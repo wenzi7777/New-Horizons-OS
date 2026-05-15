@@ -56,8 +56,8 @@
     },
     {
       "path": "config.py",
-      "sha256": "e2a6b9da03eb3b7ffb4da48a4bc88f616c170bc5d24b1573c6a67bb478e75794",
-      "size": 2979,
+      "sha256": "828eb2512c6a44283f58267f14cacdd17961ab8d8b9a5d7f58548bfb49c87b31",
+      "size": 3018,
       "kind": "code",
       "reboot_required": true
     },
@@ -252,8 +252,8 @@
     },
     {
       "path": "wifi_manager.py",
-      "sha256": "5073fda856daa85e7bc91e1aed37ecdb5664fcdeeae4d32c610c6a03b51f0d76",
-      "size": 9646,
+      "sha256": "d19a3d2910cb94c9ed19fa27fc2c7ecfbf6a55279ccf1a84f5ec491819607e47",
+      "size": 9823,
       "kind": "code",
       "reboot_required": true
     }

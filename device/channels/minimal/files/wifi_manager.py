@@ -252,6 +252,7 @@ class WiFiManager:
     def portal_status(self):
         network_cfg = self.config_store.load_network() if self.config_store is not None else {}
         portal_ip = config.SETUP_PORTAL_HOST
+        portal_domain = getattr(config, "SETUP_PORTAL_DOMAIN", "")
         ap_ssid = self.ap_ssid()
         if self.ap is not None:
             try:
@@ -263,7 +264,9 @@ class WiFiManager:
             "state": self.state,
             "ap_ssid": ap_ssid,
             "portal_ip": portal_ip,
-            "portal_url": self._portal_url(portal_ip),
+            "portal_domain": portal_domain,
+            "portal_url": self._portal_url(portal_domain or portal_ip),
+            "portal_ip_url": self._portal_url(portal_ip),
             "saved_ssid": network_cfg.get("ssid", ""),
             "last_error": self.last_error,
             "last_setup_result": self.last_setup_result,
@@ -300,10 +303,10 @@ class WiFiManager:
     def _mac_suffix(self):
         return get_device_suffix()
 
-    def _portal_url(self, ip_addr):
+    def _portal_url(self, host):
         if int(config.SETUP_PORTAL_PORT) == 80:
-            return "http://{}".format(ip_addr)
-        return "http://{}:{}".format(ip_addr, config.SETUP_PORTAL_PORT)
+            return "http://{}".format(host)
+        return "http://{}:{}".format(host, config.SETUP_PORTAL_PORT)
 
     def _auth_name(self, value):
         mapping = {

@@ -61,6 +61,9 @@ def load_wifi_manager(channel):
         WIFI_MODE="STA",
         SETUP_AP_PASSWORD="newhorizons",
         SETUP_AP_SSID_PREFIX="NewHorizonsOS",
+        SETUP_PORTAL_DOMAIN="newhorizons.os",
+        SETUP_PORTAL_HOST="192.168.4.1",
+        SETUP_PORTAL_PORT=80,
     )
     fake_secrets = types.SimpleNamespace(WIFI_SSID="", WIFI_PASSWORD="")
     fake_portal = types.SimpleNamespace(
@@ -115,6 +118,17 @@ class WiFiManagerApStartTests(unittest.TestCase):
         self.assertEqual(fake_network.ap.calls[0], ("active", False))
         self.assertEqual(fake_network.ap.calls[1], ("active", True))
         self.assertEqual(fake_network.ap.calls[2][0], "config")
+
+    def test_portal_status_prefers_friendly_domain(self):
+        module, fake_network = load_wifi_manager("minimal")
+
+        manager = module.WiFiManager()
+        manager.start_setup_portal()
+        status = manager.portal_status()
+
+        self.assertEqual(status["portal_domain"], "newhorizons.os")
+        self.assertEqual(status["portal_url"], "http://newhorizons.os")
+        self.assertEqual(status["portal_ip_url"], "http://192.168.4.1")
 
 
 if __name__ == "__main__":

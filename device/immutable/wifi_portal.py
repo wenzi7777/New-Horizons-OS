@@ -43,15 +43,110 @@ def _parse_form(body):
     return result
 
 
+def _normalize_path(path):
+    path = str(path or "/")
+    if path.startswith("http://") or path.startswith("https://"):
+        scheme_idx = path.find("://")
+        path_idx = path.find("/", scheme_idx + 3)
+        path = path[path_idx:] if path_idx >= 0 else "/"
+    if "?" in path:
+        path = path.split("?", 1)[0]
+    return path or "/"
+
+
 CAPTIVE_PORTAL_PATHS = (
     "/generate_204",
+    "/gen_204",
     "/hotspot-detect.html",
     "/library/test/success.html",
     "/connecttest.txt",
     "/ncsi.txt",
     "/success.txt",
     "/canonical.html",
+    "/redirect",
+    "/fwlink",
 )
+
+
+class CaptiveDnsServer:
+    def __init__(self, ip_addr, logger=None):
+        self.ip_addr = ip_addr or "192.168.4.1"
+        self.logger = logger
+        self.sock = None
+
+    def start(self):
+        if self.sock is not None:
+            return True
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        except Exception:
+            pass
+        sock.bind(("0.0.0.0", 53))
+        try:
+            sock.setblocking(False)
+        except Exception:
+            sock.settimeout(0)
+        self.sock = sock
+        return True
+
+    def stop(self):
+        if self.sock is not None:
+            try:
+                self.sock.close()
+            except Exception:
+                pass
+        self.sock = None
+
+    def service(self):
+        if self.sock is None:
+            return False
+
+        try:
+            data, addr = self.sock.recvfrom(512)
+        except OSError:
+            return False
+
+        try:
+            response = self._build_response(data)
+            if response:
+                self.sock.sendto(response, addr)
+        except Exception as exc:
+            if self.logger:
+                self.logger.warn("wifi_captive_dns_failed {}".format(exc))
+        return True
+
+    def _build_response(self, data):
+        if not data or len(data) < 12:
+            return b""
+
+        qdcount = (data[4] << 8) | data[5]
+        if qdcount < 1:
+            return b""
+
+        idx = 12
+        while idx < len(data):
+            length = data[idx]
+            idx += 1
+            if length == 0:
+                break
+            idx += length
+
+        if idx + 4 > len(data):
+            return b""
+
+        question_end = idx + 4
+        question = data[12:question_end]
+        ip_bytes = bytes(int(part) & 0xFF for part in self.ip_addr.split("."))
+        header = bytearray(data[:2])
+        header.extend(b"\x81\x80")
+        header.extend(b"\x00\x01")
+        header.extend(b"\x00\x01")
+        header.extend(b"\x00\x00")
+        header.extend(b"\x00\x00")
+        answer = b"\xc0\x0c" + b"\x00\x01" + b"\x00\x01" + b"\x00\x00\x00\x1e" + b"\x00\x04" + ip_bytes
+        return bytes(header) + question + answer
 
 
 class WiFiSetupPortal:
@@ -60,6 +155,7 @@ class WiFiSetupPortal:
         self.config = config_module
         self.logger = logger
         self.server = None
+        self.dns = None
         self.active = False
 
     def start(self):
@@ -79,10 +175,21 @@ class WiFiSetupPortal:
         except Exception:
             sock.settimeout(0)
         self.server = sock
+        portal_ip = self.manager.portal_status().get("portal_ip", self.config.SETUP_PORTAL_HOST)
+        try:
+            self.dns = CaptiveDnsServer(portal_ip, self.logger)
+            self.dns.start()
+        except Exception as exc:
+            self.dns = None
+            if self.logger:
+                self.logger.warn("wifi_captive_dns_start_failed {}".format(exc))
         self.active = True
         return True
 
     def stop(self):
+        if self.dns is not None:
+            self.dns.stop()
+        self.dns = None
         if self.server is not None:
             try:
                 self.server.close()
@@ -95,10 +202,14 @@ class WiFiSetupPortal:
         if not self.active or self.server is None:
             return False
 
+        dns_handled = False
+        if self.dns is not None:
+            dns_handled = self.dns.service()
+
         try:
             client, _addr = self.server.accept()
         except OSError:
-            return False
+            return dns_handled
 
         try:
             client.settimeout(1)
@@ -107,6 +218,7 @@ class WiFiSetupPortal:
 
         try:
             method, path, body = self._read_request(client)
+            path = _normalize_path(path)
             if path == "/favicon.ico":
                 self._send_response(client, "204 No Content", "text/plain", "")
                 return True
@@ -248,6 +360,8 @@ class WiFiSetupPortal:
 
         ip_addr = _escape_html(status.get("portal_ip", self.config.SETUP_PORTAL_HOST))
         portal_url = _escape_html(status.get("portal_url", "http://{}".format(self.config.SETUP_PORTAL_HOST)))
+        portal_ip_url = _escape_html(status.get("portal_ip_url", "http://{}".format(self.config.SETUP_PORTAL_HOST)))
+        portal_domain = _escape_html(status.get("portal_domain", ""))
         ap_ssid = _escape_html(status.get("ap_ssid", self.config.SETUP_AP_SSID_PREFIX))
         return """<!doctype html>
 <html>
@@ -321,9 +435,11 @@ class WiFiSetupPortal:
       </form>
       <div class="hint">
         If this page did not open automatically, use <strong>{portal_url}</strong> in your browser while connected to the hotspot.
+        {manual_hint}
       </div>
       <div class="meta">
         <p class="muted">Portal IP: {ip}</p>
+        <p class="muted">Friendly domain: {portal_domain}</p>
         <p class="muted">Saved SSID: {saved_ssid}</p>
         <p class="muted">Device state: {device_state}</p>
       </div>
@@ -341,6 +457,8 @@ class WiFiSetupPortal:
             saved_ssid=_escape_html(selected_ssid or "(none)"),
             device_state=_escape_html(status.get("state", "idle")),
             portal_url=portal_url,
+            portal_domain=portal_domain or "(disabled)",
+            manual_hint="" if not portal_domain else " Fallback: <strong>{}</strong>.".format(portal_ip_url),
         )
 
     def _render_result_page(self, result):

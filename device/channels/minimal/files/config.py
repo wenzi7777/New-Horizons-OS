@@ -2,6 +2,7 @@ DEVICE_NAME = "New Horizons OS"
 WIFI_MODE = "STA"
 SETUP_AP_SSID_PREFIX = "NewHorizonsOS"
 SETUP_AP_PASSWORD = "newhorizons"
+SETUP_PORTAL_DOMAIN = "newhorizons.os"
 SETUP_PORTAL_HOST = "192.168.4.1"
 SETUP_PORTAL_PORT = 80
 SETUP_PORTAL_TITLE = "New Horizons OS Wi-Fi Setup"
