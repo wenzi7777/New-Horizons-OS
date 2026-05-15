@@ -81,6 +81,7 @@ class App:
         self.last_battery_ms = 0
         self.last_led_ms = 0
         self.last_ntp_retry_ms = 0
+        self.last_status_announce_ms = 0
 
         active_count = len(config.ACTIVE_ROWS) * len(config.ACTIVE_COLS)
         self.filter_chain = FilterChain(
@@ -134,6 +135,7 @@ class App:
         if wifi_ok:
             self._sync_time()
             self._check_updates_on_boot()
+            self._announce_status(force=True)
         self.boot_network_initialized = wifi_ok
 
         self.update_led_state()
@@ -158,6 +160,7 @@ class App:
                 self._ensure_udp_data_socket(True)
                 self._sync_time()
                 self._check_updates_on_boot()
+                self._announce_status(now, force=True)
                 self.update_led_state()
 
             if self.imu and time.ticks_diff(now, self.last_imu_ms) >= imu_interval:
@@ -195,6 +198,8 @@ class App:
                 self.last_ntp_retry_ms = now
                 if self.wifi.is_connected():
                     self._sync_time()
+
+            self._announce_status(now)
 
             if self.reboot_required:
                 self.logger.warn("reboot_required_restart")
@@ -330,6 +335,30 @@ class App:
             self.logger.info("ntp_sync_ok epoch={}".format(self.time_sync.now_epoch()))
         else:
             self.logger.warn("ntp_sync_failed error={}".format(self.time_sync.last_error))
+
+    def _announce_status(self, now=None, force=False):
+        if self.control.sock is None or not self.wifi.is_connected():
+            return False
+        if now is None:
+            now = time.ticks_ms()
+        if (not force
+                and time.ticks_diff(now, self.last_status_announce_ms) < config.STATUS_ANNOUNCE_INTERVAL_MS):
+            return False
+        master = self.runtime.get("master_server", {})
+        host = master.get("host", "")
+        if not host:
+            return False
+        port = int(master.get("port", config.UDP_CONTROL_PORT))
+        payload = self._status()
+        payload["message"] = "status_announce"
+        try:
+            ok = self.control.send(host, port, payload)
+        except OSError as exc:
+            self.logger.warn("status_announce_failed {}".format(exc))
+            return False
+        if ok:
+            self.last_status_announce_ms = now
+        return ok
 
     def _check_updates_on_boot(self):
         runtime = self.config_store.load_runtime()

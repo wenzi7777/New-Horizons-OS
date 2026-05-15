@@ -26,6 +26,7 @@ DEFAULT_BUFFER_FRAMES = 8
 DEFAULT_TARGET_FPS = 60
 
 DEFAULT_CONTROL_PORT = 22345
+STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 DEFAULT_MANIFESTS = {
     "minimal": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.0/device/channels/minimal/manifest.json",

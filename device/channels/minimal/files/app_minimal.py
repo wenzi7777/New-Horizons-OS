@@ -29,6 +29,7 @@ class MinimalApp:
         self.updates = UpdateManager(self.config_store, self.logger, ".")
         self.last_connect_ms = 0
         self.boot_network_initialized = False
+        self.last_status_announce_ms = 0
 
     def setup(self):
         wifi_ok = False
@@ -42,6 +43,8 @@ class MinimalApp:
         if wifi_ok and self.runtime.get("update", {}).get("check_on_boot", True):
             result = self.updates.check()
             self.logger.info("boot_update_check={}".format(result.get("status")))
+        if wifi_ok:
+            self._announce_status(force=True)
         self.boot_network_initialized = wifi_ok
 
     def run(self):
@@ -56,6 +59,7 @@ class MinimalApp:
                 if self.runtime.get("update", {}).get("check_on_boot", True):
                     result = self.updates.check()
                     self.logger.info("portal_update_check={}".format(result.get("status")))
+                self._announce_status(now, force=True)
 
             if (not self.wifi.is_connected()
                     and not self.wifi.setup_active()
@@ -68,11 +72,44 @@ class MinimalApp:
             if self.reboot_required:
                 time.sleep_ms(250)
                 machine.reset()
+            self._announce_status(now)
             time.sleep_ms(50)
 
     def _has_network_hint(self):
         network_cfg = self.config_store.load_network()
         return bool(network_cfg.get("ssid"))
+
+    def _announce_status(self, now=None, force=False):
+        if self.control.sock is None or not self.wifi.is_connected():
+            return False
+        if now is None:
+            now = time.ticks_ms()
+        if (not force
+                and time.ticks_diff(now, self.last_status_announce_ms) < iconfig.STATUS_ANNOUNCE_INTERVAL_MS):
+            return False
+        master = self.runtime.get("master_server", {})
+        host = master.get("host", "")
+        if not host:
+            return False
+        port = int(master.get("port", iconfig.DEFAULT_CONTROL_PORT))
+        payload = {
+            "status": "ok",
+            "message": "status_announce",
+            "device_id": "0x{:08X}".format(self.device_id),
+            "device_uid": self.device_uid,
+            "device_name": self.device_name,
+            "channel": self.runtime.get("channel", "minimal"),
+            "manifest_url": self.runtime.get("update", {}).get("manifest_url", ""),
+            "runtime": self.runtime,
+            "wifi_connected": self.wifi.is_connected(),
+            "wifi_setup": self.wifi.portal_status(),
+            "recovery_error": self.recovery_error,
+            "reboot_required": False,
+        }
+        ok = self.control.send(host, port, payload)
+        if ok:
+            self.last_status_announce_ms = now
+        return ok
 
     def _handle_request(self, request, addr):
         command = request.get("command", "status")

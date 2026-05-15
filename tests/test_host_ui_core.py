@@ -16,6 +16,32 @@ def load_host_ui():
 
 
 class HostUiCoreTests(unittest.TestCase):
+    def test_service_control_announcement_populates_registry_without_manual_add(self):
+        module = load_host_ui()
+        service = module.HostUiService(control_local_port=0)
+        service.control.sock.close()
+
+        class FakeControl:
+            def poll_announcements(self, handler, timeout=0.2, max_packets=32):
+                handler(
+                    ("192.168.1.88", 22345),
+                    {
+                        "status": "ok",
+                        "device_id": "0xCCDDEEFF",
+                        "device_uid": "AABBCCDDEEFF",
+                        "device_name": "New Horizons OS-DDEEFF",
+                    },
+                )
+
+        service.control = FakeControl()
+
+        service._ingest_control_announcements()
+
+        devices = service.registry.list_devices()
+        self.assertEqual(len(devices), 1)
+        self.assertEqual(devices[0]["host"], "192.168.1.88")
+        self.assertEqual(devices[0]["device_uid"], "AABBCCDDEEFF")
+
     def test_registry_merges_packet_and_status_into_mac_key(self):
         module = load_host_ui()
         registry = module.DeviceRegistry()

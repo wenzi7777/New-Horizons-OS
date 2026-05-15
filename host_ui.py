@@ -253,6 +253,26 @@ class ControlClient:
                     return {"status": "ok", "message": "raw_response", "raw": resp.decode(errors="replace")}
         return {"status": "error", "message": "timeout", "error": "timeout"}
 
+    def poll_announcements(self, handler, timeout=0.2, max_packets=32):
+        with self.lock:
+            previous_timeout = self.sock.gettimeout()
+            try:
+                self.sock.settimeout(timeout)
+                processed = 0
+                while processed < max_packets:
+                    try:
+                        payload, addr = self.sock.recvfrom(8192)
+                    except socket.timeout:
+                        break
+                    processed += 1
+                    try:
+                        message = json.loads(payload.decode())
+                    except Exception:
+                        continue
+                    handler(addr, message)
+            finally:
+                self.sock.settimeout(previous_timeout)
+
 
 class HostUiService:
     def __init__(self, http_host="0.0.0.0", http_port=8787, udp_port=5005, control_local_port=22345):
@@ -265,6 +285,16 @@ class HostUiService:
         self.httpd = None
         self.udp_thread = threading.Thread(target=self._udp_loop, daemon=True)
         self.status_thread = threading.Thread(target=self._status_loop, daemon=True)
+
+    def _ingest_control_announcements(self):
+        def handle(addr, message):
+            if message.get("status") == "ok" and message.get("device_id"):
+                self.registry.apply_status(addr[0], message, port=addr[1])
+
+        try:
+            self.control.poll_announcements(handle, timeout=0.2)
+        except OSError:
+            return
 
     def _udp_loop(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -286,6 +316,7 @@ class HostUiService:
 
     def _status_loop(self):
         while not self.stop_event.is_set():
+            self._ingest_control_announcements()
             hosts = self.registry.all_hosts()
             for host, port in hosts:
                 try:

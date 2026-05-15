@@ -47,3 +47,14 @@ class UDPControlServer:
         except Exception as exc:
             if self.logger:
                 self.logger.warn("udp_reply_failed {}".format(exc))
+
+    def send(self, host, port, payload):
+        if self.sock is None:
+            return False
+        try:
+            self.sock.sendto(json.dumps(payload).encode(), (host, int(port)))
+            return True
+        except Exception as exc:
+            if self.logger:
+                self.logger.warn("udp_send_failed {}".format(exc))
+            return False
