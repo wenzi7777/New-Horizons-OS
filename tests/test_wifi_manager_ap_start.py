@@ -32,8 +32,30 @@ class FakeAP:
 
 
 class FakeSTA:
+    def __init__(self):
+        self.enabled = False
+        self.connected = False
+        self.calls = []
+
     def active(self, value=None):
-        return False
+        if value is None:
+            return self.enabled
+        self.calls.append(("active", value))
+        self.enabled = bool(value)
+        return self.enabled
+
+    def isconnected(self):
+        return self.connected
+
+    def disconnect(self):
+        self.calls.append(("disconnect", None))
+
+    def connect(self, ssid, password):
+        self.calls.append(("connect", ssid, password))
+        self.connected = True
+
+    def ifconfig(self):
+        return ("192.168.1.50", "255.255.255.0", "192.168.1.1", "8.8.8.8")
 
     def config(self, key):
         if key == "mac":
@@ -54,6 +76,17 @@ class FakeNetwork(types.SimpleNamespace):
         return self.ap if iface == self.AP_IF else self.sta
 
 
+class FakePortal:
+    def __init__(self, *args, **kwargs):
+        self.active = False
+
+    def start(self):
+        self.active = True
+
+    def stop(self):
+        self.active = False
+
+
 def load_wifi_manager(channel):
     path = REPO_ROOT / "device" / "channels" / channel / "files" / "wifi_manager.py"
     fake_network = FakeNetwork()
@@ -64,14 +97,13 @@ def load_wifi_manager(channel):
         SETUP_PORTAL_DOMAIN="newhorizons.os",
         SETUP_PORTAL_HOST="192.168.4.1",
         SETUP_PORTAL_PORT=80,
+        PRINT_WIFI_STATUS=True,
     )
     fake_secrets = types.SimpleNamespace(WIFI_SSID="", WIFI_PASSWORD="")
-    fake_portal = types.SimpleNamespace(
-        WiFiSetupPortal=lambda *args, **kwargs: types.SimpleNamespace(start=lambda: None, active=True)
-    )
+    fake_portal = types.SimpleNamespace(WiFiSetupPortal=FakePortal)
     fake_identity = types.SimpleNamespace(get_device_suffix=lambda: "010203")
-    fake_time = types.SimpleNamespace(sleep_ms=lambda _ms: None)
-    fake_gc = types.SimpleNamespace(collect=lambda: None)
+    fake_time = types.SimpleNamespace(sleep_ms=lambda _ms: None, sleep=lambda _s: None)
+    fake_gc = types.SimpleNamespace(collect=lambda: None, mem_free=lambda: 65536)
 
     saved_modules = {}
     for name, module in {
@@ -129,6 +161,28 @@ class WiFiManagerApStartTests(unittest.TestCase):
         self.assertEqual(status["portal_domain"], "newhorizons.os")
         self.assertEqual(status["portal_url"], "http://newhorizons.os")
         self.assertEqual(status["portal_ip_url"], "http://192.168.4.1")
+
+    def test_minimal_channel_disables_ap_after_successful_sta_connect(self):
+        module, fake_network = load_wifi_manager("minimal")
+        manager = module.WiFiManager()
+        manager.start_setup_portal()
+
+        ok = manager.connect_sta("TestWiFi", "pw")
+
+        self.assertTrue(ok)
+        self.assertIn(("active", False), fake_network.ap.calls)
+        self.assertFalse(fake_network.ap.enabled)
+
+    def test_full_channel_disables_ap_after_successful_sta_connect(self):
+        module, fake_network = load_wifi_manager("full")
+        manager = module.WiFiManager()
+        manager.start_setup_portal()
+
+        ok = manager.connect_sta("TestWiFi", "pw")
+
+        self.assertTrue(ok)
+        self.assertIn(("active", False), fake_network.ap.calls)
+        self.assertFalse(fake_network.ap.enabled)
 
 
 if __name__ == "__main__":

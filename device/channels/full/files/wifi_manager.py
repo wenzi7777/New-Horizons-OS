@@ -33,6 +33,8 @@ class WiFiManager:
         gc.collect()
         self.state = "normal_boot"
         self.last_error = ""
+        if not self.setup_active():
+            self._disable_ap()
 
         sta = self._ensure_sta()
         sta.active(True)
@@ -72,6 +74,8 @@ class WiFiManager:
                     if sta.isconnected():
                         if config.PRINT_WIFI_STATUS:
                             print("Wi-Fi connected:", sta.ifconfig())
+                        self.stop_setup_portal()
+                        self._disable_ap()
                         self.state = "wifi_connected"
                         return True
 
@@ -145,11 +149,7 @@ class WiFiManager:
 
     def stop_setup_portal(self):
         self.portal.stop()
-        ap = self._ensure_ap()
-        try:
-            ap.active(False)
-        except Exception:
-            pass
+        self._disable_ap()
 
     def setup_active(self):
         return bool(self.portal.active)
@@ -293,6 +293,13 @@ class WiFiManager:
         if self.ap is None:
             self.ap = network.WLAN(network.AP_IF)
         return self.ap
+
+    def _disable_ap(self):
+        ap = self._ensure_ap()
+        try:
+            ap.active(False)
+        except Exception:
+            pass
 
     def ap_ssid(self):
         suffix = get_device_suffix()
