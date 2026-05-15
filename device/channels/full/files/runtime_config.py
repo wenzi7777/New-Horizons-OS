@@ -21,6 +21,10 @@ DEFAULT_RUNTIME = {
         "settle_us": config.MATRIX_SETTLE_US,
         "core_id": 1,
     },
+    "matrix_layout": {
+        "active_rows": [],
+        "active_cols": [],
+    },
     "buffer_frames": 8,
     "ntp_servers": ["pool.ntp.org", "time.nist.gov"],
     "update": {

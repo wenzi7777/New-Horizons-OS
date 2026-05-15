@@ -7,7 +7,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-STALE_CHANNEL_FILES = {}
+STALE_CHANNEL_FILES = {
+    "minimal": ["device_state/network_config.json"],
+}
 
 
 def run(cmd: list[str]) -> None:
@@ -85,8 +87,14 @@ def upload_tree(port: str, source_root: Path, remote_root: str = "") -> None:
         remote_copy(port, path, target)
 
 
-def remove_stale_channel_files(port: str, channel: str) -> None:
-    for path in STALE_CHANNEL_FILES.get(channel, []):
+def stale_device_paths(channel: str, channel_only: bool) -> list[str]:
+    if channel_only:
+        return []
+    return list(STALE_CHANNEL_FILES.get(channel, []))
+
+
+def remove_stale_channel_files(port: str, channel: str, channel_only: bool = False) -> None:
+    for path in stale_device_paths(channel, channel_only):
         remote_remove(port, path)
 
 
@@ -117,7 +125,7 @@ def main() -> int:
         print(f"Uploading immutable layer from {immutable_root}")
         upload_tree(args.port, immutable_root)
 
-    remove_stale_channel_files(args.port, args.channel)
+    remove_stale_channel_files(args.port, args.channel, channel_only=args.channel_only)
     print(f"Uploading channel '{args.channel}' from {channel_root}")
     upload_tree(args.port, channel_root)
 

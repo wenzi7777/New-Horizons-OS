@@ -577,6 +577,32 @@ INDEX_HTML = """<!doctype html>
     .calibration-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+    .pin-layout-grid {
+      display: grid;
+      gap: 12px;
+    }
+    .pin-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .pin-chip {
+      min-height: 34px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.02);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      font-family: "IBM Plex Mono", "SF Mono", "Menlo", monospace;
+      font-size: 12px;
+      color: var(--soft);
+    }
+    .pin-chip input {
+      width: auto;
+      margin: 0;
+      accent-color: var(--accent-hot);
+    }
     .device-list {
       display: grid;
       gap: 10px;
@@ -850,6 +876,9 @@ INDEX_HTML = """<!doctype html>
       .calibration-grid {
         grid-template-columns: 1fr;
       }
+      .pin-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
       .topbar {
         flex-direction: column;
         align-items: start;
@@ -1025,6 +1054,24 @@ INDEX_HTML = """<!doctype html>
                 </div>
               </div>
               <button id="saveServersBtn">Save Servers</button>
+            </div>
+
+            <div class="control-block">
+              <div class="control-heading">
+                <div class="control-title">Matrix Layout</div>
+                <div class="control-note">Select active row and column GPIOs. Empty layout keeps scanning disabled.</div>
+              </div>
+              <div class="pin-layout-grid">
+                <div>
+                  <div class="field-label">Active Row Pins</div>
+                  <div id="matrixRows" class="pin-grid"></div>
+                </div>
+                <div>
+                  <div class="field-label">Active Column Pins</div>
+                  <div id="matrixCols" class="pin-grid"></div>
+                </div>
+              </div>
+              <button id="saveMatrixBtn">Save Matrix Layout</button>
             </div>
 
             <div class="control-block">
@@ -1226,6 +1273,27 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("levelSelect").innerHTML = levels.map(v => `<option value="${v}">${v}</option>`).join("");
     }
 
+    function renderPinGrid(targetId, availablePins, activePins) {
+      const target = document.getElementById(targetId);
+      const active = new Set(activePins || []);
+      target.innerHTML = (availablePins || []).map(pin => `
+        <label class="pin-chip">
+          <input type="checkbox" value="${pin}" ${active.has(pin) ? "checked" : ""}>
+          <span>${pin}</span>
+        </label>
+      `).join("");
+    }
+
+    function syncMatrixLayout(device) {
+      const status = device?.status || {};
+      renderPinGrid("matrixRows", status.available_rows || [], status.active_rows || []);
+      renderPinGrid("matrixCols", status.available_cols || [], status.active_cols || []);
+    }
+
+    function selectedPins(targetId) {
+      return Array.from(document.querySelectorAll(`#${targetId} input:checked`)).map(input => parseInt(input.value, 10));
+    }
+
     function renderSelected() {
       const device = state.selectedDevice;
       if (!device) {
@@ -1239,6 +1307,8 @@ INDEX_HTML = """<!doctype html>
         renderUpdateState({});
         setGridEmpty("heatmap", "No matrix data");
         setGridEmpty("calibrationMap", "No calibration data");
+        renderPinGrid("matrixRows", [], []);
+        renderPinGrid("matrixCols", [], []);
         return;
       }
 
@@ -1248,9 +1318,10 @@ INDEX_HTML = """<!doctype html>
 
       const runtime = device.status?.runtime || {};
       const packet = device.packet || {};
-      const matrix = packet.matrix || [];
-      const rows = packet.rows || device.status?.matrix_shape?.rows || 0;
-      const cols = packet.cols || device.status?.matrix_shape?.cols || 0;
+      const matrixConfigured = device.status?.matrix_configured !== false;
+      const matrix = matrixConfigured ? (packet.matrix || []) : [];
+      const rows = matrixConfigured ? (packet.rows || device.status?.matrix_shape?.rows || 0) : 0;
+      const cols = matrixConfigured ? (packet.cols || device.status?.matrix_shape?.cols || 0) : 0;
       const numeric = matrix.filter(v => typeof v === "number");
       const min = numeric.length ? Math.min(...numeric) : null;
       const max = numeric.length ? Math.max(...numeric) : null;
@@ -1265,6 +1336,7 @@ INDEX_HTML = """<!doctype html>
 
       renderGrid("heatmap", matrix, rows, cols);
       syncPinSelectors(device);
+      syncMatrixLayout(device);
       renderUpdateState(device.status?.update_state || {});
 
       document.getElementById("masterHost").value = runtime.master_server?.host || "";
@@ -1337,6 +1409,12 @@ INDEX_HTML = """<!doctype html>
         host: document.getElementById("dataHost").value.trim(),
         port: parseInt(document.getElementById("dataPort").value.trim() || "5005", 10)
       }
+    });
+
+    document.getElementById("saveMatrixBtn").onclick = () => sendCommand({
+      command: "set_matrix_layout",
+      active_rows: selectedPins("matrixRows"),
+      active_cols: selectedPins("matrixCols")
     });
 
     document.getElementById("enterCalBtn").onclick = () => sendCommand({ command: "enter_calibration_mode", enabled: true });

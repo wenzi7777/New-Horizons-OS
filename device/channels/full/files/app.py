@@ -44,6 +44,7 @@ class App:
         self.last_connect_ms = 0
         self.boot_network_initialized = False
         self.hardware_ready = False
+        self.scan_ready = False
 
         self.config_store = RuntimeConfigStore(config.DEVICE_STATE_DIR)
         self.logger = DeviceLogger(config.LOG_PATH)
@@ -52,7 +53,6 @@ class App:
         self.network = self.config_store.load_network()
         self.filter_config = self.config_store.load_filter()
 
-        self.packet = PacketBuilder()
         self.wifi = WiFiManager(self.config_store, self.logger)
         self.update_manager = UpdateManager(self.config_store, self.logger, ".")
         self.control = UDPControlServer(config.UDP_CONTROL_PORT, self.logger)
@@ -85,13 +85,9 @@ class App:
         self.last_status_announce_ms = 0
         self.reboot_deadline_ms = None
 
-        active_count = len(config.ACTIVE_ROWS) * len(config.ACTIVE_COLS)
-        self.filter_chain = FilterChain(
-            sensor_count=active_count,
-            enabled=self.filter_config.get("enabled", False),
-            median=self.filter_config.get("median", 3),
-            alpha=self.filter_config.get("alpha", 0.25),
-        )
+        self.packet = None
+        self.filter_chain = None
+        self._rebuild_matrix_pipeline()
 
         self.scan_rate = RateCounter(1000)
         self.sent_packets = 0
@@ -123,7 +119,6 @@ class App:
             self.logger.info("setup_wifi_portal_started reason={}".format(reason))
             wifi_ok = False
         else:
-            self._ensure_runtime_hardware()
             self.logger.info("setup_wifi_connect_start")
             wifi_ok = self.wifi.connect()
             self.logger.info("setup_wifi_connect_done ok={}".format(bool(wifi_ok)))
@@ -147,6 +142,7 @@ class App:
             self.logger.info("setup_status_announce_start")
             self._announce_status(force=True)
             self.logger.info("setup_status_announce_done")
+            self._ensure_runtime_hardware()
         self.boot_network_initialized = wifi_ok
 
         self.update_led_state()
@@ -190,7 +186,7 @@ class App:
                 self.last_battery_ms = now
                 self.latest_battery = self.battery.read_status()
 
-            if self.hardware_ready and not self.calibration_mode:
+            if self.scan_ready and not self.calibration_mode:
                 vdboard.scan.service()
                 self.handle_scan(now)
 
@@ -337,13 +333,15 @@ class App:
 
     def _apply_sensor_pipeline(self, matrix):
         processed = []
-        active_cols = len(config.ACTIVE_COLS)
+        active_rows = self._active_rows()
+        active_cols_list = self._active_cols()
+        active_cols = len(active_cols_list)
         for idx, value in enumerate(matrix):
             filtered = self.filter_chain.process(idx, value)
             row_index = idx // active_cols
             col_index = idx % active_cols
-            analog_pin = config.ACTIVE_ROWS[row_index]
-            select_pin = config.ACTIVE_COLS[col_index]
+            analog_pin = active_rows[row_index]
+            select_pin = active_cols_list[col_index]
             calibrated = self.calibration.apply(analog_pin, select_pin, filtered)
             processed.append(float(calibrated))
         return processed
@@ -406,11 +404,7 @@ class App:
     def _apply_runtime_reload(self):
         self.runtime = self.config_store.load_runtime()
         self.filter_config = self.config_store.load_filter()
-        self.filter_chain.apply_config(
-            self.filter_config.get("enabled", False),
-            self.filter_config.get("median", 3),
-            self.filter_config.get("alpha", 0.25),
-        )
+        self._apply_matrix_layout()
         self.time_sync.servers = list(self.runtime.get("ntp_servers", []))
         self._ensure_udp_data_socket(self.wifi.is_connected())
 
@@ -462,12 +456,38 @@ class App:
             )
             return self._ok("filter_updated", applied=True)
 
+        if cmd == "set_matrix_layout":
+            try:
+                rows, cols = self._validate_matrix_layout(
+                    request.get("active_rows", []),
+                    request.get("active_cols", []),
+                )
+            except ValueError as exc:
+                return self._ok("matrix_layout_invalid", error=str(exc))
+            runtime = self.config_store.update_runtime({
+                "matrix_layout": {
+                    "active_rows": rows,
+                    "active_cols": cols,
+                },
+            })
+            self.runtime = runtime
+            self._apply_matrix_layout()
+            return {
+                "status": "ok",
+                "message": "matrix_layout_updated",
+                "runtime": runtime,
+                "reboot_required": False,
+                "applied": True,
+            }
+
         if cmd == "enter_calibration_mode":
             self.calibration_mode = bool(request.get("enabled", True))
             self.update_led_state()
             return self._ok("calibration_mode_updated", applied=True)
 
         if cmd == "start_calibration":
+            if not self.scan_ready:
+                return self._ok("matrix_layout_required", error="matrix_layout_required")
             if not self.calibration_mode:
                 return self._ok("calibration_mode_required", error="calibration_mode_required")
             analog_pin = int(request["analog_pin"])
@@ -491,6 +511,8 @@ class App:
             }
 
         if cmd == "calibrate_all":
+            if not self.scan_ready:
+                return self._ok("matrix_layout_required", error="matrix_layout_required")
             if not self.calibration_mode:
                 return self._ok("calibration_mode_required", error="calibration_mode_required")
             level = float(request["level"])
@@ -499,7 +521,9 @@ class App:
             if start_delay > 0:
                 time.sleep_ms(start_delay)
             end_ms = time.ticks_add(time.ticks_ms(), max(1, duration_ms))
-            sensor_count = len(config.ACTIVE_ROWS) * len(config.ACTIVE_COLS)
+            active_rows = self._active_rows()
+            active_cols = self._active_cols()
+            sensor_count = len(active_rows) * len(active_cols)
             sums = [0.0] * sensor_count
             counts = [0] * sensor_count
             while time.ticks_diff(end_ms, time.ticks_ms()) > 0:
@@ -516,8 +540,8 @@ class App:
             if not counts or min(counts) == 0:
                 return self._ok("calibration_no_samples", error="calibration_no_samples")
             idx = 0
-            for analog_pin in config.ACTIVE_ROWS:
-                for select_pin in config.ACTIVE_COLS:
+            for analog_pin in active_rows:
+                for select_pin in active_cols:
                     avg_mv = sums[idx] / float(counts[idx])
                     self.calibration.set_point(analog_pin, select_pin, level, avg_mv)
                     idx += 1
@@ -547,7 +571,7 @@ class App:
                     "message": "calibration_level_dump",
                     "reboot_required": False,
                     "applied": False,
-                    "data": self.calibration.dump_level(level, config.ACTIVE_ROWS, config.ACTIVE_COLS),
+                    "data": self.calibration.dump_level(level, self._active_rows(), self._active_cols()),
                 }
             return {
                 "status": "ok",
@@ -659,9 +683,12 @@ class App:
             "update_state": self.update_manager.status(),
             "calibration_mode": self.calibration_mode,
             "calibration_levels": self.calibration.list_levels(),
-            "active_rows": list(config.ACTIVE_ROWS),
-            "active_cols": list(config.ACTIVE_COLS),
-            "matrix_shape": {"rows": len(config.ACTIVE_ROWS), "cols": len(config.ACTIVE_COLS)},
+            "available_rows": list(config.AVAILABLE_ROWS),
+            "available_cols": list(config.AVAILABLE_COLS),
+            "active_rows": self._active_rows(),
+            "active_cols": self._active_cols(),
+            "matrix_configured": self._matrix_configured(),
+            "matrix_shape": {"rows": len(self._active_rows()), "cols": len(self._active_cols())},
             "sent_packets": self.sent_packets,
             "failed_sends": self.failed_sends,
             "scan": vdboard.scan.stats(),
@@ -681,8 +708,8 @@ class App:
         print("Device:", self.device_name)
         print("Device ID:", hex(self.device_id))
         print("Matrix:", config.ROWS, "x", config.COLS)
-        print("Active rows:", config.ACTIVE_ROWS)
-        print("Active cols:", config.ACTIVE_COLS)
+        print("Active rows:", self._active_rows())
+        print("Active cols:", self._active_cols())
         print("Wi-Fi setup requested:", self.wifi_setup_requested)
 
     def _has_network_hint(self):
@@ -691,11 +718,13 @@ class App:
 
     def _init_scan_backend(self):
         scan_timing = self.runtime.get("scan_timing", {})
+        active_rows = self._active_rows()
+        active_cols = self._active_cols()
         vdboard.scan.init(
-            rows=len(config.ACTIVE_ROWS),
-            cols=len(config.ACTIVE_COLS),
-            row_pins=list(config.ACTIVE_ROWS),
-            col_pins=list(config.ACTIVE_COLS),
+            rows=len(active_rows),
+            cols=len(active_cols),
+            row_pins=active_rows,
+            col_pins=active_cols,
             fps=scan_timing.get("target_fps", config.TARGET_FPS),
             settle_us=scan_timing.get("settle_us", config.MATRIX_SETTLE_US),
             buffer_frames=self.runtime.get("buffer_frames", 8),
@@ -706,12 +735,7 @@ class App:
         if self.hardware_ready:
             return
 
-        self.logger.info("setup_scan_backend_init_start")
-        self._init_scan_backend()
-        self.logger.info("setup_scan_backend_init_done")
-        self.logger.info("setup_scan_start_start")
-        vdboard.scan.start()
-        self.logger.info("setup_scan_start_done")
+        self._start_scan_if_configured()
 
         if self.battery:
             self.logger.info("setup_battery_begin_start")
@@ -724,3 +748,84 @@ class App:
             self.logger.info("setup_imu_begin_done")
 
         self.hardware_ready = True
+
+    def _active_rows(self):
+        return list(self._matrix_layout().get("active_rows", []))
+
+    def _active_cols(self):
+        return list(self._matrix_layout().get("active_cols", []))
+
+    def _matrix_layout(self):
+        layout = self.runtime.get("matrix_layout", {})
+        try:
+            rows, cols = self._validate_matrix_layout(
+                layout.get("active_rows", []),
+                layout.get("active_cols", []),
+            )
+        except ValueError:
+            return {"active_rows": [], "active_cols": []}
+        return {"active_rows": rows, "active_cols": cols}
+
+    def _matrix_configured(self):
+        layout = self._matrix_layout()
+        return bool(layout["active_rows"] and layout["active_cols"])
+
+    def _validate_matrix_layout(self, rows, cols):
+        rows = self._normalize_pin_list(rows, config.AVAILABLE_ROWS, "active_rows")
+        cols = self._normalize_pin_list(cols, config.AVAILABLE_COLS, "active_cols")
+        if bool(rows) != bool(cols):
+            raise ValueError("rows_and_cols_must_both_be_empty_or_set")
+        return rows, cols
+
+    def _normalize_pin_list(self, values, allowed, name):
+        if not isinstance(values, list):
+            raise ValueError("{}_must_be_list".format(name))
+        normalized = []
+        seen = {}
+        allowed_map = {int(pin): True for pin in allowed}
+        for value in values:
+            pin = int(value)
+            if pin not in allowed_map:
+                raise ValueError("{}_contains_unavailable_pin".format(name))
+            if pin in seen:
+                continue
+            normalized.append(pin)
+            seen[pin] = True
+        return normalized
+
+    def _rebuild_matrix_pipeline(self):
+        active_rows = self._active_rows()
+        active_cols = self._active_cols()
+        self.packet = PacketBuilder(active_rows=active_rows, active_cols=active_cols)
+        self.filter_chain = FilterChain(
+            sensor_count=len(active_rows) * len(active_cols),
+            enabled=self.filter_config.get("enabled", False),
+            median=self.filter_config.get("median", 3),
+            alpha=self.filter_config.get("alpha", 0.25),
+        )
+
+    def _start_scan_if_configured(self):
+        if not self._matrix_configured():
+            self.scan_ready = False
+            self.logger.info("setup_scan_skipped_no_layout")
+            return
+        self.logger.info("setup_scan_backend_init_start")
+        self._init_scan_backend()
+        self.logger.info("setup_scan_backend_init_done")
+        self.logger.info("setup_scan_start_start")
+        vdboard.scan.start()
+        self.logger.info("setup_scan_start_done")
+        self.scan_ready = True
+
+    def _apply_matrix_layout(self):
+        if self.scan_ready:
+            try:
+                vdboard.scan.stop()
+            except Exception as exc:
+                self.logger.warn("scan_stop_failed {}".format(exc))
+        self.scan_ready = False
+        self.latest_matrix = None
+        self.latest_frame = None
+        self._rebuild_matrix_pipeline()
+        if self.hardware_ready:
+            self._start_scan_if_configured()

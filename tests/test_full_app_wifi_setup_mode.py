@@ -10,14 +10,16 @@ FULL_APP_PATH = REPO_ROOT / "device" / "channels" / "full" / "files" / "app.py"
 
 
 class FakeScan:
-    def __init__(self):
+    def __init__(self, events=None):
         self.init_calls = []
         self.start_calls = 0
+        self.events = events if events is not None else []
 
     def init(self, **kwargs):
         self.init_calls.append(kwargs)
 
     def start(self):
+        self.events.append("scan_start")
         self.start_calls += 1
 
     def service(self):
@@ -42,10 +44,11 @@ class FakeLogger:
 
 
 class FakeWiFi:
-    def __init__(self):
+    def __init__(self, events=None):
         self.setup_started = []
         self.connected = False
         self.portal_active = False
+        self.events = events if events is not None else []
 
     def start_setup_portal(self, reason):
         self.setup_started.append(reason)
@@ -56,6 +59,7 @@ class FakeWiFi:
         return self.portal_active
 
     def connect(self):
+        self.events.append("wifi_connect")
         self.connected = True
         return True
 
@@ -69,8 +73,40 @@ class FakeWiFi:
         return {"active": self.portal_active}
 
 
-def load_full_app_module():
-    fake_scan = FakeScan()
+class FakeRuntimeConfigStore:
+    def __init__(self, runtime_override=None):
+        self.runtime = {
+            "scan_timing": {"target_fps": 60, "settle_us": 20, "core_id": 1},
+            "buffer_frames": 8,
+            "master_server": {},
+            "matrix_layout": {"active_rows": [1], "active_cols": [1]},
+        }
+        if runtime_override:
+            self.runtime.update(runtime_override)
+
+    def load_runtime(self):
+        return dict(self.runtime)
+
+    def update_runtime(self, patch):
+        for key, value in patch.items():
+            if isinstance(value, dict) and isinstance(self.runtime.get(key), dict):
+                merged = dict(self.runtime[key])
+                merged.update(value)
+                self.runtime[key] = merged
+            else:
+                self.runtime[key] = value
+        return dict(self.runtime)
+
+    def load_network(self):
+        return {"ssid": "saved"}
+
+    def load_filter(self):
+        return {"enabled": False, "median": 3, "alpha": 0.25}
+
+
+def load_full_app_module(runtime_override=None):
+    events = []
+    fake_scan = FakeScan(events)
     fake_vdboard = types.SimpleNamespace(scan=fake_scan)
     saved_modules = {}
     injected = {
@@ -94,6 +130,8 @@ def load_full_app_module():
             GC_EVERY_N_FRAMES=0,
             ACTIVE_ROWS=[1],
             ACTIVE_COLS=[1],
+            AVAILABLE_ROWS=[1],
+            AVAILABLE_COLS=[1],
             ROWS=1,
             COLS=1,
             SEND_EVERY_N_FRAMES=1,
@@ -118,20 +156,30 @@ def load_full_app_module():
         "filesystem_api": types.SimpleNamespace(FilesystemAPI=lambda root: None),
         "filter_engine": types.SimpleNamespace(FilterChain=lambda **kwargs: types.SimpleNamespace(process=lambda idx, value: value, apply_config=lambda *args: None)),
         "frame_protocol": types.SimpleNamespace(decode_scan_frame=lambda payload: {}),
-        "packet": types.SimpleNamespace(PacketBuilder=lambda: None),
+        "packet": types.SimpleNamespace(PacketBuilder=lambda **kwargs: None),
         "packet_buffer": types.SimpleNamespace(PacketBuffer=lambda **kwargs: None),
         "runtime_config": types.SimpleNamespace(
-            RuntimeConfigStore=lambda root: types.SimpleNamespace(
-                load_runtime=lambda: {"scan_timing": {"target_fps": 60, "settle_us": 20, "core_id": 1}, "buffer_frames": 8},
-                load_network=lambda: {"ssid": "saved"},
-                load_filter=lambda: {"enabled": False, "median": 3, "alpha": 0.25},
+            RuntimeConfigStore=lambda root: FakeRuntimeConfigStore(runtime_override)
+        ),
+        "time_sync": types.SimpleNamespace(
+            TimeSync=lambda servers: types.SimpleNamespace(
+                status=lambda: {"synced": False},
+                sync=lambda: True,
+                now_epoch=lambda: 0,
+                last_error="",
             )
         ),
-        "time_sync": types.SimpleNamespace(TimeSync=lambda servers: types.SimpleNamespace(status=lambda: {"synced": False})),
         "udp_control": types.SimpleNamespace(UDPControlServer=lambda port, logger=None: types.SimpleNamespace(begin=lambda: None, poll=lambda handler: None, sock=object(), send=lambda host, port, payload: True)),
-        "update_manager": types.SimpleNamespace(UpdateManager=lambda *args, **kwargs: types.SimpleNamespace(service=lambda: None, status=lambda: {})),
+        "udp_stream": types.SimpleNamespace(UDPStreamer=lambda host, port: types.SimpleNamespace(send=lambda payload: True)),
+        "update_manager": types.SimpleNamespace(
+            UpdateManager=lambda *args, **kwargs: types.SimpleNamespace(
+                service=lambda: None,
+                status=lambda: {},
+                check=lambda: {"message": "update_disabled"},
+            )
+        ),
         "utils": types.SimpleNamespace(RateCounter=lambda interval: None),
-        "wifi_manager": types.SimpleNamespace(WiFiManager=lambda *args, **kwargs: FakeWiFi()),
+        "wifi_manager": types.SimpleNamespace(WiFiManager=lambda *args, **kwargs: FakeWiFi(events)),
     }
     for name, module in injected.items():
         saved_modules[name] = sys.modules.get(name)
@@ -141,7 +189,9 @@ def load_full_app_module():
         spec = importlib.util.spec_from_file_location("full_app_wifi_setup_test", FULL_APP_PATH)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        return module, fake_scan, saved_modules
+        module.time.ticks_ms = lambda: 0
+        module.time.ticks_diff = lambda now, then: now - then
+        return module, fake_scan, events, saved_modules
     except Exception:
         for name, saved in saved_modules.items():
             if saved is None:
@@ -153,7 +203,7 @@ def load_full_app_module():
 
 class FullAppWifiSetupModeTests(unittest.TestCase):
     def test_wifi_setup_mode_starts_portal_before_scan_hardware_init(self):
-        module, fake_scan, saved_modules = load_full_app_module()
+        module, fake_scan, _events, saved_modules = load_full_app_module()
         try:
             app = module.App(wifi_setup_requested=True)
             app.setup()
@@ -167,6 +217,57 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(app.wifi.setup_started, ["boot_window"])
         self.assertEqual(fake_scan.init_calls, [])
         self.assertEqual(fake_scan.start_calls, 0)
+
+    def test_normal_boot_connects_wifi_before_starting_scan_hardware(self):
+        module, _fake_scan, events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(events[:2], ["wifi_connect", "scan_start"])
+
+    def test_empty_matrix_layout_skips_scan_start(self):
+        module, fake_scan, events, saved_modules = load_full_app_module(
+            runtime_override={"matrix_layout": {"active_rows": [], "active_cols": []}}
+        )
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(events, ["wifi_connect"])
+        self.assertEqual(fake_scan.init_calls, [])
+        self.assertEqual(fake_scan.start_calls, 0)
+        self.assertFalse(app.scan_ready)
+
+    def test_set_matrix_layout_persists_valid_pin_selection(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            response = app._handle_control_request(
+                {"command": "set_matrix_layout", "active_rows": [1], "active_cols": [1]},
+                ("127.0.0.1", 22345),
+            )
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["runtime"]["matrix_layout"], {"active_rows": [1], "active_cols": [1]})
 
 
 if __name__ == "__main__":

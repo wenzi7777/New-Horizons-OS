@@ -15,6 +15,10 @@ DEFAULT_RUNTIME = {
         "settle_us": 20,
         "core_id": 1,
     },
+    "matrix_layout": {
+        "active_rows": [],
+        "active_cols": [],
+    },
     "buffer_frames": iconfig.DEFAULT_BUFFER_FRAMES,
     "ntp_servers": list(iconfig.DEFAULT_NTP_SERVERS),
     "update": {
