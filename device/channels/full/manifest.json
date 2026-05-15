@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.1.0",
+  "firmware_version": "v0.1.1",
   "channel": "full",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.0/device/channels/full/files",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.1/device/channels/full/files",
   "files": [
     {
       "path": ".device/filter_config.json",
