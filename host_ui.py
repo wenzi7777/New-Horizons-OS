@@ -1128,7 +1128,14 @@ INDEX_HTML = """<!doctype html>
   </div>
 
   <script>
-    const state = { devices: [], selectedKey: null, selectedDevice: null };
+    const state = {
+      devices: [],
+      selectedKey: null,
+      selectedDevice: null,
+      matrixLayoutDeviceKey: null,
+      matrixLayoutDirty: false,
+      matrixLayoutDraft: null
+    };
 
     function log(message) {
       const text = typeof message === "string" ? message : JSON.stringify(message, null, 2);
@@ -1265,29 +1272,68 @@ INDEX_HTML = """<!doctype html>
     function syncPinSelectors(device) {
       const rows = device?.status?.active_rows || [];
       const cols = device?.status?.active_cols || [];
+      const availableRows = device?.status?.available_rows || [];
+      const availableCols = device?.status?.available_cols || [];
       const rowSelect = document.getElementById("analogPin");
       const colSelect = document.getElementById("selectPin");
-      rowSelect.innerHTML = rows.map(v => `<option value="${v}">${v}</option>`).join("");
-      colSelect.innerHTML = cols.map(v => `<option value="${v}">${v}</option>`).join("");
+      rowSelect.innerHTML = rows.map(v => `<option value="${v}">${logicalPinName(v, availableRows, "A")}</option>`).join("");
+      colSelect.innerHTML = cols.map(v => `<option value="${v}">${logicalPinName(v, availableCols, "D")}</option>`).join("");
       const levels = device?.status?.calibration_levels || device?.levels || [];
       document.getElementById("levelSelect").innerHTML = levels.map(v => `<option value="${v}">${v}</option>`).join("");
+    }
+
+    function logicalPinName(pin, availablePins, prefix) {
+      const index = (availablePins || []).indexOf(pin);
+      return index >= 0 ? `${prefix}${index}` : String(pin);
     }
 
     function renderPinGrid(targetId, availablePins, activePins) {
       const target = document.getElementById(targetId);
       const active = new Set(activePins || []);
-      target.innerHTML = (availablePins || []).map(pin => `
+      const labelPrefix = targetId === "matrixRows" ? "A" : "D";
+      target.innerHTML = (availablePins || []).map((pin, index) => `
         <label class="pin-chip">
           <input type="checkbox" value="${pin}" ${active.has(pin) ? "checked" : ""}>
-          <span>${pin}</span>
+          <span>${logicalPinName(pin, availablePins, labelPrefix)}</span>
         </label>
       `).join("");
+      if (targetId === "matrixRows" || targetId === "matrixCols") {
+        target.onchange = captureMatrixLayoutDraft;
+      }
+    }
+
+    function matrixLayoutFromStatus(status) {
+      return {
+        active_rows: [...(status?.active_rows || [])],
+        active_cols: [...(status?.active_cols || [])]
+      };
+    }
+
+    function resetMatrixLayoutDraft(device) {
+      state.matrixLayoutDeviceKey = device?.key || null;
+      state.matrixLayoutDirty = false;
+      state.matrixLayoutDraft = matrixLayoutFromStatus(device?.status || {});
+    }
+
+    function captureMatrixLayoutDraft() {
+      if (!state.selectedDevice) return;
+      state.matrixLayoutDeviceKey = state.selectedDevice.key || null;
+      state.matrixLayoutDirty = true;
+      state.matrixLayoutDraft = {
+        active_rows: selectedPins("matrixRows"),
+        active_cols: selectedPins("matrixCols")
+      };
     }
 
     function syncMatrixLayout(device) {
       const status = device?.status || {};
-      renderPinGrid("matrixRows", status.available_rows || [], status.active_rows || []);
-      renderPinGrid("matrixCols", status.available_cols || [], status.active_cols || []);
+      if (state.matrixLayoutDeviceKey !== (device?.key || null) || !state.matrixLayoutDraft) {
+        resetMatrixLayoutDraft(device);
+      } else if (!state.matrixLayoutDirty) {
+        state.matrixLayoutDraft = matrixLayoutFromStatus(status);
+      }
+      renderPinGrid("matrixRows", status.available_rows || [], state.matrixLayoutDraft.active_rows);
+      renderPinGrid("matrixCols", status.available_cols || [], state.matrixLayoutDraft.active_cols);
     }
 
     function selectedPins(targetId) {
@@ -1297,6 +1343,9 @@ INDEX_HTML = """<!doctype html>
     function renderSelected() {
       const device = state.selectedDevice;
       if (!device) {
+        state.matrixLayoutDeviceKey = null;
+        state.matrixLayoutDirty = false;
+        state.matrixLayoutDraft = null;
         document.getElementById("titleText").textContent = "No Device Selected";
         document.getElementById("subtitleText").textContent = "Waiting for packets";
         document.getElementById("topSelectionState").textContent = "No active board";
@@ -1381,6 +1430,7 @@ INDEX_HTML = """<!doctype html>
       log(data.response || data);
       await fetchDevices();
       await fetchSelected();
+      return data;
     }
 
     document.getElementById("addDeviceBtn").onclick = async () => {
@@ -1411,11 +1461,17 @@ INDEX_HTML = """<!doctype html>
       }
     });
 
-    document.getElementById("saveMatrixBtn").onclick = () => sendCommand({
-      command: "set_matrix_layout",
-      active_rows: selectedPins("matrixRows"),
-      active_cols: selectedPins("matrixCols")
-    });
+    document.getElementById("saveMatrixBtn").onclick = async () => {
+      const data = await sendCommand({
+        command: "set_matrix_layout",
+        active_rows: selectedPins("matrixRows"),
+        active_cols: selectedPins("matrixCols")
+      });
+      if (data?.response?.status === "ok") {
+        resetMatrixLayoutDraft(state.selectedDevice);
+        syncMatrixLayout(state.selectedDevice);
+      }
+    };
 
     document.getElementById("enterCalBtn").onclick = () => sendCommand({ command: "enter_calibration_mode", enabled: true });
     document.getElementById("exitCalBtn").onclick = () => sendCommand({ command: "end_calibration" });

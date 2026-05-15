@@ -27,6 +27,7 @@ except ImportError:
 
 __version__ = "0.0.0+auto.0"
 __repo__ = "https://github.com/jposada202020/MicroPython_BMI270.git"
+CONFIG_FILE_PATH = "micropython_bmi270/config_file.bin"
 
 
 _REG_WHOAMI = const(0x00)
@@ -292,22 +293,20 @@ class BMI270:
         if self.internal_status == 0x01:
             print(hex(self._address), " --> Initialization already done")
         else:
-            from micropython_bmi270.config_file import bmi270_config_file
-
             print(hex(self._address), " --> Initializing...")
             self._power_configuration = 0x00
             time.sleep(0.00045)
             self._init_control = 0x00
-            for i in range(256):
-                self._init_address_0 = 0x00
-                self._init_address_1 = i
-                time.sleep(0.03)
-                self._i2c.writeto_mem(
-                    self._address,
-                    0x5E,
-                    bytes(bmi270_config_file[i * 32 : (i + 1) * 32]),
-                )
-                time.sleep(0.000020)
+            with open(CONFIG_FILE_PATH, "rb") as config_file:
+                for i in range(256):
+                    chunk = config_file.read(32)
+                    if len(chunk) != 32:
+                        raise RuntimeError("BMI270 config file truncated")
+                    self._init_address_0 = 0x00
+                    self._init_address_1 = i
+                    time.sleep(0.03)
+                    self._i2c.writeto_mem(self._address, 0x5E, chunk)
+                    time.sleep(0.000020)
             self._init_control = 0x01
             time.sleep(0.02)
             print(
