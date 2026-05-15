@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.1.5",
+  "firmware_version": "v0.1.6",
   "channel": "full",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.5/device/channels/full/files",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.6/device/channels/full/files",
   "files": [
     {
       "path": "app.py",
@@ -77,7 +77,7 @@
     },
     {
       "path": "device_state/runtime_config.json",
-      "sha256": "75d84478c513a7001dfccaee069dbc9db3b4148bf437b1f1308c4cc29e1e97ee",
+      "sha256": "a06c46a25c9ae2882c10f7f2457348b392a28d367cbf7dd5a182f74600ceeebd",
       "size": 546,
       "kind": "config",
       "reboot_required": false
@@ -231,8 +231,8 @@
     },
     {
       "path": "update_manager.py",
-      "sha256": "fc3c21f777b98288776c21c3bf56b76388a651fb00567f14747755f04efa6609",
-      "size": 9374,
+      "sha256": "8565f52fe2efab9a365da470bc6c403ab45c468f49743a900fa49615bcd8b0f5",
+      "size": 10987,
       "kind": "code",
       "reboot_required": true
     },

@@ -1,4 +1,5 @@
 import json
+import os
 import time
 
 import storage
@@ -21,6 +22,8 @@ def now_ms():
 
 
 class UpdateManager:
+    DOWNLOAD_CHUNK_SIZE = 1024
+
     def __init__(self, config_store, logger=None, root_dir="."):
         self.config_store = config_store
         self.logger = logger
@@ -177,10 +180,7 @@ class UpdateManager:
             "last_error": "",
         })
         try:
-            payload = self._fetch_bytes(item["url"])
-            if not self.planner.verify_download(item["sha256"], payload):
-                return self._finish_error("hash_mismatch", item["path"])
-            self.planner.apply_file(item["path"], payload)
+            self._download_to_path(item["url"], self.planner._local_path(item["path"]), item["sha256"])
         except Exception as exc:
             return self._finish_error("download_failed", "{}: {}".format(item["path"], exc))
 
@@ -298,3 +298,56 @@ class UpdateManager:
             return req.read()
         finally:
             req.close()
+
+    def _download_to_path(self, url, local_path, expected_sha256):
+        tmp_path = local_path + ".ota_tmp"
+        storage.ensure_dir(storage.dirname(local_path))
+        hasher = self._new_hasher()
+        stream = None
+        closer = None
+
+        try:
+            if requests is not None:
+                resp = requests.get(url)
+                stream = getattr(resp, "raw", resp)
+                closer = resp
+            else:
+                req = urllib.request.urlopen(url)  # type: ignore[name-defined]
+                stream = req
+                closer = req
+
+            with open(tmp_path, "wb") as handle:
+                while True:
+                    chunk = stream.read(self.DOWNLOAD_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    hasher.update(chunk)
+                    handle.write(chunk)
+        finally:
+            if closer is not None:
+                try:
+                    closer.close()
+                except Exception:
+                    pass
+
+        actual_sha256 = self._hexdigest(hasher)
+        if actual_sha256 != expected_sha256:
+            storage.remove(tmp_path)
+            raise ValueError("hash_mismatch")
+
+        try:
+            storage.remove(local_path)
+            os.rename(tmp_path, local_path)
+        except Exception:
+            storage.remove(tmp_path)
+            raise
+
+    def _new_hasher(self):
+        if storage.hashlib is None:
+            raise RuntimeError("hashlib unavailable")
+        return storage.hashlib.sha256()
+
+    def _hexdigest(self, hasher):
+        if hasattr(hasher, "hexdigest"):
+            return hasher.hexdigest()
+        return storage.binascii.hexlify(hasher.digest()).decode()

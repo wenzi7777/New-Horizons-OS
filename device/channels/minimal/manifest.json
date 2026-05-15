@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.1.5",
+  "firmware_version": "v0.1.6",
   "channel": "minimal",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.5/device/channels/minimal/files",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.6/device/channels/minimal/files",
   "files": [
     {
       "path": "app_minimal.py",
@@ -35,7 +35,7 @@
     },
     {
       "path": "device_state/runtime_config.json",
-      "sha256": "3a24c5327fc22d97cb0190526b719adb364f1e7bb3d15012b4f7e65ed5d59f74",
+      "sha256": "feffc076507cad50add77ba28fe0e84b00e332f1ab413a7725adbb8736ea8a7f",
       "size": 552,
       "kind": "config",
       "reboot_required": false

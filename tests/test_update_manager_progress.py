@@ -66,12 +66,8 @@ class FakePlanner:
             "reboot_required": True,
         }
 
-    def verify_download(self, sha256, payload):
-        name = payload.decode().replace(".py", "")
-        return sha256 == "hash-" + name
-
-    def apply_file(self, path, payload):
-        self.applied.append((path, payload))
+    def _local_path(self, relative_path):
+        return relative_path
 
 
 class UpdateManagerProgressTests(unittest.TestCase):
@@ -82,7 +78,7 @@ class UpdateManagerProgressTests(unittest.TestCase):
         manager = module.UpdateManager(store, logger=None, root_dir=".")
         manager.planner = planner
         manager._fetch_json = lambda url: {"files": []}
-        manager._fetch_bytes = lambda url: Path(url).name.encode()
+        manager._download_to_path = lambda url, local_path, expected_sha256: planner.applied.append((local_path, url))
 
         start = manager.start_apply()
         self.assertEqual(start["message"], "update_started")
