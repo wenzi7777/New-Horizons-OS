@@ -82,6 +82,7 @@ class App:
         self.last_led_ms = 0
         self.last_ntp_retry_ms = 0
         self.last_status_announce_ms = 0
+        self.reboot_deadline_ms = None
 
         active_count = len(config.ACTIVE_ROWS) * len(config.ACTIVE_COLS)
         self.filter_chain = FilterChain(
@@ -154,6 +155,10 @@ class App:
             now = time.ticks_ms()
             self.wifi.service_setup_portal()
             self.control.poll(self._handle_control_request)
+            update_result = self.update_manager.service()
+            if update_result is not None:
+                self._handle_update_result(update_result, now)
+                self._announce_status(now, force=True)
 
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
@@ -201,7 +206,7 @@ class App:
 
             self._announce_status(now)
 
-            if self.reboot_required:
+            if self.reboot_required and self._reboot_due(now):
                 self.logger.warn("reboot_required_restart")
                 time.sleep_ms(250)
                 machine.reset()
@@ -336,6 +341,17 @@ class App:
         else:
             self.logger.warn("ntp_sync_failed error={}".format(self.time_sync.last_error))
 
+    def _reboot_due(self, now):
+        if self.reboot_deadline_ms is None:
+            return True
+        return time.ticks_diff(now, self.reboot_deadline_ms) >= 0
+
+    def _handle_update_result(self, result, now):
+        if result.get("status") == "ok" and result.get("reboot_required"):
+            self.reboot_required = True
+            if self.reboot_deadline_ms is None:
+                self.reboot_deadline_ms = time.ticks_add(now, 1200)
+
     def _announce_status(self, now=None, force=False):
         if self.control.sock is None or not self.wifi.is_connected():
             return False
@@ -407,12 +423,10 @@ class App:
             return self._ok("config_reloaded", applied=True)
 
         if cmd == "check_update":
-            return self.update_manager.check()
+            return self.update_manager.start_check()
 
         if cmd == "apply_update":
-            result = self.update_manager.apply()
-            self.reboot_required = bool(result.get("reboot_required"))
-            return result
+            return self.update_manager.start_apply()
 
         if cmd == "set_servers":
             runtime = self.config_store.update_runtime({
@@ -626,6 +640,7 @@ class App:
             "ntp": self.time_sync.status(),
             "filter": self.config_store.load_filter(),
             "runtime": self.config_store.load_runtime(),
+            "update_state": self.update_manager.status(),
             "calibration_mode": self.calibration_mode,
             "calibration_levels": self.calibration.list_levels(),
             "active_rows": list(config.ACTIVE_ROWS),

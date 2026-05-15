@@ -1,4 +1,5 @@
 import json
+import time
 
 import storage
 from manifest_update import ManifestPlanner
@@ -13,6 +14,12 @@ except ImportError:  # pragma: no cover - host fallback
         urllib = None
 
 
+def now_ms():
+    if hasattr(time, "ticks_ms"):
+        return int(time.ticks_ms())
+    return int(time.time() * 1000)
+
+
 class UpdateManager:
     def __init__(self, config_store, logger=None, root_dir="."):
         self.config_store = config_store
@@ -21,61 +28,256 @@ class UpdateManager:
         self.planner = ManifestPlanner(root_dir)
         self.cached_manifest = None
         self.cached_plan = None
+        self.active_job = None
+
+    def status(self):
+        return self.config_store.load_update_state()
+
+    def is_busy(self):
+        return self.active_job is not None
+
+    def start_check(self):
+        return self._start_job("check")
+
+    def start_apply(self):
+        return self._start_job("apply")
 
     def check(self):
+        start = self.start_check()
+        if start["status"] != "ok":
+            return start
+        result = None
+        while self.active_job is not None:
+            result = self.service()
+        return result or start
+
+    def apply(self):
+        start = self.start_apply()
+        if start["status"] != "ok":
+            return start
+        result = None
+        while self.active_job is not None:
+            result = self.service()
+        return result or start
+
+    def service(self):
+        if self.active_job is None:
+            return None
+
+        job = self.active_job
+        if job["phase"] == "checking_manifest":
+            return self._service_manifest(job)
+        if job["phase"] == "downloading":
+            return self._service_download(job)
+        return None
+
+    def _start_job(self, operation):
+        if self.active_job is not None:
+            state = self.status()
+            return {
+                "status": "error",
+                "message": "update_busy",
+                "error": state.get("phase", "busy"),
+                "reboot_required": state.get("reboot_required", False),
+                "update_state": state,
+            }
+
+        self.cached_manifest = None
+        self.cached_plan = None
+        self.active_job = {
+            "operation": operation,
+            "phase": "checking_manifest",
+            "downloads": [],
+            "index": 0,
+            "applied": [],
+        }
+        state = self._save_state({
+            "phase": "checking_manifest",
+            "operation": operation,
+            "total_files": 0,
+            "applied_files": 0,
+            "current_file": "",
+            "last_error": "",
+            "last_result": "",
+            "reboot_required": False,
+            "started_at_ms": now_ms(),
+            "finished_at_ms": 0,
+        })
+        return {
+            "status": "ok",
+            "message": "update_started",
+            "operation": operation,
+            "reboot_required": False,
+            "update_state": state,
+        }
+
+    def _service_manifest(self, job):
         runtime = self.config_store.load_runtime()
         update_cfg = runtime.get("update", {})
         manifest_url = update_cfg.get("manifest_url", "")
         if not update_cfg.get("enabled") or not manifest_url:
-            return {
-                "status": "disabled",
-                "message": "update_disabled",
-                "downloads": [],
-                "reboot_required": False,
-            }
+            return self._finish_disabled()
 
-        manifest = self._fetch_json(manifest_url)
+        try:
+            manifest = self._fetch_json(manifest_url)
+        except Exception as exc:
+            return self._finish_error("manifest_fetch_failed", str(exc))
+
         self.cached_manifest = manifest
         self.cached_plan = self.planner.plan(manifest)
-        state = self.config_store.load_update_state()
-        state["last_result"] = "checked"
-        self.config_store.save_update_state(state)
-        return {
-            "status": "ok",
-            "message": "manifest_checked",
-            "downloads": self.cached_plan["downloads"],
-            "reboot_required": self.cached_plan["reboot_required"],
+        downloads = list(self.cached_plan.get("downloads", []))
+        reboot_required = bool(self.cached_plan.get("reboot_required"))
+        checked_at = now_ms()
+
+        state_patch = {
+            "last_check_ms": checked_at,
+            "last_error": "",
+            "reboot_required": reboot_required,
+            "total_files": len(downloads),
+            "applied_files": 0,
+            "current_file": "",
         }
 
-    def apply(self):
-        if self.cached_manifest is None or self.cached_plan is None:
-            result = self.check()
-            if result["status"] != "ok":
-                return result
+        if job["operation"] == "check":
+            return self._finish_success(
+                "manifest_checked",
+                [],
+                reboot_required,
+                extra_patch=state_patch,
+                phase="ready",
+                last_result="checked",
+                downloads=downloads,
+            )
 
-        applied = []
-        for item in self.cached_plan["downloads"]:
+        job["downloads"] = downloads
+        job["phase"] = "downloading"
+        state = self._save_state(dict(state_patch, phase="downloading"))
+        if not downloads:
+            return self._finish_success(
+                "update_applied",
+                [],
+                reboot_required,
+                extra_patch=state_patch,
+            )
+        return {
+            "status": "ok",
+            "message": "update_progress",
+            "reboot_required": reboot_required,
+            "update_state": state,
+        }
+
+    def _service_download(self, job):
+        downloads = job["downloads"]
+        item = downloads[job["index"]]
+        state = self._save_state({
+            "phase": "downloading",
+            "current_file": item["path"],
+            "applied_files": len(job["applied"]),
+            "total_files": len(downloads),
+            "last_error": "",
+        })
+        try:
             payload = self._fetch_bytes(item["url"])
             if not self.planner.verify_download(item["sha256"], payload):
-                return {
-                    "status": "error",
-                    "message": "hash_mismatch",
-                    "error": item["path"],
-                    "reboot_required": False,
-                }
+                return self._finish_error("hash_mismatch", item["path"])
             self.planner.apply_file(item["path"], payload)
-            applied.append(item["path"])
+        except Exception as exc:
+            return self._finish_error("download_failed", "{}: {}".format(item["path"], exc))
 
-        state = self.config_store.load_update_state()
-        state["last_result"] = "applied"
-        state["reboot_required"] = bool(self.cached_plan["reboot_required"])
-        self.config_store.save_update_state(state)
+        job["applied"].append(item["path"])
+        job["index"] += 1
+        reboot_required = bool(self.cached_plan.get("reboot_required"))
+
+        if job["index"] >= len(downloads):
+            return self._finish_success(
+                "update_applied",
+                job["applied"],
+                reboot_required,
+            )
+
+        next_state = self._save_state({
+            "phase": "downloading",
+            "current_file": item["path"],
+            "applied_files": len(job["applied"]),
+            "total_files": len(downloads),
+            "reboot_required": reboot_required,
+        })
         return {
             "status": "ok",
-            "message": "update_applied",
-            "applied": applied,
-            "reboot_required": state["reboot_required"],
+            "message": "update_progress",
+            "applied": list(job["applied"]),
+            "reboot_required": reboot_required,
+            "update_state": next_state,
         }
+
+    def _finish_success(self, message, applied, reboot_required, extra_patch=None, phase="done", last_result="applied", downloads=None):
+        state_patch = {
+            "phase": phase,
+            "applied_files": len(applied),
+            "current_file": "",
+            "last_error": "",
+            "last_result": last_result,
+            "reboot_required": bool(reboot_required),
+            "finished_at_ms": now_ms(),
+        }
+        if extra_patch:
+            state_patch.update(extra_patch)
+        state = self._save_state(state_patch)
+        self.active_job = None
+        response = {
+            "status": "ok",
+            "message": message,
+            "reboot_required": bool(reboot_required),
+            "update_state": state,
+        }
+        if applied:
+            response["applied"] = list(applied)
+        if downloads is not None:
+            response["downloads"] = downloads
+        return response
+
+    def _finish_disabled(self):
+        state = self._save_state({
+            "phase": "idle",
+            "operation": "",
+            "total_files": 0,
+            "applied_files": 0,
+            "current_file": "",
+            "last_error": "",
+            "last_result": "disabled",
+            "reboot_required": False,
+            "finished_at_ms": now_ms(),
+        })
+        self.active_job = None
+        return {
+            "status": "disabled",
+            "message": "update_disabled",
+            "downloads": [],
+            "reboot_required": False,
+            "update_state": state,
+        }
+
+    def _finish_error(self, message, error):
+        state = self._save_state({
+            "phase": "error",
+            "last_result": "error",
+            "last_error": str(error),
+            "finished_at_ms": now_ms(),
+        })
+        self.active_job = None
+        return {
+            "status": "error",
+            "message": message,
+            "error": str(error),
+            "reboot_required": False,
+            "update_state": state,
+        }
+
+    def _save_state(self, patch):
+        state = self.config_store.load_update_state()
+        state.update(patch)
+        self.config_store.save_update_state(state)
+        return state
 
     def _fetch_json(self, url):
         payload = self._fetch_bytes(url)

@@ -571,6 +571,21 @@ INDEX_HTML = """<!doctype html>
       white-space: pre-wrap;
     }
     .small { font-size: 12px; color: var(--muted); }
+    .meter {
+      width: 100%;
+      height: 12px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .meter-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, rgba(79, 209, 197, 0.75), rgba(246, 183, 60, 0.92));
+      transition: width 180ms ease;
+    }
     @media (max-width: 1180px) {
       .shell { grid-template-columns: 1fr; }
       .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -638,6 +653,18 @@ INDEX_HTML = """<!doctype html>
             <button data-cmd="upgrade_to_full" class="warn">Upgrade To Full</button>
             <button data-cmd="reboot" class="danger">Reboot</button>
           </div>
+        </div>
+
+        <div class="section">
+          <div class="label">OTA Progress</div>
+          <div class="stats">
+            <div class="stat"><div class="label">Phase</div><div class="big" id="otaPhaseVal">idle</div></div>
+            <div class="stat"><div class="label">Files</div><div class="big" id="otaFilesVal">-</div></div>
+            <div class="stat"><div class="label">Current</div><div class="big" id="otaCurrentVal">-</div></div>
+            <div class="stat"><div class="label">Result</div><div class="big" id="otaResultVal">-</div></div>
+          </div>
+          <div class="meter"><div id="otaProgressFill" class="meter-fill"></div></div>
+          <div class="small" id="otaProgressText">No OTA activity</div>
         </div>
 
         <div class="section">
@@ -750,6 +777,45 @@ INDEX_HTML = """<!doctype html>
       });
     }
 
+    function formatPhase(phase) {
+      const map = {
+        idle: "idle",
+        checking_manifest: "checking",
+        ready: "ready",
+        downloading: "applying",
+        done: "done",
+        error: "error"
+      };
+      return map[phase] || phase || "idle";
+    }
+
+    function renderUpdateState(updateState) {
+      const phase = updateState?.phase || "idle";
+      const totalFiles = Number(updateState?.total_files || 0);
+      const appliedFiles = Number(updateState?.applied_files || 0);
+      const lastResult = updateState?.last_result || "-";
+      const currentFile = updateState?.current_file || "-";
+      const rebootRequired = Boolean(updateState?.reboot_required);
+      const lastError = updateState?.last_error || "";
+      const percent = totalFiles > 0
+        ? Math.max(0, Math.min(100, Math.round((appliedFiles / totalFiles) * 100)))
+        : (phase === "done" ? 100 : 0);
+
+      document.getElementById("otaPhaseVal").textContent = formatPhase(phase);
+      document.getElementById("otaFilesVal").textContent = totalFiles ? `${appliedFiles}/${totalFiles}` : "-";
+      document.getElementById("otaCurrentVal").textContent = currentFile;
+      document.getElementById("otaResultVal").textContent = lastResult;
+      document.getElementById("otaProgressFill").style.width = `${percent}%`;
+
+      let text = "No OTA activity";
+      if (phase === "checking_manifest") text = "Checking manifest...";
+      else if (phase === "ready") text = totalFiles ? `Update ready: ${totalFiles} files pending` : "Manifest checked, no files pending";
+      else if (phase === "downloading") text = totalFiles ? `Applying ${appliedFiles + 1}/${totalFiles}: ${currentFile}` : `Applying ${currentFile}`;
+      else if (phase === "done") text = rebootRequired ? "Update done, reboot pending..." : "Update completed";
+      else if (phase === "error") text = lastError ? `Update failed: ${lastError}` : "Update failed";
+      document.getElementById("otaProgressText").textContent = text;
+    }
+
     function syncPinSelectors(device) {
       const rows = device?.status?.active_rows || [];
       const cols = device?.status?.active_cols || [];
@@ -781,6 +847,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("frameVal").textContent = packet.frame_id ?? "-";
       renderGrid("heatmap", matrix, rows, cols);
       syncPinSelectors(device);
+      renderUpdateState(device.status?.update_state || {});
 
       const runtime = device.status?.runtime || {};
       document.getElementById("masterHost").value = runtime.master_server?.host || "";

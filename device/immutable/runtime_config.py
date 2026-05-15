@@ -103,6 +103,14 @@ class RuntimeConfigStore:
             "last_check_ms": 0,
             "last_result": "",
             "reboot_required": False,
+            "phase": "idle",
+            "operation": "",
+            "total_files": 0,
+            "applied_files": 0,
+            "current_file": "",
+            "last_error": "",
+            "started_at_ms": 0,
+            "finished_at_ms": 0,
         }, storage.load_json(self.update_state_path, {}))
         self.save_update_state(state)
         return state

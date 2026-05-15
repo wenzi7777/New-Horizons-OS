@@ -30,6 +30,7 @@ class MinimalApp:
         self.last_connect_ms = 0
         self.boot_network_initialized = False
         self.last_status_announce_ms = 0
+        self.reboot_deadline_ms = None
 
     def setup(self):
         wifi_ok = False
@@ -53,6 +54,10 @@ class MinimalApp:
             now = time.ticks_ms()
             self.wifi.service_setup_portal()
             self.control.poll(self._handle_request)
+            update_result = self.updates.service()
+            if update_result is not None:
+                self._handle_update_result(update_result, now)
+                self._announce_status(now, force=True)
 
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
@@ -69,10 +74,10 @@ class MinimalApp:
                 if not self.wifi.connect():
                     self.wifi.start_setup_portal("reconnect_failed")
 
-            if self.reboot_required:
+            self._announce_status(now)
+            if self.reboot_required and self._reboot_due(now):
                 time.sleep_ms(250)
                 machine.reset()
-            self._announce_status(now)
             time.sleep_ms(50)
 
     def _has_network_hint(self):
@@ -103,13 +108,25 @@ class MinimalApp:
             "runtime": self.runtime,
             "wifi_connected": self.wifi.is_connected(),
             "wifi_setup": self.wifi.portal_status(),
+            "update_state": self.updates.status(),
             "recovery_error": self.recovery_error,
-            "reboot_required": False,
+            "reboot_required": self.reboot_required,
         }
         ok = self.control.send(host, port, payload)
         if ok:
             self.last_status_announce_ms = now
         return ok
+
+    def _reboot_due(self, now):
+        if self.reboot_deadline_ms is None:
+            return True
+        return time.ticks_diff(now, self.reboot_deadline_ms) >= 0
+
+    def _handle_update_result(self, result, now):
+        if result.get("status") == "ok" and result.get("reboot_required"):
+            self.reboot_required = True
+            if self.reboot_deadline_ms is None:
+                self.reboot_deadline_ms = time.ticks_add(now, 1200)
 
     def _handle_request(self, request, addr):
         command = request.get("command", "status")
@@ -127,18 +144,16 @@ class MinimalApp:
                 "runtime": runtime,
                 "wifi_connected": self.wifi.is_connected(),
                 "wifi_setup": self.wifi.portal_status(),
+                "update_state": self.updates.status(),
                 "recovery_error": self.recovery_error,
-                "reboot_required": False,
+                "reboot_required": self.reboot_required,
             }
 
         if command == "check_update":
-            return self.updates.check()
+            return self.updates.start_check()
 
         if command == "apply_update":
-            result = self.updates.apply()
-            if result.get("reboot_required"):
-                self.reboot_required = True
-            return result
+            return self.updates.start_apply()
 
         if command == "read_logs":
             max_lines = int(request.get("max_lines", 50))
@@ -173,18 +188,23 @@ class MinimalApp:
             return {"status": "ok", "message": "servers_updated", "runtime": runtime, "reboot_required": False}
 
         if command == "upgrade_to_full":
+            if self.updates.is_busy():
+                state = self.updates.status()
+                return {
+                    "status": "error",
+                    "message": "update_busy",
+                    "error": state.get("phase", "busy"),
+                    "reboot_required": state.get("reboot_required", False),
+                    "update_state": state,
+                }
             runtime = self.config_store.update_runtime({
                 "channel": "full",
                 "update": {"manifest_url": iconfig.DEFAULT_MANIFESTS["full"], "enabled": True},
             })
             self.runtime = runtime
-            result = self.updates.check()
-            if result.get("status") != "ok":
-                return result
-            result = self.updates.apply()
-            if result.get("reboot_required"):
-                self.reboot_required = True
+            result = self.updates.start_apply()
             result["runtime"] = runtime
+            result["message"] = "upgrade_to_full_started" if result.get("status") == "ok" else result.get("message", "")
             return result
 
         if command == "start_wifi_setup":
@@ -212,6 +232,7 @@ class MinimalApp:
 
         if command == "reboot":
             self.reboot_required = True
+            self.reboot_deadline_ms = None
             return {"status": "ok", "message": "rebooting", "reboot_required": True}
 
         return {"status": "error", "message": "unknown_command", "error": command, "reboot_required": False}
