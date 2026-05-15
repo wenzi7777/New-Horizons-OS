@@ -397,9 +397,13 @@ class App:
             return
         if self.led:
             self.led.set_updating()
-        result = self.update_manager.check()
-        self.logger.info("update_check {}".format(result.get("message")))
-        self.update_led_state()
+        try:
+            result = self.update_manager.check()
+            self.logger.info("update_check {}".format(result.get("message")))
+        except Exception as exc:
+            self.logger.warn("update_check_failed {}".format(exc))
+        finally:
+            self.update_led_state()
 
     def _apply_runtime_reload(self):
         self.runtime = self.config_store.load_runtime()

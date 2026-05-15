@@ -84,6 +84,8 @@ cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
 python3 firmware/scripts/upload_filesystem.py --port /dev/cu.usbserial-10 --channel minimal
 ```
 
+`flash_firmware.sh` 只會重刷 firmware partition，不會清掉檔案系統中的 `device_state/`。如果你要的是「重新回到乾淨 minimal、重新開 SoftAP 配網」的效果，必須再跑上面的 `upload_filesystem.py --channel minimal`；這個流程會清除舊的 `device_state/network_config.json`。
+
 3. 重開機後，在 3 秒 boot window 內按一下 action button。
 
 4. 裝置會啟動 SoftAP，SSID 格式為：

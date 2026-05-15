@@ -70,6 +70,11 @@ class FakePlanner:
         return relative_path
 
 
+class FailingPlanner:
+    def plan(self, _manifest):
+        raise MemoryError("manifest planning exhausted memory")
+
+
 class UpdateManagerProgressTests(unittest.TestCase):
     def _assert_progress_flow(self, module_path: Path, module_name: str):
         module = load_module(module_path, module_name)
@@ -113,6 +118,35 @@ class UpdateManagerProgressTests(unittest.TestCase):
         self._assert_progress_flow(
             REPO_ROOT / "device" / "channels" / "full" / "files" / "update_manager.py",
             "full_update_manager_test",
+        )
+
+    def _assert_manifest_planning_error_is_reported(self, module_path: Path, module_name: str):
+        module = load_module(module_path, module_name)
+        store = FakeConfigStore()
+        manager = module.UpdateManager(store, logger=None, root_dir=".")
+        manager.planner = FailingPlanner()
+        manager._fetch_json = lambda url: {"files": []}
+
+        start = manager.start_check()
+        self.assertEqual(start["message"], "update_started")
+
+        result = manager.service()
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "manifest_process_failed")
+        self.assertEqual(store.update_state["phase"], "error")
+        self.assertIn("manifest planning exhausted memory", store.update_state["last_error"])
+
+    def test_immutable_update_manager_reports_manifest_planning_memory_error(self):
+        self._assert_manifest_planning_error_is_reported(
+            REPO_ROOT / "device" / "immutable" / "update_manager.py",
+            "immutable_update_manager_manifest_memory_test",
+        )
+
+    def test_full_update_manager_reports_manifest_planning_memory_error(self):
+        self._assert_manifest_planning_error_is_reported(
+            REPO_ROOT / "device" / "channels" / "full" / "files" / "update_manager.py",
+            "full_update_manager_manifest_memory_test",
         )
 
 

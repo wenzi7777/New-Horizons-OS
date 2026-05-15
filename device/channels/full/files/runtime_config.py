@@ -30,7 +30,7 @@ DEFAULT_RUNTIME = {
     "update": {
         "manifest_url": "",
         "enabled": False,
-        "check_on_boot": True,
+        "check_on_boot": False,
         "auto_apply": False,
     },
 }

@@ -33,14 +33,19 @@ class FakeScan:
 
 
 class FakeLogger:
-    def info(self, _message):
-        pass
+    def __init__(self):
+        self.infos = []
+        self.warns = []
+        self.errors = []
 
-    def warn(self, _message):
-        pass
+    def info(self, message):
+        self.infos.append(message)
 
-    def error(self, _message):
-        pass
+    def warn(self, message):
+        self.warns.append(message)
+
+    def error(self, message):
+        self.errors.append(message)
 
 
 class FakeWiFi:
@@ -104,7 +109,30 @@ class FakeRuntimeConfigStore:
         return {"enabled": False, "median": 3, "alpha": 0.25}
 
 
-def load_full_app_module(runtime_override=None):
+class FakeLED:
+    def __init__(self):
+        self.states = []
+
+    def begin(self):
+        pass
+
+    def set_boot_window(self):
+        self.states.append("boot_window")
+
+    def set_wifi_setup(self):
+        self.states.append("wifi_setup")
+
+    def set_updating(self):
+        self.states.append("updating")
+
+    def set_normal(self):
+        self.states.append("normal")
+
+    def set_error(self):
+        self.states.append("error")
+
+
+def load_full_app_module(runtime_override=None, update_check=None, enable_led=False):
     events = []
     fake_scan = FakeScan(events)
     fake_vdboard = types.SimpleNamespace(scan=fake_scan)
@@ -115,7 +143,7 @@ def load_full_app_module(runtime_override=None):
             DEVICE_NAME="New Horizons OS",
             ENABLE_IMU=False,
             ENABLE_BATTERY=False,
-            ENABLE_LED=False,
+            ENABLE_LED=enable_led,
             USE_PACKET_BUFFER=False,
             DEVICE_STATE_DIR="device_state",
             CALIBRATION_DIR="device_state/calibration",
@@ -175,12 +203,14 @@ def load_full_app_module(runtime_override=None):
             UpdateManager=lambda *args, **kwargs: types.SimpleNamespace(
                 service=lambda: None,
                 status=lambda: {},
-                check=lambda: {"message": "update_disabled"},
+                check=update_check or (lambda: {"message": "update_disabled"}),
             )
         ),
         "utils": types.SimpleNamespace(RateCounter=lambda interval: None),
         "wifi_manager": types.SimpleNamespace(WiFiManager=lambda *args, **kwargs: FakeWiFi(events)),
     }
+    if enable_led:
+        injected["sk6812"] = types.SimpleNamespace(SK6812Status=FakeLED)
     for name, module in injected.items():
         saved_modules[name] = sys.modules.get(name)
         sys.modules[name] = module
@@ -268,6 +298,26 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
         self.assertEqual(response["status"], "ok")
         self.assertEqual(response["runtime"]["matrix_layout"], {"active_rows": [1], "active_cols": [1]})
+
+    def test_boot_update_check_failure_does_not_escape_or_leave_led_updating(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module(
+            runtime_override={"update": {"check_on_boot": True}},
+            update_check=lambda: (_ for _ in ()).throw(MemoryError("manifest parse oom")),
+            enable_led=True,
+        )
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertIn("updating", app.led.states)
+        self.assertEqual(app.led.states[-1], "normal")
+        self.assertTrue(any("update_check_failed" in message for message in app.logger.warns))
 
 
 if __name__ == "__main__":

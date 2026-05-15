@@ -126,9 +126,14 @@ class UpdateManager:
         except Exception as exc:
             return self._finish_error("manifest_fetch_failed", str(exc))
 
-        self.cached_manifest = manifest
-        self.cached_plan = self.planner.plan(manifest)
-        downloads = list(self.cached_plan.get("downloads", []))
+        try:
+            self.cached_manifest = manifest
+            self.cached_plan = self.planner.plan(manifest)
+            downloads = self.cached_plan.get("downloads", [])
+        except Exception as exc:
+            self.cached_manifest = None
+            self.cached_plan = None
+            return self._finish_error("manifest_process_failed", str(exc))
         reboot_required = bool(self.cached_plan.get("reboot_required"))
         checked_at = now_ms()
 
