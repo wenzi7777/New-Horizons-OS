@@ -43,6 +43,7 @@ class App:
         self.calibration_mode = False
         self.last_connect_ms = 0
         self.boot_network_initialized = False
+        self.hardware_ready = False
 
         self.config_store = RuntimeConfigStore(config.DEVICE_STATE_DIR)
         self.logger = DeviceLogger(config.LOG_PATH)
@@ -101,8 +102,12 @@ class App:
         self._print_setup()
 
         if self.led:
+            self.logger.info("setup_led_begin_start")
             self.led.begin()
+            self.logger.info("setup_led_begin_done")
+            self.logger.info("setup_led_boot_window_start")
             self.led.set_boot_window()
+            self.logger.info("setup_led_boot_window_done")
 
         if config.PRINT_PIN_CONFLICTS:
             conflicts = board_pins.validate_pins()
@@ -110,33 +115,38 @@ class App:
                 for pin, names in conflicts.items():
                     self.logger.warn("pin_conflict gpio={} roles={}".format(pin, names))
 
-        self._init_scan_backend()
-        vdboard.scan.start()
-
-        if self.battery:
-            self.battery.begin()
-
-        if self.imu:
-            self.imu.begin()
-
         if self.wifi_setup_requested or not self._has_network_hint():
             if self.led:
                 self.led.set_wifi_setup()
-            self.wifi.start_setup_portal("boot_window" if self.wifi_setup_requested else "missing_credentials")
+            reason = "boot_window" if self.wifi_setup_requested else "missing_credentials"
+            self.wifi.start_setup_portal(reason)
+            self.logger.info("setup_wifi_portal_started reason={}".format(reason))
             wifi_ok = False
         else:
+            self._ensure_runtime_hardware()
+            self.logger.info("setup_wifi_connect_start")
             wifi_ok = self.wifi.connect()
+            self.logger.info("setup_wifi_connect_done ok={}".format(bool(wifi_ok)))
             if not wifi_ok:
                 if self.led:
                     self.led.set_wifi_setup()
                 self.wifi.start_setup_portal("connect_failed")
+                self.logger.info("setup_wifi_portal_started reason=connect_failed")
         self._ensure_udp_data_socket(wifi_ok)
+        self.logger.info("setup_udp_socket_done ok={}".format(bool(wifi_ok)))
         self.control.begin()
+        self.logger.info("setup_control_begin_done")
 
         if wifi_ok:
+            self.logger.info("setup_ntp_sync_start")
             self._sync_time()
+            self.logger.info("setup_ntp_sync_done")
+            self.logger.info("setup_boot_update_check_start")
             self._check_updates_on_boot()
+            self.logger.info("setup_boot_update_check_done")
+            self.logger.info("setup_status_announce_start")
             self._announce_status(force=True)
+            self.logger.info("setup_status_announce_done")
         self.boot_network_initialized = wifi_ok
 
         self.update_led_state()
@@ -168,15 +178,19 @@ class App:
                 self._announce_status(now, force=True)
                 self.update_led_state()
 
-            if self.imu and time.ticks_diff(now, self.last_imu_ms) >= imu_interval:
+            if not self.hardware_ready and not self.wifi.setup_active():
+                self._ensure_runtime_hardware()
+                self.update_led_state()
+
+            if self.hardware_ready and self.imu and time.ticks_diff(now, self.last_imu_ms) >= imu_interval:
                 self.last_imu_ms = now
                 self.latest_imu = self.imu.read()
 
-            if self.battery and time.ticks_diff(now, self.last_battery_ms) >= battery_interval:
+            if self.hardware_ready and self.battery and time.ticks_diff(now, self.last_battery_ms) >= battery_interval:
                 self.last_battery_ms = now
                 self.latest_battery = self.battery.read_status()
 
-            if not self.calibration_mode:
+            if self.hardware_ready and not self.calibration_mode:
                 vdboard.scan.service()
                 self.handle_scan(now)
 
@@ -687,3 +701,26 @@ class App:
             buffer_frames=self.runtime.get("buffer_frames", 8),
             core_id=scan_timing.get("core_id", 1),
         )
+
+    def _ensure_runtime_hardware(self):
+        if self.hardware_ready:
+            return
+
+        self.logger.info("setup_scan_backend_init_start")
+        self._init_scan_backend()
+        self.logger.info("setup_scan_backend_init_done")
+        self.logger.info("setup_scan_start_start")
+        vdboard.scan.start()
+        self.logger.info("setup_scan_start_done")
+
+        if self.battery:
+            self.logger.info("setup_battery_begin_start")
+            self.battery.begin()
+            self.logger.info("setup_battery_begin_done")
+
+        if self.imu:
+            self.logger.info("setup_imu_begin_start")
+            self.imu.begin()
+            self.logger.info("setup_imu_begin_done")
+
+        self.hardware_ready = True

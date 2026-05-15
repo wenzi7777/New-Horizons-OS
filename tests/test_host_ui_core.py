@@ -16,6 +16,33 @@ def load_host_ui():
 
 
 class HostUiCoreTests(unittest.TestCase):
+    def test_control_loop_consumes_status_announcements(self):
+        module = load_host_ui()
+        service = module.HostUiService(control_local_port=0)
+        service.control.sock.close()
+
+        class FakeControl:
+            def poll_announcements(self, handler, timeout=0.2, max_packets=32):
+                handler(
+                    ("192.168.1.77", 22345),
+                    {
+                        "status": "ok",
+                        "device_id": "0x11223344",
+                        "device_uid": "0011223344AA",
+                        "device_name": "New Horizons OS-3344AA",
+                    },
+                )
+                service.stop_event.set()
+
+        service.control = FakeControl()
+
+        service._control_loop()
+
+        devices = service.registry.list_devices()
+        self.assertEqual(len(devices), 1)
+        self.assertEqual(devices[0]["device_uid"], "0011223344AA")
+        self.assertEqual(devices[0]["host"], "192.168.1.77")
+
     def test_service_control_announcement_populates_registry_without_manual_add(self):
         module = load_host_ui()
         service = module.HostUiService(control_local_port=0)

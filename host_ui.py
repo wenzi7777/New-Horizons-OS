@@ -284,7 +284,7 @@ class HostUiService:
         self.stop_event = threading.Event()
         self.httpd = None
         self.udp_thread = threading.Thread(target=self._udp_loop, daemon=True)
-        self.status_thread = threading.Thread(target=self._status_loop, daemon=True)
+        self.control_thread = threading.Thread(target=self._control_loop, daemon=True)
 
     def _ingest_control_announcements(self):
         def handle(addr, message):
@@ -314,25 +314,17 @@ class HostUiService:
             self.registry.upsert_packet(addr, packet)
         sock.close()
 
-    def _status_loop(self):
+    def _control_loop(self):
         while not self.stop_event.is_set():
             self._ingest_control_announcements()
-            hosts = self.registry.all_hosts()
-            for host, port in hosts:
-                try:
-                    response = self.control.send_command(host, port, {"command": "status"}, timeout=1.0)
-                except OSError:
-                    continue
-                if response.get("status") == "ok":
-                    self.registry.apply_status(host, response, port=port)
-            self.stop_event.wait(5.0)
 
     def start(self):
         self.udp_thread.start()
-        self.status_thread.start()
+        self.control_thread.start()
         self.httpd = ThreadingHTTPServer((self.http_host, self.http_port), self._make_handler())
         print("Host UI listening on http://{}:{}".format(self.http_host, self.http_port))
         print("UDP data receiver on 0.0.0.0:{}".format(self.udp_port))
+        print("UDP control receiver on 0.0.0.0:{}".format(self.control.sock.getsockname()[1]))
         self.httpd.serve_forever()
 
     def stop(self):
@@ -379,7 +371,8 @@ class HostUiService:
                         return self._json({"status": "error", "message": "device_not_found"}, status=404)
                     response = service.control.send_command(record["host"], record.get("port", 22345), body, timeout=4.0)
                     if response.get("status") == "ok":
-                        service.registry.apply_status(record["host"], service.control.send_command(record["host"], record.get("port", 22345), {"command": "status"}, timeout=1.0), port=record.get("port", 22345))
+                        if response.get("device_id"):
+                            service.registry.apply_status(record["host"], response, port=record.get("port", 22345))
                     return self._json({"status": "ok", "response": response, "device": service.registry.get(key) or service.registry.get(response.get("device_uid", ""))})
 
                 return self._json({"status": "error", "message": "not_found"}, status=404)
