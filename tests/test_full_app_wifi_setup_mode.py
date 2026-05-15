@@ -281,6 +281,117 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(fake_scan.start_calls, 0)
         self.assertFalse(app.scan_ready)
 
+    def test_gc_collects_once_per_frame_interval(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        calls = []
+        try:
+            app = module.App.__new__(module.App)
+            app.frame_id = 120
+            app.last_gc_frame_id = 0
+            module.config.GC_EVERY_N_FRAMES = 120
+            module.gc.collect = lambda: calls.append(app.frame_id)
+
+            self.assertTrue(app._maybe_collect_garbage())
+            self.assertFalse(app._maybe_collect_garbage())
+
+            app.frame_id = 241
+            self.assertTrue(app._maybe_collect_garbage())
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(calls, [120, 241])
+
+    def test_failed_transmit_enters_backoff_and_drops_stale_packets(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+
+        class FakeBuffer:
+            def __init__(self):
+                self.items = [b"old"]
+                self.clear_calls = 0
+
+            def clear(self):
+                self.clear_calls += 1
+                self.items = []
+
+            def pop(self):
+                return self.items.pop(0) if self.items else None
+
+        try:
+            app = module.App.__new__(module.App)
+            app.udp = types.SimpleNamespace(send=lambda payload: False)
+            app.wifi = types.SimpleNamespace(is_connected=lambda: True)
+            app.tx_buffer = FakeBuffer()
+            app.sent_packets = 0
+            app.failed_sends = 0
+            app.send_backoff_until_ms = 0
+            module.config.USE_PACKET_BUFFER = True
+            module.config.SEND_MAX_PER_LOOP = 1
+            module.config.SEND_FAILURE_BACKOFF_MS = 100
+            module.time.ticks_ms = lambda: 1000
+            module.time.ticks_add = lambda now, delta: now + delta
+            module.time.ticks_diff = lambda now, then: now - then
+
+            app.handle_transmit()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(app.failed_sends, 1)
+        self.assertEqual(app.send_backoff_until_ms, 1100)
+        self.assertEqual(app.tx_buffer.clear_calls, 1)
+
+    def test_scan_skips_packet_build_while_transmit_is_backing_off(self):
+        module, fake_scan, _events, saved_modules = load_full_app_module()
+        build_calls = []
+        try:
+            fake_scan.pop_frame_mv = lambda: memoryview(b"frame")
+            module.decode_scan_frame = lambda payload: {
+                "payload_mv": [1],
+                "seq": 7,
+                "timestamp_ms": 700,
+            }
+
+            app = module.App.__new__(module.App)
+            app.runtime = {"scan_timing": {"send_every_n_frames": 1}}
+            app.latest_frame = None
+            app.latest_matrix = None
+            app.latest_imu = None
+            app.latest_battery = None
+            app.frame_id = 0
+            app.send_backoff_until_ms = 1100
+            app.time_sync = types.SimpleNamespace(status=lambda: {"synced": False})
+            app.scan_rate = types.SimpleNamespace(tick=lambda: None)
+            app.udp = types.SimpleNamespace(send=lambda payload: True)
+            app.wifi = types.SimpleNamespace(is_connected=lambda: True)
+            app.sent_packets = 0
+            app.failed_sends = 0
+            app.packet = types.SimpleNamespace(
+                build=lambda **kwargs: build_calls.append(kwargs) or b"packet"
+            )
+            app._apply_sensor_pipeline = lambda matrix: [float(matrix[0])]
+            module.config.SEND_EVERY_N_FRAMES = 1
+            module.config.PRINT_FPS = False
+            module.time.ticks_diff = lambda now, then: now - then
+
+            app.handle_scan(1000)
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(app.frame_id, 7)
+        self.assertEqual(app.latest_matrix, [1.0])
+        self.assertEqual(build_calls, [])
+
     def test_set_matrix_layout_persists_valid_pin_selection(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()
         try:

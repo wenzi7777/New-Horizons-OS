@@ -156,6 +156,21 @@ class DeviceRegistry:
             if key is None:
                 key = packet.get("device_id") or "host:{}".format(host)
             record = self.devices.setdefault(key, {"key": key, "port": 22345})
+            previous_packet = record.get("packet", {})
+            previous_frame_id = previous_packet.get("frame_id")
+            previous_timestamp_ms = previous_packet.get("timestamp_ms")
+            current_frame_id = packet.get("frame_id")
+            current_timestamp_ms = packet.get("timestamp_ms")
+            if all(value is not None for value in (
+                previous_frame_id,
+                previous_timestamp_ms,
+                current_frame_id,
+                current_timestamp_ms,
+            )):
+                frame_delta = current_frame_id - previous_frame_id
+                elapsed_ms = current_timestamp_ms - previous_timestamp_ms
+                if frame_delta > 0 and elapsed_ms > 0:
+                    record["scan_fps"] = frame_delta * 1000.0 / elapsed_ms
             record["host"] = host
             record["data_port"] = int(addr[1])
             record["device_id"] = packet.get("device_id", record.get("device_id", ""))
@@ -212,6 +227,7 @@ class DeviceRegistry:
                     "frame_id": packet.get("frame_id"),
                     "rows": packet.get("rows"),
                     "cols": packet.get("cols"),
+                    "scan_fps": record.get("scan_fps"),
                     "wifi_state": status.get("wifi_state"),
                     "channel": status.get("runtime", {}).get("channel") if status else None,
                 })
@@ -667,7 +683,7 @@ INDEX_HTML = """<!doctype html>
     .overview-strip { align-items: center; }
     .hero-metrics {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 10px;
     }
     .metric,
@@ -959,6 +975,10 @@ INDEX_HTML = """<!doctype html>
               <div class="metric">
                 <div class="metric-label">Frame</div>
                 <div class="metric-value" id="frameVal">-</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">FPS</div>
+                <div class="metric-value" id="fpsVal">-</div>
               </div>
             </div>
             <div class="status-grid">
@@ -1352,7 +1372,7 @@ INDEX_HTML = """<!doctype html>
         document.getElementById("overviewChannel").textContent = "channel -";
         document.getElementById("overviewWifi").textContent = "wifi -";
         document.getElementById("overviewOta").textContent = "ota idle";
-        ["minVal", "maxVal", "avgVal", "frameVal"].forEach(id => { document.getElementById(id).textContent = "-"; });
+        ["minVal", "maxVal", "avgVal", "frameVal", "fpsVal"].forEach(id => { document.getElementById(id).textContent = "-"; });
         renderUpdateState({});
         setGridEmpty("heatmap", "No matrix data");
         setGridEmpty("calibrationMap", "No calibration data");
@@ -1368,9 +1388,15 @@ INDEX_HTML = """<!doctype html>
       const runtime = device.status?.runtime || {};
       const packet = device.packet || {};
       const matrixConfigured = device.status?.matrix_configured !== false;
-      const matrix = matrixConfigured ? (packet.matrix || []) : [];
-      const rows = matrixConfigured ? (packet.rows || device.status?.matrix_shape?.rows || 0) : 0;
-      const cols = matrixConfigured ? (packet.cols || device.status?.matrix_shape?.cols || 0) : 0;
+      const activeRows = device.status?.active_rows || [];
+      const activeCols = device.status?.active_cols || [];
+      const rows = matrixConfigured ? activeRows.length : 0;
+      const cols = matrixConfigured ? activeCols.length : 0;
+      const expectedCells = rows * cols;
+      const packetMatrix = matrixConfigured ? (packet.matrix || []) : [];
+      const matrix = expectedCells
+        ? Array.from({ length: expectedCells }, (_, index) => packetMatrix[index] ?? null)
+        : [];
       const numeric = matrix.filter(v => typeof v === "number");
       const min = numeric.length ? Math.min(...numeric) : null;
       const max = numeric.length ? Math.max(...numeric) : null;
@@ -1382,6 +1408,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById("maxVal").textContent = max === null ? "-" : max.toFixed(2);
       document.getElementById("avgVal").textContent = avg === null ? "-" : avg.toFixed(2);
       document.getElementById("frameVal").textContent = packet.frame_id ?? "-";
+      document.getElementById("fpsVal").textContent = device.scan_fps == null ? "-" : device.scan_fps.toFixed(1);
 
       renderGrid("heatmap", matrix, rows, cols);
       syncPinSelectors(device);

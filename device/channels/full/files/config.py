@@ -78,6 +78,10 @@ PACKET_BUFFER_DROP_OLDEST = True
 # Maximum packets to send per main-loop iteration.
 SEND_MAX_PER_LOOP = 1
 
+# Stop hammering lwIP briefly after a failed UDP send. Stale sensor packets are
+# not useful for realtime streaming, so the app drops them during this window.
+SEND_FAILURE_BACKOFF_MS = 100
+
 # 1 = send every scanned frame.
 # 2 = scan at 60Hz, send at 30Hz.
 # 3 = scan at 60Hz, send at 20Hz.

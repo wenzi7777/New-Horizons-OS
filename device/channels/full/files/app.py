@@ -84,6 +84,8 @@ class App:
         self.last_ntp_retry_ms = 0
         self.last_status_announce_ms = 0
         self.reboot_deadline_ms = None
+        self.send_backoff_until_ms = 0
+        self.last_gc_frame_id = 0
 
         self.packet = None
         self.filter_chain = None
@@ -221,9 +223,7 @@ class App:
                 time.sleep_ms(250)
                 machine.reset()
 
-            if config.GC_EVERY_N_FRAMES > 0 and self.frame_id > 0:
-                if self.frame_id % config.GC_EVERY_N_FRAMES == 0:
-                    gc.collect()
+            self._maybe_collect_garbage()
 
     def handle_scan(self, timestamp_ms):
         frame_view = vdboard.scan.pop_frame_mv()
@@ -239,7 +239,19 @@ class App:
             config.SEND_EVERY_N_FRAMES
         )
         self.frame_id = int(frame_info["seq"])
+        fps = self.scan_rate.tick()
+        if config.PRINT_FPS and fps is not None:
+            self.logger.info(
+                "scan fps={} wifi={} sent={} fail={}".format(
+                    fps,
+                    self.wifi.is_connected(),
+                    self.sent_packets,
+                    self.failed_sends
+                )
+            )
         if send_every > 1 and (self.frame_id % send_every != 0):
+            return
+        if self._transmit_backing_off(timestamp_ms):
             return
 
         packet = self.packet.build(
@@ -255,22 +267,14 @@ class App:
         else:
             self.send_packet(packet)
 
-        fps = self.scan_rate.tick()
-        if config.PRINT_FPS and fps is not None:
-            self.logger.info(
-                "scan fps={} wifi={} sent={} fail={}".format(
-                    fps,
-                    self.wifi.is_connected(),
-                    self.sent_packets,
-                    self.failed_sends
-                )
-            )
-
     def handle_transmit(self):
         if not config.USE_PACKET_BUFFER or self.tx_buffer is None:
             return
 
         if self.udp is None or not self.wifi.is_connected():
+            self.tx_buffer.clear()
+            return
+        if self._transmit_backing_off():
             self.tx_buffer.clear()
             return
 
@@ -280,6 +284,7 @@ class App:
             if packet is None:
                 return
             if not self.send_packet(packet):
+                self.tx_buffer.clear()
                 return
 
     def send_packet(self, packet):
@@ -289,10 +294,32 @@ class App:
         ok = self.udp.send(packet)
         if ok:
             self.sent_packets += 1
+            self.send_backoff_until_ms = 0
             return True
 
         self.failed_sends += 1
+        self.send_backoff_until_ms = time.ticks_add(
+            time.ticks_ms(),
+            getattr(config, "SEND_FAILURE_BACKOFF_MS", 100)
+        )
         return False
+
+    def _transmit_backing_off(self, now=None):
+        if not self.send_backoff_until_ms:
+            return False
+        if now is None:
+            now = time.ticks_ms()
+        return time.ticks_diff(now, self.send_backoff_until_ms) < 0
+
+    def _maybe_collect_garbage(self):
+        interval = int(getattr(config, "GC_EVERY_N_FRAMES", 0))
+        if interval <= 0 or self.frame_id <= 0:
+            return False
+        if self.frame_id - self.last_gc_frame_id < interval:
+            return False
+        self.last_gc_frame_id = self.frame_id
+        gc.collect()
+        return True
 
     def update_led_state(self):
         if not self.led:

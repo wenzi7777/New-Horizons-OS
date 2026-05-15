@@ -98,6 +98,37 @@ class HostUiCoreTests(unittest.TestCase):
         self.assertEqual(record["packet"]["frame_id"], 7)
         self.assertEqual(registry.get("AABBCCDDEEFF")["host"], "192.168.1.50")
 
+    def test_registry_tracks_scan_fps_from_packet_frame_and_timestamp_delta(self):
+        module = load_host_ui()
+        registry = module.DeviceRegistry()
+
+        registry.upsert_packet(
+            ("192.168.1.50", 5005),
+            {
+                "device_id": "0xCCDDEEFF",
+                "frame_id": 10,
+                "timestamp_ms": 1000,
+                "matrix": [1.0],
+                "rows": 1,
+                "cols": 1,
+            },
+        )
+        registry.upsert_packet(
+            ("192.168.1.50", 5005),
+            {
+                "device_id": "0xCCDDEEFF",
+                "frame_id": 40,
+                "timestamp_ms": 1500,
+                "matrix": [1.0],
+                "rows": 1,
+                "cols": 1,
+            },
+        )
+
+        record = registry.get("0xCCDDEEFF")
+        self.assertAlmostEqual(record["scan_fps"], 60.0)
+        self.assertAlmostEqual(registry.list_devices()[0]["scan_fps"], 60.0)
+
     def test_binary_packet_parser_extracts_float_matrix(self):
         module = load_host_ui()
         payload = struct.pack("<ffff", 1.5, 2.5, 3.5, 4.5)

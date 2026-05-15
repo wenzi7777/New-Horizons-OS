@@ -170,6 +170,72 @@ eval({json.dumps(script_under_test)});
         self.assertIn('value="2" checked', rendered["rows"])
         self.assertIn('value="13" checked', rendered["cols"])
 
+    def test_heatmap_shape_follows_selected_matrix_layout(self):
+        module = load_host_ui()
+        script = module.INDEX_HTML.split("<script>", 1)[1].split(
+            'document.getElementById("addDeviceBtn").onclick', 1
+        )[0]
+        script_under_test = script + """
+let capturedHeatmap = null;
+renderGrid = (targetId, values, rows, cols) => {
+  if (targetId === "heatmap") capturedHeatmap = { values, rows, cols };
+};
+state.selectedDevice = {
+  key: "board-a",
+  host: "192.168.1.50",
+  port: 22345,
+  status: {
+    matrix_configured: true,
+    active_rows: [1, 2, 3],
+    active_cols: [13, 14],
+    available_rows: [1, 2, 3],
+    available_cols: [13, 14],
+    runtime: {}
+  },
+  packet: {
+    frame_id: 7,
+    rows: 1,
+    cols: 6,
+    matrix: [1, 2, 3, 4, 5, 6]
+  }
+};
+renderSelected();
+console.log(JSON.stringify(capturedHeatmap));
+"""
+        harness = f"""
+const elements = {{}};
+function element(id) {{
+  if (!elements[id]) elements[id] = {{
+    id,
+    innerHTML: "",
+    textContent: "",
+    value: "",
+    style: {{}}
+  }};
+  return elements[id];
+}}
+global.document = {{
+  getElementById(id) {{
+    return element(id);
+  }},
+  querySelectorAll() {{
+    return [];
+  }}
+}};
+eval({json.dumps(script_under_test)});
+"""
+        result = subprocess.run(
+            ["node", "-e", harness],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        rendered = json.loads(result.stdout)
+
+        self.assertEqual(rendered["rows"], 3)
+        self.assertEqual(rendered["cols"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
