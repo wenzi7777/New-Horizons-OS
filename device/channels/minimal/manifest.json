@@ -21,8 +21,8 @@
     },
     {
       "path": "app_minimal.py",
-      "sha256": "7c0ef40947b4ae13adfec9aca68c81f14d8176491d35344d9c38cbe2a65fbc42",
-      "size": 8213,
+      "sha256": "502d6f94acfd17ffd35962bd8e474abfee12be690bea7593c62c2e97ad448f90",
+      "size": 9751,
       "kind": "code",
       "reboot_required": true
     },
@@ -56,8 +56,8 @@
     },
     {
       "path": "udp_control.py",
-      "sha256": "f7f604a2c234133222aea7957fb197d8e17f0561f30930b1e7c750efb71b3f93",
-      "size": 1425,
+      "sha256": "0d291bc2ead18471ac3d333ca821b77bc859ec20f7a32308a2fdec97fb935756",
+      "size": 1790,
       "kind": "code",
       "reboot_required": true
     },
