@@ -31,6 +31,7 @@ class MinimalApp:
         self.boot_network_initialized = False
         self.last_status_announce_ms = 0
         self.reboot_deadline_ms = None
+        self.pending_channel_switch = None
 
     def setup(self):
         wifi_ok = False
@@ -123,10 +124,20 @@ class MinimalApp:
         return time.ticks_diff(now, self.reboot_deadline_ms) >= 0
 
     def _handle_update_result(self, result, now):
+        if (result.get("status") == "ok"
+                and result.get("message") == "update_applied"
+                and self.pending_channel_switch):
+            runtime = self.config_store.update_runtime({
+                "channel": self.pending_channel_switch,
+            })
+            self.runtime = runtime
+            self.pending_channel_switch = None
         if result.get("status") == "ok" and result.get("reboot_required"):
             self.reboot_required = True
             if self.reboot_deadline_ms is None:
                 self.reboot_deadline_ms = time.ticks_add(now, 1200)
+        elif result.get("status") in ("error", "disabled"):
+            self.pending_channel_switch = None
 
     def _handle_request(self, request, addr):
         command = request.get("command", "status")
@@ -198,10 +209,10 @@ class MinimalApp:
                     "update_state": state,
                 }
             runtime = self.config_store.update_runtime({
-                "channel": "full",
                 "update": {"manifest_url": iconfig.DEFAULT_MANIFESTS["full"], "enabled": True},
             })
             self.runtime = runtime
+            self.pending_channel_switch = "full"
             result = self.updates.start_apply()
             result["runtime"] = runtime
             result["message"] = "upgrade_to_full_started" if result.get("status") == "ok" else result.get("message", "")
