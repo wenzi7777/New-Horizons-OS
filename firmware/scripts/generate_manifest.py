@@ -22,6 +22,8 @@ def should_include(path: Path, root: Path) -> bool:
         return False
     if path.suffix == ".pyc":
         return False
+    if rel_parts and rel_parts[0] == ".device" and path.suffix == ".json":
+        return False
     return True
 
 

@@ -97,7 +97,7 @@ class UpdateManagerProgressTests(unittest.TestCase):
         second_tick = manager.service()
         self.assertEqual(second_tick["message"], "update_progress")
         self.assertEqual(store.update_state["applied_files"], 1)
-        self.assertEqual(store.update_state["current_file"], "alpha.py")
+        self.assertEqual(store.update_state["current_file"], "beta.py")
 
         final_tick = manager.service()
         self.assertEqual(final_tick["message"], "update_applied")

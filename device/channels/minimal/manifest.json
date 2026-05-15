@@ -1,24 +1,10 @@
 {
   "manifest_version": 1,
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.1.3",
+  "firmware_version": "v0.1.4",
   "channel": "minimal",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.3/device/channels/minimal/files",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.4/device/channels/minimal/files",
   "files": [
-    {
-      "path": ".device/filter_config.json",
-      "sha256": "15902805205cbadaf5c14d42b71b011e37aa01fea9b4392d959d19e33b728e05",
-      "size": 42,
-      "kind": "config",
-      "reboot_required": false
-    },
-    {
-      "path": ".device/runtime_config.json",
-      "sha256": "efba31897965dd9b4d60e42d7ec77235fffe5a0bb8e7243195a9a91ba3bf40e9",
-      "size": 552,
-      "kind": "config",
-      "reboot_required": false
-    },
     {
       "path": "app_minimal.py",
       "sha256": "4a78afd0959d5ece50869a3b3f54b62ff0308d72667d9f446068e71afd6a0eec",

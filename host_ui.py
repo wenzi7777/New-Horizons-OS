@@ -425,289 +425,666 @@ INDEX_HTML = """<!doctype html>
   <title>New Horizons Host Console</title>
   <style>
     :root {
-      --bg: #08131a;
-      --panel: rgba(14, 27, 34, 0.88);
-      --panel-2: rgba(7, 17, 22, 0.84);
-      --line: rgba(127, 182, 199, 0.18);
-      --ink: #d7e9ed;
-      --muted: #7fa6b2;
-      --accent: #4fd1c5;
-      --accent-2: #f6b73c;
-      --danger: #ff6b6b;
-      --good: #5be584;
-      --shadow: 0 20px 70px rgba(0, 0, 0, 0.4);
+      --bg: #070909;
+      --panel: #0f1416;
+      --panel-2: #12191c;
+      --panel-3: #181f23;
+      --line: rgba(176, 191, 199, 0.14);
+      --line-strong: rgba(208, 220, 226, 0.24);
+      --text: #e5ecee;
+      --muted: #8d9ba2;
+      --soft: #aebcc2;
+      --accent: #cfd8dc;
+      --accent-hot: #ffb347;
+      --danger: #d96a58;
+      --success: #8bc2ae;
+      --shadow: 0 18px 40px rgba(0, 0, 0, 0.34);
     }
     * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
     body {
       margin: 0;
-      min-height: 100vh;
-      color: var(--ink);
-      font-family: "Avenir Next", "Trebuchet MS", sans-serif;
+      color: var(--text);
+      font-family: "IBM Plex Sans", "Avenir Next", "Helvetica Neue", sans-serif;
       background:
-        radial-gradient(circle at top left, rgba(79, 209, 197, 0.18), transparent 34%),
-        radial-gradient(circle at bottom right, rgba(246, 183, 60, 0.16), transparent 28%),
-        linear-gradient(135deg, #050d11 0%, #0a1c24 44%, #071117 100%);
+        linear-gradient(180deg, rgba(255,255,255,0.02), transparent 18%),
+        radial-gradient(circle at top right, rgba(255, 179, 71, 0.09), transparent 22%),
+        linear-gradient(180deg, #050606 0%, #090c0d 100%);
     }
-    .shell {
-      display: grid;
-      grid-template-columns: 280px minmax(0, 1fr) 360px;
-      gap: 18px;
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.09;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: linear-gradient(180deg, rgba(0,0,0,0.95), rgba(0,0,0,0.5));
+    }
+    .app {
+      position: relative;
       padding: 18px;
+      display: grid;
+      gap: 18px;
     }
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 24px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(18px);
-      overflow: hidden;
-    }
-    .panel h2, .panel h3 {
-      margin: 0;
-      font-family: "Iowan Old Style", "Palatino Linotype", serif;
-      letter-spacing: 0.03em;
-    }
-    .panel-head {
-      padding: 18px 20px 12px;
-      border-bottom: 1px solid var(--line);
+    .topbar {
       display: flex;
-      justify-content: space-between;
       align-items: end;
-      gap: 12px;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 22px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.015));
+      box-shadow: var(--shadow);
     }
-    .panel-body { padding: 16px 20px 20px; }
-    .tag {
-      display: inline-block;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: rgba(79, 209, 197, 0.12);
-      color: var(--accent);
-      font-size: 12px;
-      letter-spacing: 0.06em;
+    .topbar h1 {
+      margin: 0;
+      font-size: clamp(26px, 4vw, 42px);
+      font-family: "Avenir Next Condensed", "Arial Narrow", sans-serif;
+      font-weight: 700;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
     }
-    .device-list { display: grid; gap: 10px; }
+    .eyebrow,
+    .section-kicker,
+    .metric-label,
+    .field-label,
+    .response-label {
+      font-family: "IBM Plex Mono", "SF Mono", "Menlo", monospace;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .topbar-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.03);
+      color: var(--soft);
+      font-size: 12px;
+    }
+    .status-pill::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .status-pill.live::before { background: var(--success); }
+    .status-pill.alert::before { background: var(--accent-hot); }
+    .layout {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr) 400px;
+      gap: 18px;
+      align-items: start;
+    }
+    .stack {
+      display: grid;
+      gap: 18px;
+      min-width: 0;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.008)),
+        var(--panel);
+      box-shadow: var(--shadow);
+      min-width: 0;
+    }
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: start;
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-title {
+      display: grid;
+      gap: 6px;
+    }
+    .panel-title h2,
+    .panel-title h3 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.1;
+      font-weight: 650;
+      letter-spacing: 0.02em;
+    }
+    .panel-body {
+      padding: 18px 20px 20px;
+      display: grid;
+      gap: 18px;
+      min-width: 0;
+    }
+    .input-row,
+    .dual-grid,
+    .calibration-grid,
+    .server-grid {
+      display: grid;
+      gap: 10px;
+    }
+    .input-row,
+    .dual-grid,
+    .server-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .calibration-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .device-list {
+      display: grid;
+      gap: 10px;
+      max-height: 68vh;
+      overflow: auto;
+      padding-right: 2px;
+    }
     .device-card {
       border: 1px solid var(--line);
-      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.022), rgba(255,255,255,0.006));
       padding: 14px;
-      background: var(--panel-2);
+      display: grid;
+      gap: 10px;
       cursor: pointer;
-      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+      transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
     }
-    .device-card:hover { transform: translateY(-1px); border-color: rgba(79, 209, 197, 0.35); }
-    .device-card.active { border-color: rgba(246, 183, 60, 0.5); background: rgba(246, 183, 60, 0.08); }
-    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
-    .value { font-size: 14px; }
-    .heat-wrap { display: grid; gap: 14px; }
-    .stats {
+    .device-card:hover {
+      border-color: var(--line-strong);
+      transform: translateY(-1px);
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+    }
+    .device-card.active {
+      border-color: rgba(255, 179, 71, 0.62);
+      background: linear-gradient(180deg, rgba(255, 179, 71, 0.12), rgba(255,255,255,0.01));
+    }
+    .device-card-head,
+    .device-card-meta,
+    .overview-strip,
+    .button-grid,
+    .button-row,
+    .inline-row,
+    .status-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .device-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .device-key,
+    .device-host,
+    .mono {
+      font-family: "IBM Plex Mono", "SF Mono", "Menlo", monospace;
+      font-size: 12px;
+      color: var(--soft);
+      overflow-wrap: anywhere;
+    }
+    .mini-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.028);
+      color: var(--soft);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .overview-strip { align-items: center; }
+    .hero-metrics {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 10px;
     }
-    .stat {
+    .metric,
+    .status-card,
+    .control-block,
+    .response-shell {
       border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 12px;
-      background: rgba(255, 255, 255, 0.02);
+      background: var(--panel-2);
     }
-    .stat .big { font-size: 22px; margin-top: 6px; }
+    .metric {
+      padding: 12px 14px;
+      display: grid;
+      gap: 8px;
+    }
+    .metric-value {
+      font-size: clamp(22px, 3vw, 28px);
+      line-height: 1;
+      font-weight: 650;
+      color: var(--accent);
+    }
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .status-card {
+      padding: 12px 14px;
+      display: grid;
+      gap: 10px;
+    }
+    .status-value {
+      font-size: 18px;
+      font-weight: 600;
+      word-break: break-word;
+    }
+    .status-text {
+      font-size: 12px;
+      color: var(--soft);
+      min-height: 16px;
+    }
+    .meter {
+      width: 100%;
+      height: 10px;
+      border: 1px solid var(--line);
+      background: #0a0e10;
+      overflow: hidden;
+    }
+    .meter-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #9aadb5 0%, #ffb347 100%);
+      transition: width 140ms ease;
+    }
+    .canvas-shell {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
+      padding: 14px;
+      display: grid;
+      gap: 14px;
+    }
     .grid {
       display: grid;
       gap: 5px;
-      padding: 14px;
-      border-radius: 22px;
-      background: rgba(3, 10, 14, 0.9);
-      border: 1px solid var(--line);
-      min-height: 320px;
-    }
-    .cell {
-      aspect-ratio: 1 / 1;
-      border-radius: 10px;
+      background: #06090a;
       border: 1px solid rgba(255,255,255,0.06);
+      padding: 10px;
+      min-height: 280px;
+      align-content: start;
+    }
+    .grid.calibration-grid-view {
+      min-height: 200px;
+    }
+    .grid-empty {
       display: flex;
       align-items: center;
       justify-content: center;
+      color: var(--muted);
+      font-family: "IBM Plex Mono", "SF Mono", "Menlo", monospace;
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      min-height: 180px;
+    }
+    .cell {
+      aspect-ratio: 1 / 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(255,255,255,0.08);
+      color: #eef5f6;
+      font-family: "IBM Plex Mono", "SF Mono", "Menlo", monospace;
       font-size: 11px;
-      color: rgba(255,255,255,0.78);
-      font-family: "SF Mono", "Menlo", monospace;
       transition: transform 80ms ease;
     }
-    .cell:hover { transform: scale(1.06); }
-    .section { display: grid; gap: 12px; margin-bottom: 18px; }
-    .section:last-child { margin-bottom: 0; }
-    .button-row, .inline-row { display: flex; gap: 8px; flex-wrap: wrap; }
-    button, input, select {
-      border-radius: 14px;
+    .cell:hover { transform: scale(1.04); }
+    .control-block {
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+    }
+    .control-heading {
+      display: grid;
+      gap: 4px;
+    }
+    .control-title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 650;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .control-note {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .button-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    button,
+    input,
+    select {
+      width: 100%;
+      min-height: 42px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.04);
-      color: var(--ink);
+      background: #101619;
+      color: var(--text);
       padding: 10px 12px;
       font: inherit;
+      outline: none;
     }
     button {
       cursor: pointer;
-      background: linear-gradient(180deg, rgba(79, 209, 197, 0.18), rgba(79, 209, 197, 0.08));
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-size: 12px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015)),
+        #131a1d;
     }
-    button.warn { background: linear-gradient(180deg, rgba(246, 183, 60, 0.22), rgba(246, 183, 60, 0.08)); }
-    button.danger { background: linear-gradient(180deg, rgba(255, 107, 107, 0.2), rgba(255, 107, 107, 0.08)); }
-    input, select { width: 100%; }
-    .form-grid {
+    button:hover {
+      border-color: var(--line-strong);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02)),
+        #171f23;
+    }
+    button.warn {
+      color: #17120a;
+      border-color: rgba(255, 179, 71, 0.28);
+      background:
+        linear-gradient(180deg, rgba(255, 179, 71, 0.95), rgba(205, 135, 42, 0.95));
+    }
+    button.danger {
+      color: #f5d6d1;
+      border-color: rgba(217, 106, 88, 0.32);
+      background:
+        linear-gradient(180deg, rgba(123, 53, 41, 0.95), rgba(82, 33, 26, 0.95));
+    }
+    input::placeholder { color: #6f7b81; }
+    .response-shell {
+      padding: 14px;
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
     }
     pre.log {
       margin: 0;
       max-height: 220px;
       overflow: auto;
-      padding: 14px;
-      border-radius: 18px;
-      background: rgba(0, 0, 0, 0.32);
-      border: 1px solid var(--line);
-      color: #b7dce3;
-      font-family: "SF Mono", "Menlo", monospace;
+      padding: 12px;
+      border: 1px solid rgba(255,255,255,0.06);
+      background: #090c0d;
+      color: #bdd1d8;
+      font-family: "IBM Plex Mono", "SF Mono", "Menlo", monospace;
       font-size: 12px;
+      line-height: 1.55;
       white-space: pre-wrap;
     }
-    .small { font-size: 12px; color: var(--muted); }
-    .meter {
-      width: 100%;
-      height: 12px;
-      border-radius: 999px;
-      overflow: hidden;
-      background: rgba(255,255,255,0.08);
-      border: 1px solid rgba(255,255,255,0.08);
+    .empty-card {
+      border: 1px dashed var(--line);
+      padding: 18px 16px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+      background: rgba(255,255,255,0.01);
     }
-    .meter-fill {
-      height: 100%;
-      width: 0%;
-      border-radius: inherit;
-      background: linear-gradient(90deg, rgba(79, 209, 197, 0.75), rgba(246, 183, 60, 0.92));
-      transition: width 180ms ease;
+    @media (max-width: 1320px) {
+      .layout {
+        grid-template-columns: 280px minmax(0, 1fr);
+      }
+      .stack-right {
+        grid-column: 1 / -1;
+      }
     }
-    @media (max-width: 1180px) {
-      .shell { grid-template-columns: 1fr; }
-      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    @media (max-width: 960px) {
+      .app { padding: 12px; }
+      .layout { grid-template-columns: 1fr; }
+      .hero-metrics,
+      .status-grid,
+      .button-grid,
+      .input-row,
+      .dual-grid,
+      .server-grid,
+      .calibration-grid {
+        grid-template-columns: 1fr;
+      }
+      .topbar {
+        flex-direction: column;
+        align-items: start;
+      }
+      .topbar-meta {
+        justify-content: start;
+      }
     }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <section class="panel">
-      <div class="panel-head">
-        <div>
-          <div class="tag">Device Rail</div>
-          <h2>Known Boards</h2>
-        </div>
+  <div class="app">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">Industrial Control Surface</div>
+        <h1>Host Console</h1>
       </div>
-      <div class="panel-body">
-        <div class="section">
-          <div class="form-grid">
-            <input id="hostInput" placeholder="192.168.1.152">
-            <input id="portInput" placeholder="22345" value="22345">
-          </div>
-          <button id="addDeviceBtn">Add Device Host</button>
-        </div>
-        <div id="deviceList" class="device-list"></div>
+      <div class="topbar-meta">
+        <div id="topDeviceCount" class="status-pill">0 devices</div>
+        <div id="topSelectionState" class="status-pill">No active board</div>
+        <div class="status-pill alert">UDP 5005 / CTRL 22345</div>
       </div>
-    </section>
+    </header>
 
-    <section class="panel">
-      <div class="panel-head">
-        <div>
-          <div class="tag">Live Matrix</div>
-          <h2 id="titleText">No Device Selected</h2>
+    <main class="layout">
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">
+            <div class="section-kicker">Fleet Rail</div>
+            <h2>Devices</h2>
+          </div>
+          <div id="deviceRailState" class="mini-pill">idle</div>
         </div>
-        <div class="small" id="subtitleText">Waiting for packets</div>
+        <div class="panel-body">
+          <div class="control-block">
+            <div class="control-heading">
+              <div class="control-title">Add Target</div>
+              <div class="control-note">Register a board by host address when passive discovery has not populated it yet.</div>
+            </div>
+            <div class="input-row">
+              <input id="hostInput" placeholder="192.168.1.152">
+              <input id="portInput" placeholder="22345" value="22345">
+            </div>
+            <button id="addDeviceBtn">Add Device Host</button>
+          </div>
+          <div id="deviceList" class="device-list"></div>
+        </div>
+      </section>
+
+      <div class="stack">
+        <section class="panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <div class="section-kicker">Board Overview</div>
+              <h2 id="titleText">No Device Selected</h2>
+            </div>
+            <div id="subtitleText" class="mono">Waiting for packets</div>
+          </div>
+          <div class="panel-body">
+            <div class="overview-strip">
+              <div id="overviewChannel" class="mini-pill">channel -</div>
+              <div id="overviewWifi" class="mini-pill">wifi -</div>
+              <div id="overviewOta" class="mini-pill">ota idle</div>
+            </div>
+            <div class="hero-metrics">
+              <div class="metric">
+                <div class="metric-label">Min</div>
+                <div class="metric-value" id="minVal">-</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Max</div>
+                <div class="metric-value" id="maxVal">-</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Avg</div>
+                <div class="metric-value" id="avgVal">-</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Frame</div>
+                <div class="metric-value" id="frameVal">-</div>
+              </div>
+            </div>
+            <div class="status-grid">
+              <div class="status-card">
+                <div class="metric-label">Ota Phase</div>
+                <div class="status-value" id="otaPhaseVal">idle</div>
+                <div class="status-text" id="otaProgressText">No OTA activity</div>
+                <div class="meter"><div id="otaProgressFill" class="meter-fill"></div></div>
+              </div>
+              <div class="status-card">
+                <div class="metric-label">Ota Detail</div>
+                <div class="status-value" id="otaFilesVal">-</div>
+                <div class="status-text" id="otaCurrentVal">-</div>
+                <div class="status-text" id="otaResultVal">-</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <div class="section-kicker">Live Pressure Matrix</div>
+              <h2>Sensor View</h2>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="canvas-shell">
+              <div id="heatmap" class="grid"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <div class="section-kicker">Calibration Snapshot</div>
+              <h2>Level Preview</h2>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="canvas-shell">
+              <div id="calibrationMap" class="grid calibration-grid-view"></div>
+            </div>
+          </div>
+        </section>
       </div>
-      <div class="panel-body heat-wrap">
-        <div class="stats">
-          <div class="stat"><div class="label">Min</div><div class="big" id="minVal">-</div></div>
-          <div class="stat"><div class="label">Max</div><div class="big" id="maxVal">-</div></div>
-          <div class="stat"><div class="label">Avg</div><div class="big" id="avgVal">-</div></div>
-          <div class="stat"><div class="label">Frame</div><div class="big" id="frameVal">-</div></div>
-        </div>
-        <div id="heatmap" class="grid"></div>
-        <div class="section">
-          <div class="label">Calibration Level Preview</div>
-          <div id="calibrationMap" class="grid"></div>
-        </div>
+
+      <div class="stack stack-right">
+        <section class="panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <div class="section-kicker">Primary Actions</div>
+              <h2>Operations</h2>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="control-block">
+              <div class="control-heading">
+                <div class="control-title">Quick Commands</div>
+                <div class="control-note">Most-used device actions grouped for direct access.</div>
+              </div>
+              <div class="button-grid">
+                <button data-cmd="status">Status</button>
+                <button data-cmd="check_update">Check Update</button>
+                <button data-cmd="apply_update">Apply Update</button>
+                <button data-cmd="upgrade_to_full" class="warn">Upgrade To Full</button>
+                <button data-cmd="reboot" class="danger">Reboot</button>
+              </div>
+            </div>
+
+            <div class="control-block">
+              <div class="control-heading">
+                <div class="control-title">Server Binding</div>
+                <div class="control-note">Edit master and data endpoints for the selected device.</div>
+              </div>
+              <div class="server-grid">
+                <div>
+                  <div class="field-label">Master Host</div>
+                  <input id="masterHost" placeholder="master host">
+                </div>
+                <div>
+                  <div class="field-label">Master Port</div>
+                  <input id="masterPort" placeholder="master port">
+                </div>
+                <div>
+                  <div class="field-label">Data Host</div>
+                  <input id="dataHost" placeholder="data host">
+                </div>
+                <div>
+                  <div class="field-label">Data Port</div>
+                  <input id="dataPort" placeholder="data port">
+                </div>
+              </div>
+              <button id="saveServersBtn">Save Servers</button>
+            </div>
+
+            <div class="control-block">
+              <div class="control-heading">
+                <div class="control-title">Calibration</div>
+                <div class="control-note">Enter calibration mode, sample cells, or capture the whole matrix baseline.</div>
+              </div>
+              <div class="button-row">
+                <button id="enterCalBtn">Enter Calibration</button>
+                <button id="exitCalBtn" class="warn">Exit Calibration</button>
+              </div>
+              <div class="calibration-grid">
+                <div>
+                  <div class="field-label">Analog Pin</div>
+                  <select id="analogPin"></select>
+                </div>
+                <div>
+                  <div class="field-label">Select Pin</div>
+                  <select id="selectPin"></select>
+                </div>
+                <div>
+                  <div class="field-label">Level</div>
+                  <input id="calLevel" placeholder="level" value="0.000">
+                </div>
+                <div>
+                  <div class="field-label">Start Delay Ms</div>
+                  <input id="calDelay" placeholder="start delay ms" value="1000">
+                </div>
+                <div>
+                  <div class="field-label">Duration Ms</div>
+                  <input id="calDuration" placeholder="duration ms" value="5000">
+                </div>
+                <div>
+                  <div class="field-label">Saved Level</div>
+                  <select id="levelSelect"></select>
+                </div>
+              </div>
+              <div class="button-grid">
+                <button id="singleCalBtn">Calibrate Single Cell</button>
+                <button id="fullCalBtn" class="warn">Calibrate Full Matrix</button>
+                <button id="loadLevelBtn">Load Level Matrix</button>
+                <button id="deleteLevelBtn" class="danger">Delete Level</button>
+              </div>
+            </div>
+
+            <div class="response-shell">
+              <div class="response-label">Last Response</div>
+              <pre id="responseLog" class="log">Host UI ready.</pre>
+            </div>
+          </div>
+        </section>
       </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <div>
-          <div class="tag">Control Surface</div>
-          <h2>Board Ops</h2>
-        </div>
-      </div>
-      <div class="panel-body">
-        <div class="section">
-          <div class="label">Quick Actions</div>
-          <div class="button-row">
-            <button data-cmd="status">Status</button>
-            <button data-cmd="check_update">Check Update</button>
-            <button data-cmd="apply_update">Apply Update</button>
-            <button data-cmd="upgrade_to_full" class="warn">Upgrade To Full</button>
-            <button data-cmd="reboot" class="danger">Reboot</button>
-          </div>
-        </div>
-
-        <div class="section">
-          <div class="label">OTA Progress</div>
-          <div class="stats">
-            <div class="stat"><div class="label">Phase</div><div class="big" id="otaPhaseVal">idle</div></div>
-            <div class="stat"><div class="label">Files</div><div class="big" id="otaFilesVal">-</div></div>
-            <div class="stat"><div class="label">Current</div><div class="big" id="otaCurrentVal">-</div></div>
-            <div class="stat"><div class="label">Result</div><div class="big" id="otaResultVal">-</div></div>
-          </div>
-          <div class="meter"><div id="otaProgressFill" class="meter-fill"></div></div>
-          <div class="small" id="otaProgressText">No OTA activity</div>
-        </div>
-
-        <div class="section">
-          <div class="label">Server Binding</div>
-          <div class="form-grid">
-            <input id="masterHost" placeholder="master host">
-            <input id="masterPort" placeholder="master port">
-            <input id="dataHost" placeholder="data host">
-            <input id="dataPort" placeholder="data port">
-          </div>
-          <button id="saveServersBtn">Save Servers</button>
-        </div>
-
-        <div class="section">
-          <div class="label">Calibration Mode</div>
-          <div class="button-row">
-            <button id="enterCalBtn">Enter Calibration</button>
-            <button id="exitCalBtn" class="warn">Exit Calibration</button>
-          </div>
-          <div class="form-grid">
-            <select id="analogPin"></select>
-            <select id="selectPin"></select>
-            <input id="calLevel" placeholder="level" value="0.000">
-            <input id="calDelay" placeholder="start delay ms" value="1000">
-            <input id="calDuration" placeholder="duration ms" value="5000">
-          </div>
-          <div class="button-row">
-            <button id="singleCalBtn">Calibrate Single Cell</button>
-            <button id="fullCalBtn" class="warn">Calibrate Full Matrix</button>
-          </div>
-          <div class="inline-row">
-            <select id="levelSelect"></select>
-            <button id="loadLevelBtn">Load Level Matrix</button>
-            <button id="deleteLevelBtn" class="danger">Delete Level</button>
-          </div>
-        </div>
-
-        <div class="section">
-          <div class="label">Last Response</div>
-          <pre id="responseLog" class="log">Host UI ready.</pre>
-        </div>
-      </div>
-    </section>
+    </main>
   </div>
 
   <script>
@@ -727,20 +1104,25 @@ INDEX_HTML = """<!doctype html>
     }
 
     function colorFor(value, min, max) {
-      if (value === null || Number.isNaN(value)) return "rgba(255,255,255,0.05)";
+      if (value === null || Number.isNaN(value)) return "rgba(255,255,255,0.04)";
       const span = Math.max(max - min, 1e-6);
       const ratio = Math.min(1, Math.max(0, (value - min) / span));
-      const hue = 210 - ratio * 180;
-      const light = 16 + ratio * 46;
-      return `hsl(${hue} 82% ${light}%)`;
+      const light = 14 + ratio * 58;
+      const warmth = 210 - ratio * 170;
+      return `hsl(${warmth} 48% ${light}%)`;
+    }
+
+    function setGridEmpty(targetId, message) {
+      const el = document.getElementById(targetId);
+      el.innerHTML = `<div class="grid-empty">${message}</div>`;
+      el.style.gridTemplateColumns = "1fr";
     }
 
     function renderGrid(targetId, values, rows, cols) {
       const el = document.getElementById(targetId);
       el.innerHTML = "";
       if (!values || !rows || !cols) {
-        el.textContent = "No matrix data";
-        el.style.gridTemplateColumns = "1fr";
+        setGridEmpty(targetId, "No matrix data");
         return;
       }
       el.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
@@ -757,26 +1139,6 @@ INDEX_HTML = """<!doctype html>
       });
     }
 
-    function renderDeviceList() {
-      const list = document.getElementById("deviceList");
-      list.innerHTML = "";
-      state.devices.forEach(device => {
-        const item = document.createElement("div");
-        item.className = "device-card" + (device.key === state.selectedKey ? " active" : "");
-        item.innerHTML = `
-          <div class="label">${device.device_uid || device.device_id || device.key}</div>
-          <div class="value">${device.device_name || device.host}</div>
-          <div class="small">${device.host}:${device.port} ${device.channel || ""}</div>
-        `;
-        item.onclick = () => {
-          state.selectedKey = device.key;
-          fetchSelected();
-          renderDeviceList();
-        };
-        list.appendChild(item);
-      });
-    }
-
     function formatPhase(phase) {
       const map = {
         idle: "idle",
@@ -789,12 +1151,55 @@ INDEX_HTML = """<!doctype html>
       return map[phase] || phase || "idle";
     }
 
+    function formatWifi(device) {
+      const wifiState = device?.status?.wifi_state;
+      if (wifiState) return wifiState;
+      if (device?.status?.wifi_connected === true) return "connected";
+      if (device?.status?.wifi_connected === false) return "offline";
+      return "unknown";
+    }
+
+    function renderDeviceList() {
+      const list = document.getElementById("deviceList");
+      const count = state.devices.length;
+      document.getElementById("topDeviceCount").textContent = `${count} device${count === 1 ? "" : "s"}`;
+      document.getElementById("deviceRailState").textContent = count ? "online" : "empty";
+      list.innerHTML = "";
+
+      if (!count) {
+        list.innerHTML = '<div class="empty-card">No devices registered yet. Wait for status announcements or add a board host manually.</div>';
+        return;
+      }
+
+      state.devices.forEach(device => {
+        const item = document.createElement("div");
+        item.className = "device-card" + (device.key === state.selectedKey ? " active" : "");
+        item.innerHTML = `
+          <div class="device-card-head">
+            <div class="device-name">${device.device_name || device.host}</div>
+            <div class="mini-pill">${device.channel || "unknown"}</div>
+          </div>
+          <div class="device-key">${device.device_uid || device.device_id || device.key}</div>
+          <div class="device-card-meta">
+            <div class="mini-pill">${formatWifi(device)}</div>
+            <div class="mini-pill">${device.host}:${device.port}</div>
+          </div>
+        `;
+        item.onclick = () => {
+          state.selectedKey = device.key;
+          fetchSelected();
+          renderDeviceList();
+        };
+        list.appendChild(item);
+      });
+    }
+
     function renderUpdateState(updateState) {
       const phase = updateState?.phase || "idle";
       const totalFiles = Number(updateState?.total_files || 0);
       const appliedFiles = Number(updateState?.applied_files || 0);
-      const lastResult = updateState?.last_result || "-";
       const currentFile = updateState?.current_file || "-";
+      const lastResult = updateState?.last_result || "-";
       const rebootRequired = Boolean(updateState?.reboot_required);
       const lastError = updateState?.last_error || "";
       const percent = totalFiles > 0
@@ -802,17 +1207,18 @@ INDEX_HTML = """<!doctype html>
         : (phase === "done" ? 100 : 0);
 
       document.getElementById("otaPhaseVal").textContent = formatPhase(phase);
-      document.getElementById("otaFilesVal").textContent = totalFiles ? `${appliedFiles}/${totalFiles}` : "-";
+      document.getElementById("otaFilesVal").textContent = totalFiles ? `${appliedFiles}/${totalFiles} files` : "-";
       document.getElementById("otaCurrentVal").textContent = currentFile;
       document.getElementById("otaResultVal").textContent = lastResult;
       document.getElementById("otaProgressFill").style.width = `${percent}%`;
+      document.getElementById("overviewOta").textContent = `ota ${formatPhase(phase)}`;
 
       let text = "No OTA activity";
-      if (phase === "checking_manifest") text = "Checking manifest...";
-      else if (phase === "ready") text = totalFiles ? `Update ready: ${totalFiles} files pending` : "Manifest checked, no files pending";
+      if (phase === "checking_manifest") text = "Checking manifest and planning file diff.";
+      else if (phase === "ready") text = totalFiles ? `Update ready. ${totalFiles} files pending.` : "Manifest checked. No files pending.";
       else if (phase === "downloading") text = totalFiles ? `Applying ${appliedFiles + 1}/${totalFiles}: ${currentFile}` : `Applying ${currentFile}`;
-      else if (phase === "done") text = rebootRequired ? "Update done, reboot pending..." : "Update completed";
-      else if (phase === "error") text = lastError ? `Update failed: ${lastError}` : "Update failed";
+      else if (phase === "done") text = rebootRequired ? "Update complete. Device reboot is pending." : "Update completed.";
+      else if (phase === "error") text = lastError ? `Update failed: ${lastError}` : "Update failed.";
       document.getElementById("otaProgressText").textContent = text;
     }
 
@@ -829,10 +1235,25 @@ INDEX_HTML = """<!doctype html>
 
     function renderSelected() {
       const device = state.selectedDevice;
-      if (!device) return;
+      if (!device) {
+        document.getElementById("titleText").textContent = "No Device Selected";
+        document.getElementById("subtitleText").textContent = "Waiting for packets";
+        document.getElementById("topSelectionState").textContent = "No active board";
+        document.getElementById("overviewChannel").textContent = "channel -";
+        document.getElementById("overviewWifi").textContent = "wifi -";
+        document.getElementById("overviewOta").textContent = "ota idle";
+        ["minVal", "maxVal", "avgVal", "frameVal"].forEach(id => { document.getElementById(id).textContent = "-"; });
+        renderUpdateState({});
+        setGridEmpty("heatmap", "No matrix data");
+        setGridEmpty("calibrationMap", "No calibration data");
+        return;
+      }
+
       document.getElementById("titleText").textContent = device.device_name || device.host;
       document.getElementById("subtitleText").textContent = `${device.host}:${device.port}  ${device.device_uid || device.device_id || ""}`;
+      document.getElementById("topSelectionState").textContent = `Selected ${device.device_name || device.host}`;
 
+      const runtime = device.status?.runtime || {};
       const packet = device.packet || {};
       const matrix = packet.matrix || [];
       const rows = packet.rows || device.status?.matrix_shape?.rows || 0;
@@ -841,15 +1262,18 @@ INDEX_HTML = """<!doctype html>
       const min = numeric.length ? Math.min(...numeric) : null;
       const max = numeric.length ? Math.max(...numeric) : null;
       const avg = numeric.length ? numeric.reduce((a, b) => a + b, 0) / numeric.length : null;
+
+      document.getElementById("overviewChannel").textContent = `channel ${device.channel || runtime.channel || "-"}`;
+      document.getElementById("overviewWifi").textContent = `wifi ${formatWifi(device)}`;
       document.getElementById("minVal").textContent = min === null ? "-" : min.toFixed(2);
       document.getElementById("maxVal").textContent = max === null ? "-" : max.toFixed(2);
       document.getElementById("avgVal").textContent = avg === null ? "-" : avg.toFixed(2);
       document.getElementById("frameVal").textContent = packet.frame_id ?? "-";
+
       renderGrid("heatmap", matrix, rows, cols);
       syncPinSelectors(device);
       renderUpdateState(device.status?.update_state || {});
 
-      const runtime = device.status?.runtime || {};
       document.getElementById("masterHost").value = runtime.master_server?.host || "";
       document.getElementById("masterPort").value = runtime.master_server?.port || 22345;
       document.getElementById("dataHost").value = runtime.data_server?.host || "";
@@ -862,11 +1286,18 @@ INDEX_HTML = """<!doctype html>
       if (!state.selectedKey && state.devices.length) {
         state.selectedKey = state.devices[0].key;
       }
+      if (state.selectedKey && !state.devices.find(device => device.key === state.selectedKey)) {
+        state.selectedKey = state.devices[0]?.key || null;
+      }
       renderDeviceList();
     }
 
     async function fetchSelected() {
-      if (!state.selectedKey) return;
+      if (!state.selectedKey) {
+        state.selectedDevice = null;
+        renderSelected();
+        return;
+      }
       const data = await api(`/api/devices/${encodeURIComponent(state.selectedKey)}`);
       state.selectedDevice = data;
       renderSelected();
@@ -954,6 +1385,7 @@ INDEX_HTML = """<!doctype html>
       setTimeout(loop, 800);
     }
 
+    renderSelected();
     loop();
   </script>
 </body>

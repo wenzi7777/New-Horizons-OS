@@ -195,9 +195,10 @@ class UpdateManager:
                 reboot_required,
             )
 
+        next_item = downloads[job["index"]]
         next_state = self._save_state({
             "phase": "downloading",
-            "current_file": item["path"],
+            "current_file": next_item["path"],
             "applied_files": len(job["applied"]),
             "total_files": len(downloads),
             "reboot_required": reboot_required,
