@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.1.9",
+  "firmware_version": "v0.1.10",
   "channel": "full",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.9/device/channels/full/files",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.10/device/channels/full/files",
   "files": [
     {
       "path": "app.py",
@@ -77,8 +77,8 @@
     },
     {
       "path": "device_state/runtime_config.json",
-      "sha256": "477a70efb4d0ba1b12b14b7d42a10eedce8f0316fa346e1b77b054b865aef71a",
-      "size": 598,
+      "sha256": "ca3be3f3a9cb53e3702cc183f741d6de24a3a8cb040cfc86f95f2a9efe70d9e0",
+      "size": 599,
       "kind": "config",
       "reboot_required": false
     },
@@ -140,17 +140,17 @@
     },
     {
       "path": "micropython_bmi270/bmi270.py",
-      "sha256": "f3f80e8fc4539ac804f5afd418ec15df9d281e727b6a4470062b7925c95b508c",
-      "size": 11781,
+      "sha256": "97794f04b078986a4b23c82708e3823c50e4336a89e51a3446afc682a404552f",
+      "size": 11891,
       "kind": "code",
       "reboot_required": true
     },
     {
-      "path": "micropython_bmi270/config_file.py",
-      "sha256": "d80dc38a3dd9783a0736ff62e3d567e3ab1512f32056e3348e230aa25c336375",
-      "size": 51032,
+      "path": "micropython_bmi270/config_file.bin",
+      "sha256": "2d75e68e343a13ff99be98261dfbd99d9e8c6f267da9e3c5aeb883276ad178db",
+      "size": 8192,
       "kind": "code",
-      "reboot_required": true
+      "reboot_required": false
     },
     {
       "path": "micropython_bmi270/i2c_helpers.py",
