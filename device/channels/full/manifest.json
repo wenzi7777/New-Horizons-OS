@@ -1,14 +1,14 @@
 {
   "manifest_version": 1,
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.1.4",
+  "firmware_version": "v0.1.5",
   "channel": "full",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.4/device/channels/full/files",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.5/device/channels/full/files",
   "files": [
     {
       "path": "app.py",
-      "sha256": "6d203800c5475de086b810864ff19496eacb1d4101af277da2022a08180ed757",
-      "size": 26123,
+      "sha256": "8a2ec4f7bcdb8dfb6e638aac3ede6f93b278b51efdab39afb1c1c1024f74e7ae",
+      "size": 26203,
       "kind": "code",
       "reboot_required": true
     },
@@ -35,15 +35,15 @@
     },
     {
       "path": "calibration_store.py",
-      "sha256": "a288f8efce590a6aac6d661b236e1dfc5535919572ca7a79d76038694882d6d3",
-      "size": 3366,
+      "sha256": "313203db98727a5288ab32b92173899c2ca45c19cfa928bf01a6ee91d9390761",
+      "size": 3371,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "config.py",
-      "sha256": "7109724d22041a079262a878bfe5fa97c22cbbd3c676cf346851c321ca349b86",
-      "size": 3053,
+      "sha256": "849f53724ffbefe141f8d98e1ae77fadc05a38ad9bb3c32fc63db8e080285297",
+      "size": 3058,
       "kind": "code",
       "reboot_required": true
     },
@@ -63,15 +63,29 @@
     },
     {
       "path": "device_logging.py",
-      "sha256": "2abf81b60b36e781e09582defbe131a766c4ca29586a8ff159a26edb68319448",
-      "size": 1377,
+      "sha256": "5df6d1731293cf500b5d3a3ef969d9eaa57b0a00f5982987e553555458a5fa74",
+      "size": 1382,
       "kind": "code",
       "reboot_required": true
     },
     {
+      "path": "device_state/filter_config.json",
+      "sha256": "15902805205cbadaf5c14d42b71b011e37aa01fea9b4392d959d19e33b728e05",
+      "size": 42,
+      "kind": "config",
+      "reboot_required": false
+    },
+    {
+      "path": "device_state/runtime_config.json",
+      "sha256": "75d84478c513a7001dfccaee069dbc9db3b4148bf437b1f1308c4cc29e1e97ee",
+      "size": 546,
+      "kind": "config",
+      "reboot_required": false
+    },
+    {
       "path": "filesystem_api.py",
-      "sha256": "fe677c832066411d3d7a3dfb4a390816cdc25a4e133b6526271dc1434a23d469",
-      "size": 754,
+      "sha256": "49a40b6646baae90f6be2c9661ccb564bdc63835dac255c6cf2b4e50acb35c36",
+      "size": 759,
       "kind": "code",
       "reboot_required": true
     },
@@ -168,8 +182,8 @@
     },
     {
       "path": "runtime_config.py",
-      "sha256": "8c25d4540dfcdf0d57e6a30c8c2f46824162747e96cfadd9ba1fd494b11f1745",
-      "size": 4277,
+      "sha256": "a762713a945591a13cad1a7748729eb84df392fbdaa08d852985e7e2a8b6eb07",
+      "size": 4282,
       "kind": "code",
       "reboot_required": true
     },

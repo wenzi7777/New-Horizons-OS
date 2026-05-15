@@ -49,7 +49,7 @@ DEFAULT_FILTER = {
 
 
 class RuntimeConfigStore:
-    def __init__(self, base_dir=".device"):
+    def __init__(self, base_dir="device_state"):
         self.base_dir = base_dir
         self.runtime_path = self.base_dir + "/runtime_config.json"
         self.network_path = self.base_dir + "/network_config.json"

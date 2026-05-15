@@ -13,8 +13,8 @@ def load_app_minimal_module():
     fake_machine = types.SimpleNamespace(reset=lambda: None)
     fake_iconfig = types.SimpleNamespace(
         FIRMWARE_NAME="New Horizons OS",
-        LOG_PATH=".device/logs/device.log",
-        DEVICE_STATE_DIR=".device",
+        LOG_PATH="device_state/logs/device.log",
+        DEVICE_STATE_DIR="device_state",
         DEFAULT_CONTROL_PORT=22345,
         STATUS_ANNOUNCE_INTERVAL_MS=2000,
         DEFAULT_MANIFESTS={

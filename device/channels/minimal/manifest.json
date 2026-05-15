@@ -1,21 +1,21 @@
 {
   "manifest_version": 1,
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.1.4",
+  "firmware_version": "v0.1.5",
   "channel": "minimal",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.4/device/channels/minimal/files",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.5/device/channels/minimal/files",
   "files": [
     {
       "path": "app_minimal.py",
-      "sha256": "4a78afd0959d5ece50869a3b3f54b62ff0308d72667d9f446068e71afd6a0eec",
-      "size": 11385,
+      "sha256": "62819c24a6a97a744467695911f5cd59257f485d45b27897c57751cc6490de26",
+      "size": 11465,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "config.py",
-      "sha256": "0147e01f7655d6ee2e2252febd1fe5b670aee2654a337f4be69bdd60f5193863",
-      "size": 647,
+      "sha256": "1aed64b8384821008883a871dd1793186ab87b94b0920fd45f19d7375abc3138",
+      "size": 652,
       "kind": "code",
       "reboot_required": true
     },
@@ -27,9 +27,23 @@
       "reboot_required": true
     },
     {
+      "path": "device_state/filter_config.json",
+      "sha256": "15902805205cbadaf5c14d42b71b011e37aa01fea9b4392d959d19e33b728e05",
+      "size": 42,
+      "kind": "config",
+      "reboot_required": false
+    },
+    {
+      "path": "device_state/runtime_config.json",
+      "sha256": "3a24c5327fc22d97cb0190526b719adb364f1e7bb3d15012b4f7e65ed5d59f74",
+      "size": 552,
+      "kind": "config",
+      "reboot_required": false
+    },
+    {
       "path": "filesystem_api.py",
-      "sha256": "fe677c832066411d3d7a3dfb4a390816cdc25a4e133b6526271dc1434a23d469",
-      "size": 754,
+      "sha256": "49a40b6646baae90f6be2c9661ccb564bdc63835dac255c6cf2b4e50acb35c36",
+      "size": 759,
       "kind": "code",
       "reboot_required": true
     },

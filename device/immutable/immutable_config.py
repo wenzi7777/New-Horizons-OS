@@ -1,5 +1,5 @@
 FIRMWARE_NAME = "New Horizons OS"
-FIRMWARE_VERSION = "v0.1.4"
+FIRMWARE_VERSION = "v0.1.5"
 DEFAULT_CHANNEL = "minimal"
 
 ACTION_BUTTON_PIN = 46
@@ -13,7 +13,7 @@ SETUP_PORTAL_HOST = "192.168.4.1"
 SETUP_PORTAL_PORT = 80
 SETUP_PORTAL_TITLE = "New Horizons OS Wi-Fi Setup"
 
-DEVICE_STATE_DIR = ".device"
+DEVICE_STATE_DIR = "device_state"
 CALIBRATION_DIR = DEVICE_STATE_DIR + "/calibration"
 LOG_PATH = DEVICE_STATE_DIR + "/logs/device.log"
 
@@ -29,6 +29,6 @@ DEFAULT_CONTROL_PORT = 22345
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 DEFAULT_MANIFESTS = {
-    "minimal": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.4/device/channels/minimal/manifest.json",
-    "full": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.4/device/channels/full/manifest.json",
+    "minimal": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.5/device/channels/minimal/manifest.json",
+    "full": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.5/device/channels/full/manifest.json",
 }

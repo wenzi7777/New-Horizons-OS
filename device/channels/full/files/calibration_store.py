@@ -2,7 +2,7 @@ import storage
 
 
 class CalibrationStore:
-    def __init__(self, base_dir=".device/calibration"):
+    def __init__(self, base_dir="device_state/calibration"):
         self.base_dir = base_dir
         self.index_path = self.base_dir + "/index.json"
         self.points = {}

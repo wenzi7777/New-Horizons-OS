@@ -286,7 +286,7 @@ git push origin v0.1.1
 
 做法可以是：
 
-- 重新寫入 `.device/runtime_config.json`
+- 重新寫入 `device_state/runtime_config.json`
 - 透過 `minimal` / `full` 的控制命令更新 channel/manifest
 - 透過本機 `host_ui.py` 的控制功能下發
 

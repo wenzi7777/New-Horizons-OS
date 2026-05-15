@@ -18,15 +18,18 @@ def load_generate_manifest_module():
 
 
 class GenerateManifestTests(unittest.TestCase):
-    def test_manifest_excludes_device_state_json_files(self):
+    def test_manifest_includes_device_state_json_files_but_skips_legacy_hidden_state(self):
         module = load_generate_manifest_module()
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir)
             files_root = repo_root / "device" / "channels" / "minimal" / "files"
             (files_root / ".device").mkdir(parents=True)
+            (files_root / "device_state").mkdir(parents=True)
             (files_root / "app_minimal.py").write_text("print('ok')\n", encoding="utf-8")
             (files_root / ".device" / "runtime_config.json").write_text("{}", encoding="utf-8")
             (files_root / ".device" / "filter_config.json").write_text("{}", encoding="utf-8")
+            (files_root / "device_state" / "runtime_config.json").write_text("{}", encoding="utf-8")
+            (files_root / "device_state" / "filter_config.json").write_text("{}", encoding="utf-8")
 
             old_argv = sys.argv
             sys.argv = [
@@ -45,7 +48,14 @@ class GenerateManifestTests(unittest.TestCase):
 
             manifest_path = repo_root / "device" / "channels" / "minimal" / "manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            self.assertEqual([item["path"] for item in manifest["files"]], ["app_minimal.py"])
+            self.assertEqual(
+                [item["path"] for item in manifest["files"]],
+                [
+                    "app_minimal.py",
+                    "device_state/filter_config.json",
+                    "device_state/runtime_config.json",
+                ],
+            )
 
 
 if __name__ == "__main__":

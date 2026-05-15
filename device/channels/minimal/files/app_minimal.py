@@ -132,7 +132,9 @@ class MinimalApp:
             })
             self.runtime = runtime
             self.pending_channel_switch = None
-        if result.get("status") == "ok" and result.get("reboot_required"):
+        if (result.get("status") == "ok"
+                and result.get("message") == "update_applied"
+                and result.get("reboot_required")):
             self.reboot_required = True
             if self.reboot_deadline_ms is None:
                 self.reboot_deadline_ms = time.ticks_add(now, 1200)

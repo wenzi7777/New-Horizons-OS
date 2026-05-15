@@ -2,7 +2,7 @@ import storage
 
 
 class FilesystemAPI:
-    def __init__(self, root=".device"):
+    def __init__(self, root="device_state"):
         self.root = root
 
     def list_files(self):

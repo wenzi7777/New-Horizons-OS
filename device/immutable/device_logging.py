@@ -10,7 +10,7 @@ ERROR = 40
 
 
 class DeviceLogger:
-    def __init__(self, path=".device/logs/device.log", max_bytes=32768, level=INFO):
+    def __init__(self, path="device_state/logs/device.log", max_bytes=32768, level=INFO):
         self.path = path
         self.max_bytes = int(max_bytes)
         self.level = int(level)
