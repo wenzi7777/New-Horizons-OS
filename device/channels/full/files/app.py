@@ -1,0 +1,513 @@
+# app.py
+import machine
+import time
+import gc
+
+import config
+import board_pins
+import vdboard
+
+from calibration_store import CalibrationStore
+from device_logging import DeviceLogger
+from filesystem_api import FilesystemAPI
+from filter_engine import FilterChain
+from frame_protocol import decode_scan_frame
+from packet import PacketBuilder
+from packet_buffer import PacketBuffer
+from runtime_config import RuntimeConfigStore
+from time_sync import TimeSync
+from udp_control import UDPControlServer
+from update_manager import UpdateManager
+from utils import RateCounter
+from wifi_manager import WiFiManager
+
+if config.ENABLE_IMU:
+    from bmi270 import BMI270
+
+if config.ENABLE_BATTERY:
+    from bq25180 import BQ25180
+
+if config.ENABLE_LED:
+    from sk6812 import SK6812Status
+
+
+class App:
+    def __init__(self, provisioning_requested=False):
+        self.provisioning_requested = provisioning_requested
+        self.frame_id = 0
+        self.reboot_required = False
+        self.calibration_mode = False
+
+        self.config_store = RuntimeConfigStore(config.DEVICE_STATE_DIR)
+        self.logger = DeviceLogger(config.LOG_PATH)
+        self.filesystem = FilesystemAPI(config.DEVICE_STATE_DIR)
+        self.runtime = self.config_store.load_runtime()
+        self.network = self.config_store.load_network()
+        self.filter_config = self.config_store.load_filter()
+
+        self.packet = PacketBuilder()
+        self.wifi = WiFiManager(self.config_store, self.logger)
+        self.update_manager = UpdateManager(self.config_store, self.logger, ".")
+        self.control = UDPControlServer(config.UDP_CONTROL_PORT, self.logger)
+        self.time_sync = TimeSync(self.runtime.get("ntp_servers", []))
+        self.calibration = CalibrationStore(config.CALIBRATION_DIR)
+        self.calibration.load()
+
+        if config.USE_PACKET_BUFFER:
+            self.tx_buffer = PacketBuffer(
+                capacity=config.PACKET_BUFFER_SIZE,
+                drop_oldest=config.PACKET_BUFFER_DROP_OLDEST
+            )
+        else:
+            self.tx_buffer = None
+
+        self.imu = BMI270() if config.ENABLE_IMU else None
+        self.battery = BQ25180() if config.ENABLE_BATTERY else None
+        self.led = SK6812Status() if config.ENABLE_LED else None
+        self.udp = None
+
+        self.latest_matrix = None
+        self.latest_frame = None
+        self.latest_imu = None
+        self.latest_battery = None
+
+        self.last_imu_ms = 0
+        self.last_battery_ms = 0
+        self.last_led_ms = 0
+        self.last_ntp_retry_ms = 0
+
+        active_count = len(config.ACTIVE_ROWS) * len(config.ACTIVE_COLS)
+        self.filter_chain = FilterChain(
+            sensor_count=active_count,
+            enabled=self.filter_config.get("enabled", False),
+            median=self.filter_config.get("median", 3),
+            alpha=self.filter_config.get("alpha", 0.25),
+        )
+
+        self.scan_rate = RateCounter(1000)
+        self.sent_packets = 0
+        self.failed_sends = 0
+
+    def setup(self):
+        self.logger.info("setup_start")
+        self._print_setup()
+
+        if self.led:
+            self.led.begin()
+            self.led.set_boot_window()
+
+        if config.PRINT_PIN_CONFLICTS:
+            conflicts = board_pins.validate_pins()
+            if conflicts:
+                for pin, names in conflicts.items():
+                    self.logger.warn("pin_conflict gpio={} roles={}".format(pin, names))
+
+        self._init_scan_backend()
+        vdboard.scan.start()
+
+        if self.battery:
+            self.battery.begin()
+
+        if self.imu:
+            self.imu.begin()
+
+        if self.provisioning_requested:
+            if self.led:
+                self.led.set_provisioning()
+            started = vdboard.prov.start_ble("abcd1234", config.DEVICE_NAME)
+            if not started:
+                self.logger.warn("provisioning_start_failed status={}".format(vdboard.prov.status()))
+
+        wifi_ok = self.wifi.connect()
+        self._ensure_udp_data_socket(wifi_ok)
+        self.control.begin()
+
+        if wifi_ok:
+            self._sync_time()
+            self._check_updates_on_boot()
+
+        self.update_led_state()
+        self.logger.info("setup_done")
+
+    def run(self):
+        self.setup()
+
+        target_fps = self.runtime.get("scan_timing", {}).get("target_fps", config.TARGET_FPS)
+        scan_interval = int(1000 / max(1, int(target_fps)))
+        imu_interval = int(1000 / max(1, int(config.IMU_RATE_HZ)))
+        battery_interval = int(1000 / max(1, int(config.BATTERY_RATE_HZ)))
+        led_interval = int(1000 / max(1, int(config.LED_RATE_HZ)))
+
+        while True:
+            now = time.ticks_ms()
+            self.control.poll(self._handle_control_request)
+
+            if self.imu and time.ticks_diff(now, self.last_imu_ms) >= imu_interval:
+                self.last_imu_ms = now
+                self.latest_imu = self.imu.read()
+
+            if self.battery and time.ticks_diff(now, self.last_battery_ms) >= battery_interval:
+                self.last_battery_ms = now
+                self.latest_battery = self.battery.read_status()
+
+            if not self.calibration_mode:
+                vdboard.scan.service()
+                self.handle_scan(now)
+
+            self.handle_transmit()
+
+            if self.led and time.ticks_diff(now, self.last_led_ms) >= led_interval:
+                self.last_led_ms = now
+                self.led.update()
+
+            if not self.time_sync.status()["synced"] and time.ticks_diff(now, self.last_ntp_retry_ms) >= 60000:
+                self.last_ntp_retry_ms = now
+                if self.wifi.is_connected():
+                    self._sync_time()
+
+            if self.reboot_required:
+                self.logger.warn("reboot_required_restart")
+                time.sleep_ms(250)
+                machine.reset()
+
+            if config.GC_EVERY_N_FRAMES > 0 and self.frame_id > 0:
+                if self.frame_id % config.GC_EVERY_N_FRAMES == 0:
+                    gc.collect()
+
+    def handle_scan(self, timestamp_ms):
+        frame_view = vdboard.scan.pop_frame_mv()
+        if frame_view is None:
+            return
+        frame_info = decode_scan_frame(bytes(frame_view))
+        raw_matrix = frame_info["payload_mv"]
+        self.latest_frame = frame_info
+        self.latest_matrix = self._apply_sensor_pipeline(raw_matrix)
+
+        send_every = self.runtime.get("scan_timing", {}).get(
+            "send_every_n_frames",
+            config.SEND_EVERY_N_FRAMES
+        )
+        self.frame_id = int(frame_info["seq"])
+        if send_every > 1 and (self.frame_id % send_every != 0):
+            return
+
+        packet = self.packet.build(
+            frame_id=self.frame_id,
+            timestamp_ms=int(frame_info["timestamp_ms"] if self.time_sync.status()["synced"] else timestamp_ms),
+            matrix=self.latest_matrix,
+            imu=self.latest_imu,
+            battery=self.latest_battery
+        )
+
+        if config.USE_PACKET_BUFFER and self.tx_buffer is not None:
+            self.tx_buffer.push(packet)
+        else:
+            self.send_packet(packet)
+
+        fps = self.scan_rate.tick()
+        if config.PRINT_FPS and fps is not None:
+            self.logger.info(
+                "scan fps={} wifi={} sent={} fail={}".format(
+                    fps,
+                    self.wifi.is_connected(),
+                    self.sent_packets,
+                    self.failed_sends
+                )
+            )
+
+    def handle_transmit(self):
+        if not config.USE_PACKET_BUFFER or self.tx_buffer is None:
+            return
+
+        if self.udp is None or not self.wifi.is_connected():
+            self.tx_buffer.clear()
+            return
+
+        max_send = config.SEND_MAX_PER_LOOP
+        for _ in range(max_send):
+            packet = self.tx_buffer.pop()
+            if packet is None:
+                return
+            if not self.send_packet(packet):
+                return
+
+    def send_packet(self, packet):
+        if self.udp is None or not self.wifi.is_connected():
+            return False
+
+        ok = self.udp.send(packet)
+        if ok:
+            self.sent_packets += 1
+            return True
+
+        self.failed_sends += 1
+        return False
+
+    def update_led_state(self):
+        if not self.led:
+            return
+        if self.calibration_mode:
+            self.led.set_calibration()
+            return
+        if vdboard.prov.status() in ("starting", "waiting_credentials"):
+            self.led.set_provisioning()
+            return
+        if self.reboot_required:
+            self.led.set_updating()
+            return
+        if self.battery:
+            if self.latest_battery is None:
+                self.latest_battery = self.battery.read_status()
+            if self.battery.is_charging():
+                self.led.set_charging()
+                return
+            if self.battery.is_charge_done():
+                self.led.set_charge_done()
+                return
+        if self.wifi.is_connected():
+            self.led.set_normal()
+        else:
+            self.led.set_error()
+
+    def _ensure_udp_data_socket(self, wifi_ok):
+        if not wifi_ok:
+            self.udp = None
+            return
+        from udp_stream import UDPStreamer
+        data_server = self.runtime.get("data_server", {})
+        self.udp = UDPStreamer(
+            data_server.get("host", config.UDP_SERVER_IP),
+            data_server.get("port", config.UDP_SERVER_PORT)
+        )
+
+    def _apply_sensor_pipeline(self, matrix):
+        processed = []
+        active_cols = len(config.ACTIVE_COLS)
+        for idx, value in enumerate(matrix):
+            filtered = self.filter_chain.process(idx, value)
+            row_index = idx // active_cols
+            col_index = idx % active_cols
+            analog_pin = config.ACTIVE_ROWS[row_index]
+            select_pin = config.ACTIVE_COLS[col_index]
+            calibrated = self.calibration.apply(analog_pin, select_pin, filtered)
+            processed.append(float(calibrated))
+        return processed
+
+    def _sync_time(self):
+        synced = self.time_sync.sync()
+        if synced:
+            self.logger.info("ntp_sync_ok epoch={}".format(self.time_sync.now_epoch()))
+        else:
+            self.logger.warn("ntp_sync_failed error={}".format(self.time_sync.last_error))
+
+    def _check_updates_on_boot(self):
+        runtime = self.config_store.load_runtime()
+        update_cfg = runtime.get("update", {})
+        if not update_cfg.get("check_on_boot", True):
+            return
+        if self.led:
+            self.led.set_updating()
+        result = self.update_manager.check()
+        self.logger.info("update_check {}".format(result.get("message")))
+        self.update_led_state()
+
+    def _apply_runtime_reload(self):
+        self.runtime = self.config_store.load_runtime()
+        self.filter_config = self.config_store.load_filter()
+        self.filter_chain.apply_config(
+            self.filter_config.get("enabled", False),
+            self.filter_config.get("median", 3),
+            self.filter_config.get("alpha", 0.25),
+        )
+        self.time_sync.servers = list(self.runtime.get("ntp_servers", []))
+        self._ensure_udp_data_socket(self.wifi.is_connected())
+
+    def _authorized(self, addr):
+        master = self.config_store.load_runtime().get("master_server", {})
+        host = master.get("host", "")
+        port = int(master.get("port", config.UDP_CONTROL_PORT))
+        if not host:
+            return True
+        return addr[0] == host and int(addr[1]) == port
+
+    def _handle_control_request(self, request, addr):
+        if not self._authorized(addr):
+            self.logger.warn("control_unauthorized from={}:{}".format(addr[0], addr[1]))
+            return None
+
+        cmd = request.get("command", request.get("cmd", "")).strip().lower()
+        if not cmd:
+            return self._ok("missing_command", error="missing_command")
+
+        if cmd in ("status", "query"):
+            return self._status()
+
+        if cmd == "reload_config":
+            self._apply_runtime_reload()
+            return self._ok("config_reloaded", applied=True)
+
+        if cmd == "check_update":
+            return self.update_manager.check()
+
+        if cmd == "apply_update":
+            result = self.update_manager.apply()
+            self.reboot_required = bool(result.get("reboot_required"))
+            return result
+
+        if cmd == "set_servers":
+            runtime = self.config_store.update_runtime({
+                "master_server": request.get("master_server", {}),
+                "data_server": request.get("data_server", {}),
+            })
+            self.runtime = runtime
+            self._ensure_udp_data_socket(self.wifi.is_connected())
+            return self._ok("servers_updated", applied=True)
+
+        if cmd == "set_filter":
+            filter_data = self.config_store.update_filter(request.get("filter", {}))
+            self.filter_chain.apply_config(
+                filter_data.get("enabled", False),
+                filter_data.get("median", 3),
+                filter_data.get("alpha", 0.25),
+            )
+            return self._ok("filter_updated", applied=True)
+
+        if cmd == "enter_calibration_mode":
+            self.calibration_mode = bool(request.get("enabled", True))
+            self.update_led_state()
+            return self._ok("calibration_mode_updated", applied=True)
+
+        if cmd == "start_calibration":
+            if not self.calibration_mode:
+                return self._ok("calibration_mode_required", error="calibration_mode_required")
+            analog_pin = int(request["analog_pin"])
+            select_pin = int(request["select_pin"])
+            level = float(request["level"])
+            start_delay = int(request.get("start_delay_ms", 0))
+            duration_ms = int(request.get("duration_ms", 1000))
+            if start_delay > 0:
+                time.sleep_ms(start_delay)
+            avg_mv = vdboard.scan.sample_cell_mv(analog_pin, select_pin, duration_ms)
+            if avg_mv is None:
+                return self._ok("calibration_no_samples", error="calibration_no_samples")
+            self.calibration.set_point(analog_pin, select_pin, level, avg_mv)
+            self.calibration.save()
+            return {
+                "status": "ok",
+                "message": "calibration_sampled",
+                "avg_mv": avg_mv,
+                "reboot_required": False,
+                "applied": True,
+            }
+
+        if cmd == "end_calibration":
+            self.calibration_mode = False
+            self.calibration.save()
+            self.update_led_state()
+            return self._ok("calibration_saved", applied=True)
+
+        if cmd == "dump_calibration":
+            return {
+                "status": "ok",
+                "message": "calibration_dump",
+                "reboot_required": False,
+                "applied": False,
+                "data": self.calibration.dump(),
+            }
+
+        if cmd == "delete_calibration_level":
+            self.calibration.delete_level(request["level"])
+            self.calibration.save()
+            return self._ok("calibration_level_deleted", applied=True)
+
+        if cmd == "reboot":
+            self.reboot_required = True
+            return self._ok("reboot_scheduled", applied=True, reboot_required=True)
+
+        if cmd == "reset_credentials":
+            vdboard.prov.reset_credentials()
+            return self._ok("credentials_reset", applied=True)
+
+        if cmd == "log_read_tail":
+            return {
+                "status": "ok",
+                "message": "log_tail",
+                "reboot_required": False,
+                "applied": False,
+                "lines": self.logger.read_tail(int(request.get("max_lines", 50))),
+            }
+
+        if cmd == "fs_list":
+            return {
+                "status": "ok",
+                "message": "fs_list",
+                "reboot_required": False,
+                "applied": False,
+                "items": self.filesystem.list_files(),
+            }
+
+        if cmd == "fs_read":
+            result = self.filesystem.read_file(request.get("path", ""))
+            if result is None:
+                return self._ok("fs_not_found", error="fs_not_found")
+            return {
+                "status": "ok",
+                "message": "fs_read",
+                "reboot_required": False,
+                "applied": False,
+                "file": result,
+            }
+
+        return self._ok("unknown_command", error="unknown_command")
+
+    def _status(self):
+        return {
+            "status": "ok",
+            "message": "status",
+            "reboot_required": self.reboot_required,
+            "applied": False,
+            "wifi_state": self.wifi.state,
+            "provisioning": {
+                "status": vdboard.prov.status(),
+                "supported": vdboard.prov.is_supported(),
+                "provisioned": vdboard.prov.is_provisioned(),
+            },
+            "ntp": self.time_sync.status(),
+            "filter": self.config_store.load_filter(),
+            "runtime": self.config_store.load_runtime(),
+            "calibration_mode": self.calibration_mode,
+            "sent_packets": self.sent_packets,
+            "failed_sends": self.failed_sends,
+            "scan": vdboard.scan.stats(),
+        }
+
+    def _ok(self, message, applied=False, reboot_required=False, error=""):
+        return {
+            "status": "ok" if not error else "error",
+            "message": message,
+            "reboot_required": reboot_required,
+            "applied": applied,
+            "error": error,
+        }
+
+    def _print_setup(self):
+        print("========== Setup ==========")
+        print("Device:", config.DEVICE_NAME)
+        print("Device ID:", hex(config.DEVICE_ID))
+        print("Matrix:", config.ROWS, "x", config.COLS)
+        print("Active rows:", config.ACTIVE_ROWS)
+        print("Active cols:", config.ACTIVE_COLS)
+        print("Provisioning requested:", self.provisioning_requested)
+
+    def _init_scan_backend(self):
+        scan_timing = self.runtime.get("scan_timing", {})
+        vdboard.scan.init(
+            rows=len(config.ACTIVE_ROWS),
+            cols=len(config.ACTIVE_COLS),
+            row_pins=list(config.ACTIVE_ROWS),
+            col_pins=list(config.ACTIVE_COLS),
+            fps=scan_timing.get("target_fps", config.TARGET_FPS),
+            settle_us=scan_timing.get("settle_us", config.MATRIX_SETTLE_US),
+            buffer_frames=self.runtime.get("buffer_frames", 8),
+            core_id=scan_timing.get("core_id", 1),
+        )

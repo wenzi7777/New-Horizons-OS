@@ -1,0 +1,289 @@
+{
+  "manifest_version": 1,
+  "firmware_name": "New Horizons OS",
+  "firmware_version": "v0.1.0",
+  "channel": "full",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.0/device/channels/full/files",
+  "files": [
+    {
+      "path": ".device/filter_config.json",
+      "sha256": "15902805205cbadaf5c14d42b71b011e37aa01fea9b4392d959d19e33b728e05",
+      "size": 42,
+      "kind": "config",
+      "reboot_required": false
+    },
+    {
+      "path": ".device/runtime_config.json",
+      "sha256": "60faef7e2acfbe64e29a515031d6ccde2a15f416f5f7c61f40c31a1458af508b",
+      "size": 546,
+      "kind": "config",
+      "reboot_required": false
+    },
+    {
+      "path": "app.py",
+      "sha256": "e6612b1db1d86afc71479257e73f311aedcf4c88b9440658680d82b3b24dffca",
+      "size": 18558,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "bmi270.py",
+      "sha256": "3a6040b0aba253436466f0dc9e2fa6ac9dbda5f611ef1d50e26fc1cf4db107c1",
+      "size": 3649,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "board_pins.py",
+      "sha256": "657119633e89d75dc3f6ea845a65a6766712a415329350fd36f7ae6e81592af9",
+      "size": 908,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "bq25180.py",
+      "sha256": "8d18730eb1798c16fbf0882e37747566c32c00a59c0c078bb8a0d32929194aad",
+      "size": 6822,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "calibration_store.py",
+      "sha256": "ce8d6643eb73965541e416aec10185c35d22d266ab94c37e3091aaa8b0d0397e",
+      "size": 2411,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "config.py",
+      "sha256": "3e0e58868a885acb0f73fefa0fcca919990ccefb0e3333ee224ce667acd3abc9",
+      "size": 2798,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "crypto_hmac.py",
+      "sha256": "aee50d5f95a5b68ce067c40b234d8bdced4be201180f09a062c9a078f7fa60dc",
+      "size": 442,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "device_logging.py",
+      "sha256": "2abf81b60b36e781e09582defbe131a766c4ca29586a8ff159a26edb68319448",
+      "size": 1377,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "filesystem_api.py",
+      "sha256": "fe677c832066411d3d7a3dfb4a390816cdc25a4e133b6526271dc1434a23d469",
+      "size": 754,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "filter_engine.py",
+      "sha256": "e8a66600791da0c20ca27565628f77a020e9a6932d8756ff49f9d740c56edd73",
+      "size": 2059,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "frame_protocol.py",
+      "sha256": "877b1c0d354613ad912a72bd70ee41cb3ccb2ac04a88d25d42e1a9202e47c99c",
+      "size": 1566,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "i2c_bus.py",
+      "sha256": "e7406ca6d98899d8d65e0ab195798fb3e3506647821afde8b63ba6ba3a09ee6d",
+      "size": 435,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "manifest_update.py",
+      "sha256": "991dd68a4a58bc377c57be7523cceb21b344ee312e56f68c6620e835f621bfee",
+      "size": 1768,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "matrix_scan.py",
+      "sha256": "0f550d93491a3a35bd368538a6d617db9656b9fb1cf9b91f492960b19fdb2343",
+      "size": 7173,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "matrix_scan_mock.py",
+      "sha256": "dbd3adc2f025b8abf1d5740fbce1eb437e178e4f2edf4f5f91c2c979903b7a66",
+      "size": 5994,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "micropython_bmi270/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "micropython_bmi270/__pycache__/__init__.cpython-313.pyc",
+      "sha256": "20d5c955faa0ccb110b99b03f261ddd555e65643762c43557915078277251a1f",
+      "size": 134,
+      "kind": "code",
+      "reboot_required": false
+    },
+    {
+      "path": "micropython_bmi270/__pycache__/bmi270.cpython-313.pyc",
+      "sha256": "a85e5a2d81311eb0c8770871a5dbe0812171299896cf92278beb2d8bc3a1cc49",
+      "size": 13170,
+      "kind": "code",
+      "reboot_required": false
+    },
+    {
+      "path": "micropython_bmi270/__pycache__/config_file.cpython-313.pyc",
+      "sha256": "af5fe151ae26197cbca70f82813d22902ddb8bacf691d9a383538917ccb84172",
+      "size": 41191,
+      "kind": "code",
+      "reboot_required": false
+    },
+    {
+      "path": "micropython_bmi270/__pycache__/i2c_helpers.cpython-313.pyc",
+      "sha256": "823a3f72d2106e1efb8ee334dd253a0a0c57a16cdafad20bdca82b808bd27b64",
+      "size": 5802,
+      "kind": "code",
+      "reboot_required": false
+    },
+    {
+      "path": "micropython_bmi270/bmi270.py",
+      "sha256": "f3f80e8fc4539ac804f5afd418ec15df9d281e727b6a4470062b7925c95b508c",
+      "size": 11781,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "micropython_bmi270/config_file.py",
+      "sha256": "d80dc38a3dd9783a0736ff62e3d567e3ab1512f32056e3348e230aa25c336375",
+      "size": 51032,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "micropython_bmi270/i2c_helpers.py",
+      "sha256": "acd247cc4dc3cd88cb83f0a8702310cc42aa0f5fa9f7cda3ba691de8acdb674e",
+      "size": 3911,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "ota.py",
+      "sha256": "206670b5b910022fc9514de96506315f626fbd53d10c3cad640cee11ad797b74",
+      "size": 296,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "packet.py",
+      "sha256": "fc55348528c103c027f9452f3308acc90b4a8ece47e6f3936d4c7b0e2a973c28",
+      "size": 6558,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "packet_buffer.py",
+      "sha256": "8c3be97752ecf14f1fe2ab13bc088b27b403d2e5716473085ae2d61578050410",
+      "size": 1689,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "provisioning.py",
+      "sha256": "8b78ec94ac0c74de9bf5893a21c20f16a83eb8bc1bee6b0135a88840be86f817",
+      "size": 1491,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "runtime_config.py",
+      "sha256": "edf60ba96b673d95df5634ece4c01c47afb58da59f20a550be0930325ab41b69",
+      "size": 4010,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "secrets.py",
+      "sha256": "11c5a5bd090342a3b1b148d4744506bfc4fcd16338d7c1f518fa1b7fe7ae1ea9",
+      "size": 209,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "sk6812.py",
+      "sha256": "4ed3a374fd8f69ddda291441800de2041a918c2bfa87cd3d19c07b8c1b740ef5",
+      "size": 4380,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "storage.py",
+      "sha256": "d8001893f7d0c2549282a7881c4fc5f1b240f3d40b496f6e01c8bdea1c5bf45f",
+      "size": 3312,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "time_sync.py",
+      "sha256": "974d6eb4ead2b09cda32399d46178448c95976eb930b698e1106ba88bfacd6a6",
+      "size": 1899,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "udp_control.py",
+      "sha256": "f7f604a2c234133222aea7957fb197d8e17f0561f30930b1e7c750efb71b3f93",
+      "size": 1425,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "udp_stream.py",
+      "sha256": "48a95ca635e860c651733be19013c90e57782bab0bfdf6540826d1901a193713",
+      "size": 896,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "update_manager.py",
+      "sha256": "14806c0db9ef358e7bfe832bb43054f4db9505913710175f52daff2e1e8d9c76",
+      "size": 3217,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "utils.py",
+      "sha256": "c73c160324edb54c15f479c7f328d01a41ba5a56f6c01b48b5c5c7562a6909b7",
+      "size": 622,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "vdboard.py",
+      "sha256": "8cf20341068c03d413044e14fb50b74824b29ac137cc4da65a744c0b5cc26d62",
+      "size": 8688,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "wifi_manager.py",
+      "sha256": "7e85b30e0d8f8350048b770e8856517c87c1eac6326b4a1a4ae55e59aed2d6e5",
+      "size": 4543,
+      "kind": "code",
+      "reboot_required": true
+    }
+  ]
+}

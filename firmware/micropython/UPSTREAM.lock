@@ -1,0 +1,5 @@
+remote=https://github.com/micropython/micropython.git
+commit=1c63211817d9c5164542b94771634cf80b300fdf
+idf_version=5.5.1
+board=ESP32_GENERIC_S3
+build=build-ESP32_GENERIC_S3-vdboard-mpyfix
