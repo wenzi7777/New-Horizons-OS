@@ -29,7 +29,8 @@ DEFAULT_NETWORK = {
     "wifi_mode": "STA",
     "ssid": "",
     "password": "",
-    "provisioning_supported": True,
+    "setup_method": "softap_webui",
+    "last_ssid": "",
 }
 
 DEFAULT_FILTER = {

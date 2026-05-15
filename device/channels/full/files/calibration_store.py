@@ -35,6 +35,31 @@ class CalibrationStore:
     def dump(self):
         return self.points
 
+    def list_levels(self):
+        levels = {}
+        for sensor_points in self.points.values():
+            for level_key in sensor_points.keys():
+                levels[level_key] = True
+        return sorted(levels.keys(), key=lambda item: float(item))
+
+    def dump_level(self, level, analog_pins, select_pins):
+        level_key = self._level_key(level)
+        matrix = []
+        for analog_pin in analog_pins:
+            row = []
+            for select_pin in select_pins:
+                sensor_key = self._sensor_key(analog_pin, select_pin)
+                sensor_points = self.points.get(sensor_key, {})
+                value = sensor_points.get(level_key)
+                row.append(float(value) if value is not None else None)
+            matrix.append(row)
+        return {
+            "level": level_key,
+            "analog_pins": list(analog_pins),
+            "select_pins": list(select_pins),
+            "matrix": matrix,
+        }
+
     def has_sensor_curve(self, analog_pin, select_pin):
         sensor_key = self._sensor_key(analog_pin, select_pin)
         return sensor_key in self.points and len(self.points[sensor_key]) >= 2

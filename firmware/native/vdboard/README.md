@@ -10,9 +10,6 @@ compiled into a custom MicroPython firmware as a `USER_C_MODULES` external modul
   - open-drain matrix scan
   - SPSC ring buffer in shared RAM
   - per-cell blocking sample for calibration
-- `vdboard.prov`
-  - ESP-IDF Unified Provisioning manager
-  - BLE transport only in v1
 - `vdboard.sys`
   - reboot and base metadata
 

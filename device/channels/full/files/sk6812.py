@@ -21,7 +21,7 @@ class SK6812Status:
                 "colors": ((0, 0, 40), (0, 0, 0)),
                 "brightness": 0.04,
             },
-            "provisioning": {
+            "wifi_setup": {
                 "intervals": (180, 820),
                 "colors": ((0, 80, 80), (0, 0, 0)),
                 "brightness": 0.08,
@@ -122,8 +122,8 @@ class SK6812Status:
     def set_error(self):
         self._set_state("error")
 
-    def set_provisioning(self):
-        self._set_state("provisioning")
+    def set_wifi_setup(self):
+        self._set_state("wifi_setup")
 
     def set_updating(self):
         self._set_state("updating")

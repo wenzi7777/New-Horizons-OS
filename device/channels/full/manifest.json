@@ -21,8 +21,8 @@
     },
     {
       "path": "app.py",
-      "sha256": "e6612b1db1d86afc71479257e73f311aedcf4c88b9440658680d82b3b24dffca",
-      "size": 18558,
+      "sha256": "18fbcb909964aec67d4c564d4536d79b99df5e1fc26d4745795e3d9c23e93c40",
+      "size": 24314,
       "kind": "code",
       "reboot_required": true
     },
@@ -49,15 +49,15 @@
     },
     {
       "path": "calibration_store.py",
-      "sha256": "ce8d6643eb73965541e416aec10185c35d22d266ab94c37e3091aaa8b0d0397e",
-      "size": 2411,
+      "sha256": "a288f8efce590a6aac6d661b236e1dfc5535919572ca7a79d76038694882d6d3",
+      "size": 3366,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "config.py",
-      "sha256": "3e0e58868a885acb0f73fefa0fcca919990ccefb0e3333ee224ce667acd3abc9",
-      "size": 2798,
+      "sha256": "e2a6b9da03eb3b7ffb4da48a4bc88f616c170bc5d24b1573c6a67bb478e75794",
+      "size": 2979,
       "kind": "code",
       "reboot_required": true
     },
@@ -65,6 +65,13 @@
       "path": "crypto_hmac.py",
       "sha256": "aee50d5f95a5b68ce067c40b234d8bdced4be201180f09a062c9a078f7fa60dc",
       "size": 442,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "device_identity.py",
+      "sha256": "a197e30cba20ba2236f14fd5cb32da711b5426e41d008de4ad19b1ec7da4ec63",
+      "size": 1840,
       "kind": "code",
       "reboot_required": true
     },
@@ -132,34 +139,6 @@
       "reboot_required": true
     },
     {
-      "path": "micropython_bmi270/__pycache__/__init__.cpython-313.pyc",
-      "sha256": "20d5c955faa0ccb110b99b03f261ddd555e65643762c43557915078277251a1f",
-      "size": 134,
-      "kind": "code",
-      "reboot_required": false
-    },
-    {
-      "path": "micropython_bmi270/__pycache__/bmi270.cpython-313.pyc",
-      "sha256": "a85e5a2d81311eb0c8770871a5dbe0812171299896cf92278beb2d8bc3a1cc49",
-      "size": 13170,
-      "kind": "code",
-      "reboot_required": false
-    },
-    {
-      "path": "micropython_bmi270/__pycache__/config_file.cpython-313.pyc",
-      "sha256": "af5fe151ae26197cbca70f82813d22902ddb8bacf691d9a383538917ccb84172",
-      "size": 41191,
-      "kind": "code",
-      "reboot_required": false
-    },
-    {
-      "path": "micropython_bmi270/__pycache__/i2c_helpers.cpython-313.pyc",
-      "sha256": "823a3f72d2106e1efb8ee334dd253a0a0c57a16cdafad20bdca82b808bd27b64",
-      "size": 5802,
-      "kind": "code",
-      "reboot_required": false
-    },
-    {
       "path": "micropython_bmi270/bmi270.py",
       "sha256": "f3f80e8fc4539ac804f5afd418ec15df9d281e727b6a4470062b7925c95b508c",
       "size": 11781,
@@ -189,8 +168,8 @@
     },
     {
       "path": "packet.py",
-      "sha256": "fc55348528c103c027f9452f3308acc90b4a8ece47e6f3936d4c7b0e2a973c28",
-      "size": 6558,
+      "sha256": "8111b0e053c0ff4e25d88c43a3eb97bd4bd6222e99b1d0d67d62c4f027cebac6",
+      "size": 6715,
       "kind": "code",
       "reboot_required": true
     },
@@ -202,16 +181,9 @@
       "reboot_required": true
     },
     {
-      "path": "provisioning.py",
-      "sha256": "8b78ec94ac0c74de9bf5893a21c20f16a83eb8bc1bee6b0135a88840be86f817",
-      "size": 1491,
-      "kind": "code",
-      "reboot_required": true
-    },
-    {
       "path": "runtime_config.py",
-      "sha256": "edf60ba96b673d95df5634ece4c01c47afb58da59f20a550be0930325ab41b69",
-      "size": 4010,
+      "sha256": "f0cb4e01b4dd4082fb395128254949d271efb59ee5258f4ae9608e5489f40bad",
+      "size": 4030,
       "kind": "code",
       "reboot_required": true
     },
@@ -224,15 +196,15 @@
     },
     {
       "path": "sk6812.py",
-      "sha256": "4ed3a374fd8f69ddda291441800de2041a918c2bfa87cd3d19c07b8c1b740ef5",
-      "size": 4380,
+      "sha256": "ccb113123c15e3aa4810f6fa96649314e764f68ce716bd8a734c7904db64cad8",
+      "size": 4374,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "storage.py",
-      "sha256": "d8001893f7d0c2549282a7881c4fc5f1b240f3d40b496f6e01c8bdea1c5bf45f",
-      "size": 3312,
+      "sha256": "ba1e68516d8fd5b7f8ec45e1c051426deee5e519f1b1e0d8311c8b1663ff28f9",
+      "size": 3506,
       "kind": "code",
       "reboot_required": true
     },
@@ -273,15 +245,15 @@
     },
     {
       "path": "vdboard.py",
-      "sha256": "8cf20341068c03d413044e14fb50b74824b29ac137cc4da65a744c0b5cc26d62",
-      "size": 8688,
+      "sha256": "6e4995cf430e4bfd7be6497918015317b7399369f4f531058e0b5b61120975b1",
+      "size": 7185,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "wifi_manager.py",
-      "sha256": "7e85b30e0d8f8350048b770e8856517c87c1eac6326b4a1a4ae55e59aed2d6e5",
-      "size": 4543,
+      "sha256": "5073fda856daa85e7bc91e1aed37ecdb5664fcdeeae4d32c610c6a03b51f0d76",
+      "size": 9646,
       "kind": "code",
       "reboot_required": true
     }

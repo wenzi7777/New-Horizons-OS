@@ -36,7 +36,8 @@ DEFAULT_NETWORK = {
     "wifi_mode": config.WIFI_MODE,
     "ssid": "",
     "password": "",
-    "provisioning_supported": False,
+    "setup_method": "softap_webui",
+    "last_ssid": "",
 }
 
 

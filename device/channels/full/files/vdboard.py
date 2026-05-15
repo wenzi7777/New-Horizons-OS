@@ -10,8 +10,6 @@ except ImportError:  # pragma: no cover
 
 import config
 from frame_protocol import encode_scan_frame, decode_scan_frame
-from provisioning import ProvisioningManager
-from storage import exists
 
 
 def _ticks_ms():
@@ -210,57 +208,6 @@ class _ScanAPI:
         )
 
 
-class _ProvAPI:
-    STATUS_IDLE = "idle"
-    STATUS_STARTING = "starting"
-    STATUS_WAITING = "waiting_credentials"
-    STATUS_CONNECTED = "connected"
-    STATUS_FAILED = "failed"
-
-    def __init__(self):
-        self.manager = ProvisioningManager()
-        self._status = self.STATUS_IDLE
-        self._service_name = ""
-        self._pop = ""
-        self._provisioned = exists(config.DEVICE_STATE_DIR + "/network_config.json")
-
-    def is_supported(self):
-        return self.manager.available
-
-    def is_provisioned(self):
-        return bool(self._provisioned)
-
-    def start_ble(self, pop=None, service_name=None):
-        self._status = self.STATUS_STARTING
-        self._pop = pop or ""
-        self._service_name = service_name or "VD-CTL-R"
-        self.manager.request()
-        ok = self.manager.start()
-        if ok:
-            self._status = self.STATUS_WAITING
-        else:
-            self._status = self.STATUS_FAILED
-        return ok
-
-    def stop(self):
-        self._status = self.STATUS_IDLE
-        return True
-
-    def status(self):
-        if self.manager.available and self.manager.last_error == "":
-            return self._status
-        if self.manager.last_error:
-            return self.STATUS_FAILED
-        return self._status
-
-    def reset_credentials(self):
-        self._provisioned = False
-        return True
-
-    def wifi_state(self):
-        return self.status()
-
-
 class _SysAPI:
     def reboot(self):
         if machine is None:  # pragma: no cover
@@ -271,13 +218,12 @@ class _SysAPI:
         return {
             "module": "vdboard-shim",
             "native_scan": False,
-            "native_provisioning": False,
+            "native_wifi_setup": False,
             "frame_header_size": 16,
         }
 
 
 scan = _ScanAPI()
-prov = _ProvAPI()
 sys = _SysAPI()
 
 

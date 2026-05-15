@@ -8,6 +8,7 @@ import board_pins
 import vdboard
 
 from calibration_store import CalibrationStore
+from device_identity import get_device_id, get_device_name, get_device_uid
 from device_logging import DeviceLogger
 from filesystem_api import FilesystemAPI
 from filter_engine import FilterChain
@@ -32,11 +33,16 @@ if config.ENABLE_LED:
 
 
 class App:
-    def __init__(self, provisioning_requested=False):
-        self.provisioning_requested = provisioning_requested
+    def __init__(self, wifi_setup_requested=False):
+        self.wifi_setup_requested = wifi_setup_requested
         self.frame_id = 0
+        self.device_id = get_device_id()
+        self.device_uid = get_device_uid()
+        self.device_name = get_device_name(config.DEVICE_NAME)
         self.reboot_required = False
         self.calibration_mode = False
+        self.last_connect_ms = 0
+        self.boot_network_initialized = False
 
         self.config_store = RuntimeConfigStore(config.DEVICE_STATE_DIR)
         self.logger = DeviceLogger(config.LOG_PATH)
@@ -111,20 +117,24 @@ class App:
         if self.imu:
             self.imu.begin()
 
-        if self.provisioning_requested:
+        if self.wifi_setup_requested or not self._has_network_hint():
             if self.led:
-                self.led.set_provisioning()
-            started = vdboard.prov.start_ble("abcd1234", config.DEVICE_NAME)
-            if not started:
-                self.logger.warn("provisioning_start_failed status={}".format(vdboard.prov.status()))
-
-        wifi_ok = self.wifi.connect()
+                self.led.set_wifi_setup()
+            self.wifi.start_setup_portal("boot_window" if self.wifi_setup_requested else "missing_credentials")
+            wifi_ok = False
+        else:
+            wifi_ok = self.wifi.connect()
+            if not wifi_ok:
+                if self.led:
+                    self.led.set_wifi_setup()
+                self.wifi.start_setup_portal("connect_failed")
         self._ensure_udp_data_socket(wifi_ok)
         self.control.begin()
 
         if wifi_ok:
             self._sync_time()
             self._check_updates_on_boot()
+        self.boot_network_initialized = wifi_ok
 
         self.update_led_state()
         self.logger.info("setup_done")
@@ -140,7 +150,15 @@ class App:
 
         while True:
             now = time.ticks_ms()
+            self.wifi.service_setup_portal()
             self.control.poll(self._handle_control_request)
+
+            if self.wifi.is_connected() and not self.boot_network_initialized:
+                self.boot_network_initialized = True
+                self._ensure_udp_data_socket(True)
+                self._sync_time()
+                self._check_updates_on_boot()
+                self.update_led_state()
 
             if self.imu and time.ticks_diff(now, self.last_imu_ms) >= imu_interval:
                 self.last_imu_ms = now
@@ -155,6 +173,19 @@ class App:
                 self.handle_scan(now)
 
             self.handle_transmit()
+
+            if (not self.wifi.is_connected()
+                    and not self.wifi.setup_active()
+                    and self._has_network_hint()
+                    and time.ticks_diff(now, self.last_connect_ms) >= 10000):
+                self.last_connect_ms = now
+                wifi_ok = self.wifi.connect()
+                self._ensure_udp_data_socket(wifi_ok)
+                if wifi_ok:
+                    self.update_led_state()
+                else:
+                    self.wifi.start_setup_portal("reconnect_failed")
+                    self.update_led_state()
 
             if self.led and time.ticks_diff(now, self.last_led_ms) >= led_interval:
                 self.last_led_ms = now
@@ -249,8 +280,8 @@ class App:
         if self.calibration_mode:
             self.led.set_calibration()
             return
-        if vdboard.prov.status() in ("starting", "waiting_credentials"):
-            self.led.set_provisioning()
+        if self.wifi.setup_active():
+            self.led.set_wifi_setup()
             return
         if self.reboot_required:
             self.led.set_updating()
@@ -400,6 +431,49 @@ class App:
                 "applied": True,
             }
 
+        if cmd == "calibrate_all":
+            if not self.calibration_mode:
+                return self._ok("calibration_mode_required", error="calibration_mode_required")
+            level = float(request["level"])
+            start_delay = int(request.get("start_delay_ms", 0))
+            duration_ms = int(request.get("duration_ms", 5000))
+            if start_delay > 0:
+                time.sleep_ms(start_delay)
+            end_ms = time.ticks_add(time.ticks_ms(), max(1, duration_ms))
+            sensor_count = len(config.ACTIVE_ROWS) * len(config.ACTIVE_COLS)
+            sums = [0.0] * sensor_count
+            counts = [0] * sensor_count
+            while time.ticks_diff(end_ms, time.ticks_ms()) > 0:
+                vdboard.scan.service()
+                frame_view = vdboard.scan.pop_frame_mv()
+                if frame_view is None:
+                    time.sleep_ms(1)
+                    continue
+                frame_info = decode_scan_frame(bytes(frame_view))
+                payload = frame_info["payload_mv"]
+                for idx, value in enumerate(payload[:sensor_count]):
+                    sums[idx] += float(value)
+                    counts[idx] += 1
+            if not counts or min(counts) == 0:
+                return self._ok("calibration_no_samples", error="calibration_no_samples")
+            idx = 0
+            for analog_pin in config.ACTIVE_ROWS:
+                for select_pin in config.ACTIVE_COLS:
+                    avg_mv = sums[idx] / float(counts[idx])
+                    self.calibration.set_point(analog_pin, select_pin, level, avg_mv)
+                    idx += 1
+            self.calibration.save()
+            return {
+                "status": "ok",
+                "message": "calibration_all_sampled",
+                "level": "{:.3f}".format(level),
+                "samples_min": min(counts),
+                "samples_max": max(counts),
+                "cells": sensor_count,
+                "reboot_required": False,
+                "applied": True,
+            }
+
         if cmd == "end_calibration":
             self.calibration_mode = False
             self.calibration.save()
@@ -407,12 +481,22 @@ class App:
             return self._ok("calibration_saved", applied=True)
 
         if cmd == "dump_calibration":
+            level = request.get("level")
+            if level is not None:
+                return {
+                    "status": "ok",
+                    "message": "calibration_level_dump",
+                    "reboot_required": False,
+                    "applied": False,
+                    "data": self.calibration.dump_level(level, config.ACTIVE_ROWS, config.ACTIVE_COLS),
+                }
             return {
                 "status": "ok",
                 "message": "calibration_dump",
                 "reboot_required": False,
                 "applied": False,
                 "data": self.calibration.dump(),
+                "levels": self.calibration.list_levels(),
             }
 
         if cmd == "delete_calibration_level":
@@ -425,8 +509,47 @@ class App:
             return self._ok("reboot_scheduled", applied=True, reboot_required=True)
 
         if cmd == "reset_credentials":
-            vdboard.prov.reset_credentials()
+            self.wifi.clear_credentials()
+            self.wifi.start_setup_portal("credentials_reset")
+            self.update_led_state()
             return self._ok("credentials_reset", applied=True)
+
+        if cmd == "start_wifi_setup":
+            self.wifi.start_setup_portal("udp_command")
+            self.update_led_state()
+            return {
+                "status": "ok",
+                "message": "wifi_setup_started",
+                "reboot_required": False,
+                "applied": True,
+                "wifi_setup": self.wifi.portal_status(),
+                "error": "",
+            }
+
+        if cmd == "stop_wifi_setup":
+            self.wifi.stop_setup_portal()
+            self.update_led_state()
+            return {
+                "status": "ok",
+                "message": "wifi_setup_stopped",
+                "reboot_required": False,
+                "applied": True,
+                "wifi_setup": self.wifi.portal_status(),
+                "error": "",
+            }
+
+        if cmd == "set_wifi":
+            result = self.wifi.apply_credentials(request.get("ssid", ""), request.get("password", ""))
+            self._ensure_udp_data_socket(self.wifi.is_connected())
+            self.update_led_state()
+            return {
+                "status": "ok" if result.get("ok") else "error",
+                "message": result.get("message", ""),
+                "reboot_required": False,
+                "applied": bool(result.get("ok")),
+                "wifi_setup": self.wifi.portal_status(),
+                "error": "" if result.get("ok") else "wifi_connect_failed",
+            }
 
         if cmd == "log_read_tail":
             return {
@@ -466,16 +589,19 @@ class App:
             "message": "status",
             "reboot_required": self.reboot_required,
             "applied": False,
+            "device_id": "0x{:08X}".format(self.device_id),
+            "device_uid": self.device_uid,
+            "device_name": self.device_name,
             "wifi_state": self.wifi.state,
-            "provisioning": {
-                "status": vdboard.prov.status(),
-                "supported": vdboard.prov.is_supported(),
-                "provisioned": vdboard.prov.is_provisioned(),
-            },
+            "wifi_setup": self.wifi.portal_status(),
             "ntp": self.time_sync.status(),
             "filter": self.config_store.load_filter(),
             "runtime": self.config_store.load_runtime(),
             "calibration_mode": self.calibration_mode,
+            "calibration_levels": self.calibration.list_levels(),
+            "active_rows": list(config.ACTIVE_ROWS),
+            "active_cols": list(config.ACTIVE_COLS),
+            "matrix_shape": {"rows": len(config.ACTIVE_ROWS), "cols": len(config.ACTIVE_COLS)},
             "sent_packets": self.sent_packets,
             "failed_sends": self.failed_sends,
             "scan": vdboard.scan.stats(),
@@ -492,12 +618,16 @@ class App:
 
     def _print_setup(self):
         print("========== Setup ==========")
-        print("Device:", config.DEVICE_NAME)
-        print("Device ID:", hex(config.DEVICE_ID))
+        print("Device:", self.device_name)
+        print("Device ID:", hex(self.device_id))
         print("Matrix:", config.ROWS, "x", config.COLS)
         print("Active rows:", config.ACTIVE_ROWS)
         print("Active cols:", config.ACTIVE_COLS)
-        print("Provisioning requested:", self.provisioning_requested)
+        print("Wi-Fi setup requested:", self.wifi_setup_requested)
+
+    def _has_network_hint(self):
+        network_cfg = self.config_store.load_network()
+        return bool(network_cfg.get("ssid"))
 
     def _init_scan_backend(self):
         scan_timing = self.runtime.get("scan_timing", {})

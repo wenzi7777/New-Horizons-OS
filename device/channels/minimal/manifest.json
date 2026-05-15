@@ -21,15 +21,22 @@
     },
     {
       "path": "app_minimal.py",
-      "sha256": "c42a27383dfd158d7880df264fd5751a87083b4bb660c517515c9edbaaf62875",
-      "size": 5032,
+      "sha256": "7c0ef40947b4ae13adfec9aca68c81f14d8176491d35344d9c38cbe2a65fbc42",
+      "size": 8213,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "config.py",
-      "sha256": "699cc1514b1ac00dba2b6386e00d1267e09c11bc31f907f1b0f5f27205bba7cd",
-      "size": 427,
+      "sha256": "0ae49905e3f9ba64b67662dc10131d23de6d6119268947a381be03c4b5c3cabb",
+      "size": 608,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "device_identity.py",
+      "sha256": "a197e30cba20ba2236f14fd5cb32da711b5426e41d008de4ad19b1ec7da4ec63",
+      "size": 1840,
       "kind": "code",
       "reboot_required": true
     },
@@ -56,8 +63,8 @@
     },
     {
       "path": "wifi_manager.py",
-      "sha256": "7e85b30e0d8f8350048b770e8856517c87c1eac6326b4a1a4ae55e59aed2d6e5",
-      "size": 4543,
+      "sha256": "5073fda856daa85e7bc91e1aed37ecdb5664fcdeeae4d32c610c6a03b51f0d76",
+      "size": 9646,
       "kind": "code",
       "reboot_required": true
     }

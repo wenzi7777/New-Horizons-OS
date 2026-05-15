@@ -7,6 +7,11 @@ try:
 except ImportError:  # pragma: no cover - MicroPython fallback
     hashlib = None
 
+try:
+    import ubinascii as binascii
+except ImportError:
+    import binascii
+
 
 def _norm(path):
     if not path:
@@ -155,7 +160,10 @@ def list_tree(root):
 def sha256_hex_bytes(data):
     if hashlib is None:
         raise RuntimeError("hashlib unavailable")
-    return hashlib.sha256(data).hexdigest()
+    digest = hashlib.sha256(data)
+    if hasattr(digest, "hexdigest"):
+        return digest.hexdigest()
+    return binascii.hexlify(digest.digest()).decode()
 
 
 def sha256_hex_file(path):

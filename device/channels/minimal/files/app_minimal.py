@@ -2,8 +2,8 @@ import machine
 import time
 
 import immutable_config as iconfig
-import vdboard
 
+from device_identity import get_device_id, get_device_name, get_device_uid
 from device_logging import DeviceLogger
 from filesystem_api import FilesystemAPI
 from runtime_config import RuntimeConfigStore
@@ -13,9 +13,12 @@ from wifi_manager import WiFiManager
 
 
 class MinimalApp:
-    def __init__(self, provisioning_requested=False, recovery_error=""):
-        self.provisioning_requested = provisioning_requested
+    def __init__(self, wifi_setup_requested=False, recovery_error=""):
+        self.wifi_setup_requested = wifi_setup_requested
         self.recovery_error = recovery_error
+        self.device_id = get_device_id()
+        self.device_uid = get_device_uid()
+        self.device_name = get_device_name(iconfig.FIRMWARE_NAME)
         self.reboot_required = False
         self.logger = DeviceLogger(iconfig.LOG_PATH)
         self.config_store = RuntimeConfigStore(iconfig.DEVICE_STATE_DIR)
@@ -25,29 +28,42 @@ class MinimalApp:
         self.control = UDPControlServer(iconfig.DEFAULT_CONTROL_PORT, self.logger)
         self.updates = UpdateManager(self.config_store, self.logger, ".")
         self.last_connect_ms = 0
+        self.boot_network_initialized = False
 
     def setup(self):
-        if self.provisioning_requested:
-            vdboard.prov.start_ble(iconfig.DEFAULT_POP, iconfig.DEFAULT_SERVICE_NAME)
-        elif self._has_network_hint():
-            self.wifi.connect()
+        wifi_ok = False
+        if self.wifi_setup_requested or not self._has_network_hint():
+            self.wifi.start_setup_portal("boot_window" if self.wifi_setup_requested else "missing_credentials")
+        else:
+            wifi_ok = self.wifi.connect()
+            if not wifi_ok:
+                self.wifi.start_setup_portal("connect_failed")
         self.control.begin()
-        if self.wifi.is_connected() and self.runtime.get("update", {}).get("check_on_boot", True):
+        if wifi_ok and self.runtime.get("update", {}).get("check_on_boot", True):
             result = self.updates.check()
             self.logger.info("boot_update_check={}".format(result.get("status")))
+        self.boot_network_initialized = wifi_ok
 
     def run(self):
         self.setup()
         while True:
             now = time.ticks_ms()
+            self.wifi.service_setup_portal()
             self.control.poll(self._handle_request)
 
+            if self.wifi.is_connected() and not self.boot_network_initialized:
+                self.boot_network_initialized = True
+                if self.runtime.get("update", {}).get("check_on_boot", True):
+                    result = self.updates.check()
+                    self.logger.info("portal_update_check={}".format(result.get("status")))
+
             if (not self.wifi.is_connected()
-                    and vdboard.prov.status() not in ("starting", "waiting_credentials", "connecting_wifi")
+                    and not self.wifi.setup_active()
                     and self._has_network_hint()
                     and time.ticks_diff(now, self.last_connect_ms) >= 10000):
                 self.last_connect_ms = now
-                self.wifi.connect()
+                if not self.wifi.connect():
+                    self.wifi.start_setup_portal("reconnect_failed")
 
             if self.reboot_required:
                 time.sleep_ms(250)
@@ -56,20 +72,24 @@ class MinimalApp:
 
     def _has_network_hint(self):
         network_cfg = self.config_store.load_network()
-        return bool(network_cfg.get("ssid") or vdboard.prov.is_provisioned())
+        return bool(network_cfg.get("ssid"))
 
     def _handle_request(self, request, addr):
         command = request.get("command", "status")
 
         if command in ("status", "query"):
+            runtime = self.config_store.load_runtime()
             return {
                 "status": "ok",
                 "message": "minimal_status",
-                "channel": self.config_store.load_runtime().get("channel", "minimal"),
-                "manifest_url": self.config_store.load_runtime().get("update", {}).get("manifest_url", ""),
+                "device_id": "0x{:08X}".format(self.device_id),
+                "device_uid": self.device_uid,
+                "device_name": self.device_name,
+                "channel": runtime.get("channel", "minimal"),
+                "manifest_url": runtime.get("update", {}).get("manifest_url", ""),
+                "runtime": runtime,
                 "wifi_connected": self.wifi.is_connected(),
-                "provisioning": vdboard.prov.status(),
-                "provisioned": vdboard.prov.is_provisioned(),
+                "wifi_setup": self.wifi.portal_status(),
                 "recovery_error": self.recovery_error,
                 "reboot_required": False,
             }
@@ -104,7 +124,54 @@ class MinimalApp:
                 "channel": channel,
                 "update": {"manifest_url": manifest_url, "enabled": True},
             })
+            self.runtime = runtime
             return {"status": "ok", "message": "channel_updated", "runtime": runtime, "reboot_required": False}
+
+        if command == "set_servers":
+            runtime = self.config_store.update_runtime({
+                "master_server": request.get("master_server", {}),
+                "data_server": request.get("data_server", {}),
+            })
+            self.runtime = runtime
+            return {"status": "ok", "message": "servers_updated", "runtime": runtime, "reboot_required": False}
+
+        if command == "upgrade_to_full":
+            runtime = self.config_store.update_runtime({
+                "channel": "full",
+                "update": {"manifest_url": iconfig.DEFAULT_MANIFESTS["full"], "enabled": True},
+            })
+            self.runtime = runtime
+            result = self.updates.check()
+            if result.get("status") != "ok":
+                return result
+            result = self.updates.apply()
+            if result.get("reboot_required"):
+                self.reboot_required = True
+            result["runtime"] = runtime
+            return result
+
+        if command == "start_wifi_setup":
+            self.wifi.start_setup_portal("udp_command")
+            return {"status": "ok", "message": "wifi_setup_started", "wifi_setup": self.wifi.portal_status(), "reboot_required": False}
+
+        if command == "stop_wifi_setup":
+            self.wifi.stop_setup_portal()
+            return {"status": "ok", "message": "wifi_setup_stopped", "wifi_setup": self.wifi.portal_status(), "reboot_required": False}
+
+        if command == "set_wifi":
+            result = self.wifi.apply_credentials(request.get("ssid", ""), request.get("password", ""))
+            return {
+                "status": "ok" if result.get("ok") else "error",
+                "message": result.get("message", ""),
+                "wifi_setup": self.wifi.portal_status(),
+                "reboot_required": False,
+                "error": "" if result.get("ok") else "wifi_connect_failed",
+            }
+
+        if command == "reset_credentials":
+            self.wifi.clear_credentials()
+            self.wifi.start_setup_portal("credentials_reset")
+            return {"status": "ok", "message": "credentials_reset", "wifi_setup": self.wifi.portal_status(), "reboot_required": False}
 
         if command == "reboot":
             self.reboot_required = True
@@ -113,5 +180,5 @@ class MinimalApp:
         return {"status": "error", "message": "unknown_command", "error": command, "reboot_required": False}
 
 
-def run(provisioning_requested=False, recovery_error=""):
-    MinimalApp(provisioning_requested=provisioning_requested, recovery_error=recovery_error).run()
+def run(wifi_setup_requested=False, recovery_error=""):
+    MinimalApp(wifi_setup_requested=wifi_setup_requested, recovery_error=recovery_error).run()

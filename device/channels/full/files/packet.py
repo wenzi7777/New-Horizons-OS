@@ -5,6 +5,7 @@ import sys
 import config
 import secrets
 from crypto_hmac import hmac_sha256
+from device_identity import get_device_id, get_device_name
 
 HEADER_LEN = 18
 
@@ -13,6 +14,8 @@ class PacketBuilder:
     def __init__(self):
         self.hmac_len = config.HMAC_LEN if config.USE_HMAC else 0
         self.os_version = self._get_os_version()
+        self.device_id = get_device_id()
+        self.device_name = get_device_name(config.DEVICE_NAME)
 
         self.active_rows = list(config.ACTIVE_ROWS)
         self.active_cols = list(config.ACTIVE_COLS)
@@ -59,8 +62,8 @@ class PacketBuilder:
         ax, ay, az, gx, gy, gz, chip_temp = self._normalize_imu_text(imu)
 
         fields = [
-            config.DEVICE_NAME,
-            "0x%08X" % config.DEVICE_ID,
+            self.device_name,
+            "0x%08X" % self.device_id,
             self.os_version,
             str(timestamp_ms),
             self._fmt_float(ax, config.BMI270_ACC_DECIMALS),
@@ -163,7 +166,7 @@ class PacketBuilder:
             config.MAGIC,
             config.PACKET_VERSION,
             flags,
-            config.DEVICE_ID,
+            self.device_id,
             frame_id,
             timestamp_ms,
             payload_len

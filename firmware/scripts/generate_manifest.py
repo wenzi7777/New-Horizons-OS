@@ -16,6 +16,15 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def should_include(path: Path, root: Path) -> bool:
+    rel_parts = path.relative_to(root).parts
+    if "__pycache__" in rel_parts:
+        return False
+    if path.suffix == ".pyc":
+        return False
+    return True
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--channel", required=True, choices=["minimal", "full"])
@@ -30,7 +39,7 @@ def main() -> None:
     base_url = f"https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/{args.version}/device/channels/{args.channel}/files"
 
     files = []
-    for path in sorted(p for p in files_root.rglob("*") if p.is_file()):
+    for path in sorted(p for p in files_root.rglob("*") if p.is_file() and should_include(p, files_root)):
         rel = path.relative_to(files_root).as_posix()
         files.append({
             "path": rel,

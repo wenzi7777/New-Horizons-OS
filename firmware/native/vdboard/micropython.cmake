@@ -5,7 +5,6 @@ add_library(usermod_vdboard INTERFACE)
 target_sources(usermod_vdboard INTERFACE
     ${VDBOARD_MOD_DIR}/module.c
     ${VDBOARD_MOD_DIR}/scan.c
-    ${VDBOARD_MOD_DIR}/prov.c
     ${VDBOARD_MOD_DIR}/sys.c
 )
 

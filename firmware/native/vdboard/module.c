@@ -4,7 +4,6 @@
 static const mp_rom_map_elem_t vdboard_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_vdboard) },
     { MP_ROM_QSTR(MP_QSTR_scan), MP_ROM_PTR(&vdboard_scan_module) },
-    { MP_ROM_QSTR(MP_QSTR_prov), MP_ROM_PTR(&vdboard_prov_module) },
     { MP_ROM_QSTR(MP_QSTR_sys), MP_ROM_PTR(&vdboard_sys_module) },
 };
 

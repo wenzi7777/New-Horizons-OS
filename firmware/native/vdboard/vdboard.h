@@ -33,7 +33,6 @@ typedef struct _vdboard_scan_state_t {
 } vdboard_scan_state_t;
 
 extern const mp_obj_module_t vdboard_scan_module;
-extern const mp_obj_module_t vdboard_prov_module;
 extern const mp_obj_module_t vdboard_sys_module;
 
 #endif
