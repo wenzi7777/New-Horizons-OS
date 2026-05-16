@@ -1,3 +1,4 @@
+import os
 import time
 
 import storage
@@ -32,18 +33,41 @@ class DeviceLogger:
             return
         line = "{} [{}] {}\n".format(self._timestamp(), level_name, message)
         print(line, end="")
-        existing = storage.read_text(self.path, "")
-        combined = existing + line
-        if len(combined.encode()) > self.max_bytes:
-            combined = combined[-(self.max_bytes // 2):]
-        storage.write_text(self.path, combined)
+        self._append_line(line)
 
     def read_tail(self, max_lines=50):
-        text = storage.read_text(self.path, "")
-        if not text:
+        limit = max(0, int(max_lines))
+        if limit == 0:
             return []
-        lines = [line for line in text.splitlines() if line]
-        return lines[-max_lines:]
+        lines = []
+        try:
+            with open(self.path, "r") as f:
+                for line in f:
+                    line = line.rstrip("\n")
+                    if not line:
+                        continue
+                    lines.append(line)
+                    if len(lines) > limit:
+                        lines.pop(0)
+        except OSError:
+            return []
+        return lines
+
+    def _append_line(self, line):
+        encoded_len = len(line.encode())
+        storage.ensure_dir(storage.dirname(self.path))
+        current_size = self._file_size()
+        mode = "a"
+        if current_size + encoded_len > self.max_bytes:
+            mode = "w"
+        with open(self.path, mode) as f:
+            f.write(line)
+
+    def _file_size(self):
+        try:
+            return int(os.stat(self.path)[6])
+        except OSError:
+            return 0
 
     def _timestamp(self):
         try:

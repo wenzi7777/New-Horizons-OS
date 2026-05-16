@@ -1,7 +1,9 @@
 import importlib.util
+import queue
 import struct
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -128,6 +130,35 @@ class HostUiCoreTests(unittest.TestCase):
         record = registry.get("0xCCDDEEFF")
         self.assertAlmostEqual(record["scan_fps"], 60.0)
         self.assertAlmostEqual(registry.list_devices()[0]["scan_fps"], 60.0)
+
+    def test_device_event_hub_keeps_only_latest_event_for_slow_subscribers(self):
+        module = load_host_ui()
+        hub = module.DeviceEventHub()
+        subscriber = hub.subscribe()
+
+        hub.publish({"frame_id": 1})
+        hub.publish({"frame_id": 2})
+
+        self.assertEqual(subscriber.get_nowait(), {"frame_id": 2})
+        with self.assertRaises(queue.Empty):
+            subscriber.get_nowait()
+
+    def test_http_server_suppresses_expected_client_disconnect_errors(self):
+        module = load_host_ui()
+        server = object.__new__(module.QuietThreadingHTTPServer)
+
+        with mock.patch.object(module.ThreadingHTTPServer, "handle_error") as parent_handle_error:
+            try:
+                raise ConnectionResetError("client closed")
+            except ConnectionResetError:
+                server.handle_error(None, ("127.0.0.1", 12345))
+            parent_handle_error.assert_not_called()
+
+            try:
+                raise RuntimeError("unexpected")
+            except RuntimeError:
+                server.handle_error(None, ("127.0.0.1", 12345))
+            parent_handle_error.assert_called_once()
 
     def test_binary_packet_parser_extracts_float_matrix(self):
         module = load_host_ui()

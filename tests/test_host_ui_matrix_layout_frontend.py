@@ -236,6 +236,96 @@ eval({json.dumps(script_under_test)});
         self.assertEqual(rendered["rows"], 3)
         self.assertEqual(rendered["cols"], 2)
 
+    def test_render_selected_reports_scan_and_ui_fps_separately(self):
+        module = load_host_ui()
+        script = module.INDEX_HTML.split("<script>", 1)[1].split(
+            'document.getElementById("addDeviceBtn").onclick', 1
+        )[0]
+        script_under_test = script + """
+renderGrid = () => {};
+const device = {
+  key: "board-a",
+  host: "192.168.1.50",
+  port: 22345,
+  scan_fps: 96.4,
+  status: {
+    matrix_configured: true,
+    active_rows: [1],
+    active_cols: [13],
+    available_rows: [1],
+    available_cols: [13],
+    runtime: {}
+  },
+  packet: { frame_id: 1, matrix: [1] }
+};
+state.selectedDevice = device;
+nowValues.push(0);
+renderSelected();
+device.packet = { frame_id: 2, matrix: [2] };
+nowValues.push(1000);
+renderSelected();
+console.log(JSON.stringify({
+  scanFps: elements.scanFpsVal.textContent,
+  uiFps: elements.uiFpsVal.textContent
+}));
+"""
+        harness = f"""
+const elements = {{}};
+const nowValues = [];
+function element(id) {{
+  if (!elements[id]) elements[id] = {{
+    id,
+    innerHTML: "",
+    textContent: "",
+    value: "",
+    style: {{}}
+  }};
+  return elements[id];
+}}
+global.document = {{
+  getElementById(id) {{
+    return element(id);
+  }},
+  querySelectorAll() {{
+    return [];
+  }}
+}};
+Date.now = () => nowValues.shift() ?? 0;
+eval({json.dumps(script_under_test)});
+"""
+        result = subprocess.run(
+            ["node", "-e", harness],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        rendered = json.loads(result.stdout)
+
+        self.assertEqual(rendered["scanFps"], "96.4")
+        self.assertEqual(rendered["uiFps"], "2.0")
+
+    def test_frontend_uses_event_stream_for_realtime_selected_device_updates(self):
+        module = load_host_ui()
+        html = module.INDEX_HTML
+
+        self.assertIn("async function deviceListLoop()", html)
+        self.assertIn("setTimeout(deviceListLoop, 1000);", html)
+        self.assertIn('new EventSource("/api/stream")', html)
+        self.assertIn("requestAnimationFrame(flushSelectedRender)", html)
+        self.assertIn('typeof EventSource !== "function"', html)
+        self.assertIn("async function selectedDeviceFallbackLoop()", html)
+        self.assertNotIn("async function selectedDeviceLoop()", html)
+
+    def test_packet_stream_updates_use_lightweight_frame_render_path(self):
+        module = load_host_ui()
+        html = module.INDEX_HTML
+        source = (REPO_ROOT / "host_ui.py").read_text()
+
+        self.assertIn('self._publish_record(record, kind="packet")', source)
+        self.assertIn("function renderSelectedFrame(device)", html)
+        self.assertIn('if (kind === "packet") {', html)
+
 
 if __name__ == "__main__":
     unittest.main()

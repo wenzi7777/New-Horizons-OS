@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import queue
 import socket
 import struct
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -244,6 +246,48 @@ class DeviceRegistry:
             return hosts
 
 
+class DeviceEventHub:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.subscribers = set()
+
+    def subscribe(self):
+        subscriber = queue.Queue(maxsize=1)
+        with self.lock:
+            self.subscribers.add(subscriber)
+        return subscriber
+
+    def unsubscribe(self, subscriber):
+        with self.lock:
+            self.subscribers.discard(subscriber)
+
+    def publish(self, payload):
+        with self.lock:
+            subscribers = list(self.subscribers)
+        for subscriber in subscribers:
+            try:
+                subscriber.put_nowait(payload)
+                continue
+            except queue.Full:
+                pass
+            try:
+                subscriber.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                subscriber.put_nowait(payload)
+            except queue.Full:
+                pass
+
+
+class QuietThreadingHTTPServer(ThreadingHTTPServer):
+    def handle_error(self, request, client_address):
+        error = sys.exc_info()[1]
+        if isinstance(error, (BrokenPipeError, ConnectionResetError)):
+            return
+        return super().handle_error(request, client_address)
+
+
 class ControlClient:
     def __init__(self, local_port=22345):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -296,6 +340,7 @@ class HostUiService:
         self.http_port = int(http_port)
         self.udp_port = int(udp_port)
         self.registry = DeviceRegistry()
+        self.events = DeviceEventHub()
         self.control = ControlClient(control_local_port)
         self.stop_event = threading.Event()
         self.httpd = None
@@ -305,7 +350,8 @@ class HostUiService:
     def _ingest_control_announcements(self):
         def handle(addr, message):
             if message.get("status") == "ok" and message.get("device_id"):
-                self.registry.apply_status(addr[0], message, port=addr[1])
+                record = self.registry.apply_status(addr[0], message, port=addr[1])
+                self._publish_record(record, kind="status")
 
         try:
             self.control.poll_announcements(handle, timeout=0.2)
@@ -327,7 +373,8 @@ class HostUiService:
                 packet = parse_binary_packet(data)
             except Exception:
                 continue
-            self.registry.upsert_packet(addr, packet)
+            record = self.registry.upsert_packet(addr, packet)
+            self._publish_record(record, kind="packet")
         sock.close()
 
     def _control_loop(self):
@@ -337,7 +384,7 @@ class HostUiService:
     def start(self):
         self.udp_thread.start()
         self.control_thread.start()
-        self.httpd = ThreadingHTTPServer((self.http_host, self.http_port), self._make_handler())
+        self.httpd = QuietThreadingHTTPServer((self.http_host, self.http_port), self._make_handler())
         print("Host UI listening on http://{}:{}".format(self.http_host, self.http_port))
         print("UDP data receiver on 0.0.0.0:{}".format(self.udp_port))
         print("UDP control receiver on 0.0.0.0:{}".format(self.control.sock.getsockname()[1]))
@@ -348,6 +395,12 @@ class HostUiService:
         if self.httpd is not None:
             self.httpd.shutdown()
 
+    def _publish_record(self, record, kind="status"):
+        if not record:
+            return
+        latest = self.registry.get(record.get("key", "")) or record
+        self.events.publish({"kind": kind, "device": latest})
+
     def _make_handler(self):
         service = self
 
@@ -356,6 +409,8 @@ class HostUiService:
                 parsed = urlparse(self.path)
                 if parsed.path == "/":
                     return self._html()
+                if parsed.path == "/api/stream":
+                    return self._event_stream()
                 if parsed.path == "/api/devices":
                     return self._json({"devices": service.registry.list_devices()})
                 if parsed.path.startswith("/api/devices/"):
@@ -388,7 +443,8 @@ class HostUiService:
                     response = service.control.send_command(record["host"], record.get("port", 22345), body, timeout=4.0)
                     if response.get("status") == "ok":
                         if response.get("device_id"):
-                            service.registry.apply_status(record["host"], response, port=record.get("port", 22345))
+                            updated = service.registry.apply_status(record["host"], response, port=record.get("port", 22345))
+                            service._publish_record(updated, kind="status")
                     return self._json({"status": "ok", "response": response, "device": service.registry.get(key) or service.registry.get(response.get("device_uid", ""))})
 
                 return self._json({"status": "error", "message": "not_found"}, status=404)
@@ -422,6 +478,29 @@ class HostUiService:
                 self.send_header("Content-Length", str(len(encoded)))
                 self.end_headers()
                 self.wfile.write(encoded)
+
+            def _event_stream(self):
+                subscriber = service.events.subscribe()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                try:
+                    while not service.stop_event.is_set():
+                        try:
+                            payload = subscriber.get(timeout=15.0)
+                            encoded = json.dumps(payload, separators=(",", ":")).encode()
+                            self.wfile.write(b"event: device\n")
+                            self.wfile.write(b"data: " + encoded + b"\n\n")
+                        except queue.Empty:
+                            self.wfile.write(b": keep-alive\n\n")
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    return
+                finally:
+                    service.events.unsubscribe(subscriber)
 
         return Handler
 
@@ -683,7 +762,7 @@ INDEX_HTML = """<!doctype html>
     .overview-strip { align-items: center; }
     .hero-metrics {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: 10px;
     }
     .metric,
@@ -977,8 +1056,12 @@ INDEX_HTML = """<!doctype html>
                 <div class="metric-value" id="frameVal">-</div>
               </div>
               <div class="metric">
-                <div class="metric-label">FPS</div>
-                <div class="metric-value" id="fpsVal">-</div>
+                <div class="metric-label">Scan FPS</div>
+                <div class="metric-value" id="scanFpsVal">-</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">UI FPS</div>
+                <div class="metric-value" id="uiFpsVal">-</div>
               </div>
             </div>
             <div class="status-grid">
@@ -1154,7 +1237,15 @@ INDEX_HTML = """<!doctype html>
       selectedDevice: null,
       matrixLayoutDeviceKey: null,
       matrixLayoutDirty: false,
-      matrixLayoutDraft: null
+      matrixLayoutDraft: null,
+      uiFpsWindowStartedAt: null,
+      uiFpsFrameCount: 0,
+      uiFps: null,
+      lastRenderedFrameId: null,
+      pendingSelectedDevice: null,
+      pendingSelectedKind: null,
+      streamRenderScheduled: false,
+      deviceStreamFallbackStarted: false
     };
 
     function log(message) {
@@ -1360,31 +1451,78 @@ INDEX_HTML = """<!doctype html>
       return Array.from(document.querySelectorAll(`#${targetId} input:checked`)).map(input => parseInt(input.value, 10));
     }
 
-    function renderSelected() {
-      const device = state.selectedDevice;
-      if (!device) {
-        state.matrixLayoutDeviceKey = null;
-        state.matrixLayoutDirty = false;
-        state.matrixLayoutDraft = null;
-        document.getElementById("titleText").textContent = "No Device Selected";
-        document.getElementById("subtitleText").textContent = "Waiting for packets";
-        document.getElementById("topSelectionState").textContent = "No active board";
-        document.getElementById("overviewChannel").textContent = "channel -";
-        document.getElementById("overviewWifi").textContent = "wifi -";
-        document.getElementById("overviewOta").textContent = "ota idle";
-        ["minVal", "maxVal", "avgVal", "frameVal", "fpsVal"].forEach(id => { document.getElementById(id).textContent = "-"; });
-        renderUpdateState({});
-        setGridEmpty("heatmap", "No matrix data");
-        setGridEmpty("calibrationMap", "No calibration data");
-        renderPinGrid("matrixRows", [], []);
-        renderPinGrid("matrixCols", [], []);
+    function trackUiFps(packet) {
+      const frameId = packet?.frame_id;
+      if (frameId == null || frameId === state.lastRenderedFrameId) return;
+
+      state.lastRenderedFrameId = frameId;
+      const now = Date.now();
+      if (state.uiFpsWindowStartedAt === null) {
+        state.uiFpsWindowStartedAt = now;
+      }
+      state.uiFpsFrameCount += 1;
+
+      const elapsed = now - state.uiFpsWindowStartedAt;
+      if (elapsed >= 1000) {
+        state.uiFps = state.uiFpsFrameCount * 1000 / Math.max(elapsed, 1);
+        state.uiFpsWindowStartedAt = now;
+        state.uiFpsFrameCount = 0;
+      }
+    }
+
+    function flushSelectedRender() {
+      state.streamRenderScheduled = false;
+      if (!state.pendingSelectedDevice) return;
+      const device = state.pendingSelectedDevice;
+      const kind = state.pendingSelectedKind;
+      state.selectedDevice = device;
+      state.pendingSelectedDevice = null;
+      state.pendingSelectedKind = null;
+      if (kind === "packet") {
+        renderSelectedFrame(device);
         return;
       }
+      renderSelected();
+    }
 
-      document.getElementById("titleText").textContent = device.device_name || device.host;
-      document.getElementById("subtitleText").textContent = `${device.host}:${device.port}  ${device.device_uid || device.device_id || ""}`;
-      document.getElementById("topSelectionState").textContent = `Selected ${device.device_name || device.host}`;
+    function scheduleSelectedRender(device, kind) {
+      state.pendingSelectedDevice = device;
+      if (state.pendingSelectedKind !== "status") {
+        state.pendingSelectedKind = kind || "status";
+      }
+      if (state.streamRenderScheduled) return;
+      state.streamRenderScheduled = true;
+      requestAnimationFrame(flushSelectedRender);
+    }
 
+    function applyDeviceEvent(payload) {
+      const device = payload?.device;
+      const kind = payload?.kind || "status";
+      if (!device) return;
+
+      const index = state.devices.findIndex(item => item.key === device.key);
+      if (index >= 0) {
+        state.devices[index] = { ...state.devices[index], ...device };
+      }
+      if (device.key === state.selectedKey) {
+        scheduleSelectedRender(device, kind);
+      }
+    }
+
+    function connectDeviceStream() {
+      if (typeof EventSource !== "function") {
+        startSelectedDeviceFallbackLoop();
+        return;
+      }
+      const stream = new EventSource("/api/stream");
+      stream.addEventListener("device", event => {
+        try {
+          applyDeviceEvent(JSON.parse(event.data));
+        } catch (_err) {}
+      });
+    }
+
+    function renderSelectedFrame(device) {
       const runtime = device.status?.runtime || {};
       const packet = device.packet || {};
       const matrixConfigured = device.status?.matrix_configured !== false;
@@ -1402,15 +1540,49 @@ INDEX_HTML = """<!doctype html>
       const max = numeric.length ? Math.max(...numeric) : null;
       const avg = numeric.length ? numeric.reduce((a, b) => a + b, 0) / numeric.length : null;
 
+      trackUiFps(packet);
       document.getElementById("overviewChannel").textContent = `channel ${device.channel || runtime.channel || "-"}`;
       document.getElementById("overviewWifi").textContent = `wifi ${formatWifi(device)}`;
       document.getElementById("minVal").textContent = min === null ? "-" : min.toFixed(2);
       document.getElementById("maxVal").textContent = max === null ? "-" : max.toFixed(2);
       document.getElementById("avgVal").textContent = avg === null ? "-" : avg.toFixed(2);
       document.getElementById("frameVal").textContent = packet.frame_id ?? "-";
-      document.getElementById("fpsVal").textContent = device.scan_fps == null ? "-" : device.scan_fps.toFixed(1);
-
+      document.getElementById("scanFpsVal").textContent = device.scan_fps == null ? "-" : device.scan_fps.toFixed(1);
+      document.getElementById("uiFpsVal").textContent = state.uiFps == null ? "-" : state.uiFps.toFixed(1);
       renderGrid("heatmap", matrix, rows, cols);
+    }
+
+    function renderSelected() {
+      const device = state.selectedDevice;
+      if (!device) {
+        state.matrixLayoutDeviceKey = null;
+        state.matrixLayoutDirty = false;
+        state.matrixLayoutDraft = null;
+        state.uiFpsWindowStartedAt = null;
+        state.uiFpsFrameCount = 0;
+        state.uiFps = null;
+        state.lastRenderedFrameId = null;
+        document.getElementById("titleText").textContent = "No Device Selected";
+        document.getElementById("subtitleText").textContent = "Waiting for packets";
+        document.getElementById("topSelectionState").textContent = "No active board";
+        document.getElementById("overviewChannel").textContent = "channel -";
+        document.getElementById("overviewWifi").textContent = "wifi -";
+        document.getElementById("overviewOta").textContent = "ota idle";
+        ["minVal", "maxVal", "avgVal", "frameVal", "scanFpsVal", "uiFpsVal"].forEach(id => { document.getElementById(id).textContent = "-"; });
+        renderUpdateState({});
+        setGridEmpty("heatmap", "No matrix data");
+        setGridEmpty("calibrationMap", "No calibration data");
+        renderPinGrid("matrixRows", [], []);
+        renderPinGrid("matrixCols", [], []);
+        return;
+      }
+
+      document.getElementById("titleText").textContent = device.device_name || device.host;
+      document.getElementById("subtitleText").textContent = `${device.host}:${device.port}  ${device.device_uid || device.device_id || ""}`;
+      document.getElementById("topSelectionState").textContent = `Selected ${device.device_name || device.host}`;
+
+      const runtime = device.status?.runtime || {};
+      renderSelectedFrame(device);
       syncPinSelectors(device);
       syncMatrixLayout(device);
       renderUpdateState(device.status?.update_state || {});
@@ -1422,6 +1594,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function fetchDevices() {
+      const previousSelectedKey = state.selectedKey;
       const data = await api("/api/devices");
       state.devices = data.devices || [];
       if (!state.selectedKey && state.devices.length) {
@@ -1431,6 +1604,9 @@ INDEX_HTML = """<!doctype html>
         state.selectedKey = state.devices[0]?.key || null;
       }
       renderDeviceList();
+      if (state.selectedKey !== previousSelectedKey) {
+        await fetchSelected();
+      }
     }
 
     async function fetchSelected() {
@@ -1533,14 +1709,25 @@ INDEX_HTML = """<!doctype html>
       level: document.getElementById("levelSelect").value
     });
 
-    async function loop() {
+    async function deviceListLoop() {
       await fetchDevices();
+      setTimeout(deviceListLoop, 1000);
+    }
+
+    async function selectedDeviceFallbackLoop() {
       await fetchSelected();
-      setTimeout(loop, 800);
+      setTimeout(selectedDeviceFallbackLoop, 50);
+    }
+
+    function startSelectedDeviceFallbackLoop() {
+      if (state.deviceStreamFallbackStarted) return;
+      state.deviceStreamFallbackStarted = true;
+      selectedDeviceFallbackLoop();
     }
 
     renderSelected();
-    loop();
+    connectDeviceStream();
+    deviceListLoop();
   </script>
 </body>
 </html>
