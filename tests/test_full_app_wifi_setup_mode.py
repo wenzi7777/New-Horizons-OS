@@ -132,6 +132,22 @@ class FakeLED:
         self.states.append("error")
 
 
+class FakeControl:
+    def __init__(self):
+        self.sock = None
+        self.begin_calls = 0
+
+    def begin(self):
+        self.begin_calls += 1
+        self.sock = object()
+
+    def poll(self, handler):
+        return None
+
+    def send(self, host, port, payload):
+        return True
+
+
 def load_full_app_module(runtime_override=None, update_check=None, enable_led=False):
     events = []
     fake_scan = FakeScan(events)
@@ -184,7 +200,9 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         "filesystem_api": types.SimpleNamespace(FilesystemAPI=lambda root: None),
         "filter_engine": types.SimpleNamespace(FilterChain=lambda **kwargs: types.SimpleNamespace(process=lambda idx, value: value, apply_config=lambda *args: None)),
         "frame_protocol": types.SimpleNamespace(decode_scan_frame=lambda payload: {}),
-        "packet": types.SimpleNamespace(PacketBuilder=lambda **kwargs: None),
+        "packet": types.SimpleNamespace(
+            PacketBuilder=lambda **kwargs: types.SimpleNamespace(build=lambda **packet_kwargs: b"packet")
+        ),
         "packet_buffer": types.SimpleNamespace(PacketBuffer=lambda **kwargs: None),
         "runtime_config": types.SimpleNamespace(
             RuntimeConfigStore=lambda root: FakeRuntimeConfigStore(runtime_override)
@@ -197,7 +215,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
                 last_error="",
             )
         ),
-        "udp_control": types.SimpleNamespace(UDPControlServer=lambda port, logger=None: types.SimpleNamespace(begin=lambda: None, poll=lambda handler: None, sock=object(), send=lambda host, port, payload: True)),
+        "udp_control": types.SimpleNamespace(UDPControlServer=lambda port, logger=None: FakeControl()),
         "udp_stream": types.SimpleNamespace(UDPStreamer=lambda host, port: types.SimpleNamespace(send=lambda payload: True)),
         "update_manager": types.SimpleNamespace(
             UpdateManager=lambda *args, **kwargs: types.SimpleNamespace(
@@ -261,6 +279,34 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     sys.modules[name] = saved
 
         self.assertEqual(events[:2], ["wifi_connect", "scan_start"])
+
+    def test_runtime_services_are_deferred_until_after_wifi_boot(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+
+            self.assertIsNone(app.update_manager)
+            self.assertIsNone(app.control)
+            self.assertIsNone(app.time_sync)
+            self.assertIsNone(app.calibration)
+            self.assertIsNone(app.tx_buffer)
+            self.assertIsNone(app.packet)
+            self.assertIsNone(app.filter_chain)
+
+            app.setup()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertIsNotNone(app.update_manager)
+        self.assertIsNotNone(app.control)
+        self.assertIsNotNone(app.time_sync)
+        self.assertIsNotNone(app.calibration)
+        self.assertIsNotNone(app.packet)
+        self.assertIsNotNone(app.filter_chain)
 
     def test_empty_matrix_layout_skips_scan_start(self):
         module, fake_scan, events, saved_modules = load_full_app_module(
@@ -364,6 +410,8 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app.latest_matrix = None
             app.latest_imu = None
             app.latest_battery = None
+            app.vdboard = types.SimpleNamespace(scan=fake_scan)
+            app.decode_scan_frame = module.decode_scan_frame
             app.frame_id = 0
             app.send_backoff_until_ms = 1100
             app.time_sync = types.SimpleNamespace(status=lambda: {"synced": False})
