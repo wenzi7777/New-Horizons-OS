@@ -201,7 +201,20 @@ class WiFiManager:
             ordered.append(item)
         return ordered[:12]
 
-    def apply_credentials(self, ssid, password, server_profile=None):
+    def apply_credentials(
+        self,
+        ssid,
+        password,
+        server_profile=None,
+        master_host="",
+        master_port="",
+        data_host="",
+        data_port="",
+        mqtt_host="",
+        mqtt_port="",
+        mqtt_tls="",
+        transport_mode="",
+    ):
         ssid = (ssid or "").strip()
         password = password or ""
         if not ssid:
@@ -217,8 +230,23 @@ class WiFiManager:
                 "setup_method": "softap_webui",
                 "last_ssid": ssid,
             })
-            runtime_patch = self._runtime_patch_for_server_profile(server_profile)
-            if runtime_patch is not None:
+            runtime_patch = self._runtime_patch_for_server_profile(
+                server_profile,
+                master_host,
+                master_port,
+                data_host,
+                data_port,
+            )
+            runtime_patch = runtime_patch or {}
+            runtime_patch.update(
+                self._runtime_patch_for_transport(
+                    mqtt_host,
+                    mqtt_port,
+                    mqtt_tls,
+                    transport_mode,
+                )
+            )
+            if runtime_patch:
                 self.config_store.update_runtime(runtime_patch)
 
         ok = self.connect_sta(ssid, password)
@@ -287,6 +315,8 @@ class WiFiManager:
             "server_profile_options": self._server_profile_options(),
             "master_server": master_server,
             "data_server": data_server,
+            "mqtt": dict(runtime_cfg.get("mqtt", {})),
+            "transport": dict(runtime_cfg.get("transport", {})),
         }
 
     def _server_profiles(self):
@@ -310,21 +340,54 @@ class WiFiManager:
             return name
         return ""
 
-    def _runtime_patch_for_server_profile(self, profile_name):
+    def _runtime_patch_for_server_profile(
+        self,
+        profile_name,
+        master_host="",
+        master_port="",
+        data_host="",
+        data_port="",
+    ):
+        master_host = self._normalize_server_host(master_host)
+        data_host = self._normalize_server_host(data_host)
+        master_port = self._normalize_server_port(master_port)
+        data_port = self._normalize_server_port(data_port)
         profile_name = str(profile_name or "").strip()
         profiles = self._server_profiles()
         if not profiles:
             return None
-        if profile_name not in profiles:
-            if not profile_name:
+        if not profile_name:
+            if master_host or data_host:
+                profile_name = "manual" if "manual" in profiles else self._default_server_profile()
+            else:
                 return None
+        if profile_name not in profiles:
             profile_name = self._default_server_profile()
         profile = profiles.get(profile_name, {})
-        return {
+        patch = {
             "server_profile": profile_name,
             "master_server": dict(profile.get("master_server", {})),
             "data_server": dict(profile.get("data_server", {})),
         }
+        if profile_name == "manual":
+            current_runtime = self.config_store.load_runtime() if self.config_store is not None else {}
+            current_master = current_runtime.get("master_server", {})
+            current_data = current_runtime.get("data_server", {})
+            patch["master_server"]["port"] = master_port or int(
+                current_master.get("port", patch["master_server"].get("port", 0)) or 0
+            )
+            patch["data_server"]["port"] = data_port or int(
+                current_data.get("port", patch["data_server"].get("port", 0)) or 0
+            )
+            resolved_master = master_host or str(current_master.get("host", "") or patch["master_server"].get("host", "")).strip()
+            resolved_data = data_host or str(current_data.get("host", "") or patch["data_server"].get("host", "")).strip()
+            if resolved_master and not resolved_data:
+                resolved_data = resolved_master
+            if resolved_data and not resolved_master:
+                resolved_master = resolved_data
+            patch["master_server"]["host"] = resolved_master
+            patch["data_server"]["host"] = resolved_data
+        return patch
 
     def _selected_server_profile(self, runtime_cfg):
         runtime_cfg = runtime_cfg or {}
@@ -339,6 +402,30 @@ class WiFiManager:
                     data, profile.get("data_server", {})):
                 return name
         return self._default_server_profile()
+
+    def _runtime_patch_for_transport(self, mqtt_host="", mqtt_port="", mqtt_tls="", transport_mode=""):
+        current_runtime = self.config_store.load_runtime() if self.config_store is not None else {}
+        current_mqtt = dict(current_runtime.get("mqtt", {}))
+        current_transport = dict(current_runtime.get("transport", {}))
+        patch = {}
+
+        normalized_host = self._normalize_server_host(mqtt_host)
+        normalized_port = self._normalize_server_port(mqtt_port)
+        normalized_tls = self._normalize_bool(mqtt_tls)
+        if normalized_host or normalized_port or normalized_tls is not None:
+            patch["mqtt"] = {
+                "host": normalized_host or current_mqtt.get("host", ""),
+                "port": normalized_port or int(current_mqtt.get("port", 0) or 0),
+                "tls": current_mqtt.get("tls", False) if normalized_tls is None else normalized_tls,
+            }
+
+        normalized_mode = str(transport_mode or "").strip().lower()
+        if normalized_mode in ("udp", "mqtt"):
+            patch["transport"] = {
+                "mode": normalized_mode,
+                "topic_namespace": current_transport.get("topic_namespace", "newhorizons/v1"),
+            }
+        return patch
 
     def _server_profile_options(self):
         options = []
@@ -358,6 +445,24 @@ class WiFiManager:
             str(lhs.get("host", "")) == str(rhs.get("host", ""))
             and int(lhs.get("port", 0) or 0) == int(rhs.get("port", 0) or 0)
         )
+
+    def _normalize_server_host(self, value):
+        return str(value or "").strip()
+
+    def _normalize_server_port(self, value):
+        try:
+            port = int(str(value or "").strip())
+        except (TypeError, ValueError):
+            return 0
+        return port if 0 < port <= 65535 else 0
+
+    def _normalize_bool(self, value):
+        normalized = str(value or "").strip().lower()
+        if normalized in ("1", "true", "yes", "on"):
+            return True
+        if normalized in ("0", "false", "no", "off"):
+            return False
+        return None
 
     def _credentials(self):
         ssid = secrets.WIFI_SSID

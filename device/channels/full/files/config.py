@@ -46,15 +46,15 @@ UDP_SERVER_IP = "192.168.1.153"
 UDP_SERVER_PORT = 5005
 UDP_CONTROL_PORT = 22345
 PRODUCTION_SERVER_HOST = "isensing-s1.u-aizu.ac.jp"
-DEFAULT_SERVER_PROFILE = "local"
+DEFAULT_SERVER_PROFILE = "manual"
 SERVER_PROFILES = {
-    "local": {
-        "label": "本地版",
+    "manual": {
+        "label": "Manual",
         "master_server": {"host": UDP_SERVER_IP, "port": UDP_CONTROL_PORT},
         "data_server": {"host": UDP_SERVER_IP, "port": UDP_SERVER_PORT},
     },
     "production": {
-        "label": "正式版",
+        "label": "Production",
         "master_server": {"host": PRODUCTION_SERVER_HOST, "port": UDP_CONTROL_PORT},
         "data_server": {"host": PRODUCTION_SERVER_HOST, "port": UDP_SERVER_PORT},
     },
@@ -66,7 +66,7 @@ MQTT_TOPIC_NAMESPACE = "newhorizons/v1"
 MQTT_USERNAME = ""
 MQTT_PASSWORD = ""
 SERVER_BASE_URL = "https://isensing-s1.u-aizu.ac.jp/newhorizons/ota"
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.16/device/channels"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.17/device/channels"
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 # Packet format:

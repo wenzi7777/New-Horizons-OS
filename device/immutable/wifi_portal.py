@@ -233,6 +233,14 @@ class WiFiSetupPortal:
                     fields.get("ssid", ""),
                     fields.get("password", ""),
                     fields.get("server_profile", ""),
+                    fields.get("master_host", ""),
+                    fields.get("master_port", ""),
+                    fields.get("data_host", ""),
+                    fields.get("data_port", ""),
+                    fields.get("mqtt_host", ""),
+                    fields.get("mqtt_port", ""),
+                    fields.get("mqtt_tls", ""),
+                    fields.get("transport_mode", ""),
                 )
                 content = self._render_result_page(result)
                 self._send_response(client, "200 OK", "text/html; charset=utf-8", content)
@@ -386,6 +394,9 @@ class WiFiSetupPortal:
         ap_ssid = _escape_html(status.get("ap_ssid", self.config.SETUP_AP_SSID_PREFIX))
         master_server = status.get("master_server", {}) or {}
         data_server = status.get("data_server", {}) or {}
+        mqtt_cfg = status.get("mqtt", {}) or {}
+        transport_cfg = status.get("transport", {}) or {}
+        manual_fields_display = "block" if selected_profile == "manual" else "none"
         return """<!doctype html>
 <html>
 <head>
@@ -418,6 +429,7 @@ class WiFiSetupPortal:
     .hint {{ margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: #eef4ff; color: #264372; font-size: 14px; line-height: 1.5; }}
     .meta {{ margin-top: 18px; padding-top: 16px; border-top: 1px solid #e7ecf3; }}
     .meta p {{ margin: 6px 0; }}
+    .manual-server-fields {{ display: {manual_fields_display}; }}
     @media (max-width: 560px) {{
       .grid {{ grid-template-columns: 1fr; }}
       h1 {{ font-size: 28px; }}
@@ -430,7 +442,7 @@ class WiFiSetupPortal:
     <div class="hero">
       <div class="eyebrow">Device Setup</div>
       <h1>{title}</h1>
-      <p class="lead">Join the device hotspot, then use this page to connect the board to your local Wi-Fi. Most phones should auto-open this portal after joining the hotspot.</p>
+      <p class="lead">Join the device hotspot, then use this page to connect the board to Wi-Fi and choose where control and data should be sent. Most phones should auto-open this portal after joining the hotspot.</p>
     </div>
     <div class="card">
       <div class="grid">
@@ -450,11 +462,35 @@ class WiFiSetupPortal:
         <select id="ssid_select" onchange="document.getElementById('ssid').value = this.value;">
           {options}
         </select>
-        <label for="server_profile">Server profile</label>
-        <select id="server_profile" name="server_profile">
+        <label for="server_profile">Server mode</label>
+        <select id="server_profile" name="server_profile" onchange="toggleManualServerFields(this.value);">
           {server_options}
         </select>
-        <p class="muted">正式版會把控制與資料地址設到學校伺服器，本地版會指向實驗室本機開發地址。</p>
+        <p class="muted">Production uses the school server. Manual lets you enter custom control and data addresses.</p>
+        <div id="manual_server_fields" class="manual-server-fields">
+          <label for="master_host">Control server address</label>
+          <input id="master_host" name="master_host" value="{master_host}" placeholder="e.g. 192.168.1.153">
+          <label for="master_port">Control server port</label>
+          <input id="master_port" name="master_port" value="{master_port}" inputmode="numeric" placeholder="e.g. 22345">
+          <label for="data_host">Data server address</label>
+          <input id="data_host" name="data_host" value="{data_host}" placeholder="e.g. 192.168.1.153">
+          <label for="data_port">Data server port</label>
+          <input id="data_port" name="data_port" value="{data_port}" inputmode="numeric" placeholder="e.g. 5005">
+        </div>
+        <label for="transport_mode">Transport mode</label>
+        <select id="transport_mode" name="transport_mode">
+          <option value="udp"{transport_udp_selected}>UDP</option>
+          <option value="mqtt"{transport_mqtt_selected}>MQTT</option>
+        </select>
+        <label for="mqtt_host">MQTT broker address</label>
+        <input id="mqtt_host" name="mqtt_host" value="{mqtt_host}" placeholder="e.g. 192.168.1.153">
+        <label for="mqtt_port">MQTT broker port</label>
+        <input id="mqtt_port" name="mqtt_port" value="{mqtt_port}" inputmode="numeric" placeholder="e.g. 1883">
+        <label for="mqtt_tls">MQTT TLS</label>
+        <select id="mqtt_tls" name="mqtt_tls">
+          <option value="true"{mqtt_tls_true_selected}>Enabled</option>
+          <option value="false"{mqtt_tls_false_selected}>Disabled</option>
+        </select>
         <label for="ssid">Wi-Fi SSID</label>
         <input id="ssid" name="ssid" value="{ssid}" placeholder="Your Wi-Fi name">
         <label for="password">Wi-Fi password</label>
@@ -471,10 +507,22 @@ class WiFiSetupPortal:
         <p class="muted">Saved SSID: {saved_ssid}</p>
         <p class="muted">Master target: {master_host}:{master_port}</p>
         <p class="muted">Data target: {data_host}:{data_port}</p>
+        <p class="muted">MQTT target: {mqtt_host}:{mqtt_port} ({mqtt_tls_label})</p>
+        <p class="muted">Transport mode: {transport_mode}</p>
         <p class="muted">Device state: {device_state}</p>
       </div>
     </div>
   </div>
+  <script>
+    function toggleManualServerFields(value) {{
+      var section = document.getElementById("manual_server_fields");
+      if (!section) {{
+        return;
+      }}
+      section.style.display = value === "manual" ? "block" : "none";
+    }}
+    toggleManualServerFields("{selected_profile}");
+  </script>
 </body>
 </html>
 """.format(
@@ -484,6 +532,7 @@ class WiFiSetupPortal:
             options="".join(options),
             server_options="".join(server_options),
             ssid=_escape_html(selected_ssid),
+            selected_profile=_escape_html(selected_profile),
             ap_ssid=ap_ssid,
             saved_ssid=_escape_html(selected_ssid or "(none)"),
             device_state=_escape_html(status.get("state", "idle")),
@@ -494,6 +543,15 @@ class WiFiSetupPortal:
             master_port=_escape_html(master_server.get("port", "")),
             data_host=_escape_html(data_server.get("host", "")),
             data_port=_escape_html(data_server.get("port", "")),
+            mqtt_host=_escape_html(mqtt_cfg.get("host", "")),
+            mqtt_port=_escape_html(mqtt_cfg.get("port", "")),
+            mqtt_tls_label="TLS" if mqtt_cfg.get("tls", False) else "plain",
+            mqtt_tls_true_selected=" selected" if mqtt_cfg.get("tls", False) else "",
+            mqtt_tls_false_selected="" if mqtt_cfg.get("tls", False) else " selected",
+            transport_mode=_escape_html(transport_cfg.get("mode", "udp")),
+            transport_udp_selected=" selected" if transport_cfg.get("mode", "udp") == "udp" else "",
+            transport_mqtt_selected=" selected" if transport_cfg.get("mode", "udp") == "mqtt" else "",
+            manual_fields_display=manual_fields_display,
         )
 
     def _render_result_page(self, result):

@@ -275,6 +275,14 @@ class MinimalApp:
                 request.get("ssid", ""),
                 request.get("password", ""),
                 request.get("server_profile", ""),
+                request.get("master_host", ""),
+                request.get("master_port", ""),
+                request.get("data_host", ""),
+                request.get("data_port", ""),
+                request.get("mqtt_host", ""),
+                request.get("mqtt_port", ""),
+                request.get("mqtt_tls", ""),
+                request.get("transport_mode", ""),
             )
             return {
                 "status": "ok" if result.get("ok") else "error",

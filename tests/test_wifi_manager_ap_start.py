@@ -97,9 +97,11 @@ class FakeConfigStore:
             "last_ssid": "",
         }
         self.runtime = {
-            "server_profile": "local",
+            "server_profile": "manual",
             "master_server": {"host": "192.168.1.153", "port": 22345},
             "data_server": {"host": "192.168.1.153", "port": 5005},
+            "mqtt": {"host": "isensing-s1.u-aizu.ac.jp", "port": 8883, "tls": True},
+            "transport": {"mode": "udp", "topic_namespace": "newhorizons/v1"},
         }
 
     def load_network(self):
@@ -114,9 +116,11 @@ class FakeConfigStore:
 
     def load_runtime(self):
         return {
-            "server_profile": self.runtime.get("server_profile", "local"),
+            "server_profile": self.runtime.get("server_profile", "manual"),
             "master_server": dict(self.runtime.get("master_server", {})),
             "data_server": dict(self.runtime.get("data_server", {})),
+            "mqtt": dict(self.runtime.get("mqtt", {})),
+            "transport": dict(self.runtime.get("transport", {})),
         }
 
     def update_runtime(self, patch):
@@ -141,15 +145,15 @@ def load_wifi_manager(channel):
         SETUP_PORTAL_HOST="192.168.4.1",
         SETUP_PORTAL_PORT=80,
         PRINT_WIFI_STATUS=True,
-        DEFAULT_SERVER_PROFILE="local",
+        DEFAULT_SERVER_PROFILE="manual",
         SERVER_PROFILES={
-            "local": {
-                "label": "本地版",
+            "manual": {
+                "label": "Manual",
                 "master_server": {"host": "192.168.1.153", "port": 22345},
                 "data_server": {"host": "192.168.1.153", "port": 5005},
             },
             "production": {
-                "label": "正式版",
+                "label": "Production",
                 "master_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 22345},
                 "data_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 5005},
             },
@@ -255,6 +259,64 @@ class WiFiManagerApStartTests(unittest.TestCase):
         self.assertEqual(store.runtime["data_server"]["host"], "isensing-s1.u-aizu.ac.jp")
         self.assertEqual(store.runtime["data_server"]["port"], 5005)
 
+    def test_apply_credentials_with_manual_profile_updates_runtime_endpoints(self):
+        module, _fake_network = load_wifi_manager("minimal")
+        store = FakeConfigStore()
+        manager = module.WiFiManager(config_store=store)
+        manager.start_setup_portal()
+
+        result = manager.apply_credentials(
+            "CampusWiFi",
+            "pw",
+            "manual",
+            master_host="192.168.1.200",
+            master_port="32001",
+            data_host="192.168.1.201",
+            data_port="32002",
+            mqtt_host="192.168.1.153",
+            mqtt_port="1883",
+            mqtt_tls="false",
+            transport_mode="mqtt",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(store.runtime["server_profile"], "manual")
+        self.assertEqual(store.runtime["master_server"]["host"], "192.168.1.200")
+        self.assertEqual(store.runtime["master_server"]["port"], 32001)
+        self.assertEqual(store.runtime["data_server"]["host"], "192.168.1.201")
+        self.assertEqual(store.runtime["data_server"]["port"], 32002)
+        self.assertEqual(store.runtime["mqtt"], {"host": "192.168.1.153", "port": 1883, "tls": False})
+        self.assertEqual(store.runtime["transport"]["mode"], "mqtt")
+
+    def test_full_channel_manual_profile_updates_runtime_ports(self):
+        module, _fake_network = load_wifi_manager("full")
+        store = FakeConfigStore()
+        manager = module.WiFiManager(config_store=store)
+        manager.start_setup_portal()
+
+        result = manager.apply_credentials(
+            "CampusWiFi",
+            "pw",
+            "manual",
+            master_host="192.168.1.210",
+            master_port="32101",
+            data_host="192.168.1.211",
+            data_port="32102",
+            mqtt_host="192.168.1.154",
+            mqtt_port="1884",
+            mqtt_tls="false",
+            transport_mode="mqtt",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(store.runtime["server_profile"], "manual")
+        self.assertEqual(store.runtime["master_server"]["host"], "192.168.1.210")
+        self.assertEqual(store.runtime["master_server"]["port"], 32101)
+        self.assertEqual(store.runtime["data_server"]["host"], "192.168.1.211")
+        self.assertEqual(store.runtime["data_server"]["port"], 32102)
+        self.assertEqual(store.runtime["mqtt"], {"host": "192.168.1.154", "port": 1884, "tls": False})
+        self.assertEqual(store.runtime["transport"]["mode"], "mqtt")
+
     def test_portal_status_reports_selected_server_profile(self):
         module, _fake_network = load_wifi_manager("minimal")
         store = FakeConfigStore()
@@ -272,14 +334,14 @@ class WiFiManagerApStartTests(unittest.TestCase):
             status["server_profile_options"],
             [
                 {
-                    "value": "local",
-                    "label": "本地版",
+                    "value": "manual",
+                    "label": "Manual",
                     "master_host": "192.168.1.153",
                     "data_host": "192.168.1.153",
                 },
                 {
                     "value": "production",
-                    "label": "正式版",
+                    "label": "Production",
                     "master_host": "isensing-s1.u-aizu.ac.jp",
                     "data_host": "isensing-s1.u-aizu.ac.jp",
                 },

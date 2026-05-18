@@ -707,6 +707,14 @@ class App:
                 request.get("ssid", ""),
                 request.get("password", ""),
                 request.get("server_profile", ""),
+                request.get("master_host", ""),
+                request.get("master_port", ""),
+                request.get("data_host", ""),
+                request.get("data_port", ""),
+                request.get("mqtt_host", ""),
+                request.get("mqtt_port", ""),
+                request.get("mqtt_tls", ""),
+                request.get("transport_mode", ""),
             )
             self._ensure_udp_data_socket(self.wifi.is_connected())
             self.update_led_state()

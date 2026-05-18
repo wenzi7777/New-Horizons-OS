@@ -1,14 +1,14 @@
 {
   "manifest_version": 1,
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.1.16",
+  "firmware_version": "v0.1.17",
   "channel": "full",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.16/device/channels/full/files",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.17/device/channels/full/files",
   "files": [
     {
       "path": "app.py",
-      "sha256": "ad3e2195ac2bff3e957e425d2e12caa680d3d9ba821eeabd4dd3db7f54b2f909",
-      "size": 38184,
+      "sha256": "383cb15a36a7bfdb9626034c750665f3baf2384b2a1788278f75058b7507227e",
+      "size": 38560,
       "kind": "code",
       "reboot_required": true
     },
@@ -42,7 +42,7 @@
     },
     {
       "path": "config.py",
-      "sha256": "bdddc003ba889d62e050cb5d076159fabc35c1f15659f05a43db463fff75ed1e",
+      "sha256": "30e4a7c91e3ad5fd54cc449693d6a56e6f74e10ea074ed01853d0a87ada2970e",
       "size": 4117,
       "kind": "code",
       "reboot_required": true
@@ -77,7 +77,7 @@
     },
     {
       "path": "device_state/runtime_config.json",
-      "sha256": "15c604a02283e3efa5baf439202fe11b58576a58fee0dc59c9a682c15c94c933",
+      "sha256": "25373333d23f1c43d94dd4829d7db541f2614978442afbb818ef8c8e0eea6a3d",
       "size": 600,
       "kind": "config",
       "reboot_required": false
@@ -280,8 +280,8 @@
     },
     {
       "path": "wifi_manager.py",
-      "sha256": "699dc0fa332ba24e612ee82c896790b85ad1e4b7ce3b40d48e5ced686dddf1b6",
-      "size": 13823,
+      "sha256": "da3649a7c89bb02462e88e0252254c74a9afc3d87639d0d7f79fb2b7ac6207a5",
+      "size": 18117,
       "kind": "code",
       "reboot_required": true
     }
