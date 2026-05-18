@@ -21,11 +21,27 @@ DEFAULT_RUNTIME = {
     },
     "buffer_frames": iconfig.DEFAULT_BUFFER_FRAMES,
     "ntp_servers": list(iconfig.DEFAULT_NTP_SERVERS),
+    "transport": {
+        "mode": "udp",
+        "topic_namespace": iconfig.DEFAULT_TOPIC_NAMESPACE,
+    },
+    "mqtt": {
+        "host": iconfig.DEFAULT_MQTT_HOST,
+        "port": iconfig.DEFAULT_MQTT_PORT,
+        "tls": iconfig.DEFAULT_MQTT_TLS,
+        "username": iconfig.DEFAULT_MQTT_USERNAME,
+        "password": iconfig.DEFAULT_MQTT_PASSWORD,
+    },
     "update": {
         "manifest_url": iconfig.DEFAULT_MANIFESTS[iconfig.DEFAULT_CHANNEL],
         "enabled": True,
         "check_on_boot": True,
         "auto_apply": False,
+        "source": "github",
+        "sources": {
+            "github": dict(iconfig.DEFAULT_MANIFESTS),
+            "server": dict(iconfig.DEFAULT_SERVER_MANIFESTS),
+        },
     },
 }
 

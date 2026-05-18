@@ -1,14 +1,14 @@
 {
   "manifest_version": 1,
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.1.14",
+  "firmware_version": "v0.1.15",
   "channel": "full",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.14/device/channels/full/files",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.15/device/channels/full/files",
   "files": [
     {
       "path": "app.py",
-      "sha256": "5bfa77c08e3ab5fb1add0877e8bc14cc2824fb6b02e3bfb6724aa38fc8496c90",
-      "size": 34845,
+      "sha256": "1e9cf4ce4ea5f888058cfa5b9998c5ea2544efc3810908b0a2f7f7281b0ba4c2",
+      "size": 37793,
       "kind": "code",
       "reboot_required": true
     },
@@ -42,8 +42,8 @@
     },
     {
       "path": "config.py",
-      "sha256": "b7206bd6ff08711fe1261281017e4710743bad4d43ccf34bab6512d67434e74d",
-      "size": 3248,
+      "sha256": "4a1bccf96adeb80887eb350ea9e51de6d1381222a947e462261857b3db7ac16a",
+      "size": 3585,
       "kind": "code",
       "reboot_required": true
     },
@@ -77,7 +77,7 @@
     },
     {
       "path": "device_state/runtime_config.json",
-      "sha256": "fab54f2b2f42d8c790d54181d4e3d19dae7063c53311c21854be11bfc2bea56e",
+      "sha256": "7c9ce0ccf264ec33306a3d84953cde49bc7bb1249d897586f332a383c0ac84de",
       "size": 600,
       "kind": "config",
       "reboot_required": false
@@ -160,6 +160,13 @@
       "reboot_required": true
     },
     {
+      "path": "mqtt_transport.py",
+      "sha256": "83c70f67916cf0f6e2cedc99829690bc900678ba9d32a72e426c8d25861d9009",
+      "size": 5294,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
       "path": "ota.py",
       "sha256": "206670b5b910022fc9514de96506315f626fbd53d10c3cad640cee11ad797b74",
       "size": 296,
@@ -182,8 +189,8 @@
     },
     {
       "path": "runtime_config.py",
-      "sha256": "699cdd2331bf2bd4bfbc0c1a2ee0ed47da4ae08e229e5113cd07e0ee05aed652",
-      "size": 4367,
+      "sha256": "c006855b017962d10b14654416624a80bd64921d2c56393882f600ee319ceb3d",
+      "size": 5147,
       "kind": "code",
       "reboot_required": true
     },
@@ -226,6 +233,27 @@
       "path": "udp_stream.py",
       "sha256": "48a95ca635e860c651733be19013c90e57782bab0bfdf6540826d1901a193713",
       "size": 896,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "umqtt/__init__.py",
+      "sha256": "c651471e7b8c1fe829964df7e1995d141c802284523afe87075871a781dc466a",
+      "size": 23,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "umqtt/robust.py",
+      "sha256": "64a91e6f367b610021136d65a653574826d940f85cf5c6f64582d550e40fabb1",
+      "size": 1012,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "umqtt/simple.py",
+      "sha256": "68f557c30328a7cbc4dffbd3f808de5c8a6ffeac84b2faaf85d177499759be4b",
+      "size": 4624,
       "kind": "code",
       "reboot_required": true
     },

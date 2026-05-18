@@ -49,6 +49,7 @@ class App:
         self.battery = None
         self.led = None
         self.udp = None
+        self.mqtt_transport = None
 
         self.latest_matrix = None
         self.latest_frame = None
@@ -139,6 +140,8 @@ class App:
             self.wifi.service_setup_portal()
             if self.control is not None:
                 self.control.poll(self._handle_control_request)
+            if self.mqtt_transport is not None:
+                self.mqtt_transport.poll(self.wifi.is_connected(), self._handle_control_request)
             update_result = self.update_manager.service() if self.update_manager is not None else None
             if update_result is not None:
                 self._handle_update_result(update_result, now)
@@ -268,6 +271,21 @@ class App:
                 return
 
     def send_packet(self, packet):
+        if self._transport_mode() == "mqtt":
+            if self.mqtt_transport is None:
+                return False
+            ok = self.mqtt_transport.publish_raw(packet, self.wifi.is_connected())
+            if ok:
+                self.sent_packets += 1
+                self.send_backoff_until_ms = 0
+                return True
+            self.failed_sends += 1
+            self.send_backoff_until_ms = time.ticks_add(
+                time.ticks_ms(),
+                getattr(config, "SEND_FAILURE_BACKOFF_MS", 100)
+            )
+            return False
+
         if self.udp is None or not self.wifi.is_connected():
             return False
 
@@ -328,7 +346,7 @@ class App:
             self.led.set_error()
 
     def _ensure_udp_data_socket(self, wifi_ok):
-        if not wifi_ok:
+        if not wifi_ok or self._transport_mode() != "udp":
             self.udp = None
             return
         from udp_stream import UDPStreamer
@@ -376,27 +394,32 @@ class App:
                 self.reboot_deadline_ms = time.ticks_add(now, 1200)
 
     def _announce_status(self, now=None, force=False):
-        if self.control is None:
+        if self.control is None and self.mqtt_transport is None:
             return False
-        if self.control.sock is None or not self.wifi.is_connected():
+        if not self.wifi.is_connected():
             return False
         if now is None:
             now = time.ticks_ms()
         if (not force
                 and time.ticks_diff(now, self.last_status_announce_ms) < config.STATUS_ANNOUNCE_INTERVAL_MS):
             return False
-        master = self.runtime.get("master_server", {})
-        host = master.get("host", "")
-        if not host:
-            return False
-        port = int(master.get("port", config.UDP_CONTROL_PORT))
         payload = self._status()
         payload["message"] = "status_announce"
-        try:
-            ok = self.control.send(host, port, payload)
-        except OSError as exc:
-            self.logger.warn("status_announce_failed {}".format(exc))
-            return False
+        if self._transport_mode() == "mqtt":
+            ok = self.mqtt_transport.publish_status(payload, self.wifi.is_connected()) if self.mqtt_transport is not None else False
+        else:
+            if self.control is None or self.control.sock is None:
+                return False
+            master = self.runtime.get("master_server", {})
+            host = master.get("host", "")
+            if not host:
+                return False
+            port = int(master.get("port", config.UDP_CONTROL_PORT))
+            try:
+                ok = self.control.send(host, port, payload)
+            except OSError as exc:
+                self.logger.warn("status_announce_failed {}".format(exc))
+                return False
         if ok:
             self.last_status_announce_ms = now
         return ok
@@ -424,6 +447,8 @@ class App:
         self._ensure_udp_data_socket(self.wifi.is_connected())
 
     def _authorized(self, addr):
+        if addr and addr[0] == "mqtt":
+            return True
         master = self.config_store.load_runtime().get("master_server", {})
         host = master.get("host", "")
         port = int(master.get("port", config.UDP_CONTROL_PORT))
@@ -458,10 +483,47 @@ class App:
             runtime = self.config_store.update_runtime({
                 "master_server": request.get("master_server", {}),
                 "data_server": request.get("data_server", {}),
+                "mqtt": request.get("mqtt", {}),
             })
             self.runtime = runtime
             self._ensure_udp_data_socket(self.wifi.is_connected())
             return self._ok("servers_updated", applied=True)
+
+        if cmd == "set_transport":
+            runtime = self.config_store.update_runtime({
+                "transport": {
+                    "mode": request.get("mode", "mqtt"),
+                    "topic_namespace": request.get("topic_namespace", "newhorizons/v1"),
+                },
+            })
+            self.runtime = runtime
+            self._ensure_udp_data_socket(self.wifi.is_connected())
+            return self._ok("transport_updated", applied=True)
+
+        if cmd == "set_update_source":
+            runtime = self.config_store.load_runtime()
+            update_cfg = runtime.get("update", {})
+            source = request.get("update_source", request.get("source", "server"))
+            channel = runtime.get("channel", "full")
+            sources = update_cfg.get("sources", {})
+            manifest_url = request.get("manifest_url", "")
+            if not manifest_url:
+                manifest_url = ((sources.get(source) or {}).get(channel) or "")
+            runtime = self.config_store.update_runtime({
+                "update": {
+                    "source": source,
+                    "manifest_url": manifest_url,
+                    "enabled": True,
+                }
+            })
+            self.runtime = runtime
+            return {
+                "status": "ok",
+                "message": "update_source_updated",
+                "reboot_required": False,
+                "applied": True,
+                "runtime": runtime,
+            }
 
         if cmd == "set_filter":
             filter_data = self.config_store.update_filter(request.get("filter", {}))
@@ -710,6 +772,12 @@ class App:
             "scan": self.vdboard.scan.stats() if self.vdboard is not None else (),
         }
 
+    def _transport_mode(self):
+        runtime = getattr(self, "runtime", None) or {}
+        if not isinstance(runtime, dict):
+            return "udp"
+        return runtime.get("transport", {}).get("mode", "udp")
+
     def _ok(self, message, applied=False, reboot_required=False, error=""):
         return {
             "status": "ok" if not error else "error",
@@ -868,6 +936,7 @@ class App:
         from calibration_store import CalibrationStore
         from filesystem_api import FilesystemAPI
         from frame_protocol import decode_scan_frame
+        from mqtt_transport import MQTTTransport
         from packet_buffer import PacketBuffer
         from time_sync import TimeSync
         from udp_control import UDPControlServer
@@ -877,6 +946,7 @@ class App:
         self.filesystem = FilesystemAPI(config.DEVICE_STATE_DIR)
         self.update_manager = UpdateManager(self.config_store, self.logger, ".")
         self.control = UDPControlServer(config.UDP_CONTROL_PORT, self.logger)
+        self.mqtt_transport = MQTTTransport(lambda: self.runtime, self.device_uid, self.logger)
         self.time_sync = TimeSync(self.runtime.get("ntp_servers", []))
         self.calibration = CalibrationStore(config.CALIBRATION_DIR)
         self.calibration.load()

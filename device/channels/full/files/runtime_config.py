@@ -27,11 +27,33 @@ DEFAULT_RUNTIME = {
     },
     "buffer_frames": 8,
     "ntp_servers": ["pool.ntp.org", "time.nist.gov"],
+    "transport": {
+        "mode": "udp",
+        "topic_namespace": config.MQTT_TOPIC_NAMESPACE,
+    },
+    "mqtt": {
+        "host": config.MQTT_BROKER_HOST,
+        "port": config.MQTT_BROKER_PORT,
+        "tls": config.MQTT_TLS,
+        "username": config.MQTT_USERNAME,
+        "password": config.MQTT_PASSWORD,
+    },
     "update": {
         "manifest_url": "",
         "enabled": False,
         "check_on_boot": False,
         "auto_apply": False,
+        "source": "github",
+        "sources": {
+            "github": {
+                "minimal": config.GITHUB_BASE_URL + "/minimal/manifest.json",
+                "full": config.GITHUB_BASE_URL + "/full/manifest.json",
+            },
+            "server": {
+                "minimal": config.SERVER_BASE_URL + "/channels/minimal/manifest.json",
+                "full": config.SERVER_BASE_URL + "/channels/full/manifest.json",
+            },
+        },
     },
 }
 

@@ -60,6 +60,8 @@ def collect_files(root: Path) -> list[Path]:
         if not path.is_file():
             continue
         rel_parts = path.relative_to(root).parts
+        if any(part.startswith(".") for part in rel_parts):
+            continue
         if "__pycache__" in rel_parts or path.suffix == ".pyc":
             continue
         files.append(path)

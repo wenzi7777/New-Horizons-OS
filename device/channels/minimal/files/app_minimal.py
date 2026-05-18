@@ -6,6 +6,7 @@ import immutable_config as iconfig
 from device_identity import get_device_id, get_device_name, get_device_uid
 from device_logging import DeviceLogger
 from filesystem_api import FilesystemAPI
+from mqtt_transport import MQTTTransport
 from runtime_config import RuntimeConfigStore
 from udp_control import UDPControlServer
 from update_manager import UpdateManager
@@ -26,6 +27,7 @@ class MinimalApp:
         self.filesystem = FilesystemAPI(iconfig.DEVICE_STATE_DIR)
         self.wifi = WiFiManager(self.config_store, self.logger)
         self.control = UDPControlServer(iconfig.DEFAULT_CONTROL_PORT, self.logger)
+        self.mqtt_transport = MQTTTransport(lambda: self.runtime, self.device_uid, self.logger)
         self.updates = UpdateManager(self.config_store, self.logger, ".")
         self.last_connect_ms = 0
         self.boot_network_initialized = False
@@ -55,6 +57,7 @@ class MinimalApp:
             now = time.ticks_ms()
             self.wifi.service_setup_portal()
             self.control.poll(self._handle_request)
+            self.mqtt_transport.poll(self.wifi.is_connected(), self._handle_request)
             update_result = self.updates.service()
             if update_result is not None:
                 self._handle_update_result(update_result, now)
@@ -86,18 +89,13 @@ class MinimalApp:
         return bool(network_cfg.get("ssid"))
 
     def _announce_status(self, now=None, force=False):
-        if self.control.sock is None or not self.wifi.is_connected():
+        if not self.wifi.is_connected():
             return False
         if now is None:
             now = time.ticks_ms()
         if (not force
                 and time.ticks_diff(now, self.last_status_announce_ms) < iconfig.STATUS_ANNOUNCE_INTERVAL_MS):
             return False
-        master = self.runtime.get("master_server", {})
-        host = master.get("host", "")
-        if not host:
-            return False
-        port = int(master.get("port", iconfig.DEFAULT_CONTROL_PORT))
         payload = {
             "status": "ok",
             "message": "status_announce",
@@ -113,7 +111,17 @@ class MinimalApp:
             "recovery_error": self.recovery_error,
             "reboot_required": self.reboot_required,
         }
-        ok = self.control.send(host, port, payload)
+        if self._transport_mode() == "mqtt":
+            ok = self.mqtt_transport.publish_status(payload, self.wifi.is_connected())
+        else:
+            if self.control.sock is None:
+                return False
+            master = self.runtime.get("master_server", {})
+            host = master.get("host", "")
+            if not host:
+                return False
+            port = int(master.get("port", iconfig.DEFAULT_CONTROL_PORT))
+            ok = self.control.send(host, port, payload)
         if ok:
             self.last_status_announce_ms = now
         return ok
@@ -196,9 +204,35 @@ class MinimalApp:
             runtime = self.config_store.update_runtime({
                 "master_server": request.get("master_server", {}),
                 "data_server": request.get("data_server", {}),
+                "mqtt": request.get("mqtt", {}),
             })
             self.runtime = runtime
             return {"status": "ok", "message": "servers_updated", "runtime": runtime, "reboot_required": False}
+
+        if command == "set_transport":
+            runtime = self.config_store.update_runtime({
+                "transport": {
+                    "mode": request.get("mode", "mqtt"),
+                    "topic_namespace": request.get("topic_namespace", iconfig.DEFAULT_TOPIC_NAMESPACE),
+                }
+            })
+            self.runtime = runtime
+            return {"status": "ok", "message": "transport_updated", "runtime": runtime, "reboot_required": False}
+
+        if command == "set_update_source":
+            runtime = self.config_store.load_runtime()
+            update_cfg = runtime.get("update", {})
+            source = request.get("update_source", request.get("source", "server"))
+            channel = runtime.get("channel", "minimal")
+            sources = update_cfg.get("sources", {})
+            manifest_url = request.get("manifest_url", "")
+            if not manifest_url:
+                manifest_url = ((sources.get(source) or {}).get(channel) or "")
+            runtime = self.config_store.update_runtime({
+                "update": {"manifest_url": manifest_url, "enabled": True, "source": source},
+            })
+            self.runtime = runtime
+            return {"status": "ok", "message": "update_source_updated", "runtime": runtime, "reboot_required": False}
 
         if command == "upgrade_to_full":
             if self.updates.is_busy():
@@ -210,8 +244,13 @@ class MinimalApp:
                     "reboot_required": state.get("reboot_required", False),
                     "update_state": state,
                 }
+            runtime_before = self.config_store.load_runtime()
+            update_cfg = runtime_before.get("update", {})
+            source = request.get("update_source", request.get("source", update_cfg.get("source", "github")))
+            sources = update_cfg.get("sources", {})
+            manifest_url = request.get("manifest_url", "") or ((sources.get(source) or {}).get("full") or iconfig.DEFAULT_MANIFESTS["full"])
             runtime = self.config_store.update_runtime({
-                "update": {"manifest_url": iconfig.DEFAULT_MANIFESTS["full"], "enabled": True},
+                "update": {"manifest_url": manifest_url, "enabled": True, "source": source},
             })
             self.runtime = runtime
             self.pending_channel_switch = "full"
@@ -249,6 +288,12 @@ class MinimalApp:
             return {"status": "ok", "message": "rebooting", "reboot_required": True}
 
         return {"status": "error", "message": "unknown_command", "error": command, "reboot_required": False}
+
+    def _transport_mode(self):
+        runtime = getattr(self, "runtime", None) or {}
+        if not isinstance(runtime, dict):
+            return "udp"
+        return runtime.get("transport", {}).get("mode", "udp")
 
 
 def run(wifi_setup_requested=False, recovery_error=""):

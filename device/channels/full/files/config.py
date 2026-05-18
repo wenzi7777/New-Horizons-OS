@@ -45,6 +45,14 @@ LED_RATE_HZ = 5
 UDP_SERVER_IP = "192.168.1.153"
 UDP_SERVER_PORT = 5005
 UDP_CONTROL_PORT = 22345
+MQTT_BROKER_HOST = "isensing-s1.u-aizu.ac.jp"
+MQTT_BROKER_PORT = 8883
+MQTT_TLS = True
+MQTT_TOPIC_NAMESPACE = "newhorizons/v1"
+MQTT_USERNAME = ""
+MQTT_PASSWORD = ""
+SERVER_BASE_URL = "https://isensing-s1.u-aizu.ac.jp/newhorizons/ota"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.15/device/channels"
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 # Packet format:

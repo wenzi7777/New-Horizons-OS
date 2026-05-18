@@ -54,10 +54,12 @@ class FakeWiFi:
         self.connected = False
         self.portal_active = False
         self.events = events if events is not None else []
+        self.state = "idle"
 
     def start_setup_portal(self, reason):
         self.setup_started.append(reason)
         self.portal_active = True
+        self.state = "setup"
         return True
 
     def setup_active(self):
@@ -66,6 +68,7 @@ class FakeWiFi:
     def connect(self):
         self.events.append("wifi_connect")
         self.connected = True
+        self.state = "connected"
         return True
 
     def is_connected(self):
@@ -200,6 +203,13 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         "filesystem_api": types.SimpleNamespace(FilesystemAPI=lambda root: None),
         "filter_engine": types.SimpleNamespace(FilterChain=lambda **kwargs: types.SimpleNamespace(process=lambda idx, value: value, apply_config=lambda *args: None)),
         "frame_protocol": types.SimpleNamespace(decode_scan_frame=lambda payload: {}),
+        "mqtt_transport": types.SimpleNamespace(
+            MQTTTransport=lambda *args, **kwargs: types.SimpleNamespace(
+                poll=lambda *poll_args, **poll_kwargs: None,
+                publish_raw=lambda *raw_args, **raw_kwargs: True,
+                publish_status=lambda *status_args, **status_kwargs: True,
+            )
+        ),
         "packet": types.SimpleNamespace(
             PacketBuilder=lambda **kwargs: types.SimpleNamespace(build=lambda **packet_kwargs: b"packet")
         ),

@@ -54,6 +54,12 @@ def load_minimal_app_module():
             ),
             "device_logging": types.SimpleNamespace(DeviceLogger=lambda path: None),
             "filesystem_api": types.SimpleNamespace(FilesystemAPI=lambda root: None),
+            "mqtt_transport": types.SimpleNamespace(
+                MQTTTransport=lambda *args, **kwargs: types.SimpleNamespace(
+                    poll=lambda *poll_args, **poll_kwargs: None,
+                    publish_status=lambda *status_args, **status_kwargs: True,
+                )
+            ),
             "runtime_config": types.SimpleNamespace(RuntimeConfigStore=lambda root: None),
             "udp_control": types.SimpleNamespace(UDPControlServer=lambda port, logger=None: None),
             "update_manager": types.SimpleNamespace(UpdateManager=lambda *args, **kwargs: None),
@@ -104,6 +110,13 @@ def load_full_app_module():
             "filesystem_api": types.SimpleNamespace(FilesystemAPI=lambda root: None),
             "filter_engine": types.SimpleNamespace(FilterChain=lambda **kwargs: None),
             "frame_protocol": types.SimpleNamespace(decode_scan_frame=lambda payload: {}),
+            "mqtt_transport": types.SimpleNamespace(
+                MQTTTransport=lambda *args, **kwargs: types.SimpleNamespace(
+                    poll=lambda *poll_args, **poll_kwargs: None,
+                    publish_raw=lambda *raw_args, **raw_kwargs: True,
+                    publish_status=lambda *status_args, **status_kwargs: True,
+                )
+            ),
             "packet": types.SimpleNamespace(PacketBuilder=lambda: None),
             "packet_buffer": types.SimpleNamespace(PacketBuffer=lambda **kwargs: None),
             "runtime_config": types.SimpleNamespace(RuntimeConfigStore=lambda root: None),

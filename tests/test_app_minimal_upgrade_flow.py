@@ -29,6 +29,12 @@ def load_app_minimal_module():
     )
     fake_logger_mod = types.SimpleNamespace(DeviceLogger=lambda path: None)
     fake_fs_mod = types.SimpleNamespace(FilesystemAPI=lambda root: None)
+    fake_mqtt_mod = types.SimpleNamespace(
+        MQTTTransport=lambda *args, **kwargs: types.SimpleNamespace(
+            poll=lambda *poll_args, **poll_kwargs: None,
+            publish_status=lambda *status_args, **status_kwargs: True,
+        )
+    )
     fake_runtime_mod = types.SimpleNamespace(RuntimeConfigStore=lambda root: None)
     fake_udp_mod = types.SimpleNamespace(UDPControlServer=lambda port, logger=None: None)
     fake_update_mod = types.SimpleNamespace(UpdateManager=lambda *args, **kwargs: None)
@@ -40,6 +46,7 @@ def load_app_minimal_module():
         "device_identity": fake_identity,
         "device_logging": fake_logger_mod,
         "filesystem_api": fake_fs_mod,
+        "mqtt_transport": fake_mqtt_mod,
         "runtime_config": fake_runtime_mod,
         "udp_control": fake_udp_mod,
         "update_manager": fake_update_mod,
@@ -67,6 +74,9 @@ def load_app_minimal_module():
 class FakeConfigStore:
     def __init__(self, runtime):
         self.runtime = dict(runtime)
+
+    def load_runtime(self):
+        return dict(self.runtime)
 
     def update_runtime(self, patch):
         merged = dict(self.runtime)

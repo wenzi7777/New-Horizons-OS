@@ -18,6 +18,8 @@ def sha256_file(path: Path) -> str:
 
 def should_include(path: Path, root: Path) -> bool:
     rel_parts = path.relative_to(root).parts
+    if any(part.startswith(".") for part in rel_parts):
+        return False
     if "__pycache__" in rel_parts:
         return False
     if path.suffix == ".pyc":
