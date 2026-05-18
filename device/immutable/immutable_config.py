@@ -1,5 +1,5 @@
 FIRMWARE_NAME = "New Horizons OS"
-FIRMWARE_VERSION = "v0.1.17"
+FIRMWARE_VERSION = "v0.1.18"
 DEFAULT_CHANNEL = "minimal"
 
 ACTION_BUTTON_PIN = 46
@@ -50,8 +50,8 @@ DEFAULT_CONTROL_PORT = 22345
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 DEFAULT_MANIFESTS = {
-    "minimal": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.17/device/channels/minimal/manifest.json",
-    "full": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.17/device/channels/full/manifest.json",
+    "minimal": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.18/device/channels/minimal/manifest.json",
+    "full": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.18/device/channels/full/manifest.json",
 }
 DEFAULT_SERVER_MANIFESTS = {
     "minimal": DEFAULT_SERVER_BASE_URL + "/channels/minimal/manifest.json",

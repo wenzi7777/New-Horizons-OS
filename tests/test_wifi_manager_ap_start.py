@@ -193,6 +193,24 @@ def load_wifi_manager(channel):
 
 
 class WiFiManagerApStartTests(unittest.TestCase):
+    def test_minimal_channel_does_not_allocate_ap_during_normal_sta_boot(self):
+        module, fake_network = load_wifi_manager("minimal")
+        manager = module.WiFiManager()
+
+        ok = manager.connect_sta("TestWiFi", "pw")
+
+        self.assertTrue(ok)
+        self.assertEqual(fake_network.ap.calls, [])
+
+    def test_full_channel_does_not_allocate_ap_during_normal_sta_boot(self):
+        module, fake_network = load_wifi_manager("full")
+        manager = module.WiFiManager()
+
+        ok = manager.connect_sta("TestWiFi", "pw")
+
+        self.assertTrue(ok)
+        self.assertEqual(fake_network.ap.calls, [])
+
     def test_minimal_channel_activates_ap_before_config(self):
         module, fake_network = load_wifi_manager("minimal")
 

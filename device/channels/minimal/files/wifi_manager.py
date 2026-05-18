@@ -487,7 +487,11 @@ class WiFiManager:
         return self.ap
 
     def _disable_ap(self):
-        ap = self._ensure_ap()
+        # Normal STA boots should not allocate AP_IF just to disable an AP that
+        # was never created; on memory-tight boards that allocation can fail.
+        if self.ap is None:
+            return
+        ap = self.ap
         try:
             ap.active(False)
         except Exception:
