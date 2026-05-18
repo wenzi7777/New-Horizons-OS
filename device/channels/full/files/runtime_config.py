@@ -2,17 +2,48 @@ import config
 import storage
 
 
+def _server_profiles():
+    return getattr(config, "SERVER_PROFILES", {}) or {}
+
+
+def _default_server_profile_name():
+    default_name = getattr(config, "DEFAULT_SERVER_PROFILE", "")
+    profiles = _server_profiles()
+    if default_name in profiles:
+        return default_name
+    for name in profiles:
+        return name
+    return ""
+
+
+def _server_endpoint(profile_name, key, fallback_host, fallback_port):
+    profile = _server_profiles().get(profile_name, {})
+    endpoint = profile.get(key, {})
+    return {
+        "host": endpoint.get("host", fallback_host),
+        "port": endpoint.get("port", fallback_port),
+    }
+
+
+DEFAULT_SERVER_PROFILE = _default_server_profile_name()
+
+
 DEFAULT_RUNTIME = {
     "firmware_name": "New Horizons OS",
     "channel": "full",
-    "master_server": {
-        "host": config.UDP_SERVER_IP,
-        "port": 22345,
-    },
-    "data_server": {
-        "host": config.UDP_SERVER_IP,
-        "port": config.UDP_SERVER_PORT,
-    },
+    "server_profile": DEFAULT_SERVER_PROFILE,
+    "master_server": _server_endpoint(
+        DEFAULT_SERVER_PROFILE,
+        "master_server",
+        config.UDP_SERVER_IP,
+        config.UDP_CONTROL_PORT,
+    ),
+    "data_server": _server_endpoint(
+        DEFAULT_SERVER_PROFILE,
+        "data_server",
+        config.UDP_SERVER_IP,
+        config.UDP_SERVER_PORT,
+    ),
     "packet_format_version": config.PACKET_VERSION,
     "sensor_precision": "float32",
     "scan_timing": {

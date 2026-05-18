@@ -232,6 +232,7 @@ class WiFiSetupPortal:
                 result = self.manager.apply_credentials(
                     fields.get("ssid", ""),
                     fields.get("password", ""),
+                    fields.get("server_profile", ""),
                 )
                 content = self._render_result_page(result)
                 self._send_response(client, "200 OK", "text/html; charset=utf-8", content)
@@ -332,6 +333,8 @@ class WiFiSetupPortal:
         status = self.manager.portal_status()
         networks = self.manager.scan_networks()
         selected_ssid = status.get("saved_ssid", "")
+        selected_profile = status.get("server_profile", "")
+        server_profile_options = status.get("server_profile_options", [])
 
         options = ['<option value="">Manual input</option>']
         for item in networks:
@@ -352,6 +355,24 @@ class WiFiSetupPortal:
                 )
             )
 
+        server_options = []
+        for item in server_profile_options:
+            value = item.get("value", "")
+            if not value:
+                continue
+            selected = " selected" if value == selected_profile else ""
+            label = "{} ({})".format(
+                item.get("label", value),
+                item.get("master_host", ""),
+            )
+            server_options.append(
+                '<option value="{value}"{selected}>{label}</option>'.format(
+                    value=_escape_html(value),
+                    selected=selected,
+                    label=_escape_html(label),
+                )
+            )
+
         notice = ""
         if status.get("last_error"):
             notice = '<div class="notice error">Last error: {}</div>'.format(_escape_html(status["last_error"]))
@@ -363,6 +384,8 @@ class WiFiSetupPortal:
         portal_ip_url = _escape_html(status.get("portal_ip_url", "http://{}".format(self.config.SETUP_PORTAL_HOST)))
         portal_domain = _escape_html(status.get("portal_domain", ""))
         ap_ssid = _escape_html(status.get("ap_ssid", self.config.SETUP_AP_SSID_PREFIX))
+        master_server = status.get("master_server", {}) or {}
+        data_server = status.get("data_server", {}) or {}
         return """<!doctype html>
 <html>
 <head>
@@ -427,6 +450,11 @@ class WiFiSetupPortal:
         <select id="ssid_select" onchange="document.getElementById('ssid').value = this.value;">
           {options}
         </select>
+        <label for="server_profile">Server profile</label>
+        <select id="server_profile" name="server_profile">
+          {server_options}
+        </select>
+        <p class="muted">正式版會把控制與資料地址設到學校伺服器，本地版會指向實驗室本機開發地址。</p>
         <label for="ssid">Wi-Fi SSID</label>
         <input id="ssid" name="ssid" value="{ssid}" placeholder="Your Wi-Fi name">
         <label for="password">Wi-Fi password</label>
@@ -441,6 +469,8 @@ class WiFiSetupPortal:
         <p class="muted">Portal IP: {ip}</p>
         <p class="muted">Friendly domain: {portal_domain}</p>
         <p class="muted">Saved SSID: {saved_ssid}</p>
+        <p class="muted">Master target: {master_host}:{master_port}</p>
+        <p class="muted">Data target: {data_host}:{data_port}</p>
         <p class="muted">Device state: {device_state}</p>
       </div>
     </div>
@@ -452,6 +482,7 @@ class WiFiSetupPortal:
             ip=ip_addr,
             notice=notice,
             options="".join(options),
+            server_options="".join(server_options),
             ssid=_escape_html(selected_ssid),
             ap_ssid=ap_ssid,
             saved_ssid=_escape_html(selected_ssid or "(none)"),
@@ -459,6 +490,10 @@ class WiFiSetupPortal:
             portal_url=portal_url,
             portal_domain=portal_domain or "(disabled)",
             manual_hint="" if not portal_domain else " Fallback: <strong>{}</strong>.".format(portal_ip_url),
+            master_host=_escape_html(master_server.get("host", "")),
+            master_port=_escape_html(master_server.get("port", "")),
+            data_host=_escape_html(data_server.get("host", "")),
+            data_port=_escape_html(data_server.get("port", "")),
         )
 
     def _render_result_page(self, result):

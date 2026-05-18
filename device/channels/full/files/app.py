@@ -480,11 +480,14 @@ class App:
             return self.update_manager.start_apply()
 
         if cmd == "set_servers":
-            runtime = self.config_store.update_runtime({
+            runtime_patch = {
                 "master_server": request.get("master_server", {}),
                 "data_server": request.get("data_server", {}),
                 "mqtt": request.get("mqtt", {}),
-            })
+            }
+            if request.get("server_profile", ""):
+                runtime_patch["server_profile"] = request.get("server_profile", "")
+            runtime = self.config_store.update_runtime(runtime_patch)
             self.runtime = runtime
             self._ensure_udp_data_socket(self.wifi.is_connected())
             return self._ok("servers_updated", applied=True)
@@ -700,7 +703,11 @@ class App:
             }
 
         if cmd == "set_wifi":
-            result = self.wifi.apply_credentials(request.get("ssid", ""), request.get("password", ""))
+            result = self.wifi.apply_credentials(
+                request.get("ssid", ""),
+                request.get("password", ""),
+                request.get("server_profile", ""),
+            )
             self._ensure_udp_data_socket(self.wifi.is_connected())
             self.update_led_state()
             return {

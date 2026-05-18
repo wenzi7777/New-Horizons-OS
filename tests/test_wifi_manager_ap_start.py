@@ -87,6 +87,49 @@ class FakePortal:
         self.active = False
 
 
+class FakeConfigStore:
+    def __init__(self):
+        self.network = {
+            "wifi_mode": "STA",
+            "ssid": "",
+            "password": "",
+            "setup_method": "softap_webui",
+            "last_ssid": "",
+        }
+        self.runtime = {
+            "server_profile": "local",
+            "master_server": {"host": "192.168.1.153", "port": 22345},
+            "data_server": {"host": "192.168.1.153", "port": 5005},
+        }
+
+    def load_network(self):
+        return dict(self.network)
+
+    def save_network(self, network):
+        self.network = dict(network)
+
+    def update_network(self, patch):
+        self.network.update(patch)
+        return dict(self.network)
+
+    def load_runtime(self):
+        return {
+            "server_profile": self.runtime.get("server_profile", "local"),
+            "master_server": dict(self.runtime.get("master_server", {})),
+            "data_server": dict(self.runtime.get("data_server", {})),
+        }
+
+    def update_runtime(self, patch):
+        for key, value in patch.items():
+            if isinstance(value, dict) and isinstance(self.runtime.get(key), dict):
+                merged = dict(self.runtime[key])
+                merged.update(value)
+                self.runtime[key] = merged
+            else:
+                self.runtime[key] = value
+        return self.load_runtime()
+
+
 def load_wifi_manager(channel):
     path = REPO_ROOT / "device" / "channels" / channel / "files" / "wifi_manager.py"
     fake_network = FakeNetwork()
@@ -98,6 +141,19 @@ def load_wifi_manager(channel):
         SETUP_PORTAL_HOST="192.168.4.1",
         SETUP_PORTAL_PORT=80,
         PRINT_WIFI_STATUS=True,
+        DEFAULT_SERVER_PROFILE="local",
+        SERVER_PROFILES={
+            "local": {
+                "label": "本地版",
+                "master_server": {"host": "192.168.1.153", "port": 22345},
+                "data_server": {"host": "192.168.1.153", "port": 5005},
+            },
+            "production": {
+                "label": "正式版",
+                "master_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 22345},
+                "data_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 5005},
+            },
+        },
     )
     fake_secrets = types.SimpleNamespace(WIFI_SSID="", WIFI_PASSWORD="")
     fake_portal = types.SimpleNamespace(WiFiSetupPortal=FakePortal)
@@ -183,6 +239,52 @@ class WiFiManagerApStartTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn(("active", False), fake_network.ap.calls)
         self.assertFalse(fake_network.ap.enabled)
+
+    def test_apply_credentials_with_production_profile_updates_runtime_endpoints(self):
+        module, _fake_network = load_wifi_manager("minimal")
+        store = FakeConfigStore()
+        manager = module.WiFiManager(config_store=store)
+        manager.start_setup_portal()
+
+        result = manager.apply_credentials("CampusWiFi", "pw", "production")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(store.runtime["server_profile"], "production")
+        self.assertEqual(store.runtime["master_server"]["host"], "isensing-s1.u-aizu.ac.jp")
+        self.assertEqual(store.runtime["master_server"]["port"], 22345)
+        self.assertEqual(store.runtime["data_server"]["host"], "isensing-s1.u-aizu.ac.jp")
+        self.assertEqual(store.runtime["data_server"]["port"], 5005)
+
+    def test_portal_status_reports_selected_server_profile(self):
+        module, _fake_network = load_wifi_manager("minimal")
+        store = FakeConfigStore()
+        store.update_runtime({
+            "server_profile": "production",
+            "master_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 22345},
+            "data_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 5005},
+        })
+
+        manager = module.WiFiManager(config_store=store)
+        status = manager.portal_status()
+
+        self.assertEqual(status["server_profile"], "production")
+        self.assertEqual(
+            status["server_profile_options"],
+            [
+                {
+                    "value": "local",
+                    "label": "本地版",
+                    "master_host": "192.168.1.153",
+                    "data_host": "192.168.1.153",
+                },
+                {
+                    "value": "production",
+                    "label": "正式版",
+                    "master_host": "isensing-s1.u-aizu.ac.jp",
+                    "data_host": "isensing-s1.u-aizu.ac.jp",
+                },
+            ],
+        )
 
 
 if __name__ == "__main__":

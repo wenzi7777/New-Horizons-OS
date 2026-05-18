@@ -201,11 +201,14 @@ class MinimalApp:
             return {"status": "ok", "message": "channel_updated", "runtime": runtime, "reboot_required": False}
 
         if command == "set_servers":
-            runtime = self.config_store.update_runtime({
+            runtime_patch = {
                 "master_server": request.get("master_server", {}),
                 "data_server": request.get("data_server", {}),
                 "mqtt": request.get("mqtt", {}),
-            })
+            }
+            if request.get("server_profile", ""):
+                runtime_patch["server_profile"] = request.get("server_profile", "")
+            runtime = self.config_store.update_runtime(runtime_patch)
             self.runtime = runtime
             return {"status": "ok", "message": "servers_updated", "runtime": runtime, "reboot_required": False}
 
@@ -268,7 +271,11 @@ class MinimalApp:
             return {"status": "ok", "message": "wifi_setup_stopped", "wifi_setup": self.wifi.portal_status(), "reboot_required": False}
 
         if command == "set_wifi":
-            result = self.wifi.apply_credentials(request.get("ssid", ""), request.get("password", ""))
+            result = self.wifi.apply_credentials(
+                request.get("ssid", ""),
+                request.get("password", ""),
+                request.get("server_profile", ""),
+            )
             return {
                 "status": "ok" if result.get("ok") else "error",
                 "message": result.get("message", ""),

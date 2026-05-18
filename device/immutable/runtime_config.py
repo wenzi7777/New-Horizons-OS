@@ -2,11 +2,48 @@ import immutable_config as iconfig
 import storage
 
 
+def _server_profiles():
+    return getattr(iconfig, "SERVER_PROFILES", {}) or {}
+
+
+def _default_server_profile_name():
+    default_name = getattr(iconfig, "DEFAULT_SERVER_PROFILE", "")
+    profiles = _server_profiles()
+    if default_name in profiles:
+        return default_name
+    for name in profiles:
+        return name
+    return ""
+
+
+def _server_endpoint(profile_name, key, fallback_host, fallback_port):
+    profile = _server_profiles().get(profile_name, {})
+    endpoint = profile.get(key, {})
+    return {
+        "host": endpoint.get("host", fallback_host),
+        "port": endpoint.get("port", fallback_port),
+    }
+
+
+DEFAULT_SERVER_PROFILE = _default_server_profile_name()
+
+
 DEFAULT_RUNTIME = {
     "firmware_name": iconfig.FIRMWARE_NAME,
     "channel": iconfig.DEFAULT_CHANNEL,
-    "master_server": {"host": iconfig.DEFAULT_MASTER_HOST, "port": iconfig.DEFAULT_MASTER_PORT},
-    "data_server": {"host": iconfig.DEFAULT_DATA_HOST, "port": iconfig.DEFAULT_DATA_PORT},
+    "server_profile": DEFAULT_SERVER_PROFILE,
+    "master_server": _server_endpoint(
+        DEFAULT_SERVER_PROFILE,
+        "master_server",
+        iconfig.DEFAULT_MASTER_HOST,
+        iconfig.DEFAULT_MASTER_PORT,
+    ),
+    "data_server": _server_endpoint(
+        DEFAULT_SERVER_PROFILE,
+        "data_server",
+        iconfig.DEFAULT_DATA_HOST,
+        iconfig.DEFAULT_DATA_PORT,
+    ),
     "packet_format_version": 1,
     "sensor_precision": "float32",
     "scan_timing": {

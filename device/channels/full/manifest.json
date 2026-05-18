@@ -1,14 +1,14 @@
 {
   "manifest_version": 1,
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.1.15",
+  "firmware_version": "v0.1.16",
   "channel": "full",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.15/device/channels/full/files",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.16/device/channels/full/files",
   "files": [
     {
       "path": "app.py",
-      "sha256": "1e9cf4ce4ea5f888058cfa5b9998c5ea2544efc3810908b0a2f7f7281b0ba4c2",
-      "size": 37793,
+      "sha256": "ad3e2195ac2bff3e957e425d2e12caa680d3d9ba821eeabd4dd3db7f54b2f909",
+      "size": 38184,
       "kind": "code",
       "reboot_required": true
     },
@@ -42,8 +42,8 @@
     },
     {
       "path": "config.py",
-      "sha256": "4a1bccf96adeb80887eb350ea9e51de6d1381222a947e462261857b3db7ac16a",
-      "size": 3585,
+      "sha256": "bdddc003ba889d62e050cb5d076159fabc35c1f15659f05a43db463fff75ed1e",
+      "size": 4117,
       "kind": "code",
       "reboot_required": true
     },
@@ -77,7 +77,7 @@
     },
     {
       "path": "device_state/runtime_config.json",
-      "sha256": "7c9ce0ccf264ec33306a3d84953cde49bc7bb1249d897586f332a383c0ac84de",
+      "sha256": "15c604a02283e3efa5baf439202fe11b58576a58fee0dc59c9a682c15c94c933",
       "size": 600,
       "kind": "config",
       "reboot_required": false
@@ -189,8 +189,8 @@
     },
     {
       "path": "runtime_config.py",
-      "sha256": "c006855b017962d10b14654416624a80bd64921d2c56393882f600ee319ceb3d",
-      "size": 5147,
+      "sha256": "67e5d430b41919d2d0f6fea983bbbf54e402c0468ba042d0737058ffdabf2e2b",
+      "size": 6010,
       "kind": "code",
       "reboot_required": true
     },
@@ -280,8 +280,8 @@
     },
     {
       "path": "wifi_manager.py",
-      "sha256": "9d3c43974065dc66fe6d168b283cfc2784f4e030024aae595128dcf53881bc77",
-      "size": 10037,
+      "sha256": "699dc0fa332ba24e612ee82c896790b85ad1e4b7ce3b40d48e5ced686dddf1b6",
+      "size": 13823,
       "kind": "code",
       "reboot_required": true
     }

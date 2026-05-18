@@ -1,5 +1,5 @@
 FIRMWARE_NAME = "New Horizons OS"
-FIRMWARE_VERSION = "v0.1.15"
+FIRMWARE_VERSION = "v0.1.16"
 DEFAULT_CHANNEL = "minimal"
 
 ACTION_BUTTON_PIN = 46
@@ -21,6 +21,20 @@ DEFAULT_MASTER_HOST = "192.168.1.153"
 DEFAULT_MASTER_PORT = 22345
 DEFAULT_DATA_HOST = "192.168.1.153"
 DEFAULT_DATA_PORT = 5005
+PRODUCTION_SERVER_HOST = "isensing-s1.u-aizu.ac.jp"
+DEFAULT_SERVER_PROFILE = "local"
+SERVER_PROFILES = {
+    "local": {
+        "label": "本地版",
+        "master_server": {"host": DEFAULT_MASTER_HOST, "port": DEFAULT_MASTER_PORT},
+        "data_server": {"host": DEFAULT_DATA_HOST, "port": DEFAULT_DATA_PORT},
+    },
+    "production": {
+        "label": "正式版",
+        "master_server": {"host": PRODUCTION_SERVER_HOST, "port": DEFAULT_MASTER_PORT},
+        "data_server": {"host": PRODUCTION_SERVER_HOST, "port": DEFAULT_DATA_PORT},
+    },
+}
 DEFAULT_MQTT_HOST = "isensing-s1.u-aizu.ac.jp"
 DEFAULT_MQTT_PORT = 8883
 DEFAULT_MQTT_TLS = True
@@ -36,8 +50,8 @@ DEFAULT_CONTROL_PORT = 22345
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 DEFAULT_MANIFESTS = {
-    "minimal": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.15/device/channels/minimal/manifest.json",
-    "full": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.15/device/channels/full/manifest.json",
+    "minimal": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.16/device/channels/minimal/manifest.json",
+    "full": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.16/device/channels/full/manifest.json",
 }
 DEFAULT_SERVER_MANIFESTS = {
     "minimal": DEFAULT_SERVER_BASE_URL + "/channels/minimal/manifest.json",

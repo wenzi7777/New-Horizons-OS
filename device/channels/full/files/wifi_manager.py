@@ -201,7 +201,7 @@ class WiFiManager:
             ordered.append(item)
         return ordered[:12]
 
-    def apply_credentials(self, ssid, password):
+    def apply_credentials(self, ssid, password, server_profile=None):
         ssid = (ssid or "").strip()
         password = password or ""
         if not ssid:
@@ -217,6 +217,9 @@ class WiFiManager:
                 "setup_method": "softap_webui",
                 "last_ssid": ssid,
             })
+            runtime_patch = self._runtime_patch_for_server_profile(server_profile)
+            if runtime_patch is not None:
+                self.config_store.update_runtime(runtime_patch)
 
         ok = self.connect_sta(ssid, password)
         if ok:
@@ -251,6 +254,16 @@ class WiFiManager:
 
     def portal_status(self):
         network_cfg = self.config_store.load_network() if self.config_store is not None else {}
+        runtime_cfg = self.config_store.load_runtime() if self.config_store is not None else {}
+        selected_profile = self._selected_server_profile(runtime_cfg)
+        master_server = dict(runtime_cfg.get("master_server", {}))
+        data_server = dict(runtime_cfg.get("data_server", {}))
+        profile_runtime = self._runtime_patch_for_server_profile(selected_profile)
+        if profile_runtime is not None:
+            if not master_server:
+                master_server = dict(profile_runtime.get("master_server", {}))
+            if not data_server:
+                data_server = dict(profile_runtime.get("data_server", {}))
         portal_ip = config.SETUP_PORTAL_HOST
         portal_domain = getattr(config, "SETUP_PORTAL_DOMAIN", "")
         ap_ssid = self.ap_ssid()
@@ -270,7 +283,81 @@ class WiFiManager:
             "saved_ssid": network_cfg.get("ssid", ""),
             "last_error": self.last_error,
             "last_setup_result": self.last_setup_result,
+            "server_profile": selected_profile,
+            "server_profile_options": self._server_profile_options(),
+            "master_server": master_server,
+            "data_server": data_server,
         }
+
+    def _server_profiles(self):
+        profiles = getattr(config, "SERVER_PROFILES", {}) or {}
+        normalized = {}
+        for name, item in profiles.items():
+            item = item or {}
+            normalized[str(name)] = {
+                "label": str(item.get("label", name)),
+                "master_server": dict(item.get("master_server", {})),
+                "data_server": dict(item.get("data_server", {})),
+            }
+        return normalized
+
+    def _default_server_profile(self):
+        profiles = self._server_profiles()
+        default_name = getattr(config, "DEFAULT_SERVER_PROFILE", "")
+        if default_name in profiles:
+            return default_name
+        for name in profiles:
+            return name
+        return ""
+
+    def _runtime_patch_for_server_profile(self, profile_name):
+        profile_name = str(profile_name or "").strip()
+        profiles = self._server_profiles()
+        if not profiles:
+            return None
+        if profile_name not in profiles:
+            if not profile_name:
+                return None
+            profile_name = self._default_server_profile()
+        profile = profiles.get(profile_name, {})
+        return {
+            "server_profile": profile_name,
+            "master_server": dict(profile.get("master_server", {})),
+            "data_server": dict(profile.get("data_server", {})),
+        }
+
+    def _selected_server_profile(self, runtime_cfg):
+        runtime_cfg = runtime_cfg or {}
+        profiles = self._server_profiles()
+        requested = str(runtime_cfg.get("server_profile", "") or "").strip()
+        if requested in profiles:
+            return requested
+        master = runtime_cfg.get("master_server", {})
+        data = runtime_cfg.get("data_server", {})
+        for name, profile in profiles.items():
+            if self._server_equals(master, profile.get("master_server", {})) and self._server_equals(
+                    data, profile.get("data_server", {})):
+                return name
+        return self._default_server_profile()
+
+    def _server_profile_options(self):
+        options = []
+        for name, profile in self._server_profiles().items():
+            options.append({
+                "value": name,
+                "label": profile.get("label", name),
+                "master_host": profile.get("master_server", {}).get("host", ""),
+                "data_host": profile.get("data_server", {}).get("host", ""),
+            })
+        return options
+
+    def _server_equals(self, lhs, rhs):
+        lhs = lhs or {}
+        rhs = rhs or {}
+        return (
+            str(lhs.get("host", "")) == str(rhs.get("host", ""))
+            and int(lhs.get("port", 0) or 0) == int(rhs.get("port", 0) or 0)
+        )
 
     def _credentials(self):
         ssid = secrets.WIFI_SSID
