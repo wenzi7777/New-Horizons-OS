@@ -6,8 +6,10 @@ import network
 import config
 import secrets
 from device_identity import get_device_suffix
-from wifi_portal import WiFiSetupPortal
 import storage
+
+
+WiFiSetupPortal = None
 
 
 class WiFiManager:
@@ -19,7 +21,7 @@ class WiFiManager:
         self.state = "idle"
         self.last_error = ""
         self.last_setup_result = ""
-        self.portal = WiFiSetupPortal(self, config, logger)
+        self.portal = None
 
     def connect(self):
         wifi_mode = config.WIFI_MODE
@@ -114,6 +116,7 @@ class WiFiManager:
         self.state = "wifi_setup_active"
         self.last_setup_result = reason
 
+        portal = self._ensure_portal()
         ap = self._ensure_ap()
         ap_ssid = self.ap_ssid()
 
@@ -130,20 +133,23 @@ class WiFiManager:
 
         ap.config(essid=ap_ssid, password=config.SETUP_AP_PASSWORD)
 
-        self.portal.start()
+        portal.start()
         ifconfig = ap.ifconfig()
         self._log_info("wifi_setup_ap_started ssid={} ip={}".format(ap_ssid, ifconfig[0]))
         return True
 
     def service_setup_portal(self):
+        if self.portal is None:
+            return False
         return self.portal.service()
 
     def stop_setup_portal(self):
-        self.portal.stop()
+        if self.portal is not None:
+            self.portal.stop()
         self._disable_ap()
 
     def setup_active(self):
-        return bool(self.portal.active)
+        return bool(self.portal is not None and self.portal.active)
 
     def scan_networks(self):
         sta = self._ensure_sta()
@@ -534,6 +540,15 @@ class WiFiManager:
         if self.ap is None:
             self.ap = network.WLAN(network.AP_IF)
         return self.ap
+
+    def _ensure_portal(self):
+        global WiFiSetupPortal
+        if self.portal is None:
+            if WiFiSetupPortal is None:
+                from wifi_portal import WiFiSetupPortal as LoadedWiFiSetupPortal
+                WiFiSetupPortal = LoadedWiFiSetupPortal
+            self.portal = WiFiSetupPortal(self, config, self.logger)
+        return self.portal
 
     def _disable_ap(self):
         # Normal STA boots should not allocate AP_IF just to disable an AP that

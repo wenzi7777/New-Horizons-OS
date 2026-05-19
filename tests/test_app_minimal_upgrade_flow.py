@@ -78,6 +78,8 @@ def load_recovery_app_module():
         spec = importlib.util.spec_from_file_location("recovery_app_test_module", RECOVERY_APP_PATH)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        module.time.ticks_ms = lambda: 1000
+        module.time.ticks_diff = lambda now, then: now - then
         module.time.ticks_add = lambda now, delta: now + delta
         return module
     finally:
@@ -124,12 +126,17 @@ class FakeMQTTTransport:
     def __init__(self):
         self.reconfigure_calls = 0
         self.close_calls = 0
+        self.status_payloads = []
 
     def reconfigure(self):
         self.reconfigure_calls += 1
 
     def close(self):
         self.close_calls += 1
+
+    def publish_status(self, payload, wifi_connected):
+        self.status_payloads.append((payload, wifi_connected))
+        return True
 
 
 class FakePortalWiFi:
@@ -141,6 +148,49 @@ class FakePortalWiFi:
 
 
 class RecoveryOSWriterFlowTests(unittest.TestCase):
+    def test_os_write_progress_updates_state_and_publishes_status(self):
+        module = load_recovery_app_module()
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.device_id = 0x12345678
+        app.device_uid = "UID123"
+        app.device_name = "New Horizons OS"
+        app.runtime = {
+            "mode": "recovery",
+            "transport": {"mode": "mqtt", "topic_namespace": "newhorizons/v1"},
+        }
+        app.wifi = type("FakeWiFi", (), {
+            "is_connected": lambda self: True,
+            "portal_status": lambda self: {"active": False},
+        })()
+        app.mqtt_transport = FakeMQTTTransport()
+        app.control = None
+        app.recovery_error = ""
+        app.reboot_required = False
+        app.logger = FakeLogger()
+        app.last_status_announce_ms = 0
+
+        app._os_write_progress({
+            "message": "os_write_progress",
+            "phase": "file_done",
+            "version": "v0.2.8",
+            "total_files": 4,
+            "download_files": 3,
+            "skipped_files": 1,
+            "written_files": 2,
+            "current_file": "app.py",
+        })
+
+        self.assertEqual(app.update_state["phase"], "downloading")
+        self.assertEqual(app.update_state["operation"], "write_os")
+        self.assertEqual(app.update_state["total_files"], 4)
+        self.assertEqual(app.update_state["applied_files"], 3)
+        self.assertEqual(app.update_state["downloaded_files"], 2)
+        self.assertEqual(app.update_state["current_file"], "app.py")
+        self.assertEqual(len(app.mqtt_transport.status_payloads), 1)
+        published, wifi_connected = app.mqtt_transport.status_payloads[0]
+        self.assertTrue(wifi_connected)
+        self.assertEqual(published["update_state"]["applied_files"], 3)
+
     def test_recovery_os_installed_detects_app_entrypoint(self):
         module = load_recovery_app_module()
         app = module.RecoveryApp.__new__(module.RecoveryApp)

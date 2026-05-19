@@ -73,15 +73,6 @@ class App:
     def setup(self):
         self.logger.info("setup_start")
         self._print_setup()
-        self._ensure_led()
-
-        if self.led:
-            self.logger.info("setup_led_begin_start")
-            self.led.begin()
-            self.logger.info("setup_led_begin_done")
-            self.logger.info("setup_led_boot_window_start")
-            self.led.set_boot_window()
-            self.logger.info("setup_led_boot_window_done")
 
         if config.PRINT_PIN_CONFLICTS:
             conflicts = board_pins.validate_pins()
@@ -90,8 +81,6 @@ class App:
                     self.logger.warn("pin_conflict gpio={} roles={}".format(pin, names))
 
         if self.wifi_setup_requested or not self._has_network_hint():
-            if self.led:
-                self.led.set_wifi_setup()
             reason = "boot_window" if self.wifi_setup_requested else "missing_credentials"
             self.wifi.start_setup_portal(reason)
             self.logger.info("setup_wifi_portal_started reason={}".format(reason))
@@ -101,10 +90,20 @@ class App:
             wifi_ok = self.wifi.connect()
             self.logger.info("setup_wifi_connect_done ok={}".format(bool(wifi_ok)))
             if not wifi_ok:
-                if self.led:
-                    self.led.set_wifi_setup()
                 self.wifi.start_setup_portal("connect_failed")
                 self.logger.info("setup_wifi_portal_started reason=connect_failed")
+
+        self._ensure_led()
+        if self.led:
+            self.logger.info("setup_led_begin_start")
+            self.led.begin()
+            self.logger.info("setup_led_begin_done")
+            self.logger.info("setup_led_boot_window_start")
+            self.led.set_boot_window()
+            self.logger.info("setup_led_boot_window_done")
+            if self.wifi.setup_active():
+                self.led.set_wifi_setup()
+
         if wifi_ok:
             self._ensure_runtime_services()
         self._ensure_udp_data_socket(wifi_ok)

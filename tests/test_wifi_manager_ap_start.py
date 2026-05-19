@@ -176,7 +176,14 @@ def load_wifi_manager(channel, include_os_dir=True):
         config_values["OS_DIR"] = "nhos"
     fake_config = types.SimpleNamespace(**config_values)
     fake_secrets = types.SimpleNamespace(WIFI_SSID="", WIFI_PASSWORD="")
-    fake_portal = types.SimpleNamespace(WiFiSetupPortal=FakePortal)
+    portal_instances = []
+
+    class CountingPortal(FakePortal):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            portal_instances.append(self)
+
+    fake_portal = types.SimpleNamespace(WiFiSetupPortal=CountingPortal)
     fake_identity = types.SimpleNamespace(get_device_suffix=lambda: "010203")
     fake_time = types.SimpleNamespace(sleep_ms=lambda _ms: None, sleep=lambda _s: None)
     fake_gc = types.SimpleNamespace(collect=lambda: None, mem_free=lambda: 65536)
@@ -200,6 +207,8 @@ def load_wifi_manager(channel, include_os_dir=True):
         spec = importlib.util.spec_from_file_location(f"wifi_manager_{channel}", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        module.WiFiSetupPortal = CountingPortal
+        module._test_portal_instances = portal_instances
     finally:
         for name, saved_module in saved_modules.items():
             if saved_module is None:
@@ -228,6 +237,15 @@ class WiFiManagerApStartTests(unittest.TestCase):
 
         self.assertTrue(ok)
         self.assertEqual(fake_network.ap.calls, [])
+
+    def test_full_channel_does_not_construct_portal_during_normal_sta_boot(self):
+        module, _fake_network = load_wifi_manager("full")
+        manager = module.WiFiManager()
+
+        ok = manager.connect_sta("TestWiFi", "pw")
+
+        self.assertTrue(ok)
+        self.assertEqual(module._test_portal_instances, [])
 
     def test_minimal_channel_activates_ap_before_config(self):
         module, fake_network = load_wifi_manager("minimal")

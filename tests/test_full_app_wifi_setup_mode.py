@@ -135,13 +135,16 @@ class FakeRuntimeConfigStore:
 
 
 class FakeLED:
-    def __init__(self):
+    def __init__(self, events=None):
+        self.events = events if events is not None else []
         self.states = []
 
     def begin(self):
+        self.events.append("led_begin")
         pass
 
     def set_boot_window(self):
+        self.events.append("led_boot_window")
         self.states.append("boot_window")
 
     def set_wifi_setup(self):
@@ -262,7 +265,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         "wifi_manager": types.SimpleNamespace(WiFiManager=lambda *args, **kwargs: FakeWiFi(events)),
     }
     if enable_led:
-        injected["sk6812"] = types.SimpleNamespace(SK6812Status=FakeLED)
+        injected["sk6812"] = types.SimpleNamespace(SK6812Status=lambda: FakeLED(events))
     for name, module in injected.items():
         saved_modules[name] = sys.modules.get(name)
         sys.modules[name] = module
@@ -313,6 +316,20 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     sys.modules[name] = saved
 
         self.assertEqual(events[:2], ["wifi_connect", "scan_start"])
+
+    def test_normal_boot_connects_wifi_before_led_initialization(self):
+        module, _fake_scan, events, saved_modules = load_full_app_module(enable_led=True)
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertLess(events.index("wifi_connect"), events.index("led_begin"))
 
     def test_runtime_services_are_deferred_until_after_wifi_boot(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()

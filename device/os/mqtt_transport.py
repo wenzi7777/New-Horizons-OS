@@ -145,6 +145,7 @@ class MQTTTransport:
         except Exception as exc:
             self._warn("mqtt_publish_json_failed {}".format(exc))
             self.close()
+            self.last_attempt_ms = 0
             return False
 
     def _publish_bytes(self, topic, payload):

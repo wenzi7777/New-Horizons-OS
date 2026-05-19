@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "recovery",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.8",
-  "version": "v0.2.8",
+  "firmware_version": "v0.2.9",
+  "version": "v0.2.9",
   "target_root": "/recovery",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.8/device/recovery",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.9/device/recovery",
   "files": [
     {
       "path": "config.py",
@@ -37,15 +37,15 @@
     },
     {
       "path": "immutable_config.py",
-      "sha256": "aec0899559afdb46399df93da2153f588217869a824931a00b5ab7431814667e",
+      "sha256": "b0449b8951b2830508c5fc0646405230a9674027f8ba91a78f43de24e675cd6a",
       "size": 2154,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "mqtt_transport.py",
-      "sha256": "81b06c3c94e80ecd4fb3824e93d0d148a479d595c871078fd1b95019277f6e1c",
-      "size": 6228,
+      "sha256": "a3320fbeab5e41d7ba5ebde10b702a25d791df054ba299b2946d44d8996bd45b",
+      "size": 6265,
       "kind": "code",
       "reboot_required": true
     },
@@ -58,8 +58,8 @@
     },
     {
       "path": "recovery_app.py",
-      "sha256": "77a2ec79863f7504f54bbd1fa3e330f434b9602898ab11cc476a0984be3278cf",
-      "size": 15749,
+      "sha256": "b9d9002cb2d591e6582c3b349e622b154a4af1391017bf9a489e928bb697896c",
+      "size": 19345,
       "kind": "code",
       "reboot_required": true
     },
@@ -114,15 +114,15 @@
     },
     {
       "path": "wifi_manager.py",
-      "sha256": "00fb474958b26d15e4d6d83d1fcc2618cf75164bfc32016faa6dd57a0c5baa39",
-      "size": 21407,
+      "sha256": "0d67643b96dbcb6d41cb397d41765f9360e94d455e8d0a6cb8df1959ac500878",
+      "size": 21885,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "wifi_portal.py",
-      "sha256": "ff59034e33cff284bc86b9d08aaf8cb132800e2a09ddc523c11fab4fe60383c6",
-      "size": 23744,
+      "sha256": "25f1b48037b5b0a1b3fc7919cc00d98c7b57fcd82c02946f27666243fdac548a",
+      "size": 23742,
       "kind": "code",
       "reboot_required": true
     }

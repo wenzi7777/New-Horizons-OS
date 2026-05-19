@@ -37,6 +37,7 @@ class RecoveryApp:
         self.control = UDPControlServer(iconfig.DEFAULT_CONTROL_PORT, self.logger)
         self.mqtt_transport = MQTTTransport(lambda: self.runtime, self.device_uid, self.logger)
         self.os_writer = None
+        self.update_state = self._default_update_state()
         self.last_connect_ms = 0
         self.boot_network_initialized = False
         self.last_status_announce_ms = 0
@@ -148,7 +149,7 @@ class RecoveryApp:
             "runtime": self.runtime,
             "wifi_connected": self.wifi.is_connected(),
             "wifi_setup": self.wifi.portal_status(),
-            "update_state": {},
+            "update_state": self._current_update_state(),
             "recovery_error": self.recovery_error,
             "reboot_required": self.reboot_required,
         }
@@ -189,7 +190,7 @@ class RecoveryApp:
                 "logging": self._logging_status(),
                 "wifi_connected": self.wifi.is_connected(),
                 "wifi_setup": self.wifi.portal_status(),
-                "update_state": {},
+                "update_state": self._current_update_state(),
                 "recovery_error": self.recovery_error,
                 "reboot_required": self.reboot_required,
             }
@@ -199,6 +200,21 @@ class RecoveryApp:
             writer = self._ensure_os_writer()
             result = writer.check_os_release(release_url)
             result["release_url"] = release_url
+            self._set_update_state({
+                "phase": "ready",
+                "operation": "check_os_release",
+                "version": result.get("latest_version", ""),
+                "manifest_url": result.get("manifest_url", ""),
+                "total_files": 0,
+                "applied_files": 0,
+                "downloaded_files": 0,
+                "skipped_files": 0,
+                "current_file": "",
+                "last_error": "",
+                "last_result": "manifest_ready",
+                "reboot_required": False,
+            })
+            result["update_state"] = self._current_update_state()
             return result
 
         if command == "write_os":
@@ -206,6 +222,20 @@ class RecoveryApp:
             writer = self._ensure_os_writer()
             result = writer.write_os(release_url)
             result["release_url"] = release_url
+            self._set_update_state({
+                "phase": "done",
+                "operation": "write_os",
+                "version": result.get("version", ""),
+                "total_files": int(result.get("downloaded_files", 0)) + int(result.get("skipped_files", 0)),
+                "applied_files": int(result.get("downloaded_files", 0)) + int(result.get("skipped_files", 0)),
+                "downloaded_files": int(result.get("downloaded_files", 0)),
+                "skipped_files": int(result.get("skipped_files", 0)),
+                "current_file": "",
+                "last_error": "",
+                "last_result": "applied",
+                "reboot_required": bool(result.get("reboot_required", False)),
+            })
+            result["update_state"] = self._current_update_state()
             return result
 
         if command == "reboot_to_os":
@@ -322,8 +352,60 @@ class RecoveryApp:
             if OSWriter is None:
                 from os_writer import OSWriter as LoadedOSWriter
                 OSWriter = LoadedOSWriter
-            self.os_writer = OSWriter(".", self.logger)
+            self.os_writer = OSWriter(".", self.logger, progress=self._os_write_progress)
         return self.os_writer
+
+    def _default_update_state(self):
+        return {
+            "phase": "idle",
+            "operation": "",
+            "version": "",
+            "manifest_url": "",
+            "total_files": 0,
+            "applied_files": 0,
+            "downloaded_files": 0,
+            "skipped_files": 0,
+            "current_file": "",
+            "last_error": "",
+            "last_result": "",
+            "reboot_required": False,
+        }
+
+    def _current_update_state(self):
+        state = getattr(self, "update_state", None)
+        if not isinstance(state, dict):
+            state = self._default_update_state()
+            self.update_state = state
+        return state
+
+    def _set_update_state(self, patch):
+        state = self._default_update_state()
+        state.update(self._current_update_state())
+        state.update(patch or {})
+        self.update_state = state
+        return state
+
+    def _os_write_progress(self, payload):
+        raw_phase = str(payload.get("phase", "") or "")
+        downloaded = int(payload.get("written_files", payload.get("downloaded_files", 0)) or 0)
+        skipped = int(payload.get("skipped_files", 0) or 0)
+        total = int(payload.get("total_files", downloaded + skipped) or 0)
+        phase = "done" if raw_phase == "complete" else "downloading"
+        last_result = "applied" if raw_phase == "complete" else raw_phase
+        self._set_update_state({
+            "phase": phase,
+            "operation": "write_os",
+            "version": payload.get("version", ""),
+            "total_files": total,
+            "applied_files": min(total, downloaded + skipped) if total else downloaded + skipped,
+            "downloaded_files": downloaded,
+            "skipped_files": skipped,
+            "current_file": "" if raw_phase == "complete" else payload.get("current_file", ""),
+            "last_error": "",
+            "last_result": last_result,
+            "reboot_required": raw_phase == "complete",
+        })
+        self._announce_status(force=True)
 
     def _set_logging(self, request):
         logging_cfg = self._normalize_logging_config(request)
