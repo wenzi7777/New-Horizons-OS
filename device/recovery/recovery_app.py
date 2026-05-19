@@ -105,7 +105,7 @@ class RecoveryApp:
 
     def _os_installed(self):
         os_dir = getattr(iconfig, "OS_DIR", "nhos")
-        return self._path_exists(os_dir + "/app.py") or self._path_exists(os_dir + "/main.py")
+        return self._path_exists(os_dir + "/app.mpy")
 
     def _service_wifi_setup_portal(self):
         handled = self.wifi.service_setup_portal()

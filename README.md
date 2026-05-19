@@ -73,9 +73,9 @@ python3 firmware/scripts/upload_filesystem.py --port /dev/cu.usbserial-210 --tar
 ```bash
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
 python3 firmware/scripts/build_mpy_release.py --repo-root . --source device/os --output device/os_mpy
-python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.12 \
+python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.13 \
   --source-root device/os_mpy --base-url-path device/os_mpy \
-  --delete-source-root device/os --delete-suffix .py
+  --delete-source-root device/os --delete-suffix .py --delete-path main.py
 ```
 
 產物是：
@@ -89,7 +89,8 @@ OS manifest 會：
 
 - 使用 `type: "os"` 與 `target_root: "/nhos"`。
 - 發布時 OS Python 模組會先編譯成 `.mpy`，manifest 下載 `device/os_mpy/` 內的產物。
-- manifest 會把舊 `/nhos/*.py` 加入 `delete`，避免舊 source module 留在裝置上干擾 `.mpy` import。
+- OS canonical entrypoint 是 `/nhos/app.mpy`；launcher 與 recovery status 只用這個檔案判定 OS installed。
+- manifest 會把舊 `/nhos/*.py` 與歷史 `/nhos/main.py` 加入 `delete`，避免舊 source module 留在裝置上干擾 `.mpy` import。
 - 以 streaming SHA256 記錄每個檔案 hash。
 - 排除 `.device/`、`device_state/`、`__pycache__/`、`.pyc` 與 `manifest.json`。
 - 不再包含舊 `channel` 欄位。
@@ -109,8 +110,8 @@ release JSON 格式：
 ```json
 {
   "product": "New Horizons OS",
-  "latest": "v0.2.12",
-  "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.12/device/os/manifest.json"
+  "latest": "v0.2.13",
+  "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.13/device/os/manifest.json"
 }
 ```
 

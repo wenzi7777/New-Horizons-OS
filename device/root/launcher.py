@@ -147,7 +147,7 @@ def run():
         runtime = _load_runtime()
         mode = runtime.get("mode", iconfig.DEFAULT_MODE)
         boot_request = runtime.get("boot_request", "")
-        os_installed = _exists(iconfig.OS_DIR + "/app.py") or _exists(iconfig.OS_DIR + "/main.py")
+        os_installed = _exists(iconfig.OS_DIR + "/app.mpy")
         logger.info("launcher_mode={} os_installed={} boot_request={}".format(mode, os_installed, boot_request))
 
         if boot_request == "recovery" or mode == "recovery":

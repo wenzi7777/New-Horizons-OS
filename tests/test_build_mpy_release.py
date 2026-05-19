@@ -54,6 +54,7 @@ class BuildMpyReleaseTests(unittest.TestCase):
             self.assertTrue((output / "app.mpy").exists())
             self.assertTrue((output / "umqtt" / "simple.mpy").exists())
             self.assertFalse((output / "app.py").exists())
+            self.assertEqual(list(output.rglob("*.py")), [])
             self.assertFalse((output / "__pycache__").exists())
             self.assertEqual((output / "micropython_bmi270" / "config_file.bin").read_bytes(), b"asset")
 

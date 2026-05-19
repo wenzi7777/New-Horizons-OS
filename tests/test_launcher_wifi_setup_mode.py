@@ -118,7 +118,7 @@ class LauncherWifiSetupModeTests(unittest.TestCase):
                 else:
                     sys.modules[name] = saved
 
-        self.assertEqual(checked_paths, ["nhos/app.py", "nhos/main.py"])
+        self.assertEqual(checked_paths, ["nhos/app.mpy"])
         self.assertEqual(recovery_calls, [(True, "")])
 
     def test_launcher_fallback_calls_recovery_app_without_recovery_wrapper(self):
@@ -192,7 +192,7 @@ class LauncherWifiSetupModeTests(unittest.TestCase):
         try:
             module.BOOT_LOGS[:] = []
             module._load_runtime = lambda: {"mode": "normal"}
-            module._exists = lambda path: path == "nhos/app.py"
+            module._exists = lambda path: path == "nhos/app.mpy"
             module.run()
         finally:
             for name, saved in saved_modules.items():
@@ -204,6 +204,46 @@ class LauncherWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(minimal_calls, [])
         self.assertEqual(full_calls, [True])
         self.assertNotIn(("warn", "launcher_force_minimal_for_wifi_setup"), module.BOOT_LOGS)
+
+    def test_python_entrypoints_alone_do_not_count_as_installed_os(self):
+        recovery_calls = []
+
+        injected = {
+            "machine": types.SimpleNamespace(Pin=FakePinFactory()),
+            "immutable_config": types.SimpleNamespace(
+                ACTION_BUTTON_PIN=46,
+                BOOT_WINDOW_MS=3000,
+                BOOT_WINDOW_POLL_MS=50,
+                DEFAULT_MODE="recovery",
+                DEVICE_STATE_DIR="device_state",
+                LOG_PATH="device_state/logs/device.log",
+                OS_DIR="nhos",
+            ),
+            "recovery_app": types.SimpleNamespace(
+                run=lambda wifi_setup_requested=False, recovery_error="": recovery_calls.append(
+                    (wifi_setup_requested, recovery_error)
+                )
+            ),
+            "app": types.SimpleNamespace(
+                App=lambda wifi_setup_requested=False: types.SimpleNamespace(
+                    run=lambda: None
+                )
+            ),
+            "recovery": types.SimpleNamespace(run=lambda **kwargs: None),
+        }
+        module, saved_modules = load_launcher_module(injected)
+        try:
+            module._load_runtime = lambda: {"mode": "normal"}
+            module._exists = lambda path: path in {"nhos/app.py", "nhos/main.py"}
+            module.run()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(recovery_calls, [(True, "")])
 
     def test_normal_os_failure_schedules_recovery_reset_instead_of_inline_fallback(self):
         recovery_calls = []
@@ -250,7 +290,7 @@ class LauncherWifiSetupModeTests(unittest.TestCase):
             module.BOOT_LOGS[:] = []
             module._load_runtime = store.load_runtime
             module._update_runtime = store.update_runtime
-            module._exists = lambda path: path == "nhos/app.py"
+            module._exists = lambda path: path == "nhos/app.mpy"
             module.run()
         finally:
             for name, saved in saved_modules.items():

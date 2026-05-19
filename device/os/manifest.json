@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.12",
-  "version": "v0.2.12",
+  "firmware_version": "v0.2.13",
+  "version": "v0.2.13",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.12/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.13/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
@@ -44,7 +44,7 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "64a92f27553e94e859e78aecacd9928b71772dc904d07cc4b565f3fc9e1b1ee6",
+      "sha256": "1c567d2291d8f9c3a2dd7c8d68774bfedab78796a1dd2fc585a2937f3a9c7b34",
       "size": 2773,
       "kind": "code",
       "reboot_required": true
@@ -254,7 +254,7 @@
     },
     {
       "path": "wifi_manager.mpy",
-      "sha256": "38c591df51fe8dfc2e484e13411085e44a8aa1330ac4f4e110e4399cad99699f",
+      "sha256": "54a5da6c60f43a49f852a8d097470fdda680f2318f1df94a488a51a67965c57a",
       "size": 8120,
       "kind": "code",
       "reboot_required": true
@@ -274,6 +274,7 @@
     "filter_engine.py",
     "frame_protocol.py",
     "i2c_bus.py",
+    "main.py",
     "manifest_update.py",
     "matrix_scan.py",
     "matrix_scan_mock.py",

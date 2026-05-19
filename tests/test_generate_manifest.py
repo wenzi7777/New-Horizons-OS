@@ -92,6 +92,8 @@ class GenerateManifestTests(unittest.TestCase):
                 str(delete_root),
                 "--delete-suffix",
                 ".py",
+                "--delete-path",
+                "main.py",
             ]
             try:
                 module.main()
@@ -108,7 +110,7 @@ class GenerateManifestTests(unittest.TestCase):
                 [item["path"] for item in manifest["files"]],
                 ["app.mpy", "micropython_bmi270/config_file.bin", "umqtt/simple.mpy"],
             )
-            self.assertEqual(manifest["delete"], ["app.py", "umqtt/simple.py"])
+            self.assertEqual(manifest["delete"], ["app.py", "main.py", "umqtt/simple.py"])
 
 
 if __name__ == "__main__":

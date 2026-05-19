@@ -63,6 +63,16 @@ def collect_deletes(delete_root: Path | None, suffixes: list[str]) -> list[str]:
     return deletes
 
 
+def normalize_delete_path(value: str) -> str:
+    rel = Path(value)
+    if rel.is_absolute():
+        raise ValueError(f"delete path must be relative: {value}")
+    rel_text = rel.as_posix().strip("/")
+    if not rel_text or rel_text == "." or ".." in rel.parts:
+        raise ValueError(f"unsafe delete path: {value}")
+    return rel_text
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", choices=["os", "recovery"], required=True)
@@ -77,6 +87,12 @@ def main() -> None:
         action="append",
         default=[],
         help="Suffix to delete from --delete-source-root. May be passed more than once.",
+    )
+    parser.add_argument(
+        "--delete-path",
+        action="append",
+        default=[],
+        help="Additional repo-relative path to delete from target root. May be passed more than once.",
     )
     args = parser.parse_args()
 
@@ -110,6 +126,8 @@ def main() -> None:
         "files": files,
     }
     deletes = collect_deletes(delete_root, args.delete_suffix)
+    deletes.extend(normalize_delete_path(path) for path in args.delete_path)
+    deletes = sorted(set(deletes))
     if deletes:
         manifest["delete"] = deletes
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

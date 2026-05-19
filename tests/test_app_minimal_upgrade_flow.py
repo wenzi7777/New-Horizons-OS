@@ -194,10 +194,18 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
     def test_recovery_os_installed_detects_app_entrypoint(self):
         module = load_recovery_app_module()
         app = module.RecoveryApp.__new__(module.RecoveryApp)
-        existing_paths = {"nhos/app.py"}
+        existing_paths = {"nhos/app.mpy"}
         app._path_exists = lambda path: path in existing_paths
 
         self.assertTrue(app._os_installed())
+
+    def test_recovery_os_installed_ignores_python_entrypoints(self):
+        module = load_recovery_app_module()
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        existing_paths = {"nhos/app.py", "nhos/main.py"}
+        app._path_exists = lambda path: path in existing_paths
+
+        self.assertFalse(app._os_installed())
 
     def test_upgrade_to_full_is_not_supported(self):
         module = load_recovery_app_module()

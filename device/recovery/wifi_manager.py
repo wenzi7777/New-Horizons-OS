@@ -308,7 +308,7 @@ class WiFiManager:
             "active": self.setup_active(),
             "state": self.state,
             "mode": runtime_cfg.get("mode", "recovery"),
-            "os_installed": storage.exists(getattr(config, "OS_DIR", "nhos") + "/main.py"),
+            "os_installed": storage.exists(getattr(config, "OS_DIR", "nhos") + "/app.mpy"),
             "release_url": self._github_release_url() or runtime_cfg.get("update", {}).get("release_url", ""),
             "ap_ssid": ap_ssid,
             "portal_ip": portal_ip,

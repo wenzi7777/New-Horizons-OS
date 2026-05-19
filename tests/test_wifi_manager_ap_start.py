@@ -440,7 +440,7 @@ class WiFiManagerApStartTests(unittest.TestCase):
         status = module.WiFiManager(config_store=FakeConfigStore()).portal_status()
 
         self.assertFalse(status["os_installed"])
-        self.assertEqual(checked_paths, ["nhos/main.py"])
+        self.assertEqual(checked_paths, ["nhos/app.mpy"])
 
 
 if __name__ == "__main__":
