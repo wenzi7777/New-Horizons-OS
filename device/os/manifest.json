@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.0",
-  "version": "v0.2.0",
+  "firmware_version": "v0.2.1",
+  "version": "v0.2.1",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.0/device/os",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.1/device/os",
   "files": [
     {
       "path": "app.py",
@@ -44,7 +44,7 @@
     },
     {
       "path": "config.py",
-      "sha256": "3f10048f3e70554692ada77245e06838d541e09a4e0256e0b9ac1e57d151a779",
+      "sha256": "dd6dfccc4bf46004469909fe7d7950c450446788c765bb8ab458f101decb098c",
       "size": 4251,
       "kind": "code",
       "reboot_required": true
