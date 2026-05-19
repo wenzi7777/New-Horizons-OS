@@ -1,7 +1,7 @@
 import json
 import time
 
-from umqtt.robust import MQTTClient
+from umqtt.simple import MQTTClient
 
 
 class MQTTTransport:

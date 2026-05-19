@@ -36,15 +36,30 @@ class MQTTClient:
         self.sock.write(struct.pack("!H", len(s)))
         self.sock.write(s)
 
+    def _read_exact(self, n):
+        data = self.sock.read(n)
+        if data is None or len(data) != n:
+            raise OSError(-1)
+        return data
+
+    def _skip_bytes(self, n):
+        while n > 0:
+            chunk = self.sock.read(min(n, 256))
+            if chunk is None or len(chunk) == 0:
+                raise OSError(-1)
+            n -= len(chunk)
+
     def _recv_len(self):
         n = 0
         sh = 0
         while 1:
-            b = self.sock.read(1)[0]
+            b = self._read_exact(1)[0]
             n |= (b & 0x7F) << sh
             if not b & 0x80:
                 return n
             sh += 7
+            if sh > 21:
+                raise MQTTException("malformed remaining length")
 
     def set_callback(self, f):
         self.cb = f
@@ -123,12 +138,38 @@ class MQTTClient:
         self._send_str(topic)
         self.sock.write(qos.to_bytes(1, "little"))
         while 1:
-            op = self.wait_msg()
+            res = self.sock.read(1)
+            if res is None:
+                continue
+            if res == b"":
+                raise OSError(-1)
+            op = res[0]
+            sz = self._recv_len()
             if op == 0x90:
-                resp = self.sock.read(4)
-                if resp[3] == 0x80:
-                    raise MQTTException(resp[3])
+                resp = self._read_exact(sz)
+                if len(resp) < 3 or resp[-1] == 0x80:
+                    raise MQTTException(resp[-1] if resp else 0x80)
                 return
+            if op & 0xF0 == 0x30:
+                self._handle_publish(op, sz)
+            else:
+                self._skip_bytes(sz)
+
+    def _handle_publish(self, op, sz):
+        topic_len = self._read_exact(2)
+        topic_len = (topic_len[0] << 8) | topic_len[1]
+        topic = self._read_exact(topic_len)
+        sz -= topic_len + 2
+        if op & 6:
+            pid = self._read_exact(2)
+            pid = pid[0] << 8 | pid[1]
+            sz -= 2
+        msg = self._read_exact(sz)
+        self.cb(topic, msg)
+        if (op & 6) == 2:
+            pkt = bytearray(b"\x40\x02\0\0")
+            struct.pack_into("!H", pkt, 2, pid)
+            self.sock.write(pkt)
 
     def wait_msg(self):
         res = self.sock.read(1)
@@ -137,27 +178,12 @@ class MQTTClient:
             return None
         if res == b"":
             raise OSError(-1)
-        if res == b"\xd0":
-            self.sock.read(1)
-            return None
         op = res[0]
-        if op & 0xF0 != 0x30:
-            return op
         sz = self._recv_len()
-        topic_len = self.sock.read(2)
-        topic_len = (topic_len[0] << 8) | topic_len[1]
-        topic = self.sock.read(topic_len)
-        sz -= topic_len + 2
-        if op & 6:
-            pid = self.sock.read(2)
-            pid = pid[0] << 8 | pid[1]
-            sz -= 2
-        msg = self.sock.read(sz)
-        self.cb(topic, msg)
-        if op & 6 == 2:
-            pkt = bytearray(b"\x40\x02\0\0")
-            struct.pack_into("!H", pkt, 2, pid)
-            self.sock.write(pkt)
+        if op & 0xF0 != 0x30:
+            self._skip_bytes(sz)
+            return op
+        self._handle_publish(op, sz)
         return op
 
     def check_msg(self):

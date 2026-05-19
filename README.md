@@ -72,7 +72,7 @@ python3 firmware/scripts/upload_filesystem.py --port /dev/cu.usbserial-210 --tar
 
 ```bash
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
-python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.4
+python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.5
 ```
 
 產物是：
@@ -103,12 +103,22 @@ release JSON 格式：
 ```json
 {
   "product": "New Horizons OS",
-  "latest": "v0.2.4",
-  "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.4/device/os/manifest.json"
+  "latest": "v0.2.5",
+  "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.5/device/os/manifest.json"
 }
 ```
 
 Wi-Fi setup WebUI 只保留 Wi-Fi、本地 control/data/MQTT IP 與 port 的手動欄位；OS release 固定走 GitHub。若要做本地 OS 開發測試，請使用 `upload_filesystem.py --target os` 直接上傳，不走 release URL。
+
+## WebUI / MQTT
+
+正式與本機 WebUI 都放在：
+
+```text
+/Users/nickxu/Documents/vd-ctl-r-os-lts/server_sample/mqtt_test/newhorizons
+```
+
+這個 firmware repo 不再保留另一套 Host WebUI，避免和實驗室伺服器上的 `mqtt_test` 混用。
 
 ## 命令邊界
 

@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.4",
-  "version": "v0.2.4",
+  "firmware_version": "v0.2.5",
+  "version": "v0.2.5",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.4/device/os",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.5/device/os",
   "files": [
     {
       "path": "app.py",
@@ -44,7 +44,7 @@
     },
     {
       "path": "config.py",
-      "sha256": "6c877621b4e34072f70e09f29e2e345de68d06cb1147a6dff1301bd073b1de51",
+      "sha256": "d910d4798aaeea6699cd239e8352fb612ce9035d53ebe908aa06114f9a2d272c",
       "size": 4459,
       "kind": "code",
       "reboot_required": true
@@ -149,7 +149,7 @@
     },
     {
       "path": "mqtt_transport.py",
-      "sha256": "dcfd00adba7a7664bc9c83e49103efa5ae453ba2a43262bd3660d70c84731fbb",
+      "sha256": "1bcaccc7f7ce26222ca1a82d541d72ac551768987df56316af063209456a6a36",
       "size": 5405,
       "kind": "code",
       "reboot_required": true
@@ -233,8 +233,8 @@
     },
     {
       "path": "umqtt/simple.py",
-      "sha256": "68f557c30328a7cbc4dffbd3f808de5c8a6ffeac84b2faaf85d177499759be4b",
-      "size": 4624,
+      "sha256": "a54816c850223a3e234934b9a2b33d81e8e92d451c9964cf4a718cc53369757f",
+      "size": 5472,
       "kind": "code",
       "reboot_required": true
     },

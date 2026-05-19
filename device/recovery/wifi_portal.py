@@ -73,7 +73,7 @@ INDEX_CSS = (
     "main{max-width:680px;margin:auto}"
     "h1{font-size:24px;margin:8px 0}"
     "h2{font-size:16px;margin:18px 0 8px}"
-    "p{line-height:1.35}"
+    "p{line-height:1.35;margin:8px 0}"
     "label{display:block;margin:10px 0 4px;font-weight:700}"
     "input,select,button{width:100%;padding:10px;font-size:16px;border:1px solid #999;border-radius:6px}"
     "button{margin-top:14px;background:#12325a;color:#fff;border:0}"
@@ -458,55 +458,44 @@ class WiFiSetupPortal:
   <main>
       <p class="muted">{eyebrow}</p>
       <h1>{headline}</h1>
-      <p>{lead}</p>
-      <p class="msg">Hotspot: <b>{ap_ssid}</b><br>Portal: <b>{portal_url}</b></p>
+      <p class="msg">AP: <b>{ap_ssid}</b><br>URL: <b>{portal_url}</b></p>
       {recovery_notice}
       {notice}
-      <h2>Wi-Fi Connection</h2>
+      <h2>Wi-Fi</h2>
       <form method="post" action="/connect">
-        <label for="ssid_select">Detected networks</label>
+        <label for="ssid_select">Networks</label>
         <select id="ssid_select" onchange="document.getElementById('ssid').value = this.value;">
           {options}
         </select>
-        <label for="server_profile">Server mode</label>
+        <label for="server_profile">Server</label>
         <select id="server_profile" name="server_profile" onchange="toggleManualServerFields(this.value);">
           {server_options}
         </select>
-        <p class="muted">Production uses the school server. Manual lets you enter custom control and data addresses.</p>
         <div id="manual_server_fields" style="display:{manual_fields_display}">
-          <label for="master_host">Control server address</label>
-          <input id="master_host" name="master_host" value="{manual_master_host}" placeholder="e.g. 192.168.1.153">
-          <label for="master_port">Control server port</label>
-          <input id="master_port" name="master_port" value="{manual_master_port}" inputmode="numeric" placeholder="e.g. 22345">
-          <label for="data_host">Data server address</label>
-          <input id="data_host" name="data_host" value="{manual_data_host}" placeholder="e.g. 192.168.1.153">
-          <label for="data_port">Data server port</label>
-          <input id="data_port" name="data_port" value="{manual_data_port}" inputmode="numeric" placeholder="e.g. 5005">
-          <label for="mqtt_host">MQTT broker address</label>
-          <input id="mqtt_host" name="mqtt_host" value="{manual_mqtt_host}" placeholder="e.g. 192.168.1.153">
-          <label for="mqtt_port">MQTT broker port</label>
-          <input id="mqtt_port" name="mqtt_port" value="{manual_mqtt_port}" inputmode="numeric" placeholder="e.g. 1883">
+          <label for="master_host">Control Host</label>
+          <input id="master_host" name="master_host" value="{manual_master_host}" placeholder="host">
+          <label for="master_port">Control Port</label>
+          <input id="master_port" name="master_port" value="{manual_master_port}" inputmode="numeric" placeholder="port">
+          <label for="data_host">Data Host</label>
+          <input id="data_host" name="data_host" value="{manual_data_host}" placeholder="host">
+          <label for="data_port">Data Port</label>
+          <input id="data_port" name="data_port" value="{manual_data_port}" inputmode="numeric" placeholder="port">
+          <label for="mqtt_host">MQTT Host</label>
+          <input id="mqtt_host" name="mqtt_host" value="{manual_mqtt_host}" placeholder="host">
+          <label for="mqtt_port">MQTT Port</label>
+          <input id="mqtt_port" name="mqtt_port" value="{manual_mqtt_port}" inputmode="numeric" placeholder="port">
         </div>
-        <p class="muted">Transport: MQTT. Manual uses plain MQTT; production uses TLS. OS release source: GitHub.</p>
         <label for="ssid">Wi-Fi SSID</label>
-        <input id="ssid" name="ssid" value="{ssid}" placeholder="Your Wi-Fi name">
-        <label for="password">Wi-Fi password</label>
-        <input id="password" name="password" type="password" placeholder="Your Wi-Fi password">
+        <input id="ssid" name="ssid" value="{ssid}" placeholder="ssid">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" placeholder="password">
         <button type="submit">{primary_button}</button>
       </form>
-      <p class="msg">
-        If this page did not open automatically, use <strong>{portal_url}</strong> in your browser while connected to the hotspot.
-        {manual_hint}
-      </p>
       <div class="meta">
-        <p class="muted">Portal IP: {ip}</p>
-        <p class="muted">Friendly domain: {portal_domain}</p>
-        <p class="muted">Saved SSID: {saved_ssid}</p>
-        <p class="muted">Master target: {master_host}:{master_port}</p>
-        <p class="muted">Data target: {data_host}:{data_port}</p>
-        <p class="muted">MQTT target: {mqtt_host}:{mqtt_port} ({mqtt_tls_label})</p>
-        <p class="muted">GitHub release: {release_url}</p>
-        <p class="muted">Device state: {device_state}</p>
+        <p class="muted">Control: {master_host}:{master_port}</p>
+        <p class="muted">MQTT: {mqtt_host}:{mqtt_port}</p>
+        <p class="muted">Release: {release_url}</p>
+        <p class="muted">State: {device_state}</p>
       </div>
   </main>
   <script>

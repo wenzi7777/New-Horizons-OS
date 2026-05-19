@@ -150,6 +150,9 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         self.assertNotIn('name="log_capacity"', html)
         self.assertNotIn('name="transport_mode"', html)
         self.assertNotIn(">UDP<", html)
+        self.assertNotIn("Production uses", html)
+        self.assertNotIn("Transport: MQTT", html)
+        self.assertNotIn("placeholder=\"e.g. 192.168.1.153\"", html)
         self.assertIn("isensing-s1.u-aizu.ac.jp", html)
 
     def test_production_page_keeps_manual_defaults_out_of_option_label(self):
