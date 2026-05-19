@@ -17,44 +17,54 @@ class SK6812Status:
         self.phase = 0
         self.state_map = {
             "boot_window": {
-                "intervals": (350, 350),
-                "colors": ((0, 0, 40), (0, 0, 0)),
-                "brightness": 0.04,
+                "intervals": (120, 1380),
+                "colors": ((0, 0, 160), (0, 0, 0)),
+                "brightness": 0.15,
             },
             "wifi_setup": {
-                "intervals": (180, 820),
-                "colors": ((0, 80, 80), (0, 0, 0)),
-                "brightness": 0.08,
+                "intervals": (120, 880),
+                "colors": ((0, 180, 180), (0, 0, 0)),
+                "brightness": 0.20,
             },
             "normal": {
-                "intervals": (120, 120, 120, 5000),
-                "colors": ((0, 120, 0), (0, 0, 0), (0, 60, 0), (0, 0, 0)),
-                "brightness": 0.06,
+                "intervals": (90, 120, 90, 4700),
+                "colors": ((0, 170, 0), (0, 0, 0), (0, 90, 0), (0, 0, 0)),
+                "brightness": 0.15,
             },
             "updating": {
-                "intervals": (90, 90, 90, 90, 90, 1500),
-                "colors": ((0, 0, 120), (0, 0, 0), (0, 0, 80), (0, 0, 0), (0, 0, 40), (0, 0, 0)),
-                "brightness": 0.08,
+                "intervals": (1800, 100, 1800, 100),
+                "colors": ((80, 0, 255), (0, 0, 0), (0, 180, 255), (0, 0, 0)),
+                "brightness": 0.45,
+            },
+            "reboot_required": {
+                "intervals": (1000, 100),
+                "colors": ((120, 0, 255), (0, 0, 0)),
+                "brightness": 0.35,
+            },
+            "maintenance": {
+                "intervals": (100, 120, 100, 1680),
+                "colors": ((110, 0, 180), (0, 0, 0), (70, 0, 140), (0, 0, 0)),
+                "brightness": 0.25,
             },
             "calibration": {
-                "intervals": (120, 120, 120, 120, 2000),
-                "colors": ((120, 0, 120), (0, 0, 0), (60, 0, 60), (0, 0, 0), (0, 0, 0)),
-                "brightness": 0.08,
+                "intervals": (90, 90, 90, 90, 90, 1050),
+                "colors": ((200, 0, 140), (0, 0, 0), (150, 0, 100), (0, 0, 0), (90, 0, 70), (0, 0, 0)),
+                "brightness": 0.30,
             },
             "error": {
                 "intervals": (70, 70, 70, 70, 70, 1500),
-                "colors": ((120, 0, 0), (0, 0, 0), (80, 0, 0), (0, 0, 0), (40, 0, 0), (0, 0, 0)),
-                "brightness": 0.1,
+                "colors": ((255, 0, 0), (0, 0, 0), (180, 0, 0), (0, 0, 0), (100, 0, 0), (0, 0, 0)),
+                "brightness": 0.50,
             },
             "charging": {
-                "intervals": (300, 3000),
-                "colors": ((120, 0, 0), (0, 0, 0)),
-                "brightness": 0.05,
+                "intervals": (120, 3880),
+                "colors": ((255, 120, 0), (0, 0, 0)),
+                "brightness": 0.20,
             },
             "charge_done": {
-                "intervals": (150, 150, 2500),
-                "colors": ((0, 120, 0), (0, 0, 0), (0, 0, 0)),
-                "brightness": 0.05,
+                "intervals": (120, 5880),
+                "colors": ((57, 197, 187), (0, 0, 0)),
+                "brightness": 0.20,
             },
             "off": {
                 "intervals": (1000,),
@@ -127,6 +137,12 @@ class SK6812Status:
 
     def set_updating(self):
         self._set_state("updating")
+
+    def set_reboot_required(self):
+        self._set_state("reboot_required")
+
+    def set_maintenance(self):
+        self._set_state("maintenance")
 
     def set_calibration(self):
         self._set_state("calibration")

@@ -73,7 +73,7 @@ python3 firmware/scripts/upload_filesystem.py --port /dev/cu.usbserial-210 --tar
 ```bash
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
 python3 firmware/scripts/build_mpy_release.py --repo-root . --source device/os --output device/os_mpy
-python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.14 \
+python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.15 \
   --source-root device/os_mpy --base-url-path device/os_mpy \
   --delete-source-root device/os --delete-suffix .py --delete-path main.py
 ```
@@ -110,8 +110,8 @@ release JSON 格式：
 ```json
 {
   "product": "New Horizons OS",
-  "latest": "v0.2.14",
-  "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.14/device/os/manifest.json"
+  "latest": "v0.2.15",
+  "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.15/device/os/manifest.json"
 }
 ```
 

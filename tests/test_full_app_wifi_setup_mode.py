@@ -154,6 +154,12 @@ class FakeLED:
     def set_updating(self):
         self.states.append("updating")
 
+    def set_reboot_required(self):
+        self.states.append("reboot_required")
+
+    def set_maintenance(self):
+        self.states.append("maintenance")
+
     def set_normal(self):
         self.states.append("normal")
 
@@ -333,6 +339,38 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     sys.modules[name] = saved
 
         self.assertLess(events.index("wifi_connect"), events.index("led_begin"))
+
+    def test_reboot_required_uses_dedicated_no_power_off_led_state(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module(enable_led=True)
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            app.reboot_required = True
+            app.update_led_state()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(app.led.states[-1], "reboot_required")
+
+    def test_maintenance_mode_uses_dedicated_led_state(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module(enable_led=True)
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            app.mode = "maintenance"
+            app.update_led_state()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(app.led.states[-1], "maintenance")
 
     def test_runtime_services_are_deferred_until_after_wifi_boot(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()

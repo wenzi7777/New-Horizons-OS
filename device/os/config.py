@@ -2,6 +2,7 @@
 
 DEVICE_ID = 0x00000001
 DEVICE_NAME = "New Horizons OS"
+FIRMWARE_VERSION = "v0.2.15"
 SETUP_AP_SSID_PREFIX = "NewHorizonsOS"
 SETUP_AP_PASSWORD = "newhorizons"
 SETUP_PORTAL_DOMAIN = "newhorizons.os"
@@ -40,7 +41,7 @@ MAX_FPS = 60
 
 IMU_RATE_HZ = 30
 BATTERY_RATE_HZ = 1
-LED_RATE_HZ = 5
+LED_RATE_HZ = 20
 
 UDP_SERVER_IP = "192.168.1.153"
 UDP_SERVER_PORT = 5005
@@ -68,7 +69,7 @@ PRODUCTION_MQTT_TLS = True
 MQTT_TOPIC_NAMESPACE = "newhorizons/v1"
 MQTT_USERNAME = ""
 MQTT_PASSWORD = ""
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.14/device"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.15/device"
 GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
 STATUS_ANNOUNCE_INTERVAL_MS = 2000

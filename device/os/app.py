@@ -337,6 +337,12 @@ class App:
     def update_led_state(self):
         if not self.led:
             return
+        if self.reboot_required:
+            if hasattr(self.led, "set_reboot_required"):
+                self.led.set_reboot_required()
+            else:
+                self.led.set_updating()
+            return
         if self._in_maintenance() and hasattr(self.led, "set_maintenance"):
             self.led.set_maintenance()
             return
@@ -345,9 +351,6 @@ class App:
             return
         if self.wifi.setup_active():
             self.led.set_wifi_setup()
-            return
-        if self.reboot_required:
-            self.led.set_updating()
             return
         if self.battery:
             if self.latest_battery is None:
