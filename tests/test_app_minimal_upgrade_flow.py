@@ -19,7 +19,6 @@ def load_recovery_app_module():
         FIRMWARE_VERSION="v-recovery-test",
         LOG_PATH="device_state/logs/device.log",
         DEVICE_STATE_DIR="device_state",
-        DEFAULT_CONTROL_PORT=22345,
         STATUS_ANNOUNCE_INTERVAL_MS=2000,
         DEFAULT_MANIFESTS={
             "recovery": "https://example.com/recovery/manifest.json",
@@ -41,7 +40,11 @@ def load_recovery_app_module():
         )
     )
     fake_runtime_mod = types.SimpleNamespace(RuntimeConfigStore=lambda root: None)
-    fake_udp_mod = types.SimpleNamespace(UDPControlServer=lambda port, logger=None: None)
+    class ForbiddenRecoveryUdpModule(types.ModuleType):
+        def __getattr__(self, name):
+            raise AssertionError("recovery must not import udp_control")
+
+    fake_udp_mod = ForbiddenRecoveryUdpModule("udp_control")
     fake_wifi_mod = types.SimpleNamespace(WiFiManager=lambda *args, **kwargs: None)
     fake_os_writer_mod = types.SimpleNamespace(
         OSWriter=lambda *args, **kwargs: types.SimpleNamespace(

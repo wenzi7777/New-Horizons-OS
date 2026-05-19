@@ -37,18 +37,18 @@ class FakeManager:
                 {
                     "value": "manual",
                     "label": "Manual",
-                    "master_host": "192.168.1.153",
-                    "data_host": "192.168.1.153",
+                    "mqtt_host": "192.168.1.153",
+                    "mqtt_port": 1883,
+                    "mqtt_tls": False,
                 },
                 {
                     "value": "production",
                     "label": "Production",
-                    "master_host": "isensing-s1.u-aizu.ac.jp",
-                    "data_host": "isensing-s1.u-aizu.ac.jp",
+                    "mqtt_host": "isensing-s1.u-aizu.ac.jp",
+                    "mqtt_port": 8883,
+                    "mqtt_tls": True,
                 },
             ],
-            "master_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 22345},
-            "data_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 5005},
             "mqtt": {"host": "isensing-s1.u-aizu.ac.jp", "port": 8883, "tls": True},
             "transport": {"mode": "mqtt"},
             "mode": "normal",
@@ -69,30 +69,24 @@ class FakeManager:
         ssid,
         password,
         server_profile=None,
-        master_host="",
-        master_port="",
-        data_host="",
-        data_port="",
         mqtt_host="",
         mqtt_port="",
         mqtt_tls="",
-        transport_mode="",
         release_url="",
+        log_enabled="",
+        log_capacity="",
     ):
         self.calls.append(
             (
                 ssid,
                 password,
                 server_profile,
-                master_host,
-                master_port,
-                data_host,
-                data_port,
                 mqtt_host,
                 mqtt_port,
                 mqtt_tls,
-                transport_mode,
                 release_url,
+                log_enabled,
+                log_capacity,
             )
         )
         return {"ok": True, "message": "Connected"}
@@ -144,10 +138,10 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         self.assertIn('data-developer="1"', html)
         self.assertIn(">Manual</option>", html)
         self.assertNotIn("Manual (192.168.1.153)", html)
-        self.assertIn('name="master_host"', html)
-        self.assertIn('name="master_port"', html)
-        self.assertIn('name="data_host"', html)
-        self.assertIn('name="data_port"', html)
+        self.assertNotIn('name="master_host"', html)
+        self.assertNotIn('name="master_port"', html)
+        self.assertNotIn('name="data_host"', html)
+        self.assertNotIn('name="data_port"', html)
         self.assertIn('name="mqtt_host"', html)
         self.assertIn('name="mqtt_port"', html)
         self.assertIn(GITHUB_RELEASE_URL, html)
@@ -185,7 +179,7 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         portal._read_request = lambda client: (
             "POST",
             "/connect",
-            "ssid=LabWiFi&password=secret&server_profile=manual&master_host=192.168.1.153&master_port=22345&data_host=192.168.1.153&data_port=5005&mqtt_host=192.168.1.153&mqtt_port=1883",
+            "ssid=LabWiFi&password=secret&server_profile=manual&mqtt_host=192.168.1.153&mqtt_port=1883",
         )
         portal._send_response = lambda client, status, content_type, body: (_ for _ in ()).throw(OSError("ECONNABORTED"))
 
@@ -193,7 +187,7 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
 
         self.assertTrue(handled)
         self.assertEqual(manager.calls[0][2], "manual")
-        self.assertEqual(manager.calls[0][7], "192.168.1.153")
+        self.assertEqual(manager.calls[0][3], "192.168.1.153")
 
     def test_production_page_keeps_manual_defaults_out_of_option_label(self):
         module = load_portal_module()
@@ -213,7 +207,7 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         portal._read_request = lambda client: (
             "POST",
             "/connect",
-            "ssid=LabWiFi&password=secret&server_profile=manual&master_host=192.168.1.200&master_port=32001&data_host=192.168.1.201&data_port=32002&mqtt_host=192.168.1.153&mqtt_port=1883",
+            "ssid=LabWiFi&password=secret&server_profile=manual&mqtt_host=192.168.1.153&mqtt_port=1883",
         )
         portal._send_response = lambda client, status, content_type, body: None
 
@@ -227,12 +221,9 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
                     "LabWiFi",
                     "secret",
                     "manual",
-                    "192.168.1.200",
-                    "32001",
-                    "192.168.1.201",
-                    "32002",
                     "192.168.1.153",
                     "1883",
+                    "",
                     "",
                     "",
                     "",

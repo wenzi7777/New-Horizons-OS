@@ -16,19 +16,18 @@ def _default_server_profile_name():
     return ""
 
 
-def _server_endpoint(profile_name, key, fallback_host, fallback_port):
-    profile = _server_profiles().get(profile_name, {})
-    endpoint = profile.get(key, {})
-    return {
-        "host": endpoint.get("host", fallback_host),
-        "port": endpoint.get("port", fallback_port),
-    }
-
-
 DEFAULT_SERVER_PROFILE = _default_server_profile_name()
 
 
 def _mqtt_defaults_for_profile(profile_name):
+    profile = _server_profiles().get(profile_name, {})
+    mqtt_cfg = profile.get("mqtt", {})
+    if mqtt_cfg:
+        return {
+            "host": mqtt_cfg.get("host", ""),
+            "port": int(mqtt_cfg.get("port", 8883)),
+            "tls": bool(mqtt_cfg.get("tls", True)),
+        }
     if profile_name == "production":
         return {
             "host": getattr(iconfig, "PRODUCTION_MQTT_HOST", getattr(iconfig, "PRODUCTION_SERVER_HOST", "")),
@@ -49,18 +48,6 @@ DEFAULT_RUNTIME = {
     "firmware_name": iconfig.FIRMWARE_NAME,
     "mode": iconfig.DEFAULT_MODE,
     "server_profile": DEFAULT_SERVER_PROFILE,
-    "master_server": _server_endpoint(
-        DEFAULT_SERVER_PROFILE,
-        "master_server",
-        iconfig.DEFAULT_MASTER_HOST,
-        iconfig.DEFAULT_MASTER_PORT,
-    ),
-    "data_server": _server_endpoint(
-        DEFAULT_SERVER_PROFILE,
-        "data_server",
-        iconfig.DEFAULT_DATA_HOST,
-        iconfig.DEFAULT_DATA_PORT,
-    ),
     "packet_format_version": 1,
     "sensor_precision": "float32",
     "scan_timing": {

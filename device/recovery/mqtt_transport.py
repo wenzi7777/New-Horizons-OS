@@ -17,8 +17,7 @@ class MQTTTransport:
         self.last_attempt_ms = 0
 
     def enabled(self):
-        runtime = self.runtime_getter()
-        return runtime.get("transport", {}).get("mode", "udp") == "mqtt"
+        return True
 
     def poll(self, wifi_connected, handler=None):
         if not self.ensure_connected(wifi_connected):

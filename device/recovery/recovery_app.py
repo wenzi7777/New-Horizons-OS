@@ -13,7 +13,6 @@ from device_logging import DeviceLogger
 from filesystem_api import FilesystemAPI
 from mqtt_transport import MQTTTransport
 from runtime_config import RuntimeConfigStore
-from udp_control import UDPControlServer
 from wifi_manager import WiFiManager
 try:
     from os_writer import OSWriter
@@ -43,7 +42,6 @@ class RecoveryApp:
             },
         )
         self.wifi = WiFiManager(self.config_store, self.logger)
-        self.control = UDPControlServer(iconfig.DEFAULT_CONTROL_PORT, self.logger)
         self.mqtt_transport = MQTTTransport(lambda: self.runtime, self.device_uid, self.logger)
         self.os_writer = None
         self.update_state = self._default_update_state()
@@ -69,8 +67,6 @@ class RecoveryApp:
             wifi_ok = self.wifi.connect()
             if not wifi_ok:
                 self.wifi.start_setup_portal("connect_failed")
-        self.control.begin()
-        self.logger.info("control_server_started port={}".format(iconfig.DEFAULT_CONTROL_PORT))
         if wifi_ok:
             self._announce_status(force=True)
         self.boot_network_initialized = wifi_ok
@@ -80,7 +76,6 @@ class RecoveryApp:
         while True:
             now = time.ticks_ms()
             self._service_wifi_setup_portal()
-            self.control.poll(self._handle_request)
             self.mqtt_transport.poll(self.wifi.is_connected(), self._handle_request)
 
             if self.wifi.is_connected() and not self.boot_network_initialized:
@@ -163,17 +158,7 @@ class RecoveryApp:
             "recovery_error": self.recovery_error,
             "reboot_required": self.reboot_required,
         }
-        if self._transport_mode() == "mqtt":
-            ok = self.mqtt_transport.publish_status(payload, self.wifi.is_connected())
-        else:
-            if self.control.sock is None:
-                return False
-            master = self.runtime.get("master_server", {})
-            host = master.get("host", "")
-            if not host:
-                return False
-            port = int(master.get("port", iconfig.DEFAULT_CONTROL_PORT))
-            ok = self.control.send(host, port, payload)
+        ok = self.mqtt_transport.publish_status(payload, self.wifi.is_connected())
         if ok:
             self.last_status_announce_ms = now
         return ok
@@ -338,8 +323,6 @@ class RecoveryApp:
 
         if command == "set_servers":
             runtime_patch = {
-                "master_server": request.get("master_server", {}),
-                "data_server": request.get("data_server", {}),
                 "mqtt": request.get("mqtt", {}),
             }
             if request.get("server_profile", ""):
@@ -351,7 +334,7 @@ class RecoveryApp:
         if command == "set_transport":
             runtime = self.config_store.update_runtime({
                 "transport": {
-                    "mode": request.get("mode", "mqtt"),
+                    "mode": "mqtt",
                     "topic_namespace": request.get("topic_namespace", iconfig.DEFAULT_TOPIC_NAMESPACE),
                 }
             })
@@ -359,7 +342,7 @@ class RecoveryApp:
             return {"status": "ok", "message": "transport_updated", "runtime": runtime, "reboot_required": False}
 
         if command == "start_wifi_setup":
-            self.wifi.start_setup_portal("udp_command")
+            self.wifi.start_setup_portal("mqtt_command")
             return {"status": "ok", "message": "wifi_setup_started", "wifi_setup": self.wifi.portal_status(), "reboot_required": False}
 
         if command == "stop_wifi_setup":
@@ -371,14 +354,9 @@ class RecoveryApp:
                 request.get("ssid", ""),
                 request.get("password", ""),
                 request.get("server_profile", ""),
-                request.get("master_host", ""),
-                request.get("master_port", ""),
-                request.get("data_host", ""),
-                request.get("data_port", ""),
                 request.get("mqtt_host", ""),
                 request.get("mqtt_port", ""),
                 request.get("mqtt_tls", ""),
-                request.get("transport_mode", ""),
                 request.get("release_url", ""),
                 request.get("log_enabled", ""),
                 request.get("log_capacity", ""),
@@ -410,12 +388,6 @@ class RecoveryApp:
             return fn(*args)
         except ValueError as exc:
             return {"status": "error", "message": str(exc), "error": str(exc), "reboot_required": False}
-
-    def _transport_mode(self):
-        runtime = getattr(self, "runtime", None) or {}
-        if not isinstance(runtime, dict):
-            return "udp"
-        return runtime.get("transport", {}).get("mode", "udp")
 
     def _installed_os_version(self, runtime=None):
         runtime = runtime if isinstance(runtime, dict) else getattr(self, "runtime", {})

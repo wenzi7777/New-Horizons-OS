@@ -108,8 +108,9 @@ class FakeRuntimeConfigStore:
         self.runtime = {
             "scan_timing": {"target_fps": 60, "settle_us": 20, "core_id": 1},
             "buffer_frames": 8,
-            "master_server": {},
             "matrix_layout": {"active_rows": [1], "active_cols": [1]},
+            "mqtt": {"host": "127.0.0.1", "port": 1883, "tls": False},
+            "transport": {"mode": "mqtt", "topic_namespace": "newhorizons/v1"},
             "logging": {"enabled": True, "capacity": "default", "serial": "status"},
         }
         if runtime_override:
@@ -201,27 +202,16 @@ class FakeBattery:
         return self.last_status_code == self.STATUS_DONE
 
 
-class FakeControl:
-    def __init__(self):
-        self.sock = None
-        self.begin_calls = 0
-
-    def begin(self):
-        self.begin_calls += 1
-        self.sock = object()
-
-    def poll(self, handler):
-        return None
-
-    def send(self, host, port, payload):
-        return True
-
-
 def load_full_app_module(runtime_override=None, update_check=None, enable_led=False, enable_battery=False, wifi_connect_result=True):
     events = []
     fake_scan = FakeScan(events)
     fake_vdboard = types.SimpleNamespace(scan=fake_scan)
     saved_modules = {}
+
+    class ForbiddenUdpModule(types.ModuleType):
+        def __getattr__(self, name):
+            raise AssertionError("New Horizons OS must not import UDP modules")
+
     injected = {
         "machine": types.SimpleNamespace(reset=lambda: None),
         "immutable_config": types.SimpleNamespace(
@@ -240,7 +230,6 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
             DEVICE_STATE_DIR="device_state",
             CALIBRATION_DIR="device_state/calibration",
             LOG_PATH="device_state/logs/device.log",
-            UDP_CONTROL_PORT=22345,
             STATUS_ANNOUNCE_INTERVAL_MS=2000,
             TARGET_FPS=60,
             MATRIX_SETTLE_US=20,
@@ -259,8 +248,6 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
             PACKET_BUFFER_DROP_OLDEST=False,
             PRINT_PIN_CONFLICTS=False,
             PRINT_FPS=False,
-            UDP_SERVER_IP="127.0.0.1",
-            UDP_SERVER_PORT=5005,
             DATA_FILES_DIR="data/files",
             DATA_LOG_DIR="data/logs",
             DATA_TMP_DIR="data/tmp",
@@ -307,8 +294,8 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
                 last_error="",
             )
         ),
-        "udp_control": types.SimpleNamespace(UDPControlServer=lambda port, logger=None: FakeControl()),
-        "udp_stream": types.SimpleNamespace(UDPStreamer=lambda host, port: types.SimpleNamespace(send=lambda payload: True)),
+        "udp_control": ForbiddenUdpModule("udp_control"),
+        "udp_stream": ForbiddenUdpModule("udp_stream"),
         "utils": types.SimpleNamespace(RateCounter=lambda interval: None),
         "wifi_manager": types.SimpleNamespace(
             WiFiManager=lambda *args, **kwargs: FakeWiFi(events, connect_result=wifi_connect_result)
@@ -482,7 +469,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         try:
             app = module.App(wifi_setup_requested=False)
 
-            self.assertIsNone(app.control)
+            self.assertIsNone(app.mqtt_transport)
             self.assertIsNone(app.time_sync)
             self.assertIsNone(app.calibration)
             self.assertIsNone(app.tx_buffer)
@@ -497,7 +484,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 else:
                     sys.modules[name] = saved
 
-        self.assertIsNotNone(app.control)
+        self.assertIsNotNone(app.mqtt_transport)
         self.assertIsNotNone(app.time_sync)
         self.assertIsNotNone(app.calibration)
         self.assertIsNotNone(app.packet)
@@ -581,7 +568,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
         try:
             app = module.App.__new__(module.App)
-            app.udp = types.SimpleNamespace(send=lambda payload: False)
+            app.mqtt_transport = types.SimpleNamespace(publish_raw=lambda payload, connected: False)
             app.wifi = types.SimpleNamespace(is_connected=lambda: True)
             app.tx_buffer = FakeBuffer()
             app.sent_packets = 0
@@ -629,7 +616,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app.send_backoff_until_ms = 1100
             app.time_sync = types.SimpleNamespace(status=lambda: {"synced": False})
             app.scan_rate = types.SimpleNamespace(tick=lambda: None)
-            app.udp = types.SimpleNamespace(send=lambda payload: True)
+            app.mqtt_transport = types.SimpleNamespace(publish_raw=lambda payload, connected: True)
             app.wifi = types.SimpleNamespace(is_connected=lambda: True)
             app.sent_packets = 0
             app.failed_sends = 0
@@ -659,7 +646,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app = module.App(wifi_setup_requested=False)
             response = app._handle_control_request(
                 {"command": "set_matrix_layout", "analog_pins": [1], "select_pins": [1]},
-                ("127.0.0.1", 22345),
+                ("mqtt", 0),
             )
         finally:
             for name, saved in saved_modules.items():

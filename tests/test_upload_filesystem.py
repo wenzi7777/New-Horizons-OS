@@ -98,14 +98,14 @@ class UploadFilesystemTests(unittest.TestCase):
         module.subprocess.run = fake_run
         module.RAW_COPY_CHUNK_SIZE = 4
         with tempfile.TemporaryDirectory() as tmpdir:
-            local_path = Path(tmpdir) / "udp_control.py"
+            local_path = Path(tmpdir) / "mqtt_transport.py"
             local_path.write_bytes(b"abcdef")
 
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                module.remote_copy("/dev/test", local_path, "recovery/udp_control.py")
+                module.remote_copy("/dev/test", local_path, "recovery/mqtt_transport.py")
 
         exec_commands = [cmd for cmd in calls if cmd[:3] == ["mpremote", "connect", "/dev/test"] and cmd[3] == "exec"]
-        self.assertEqual(exec_commands[0][4], "f=open('recovery/udp_control.py','wb');f.close()")
+        self.assertEqual(exec_commands[0][4], "f=open('recovery/mqtt_transport.py','wb');f.close()")
         self.assertIn("b'abcd'", exec_commands[1][4])
         self.assertIn("b'ef'", exec_commands[2][4])
 

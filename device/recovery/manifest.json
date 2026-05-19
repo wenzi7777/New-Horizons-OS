@@ -2,15 +2,15 @@
   "manifest_version": 1,
   "type": "recovery",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.21",
-  "version": "v0.2.21",
+  "firmware_version": "v0.2.22",
+  "version": "v0.2.22",
   "target_root": "/recovery",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.21/device/recovery",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.22/device/recovery",
   "files": [
     {
       "path": "config.py",
-      "sha256": "1b80ae3398414c3c13ad4d580d2ccfc113262ac841e2c359c9407f3f7578c4ec",
-      "size": 1532,
+      "sha256": "f4519daa9ef5ad600d557d0724689f359a2f64060d54969e674701950400061d",
+      "size": 1329,
       "kind": "code",
       "reboot_required": true
     },
@@ -37,15 +37,15 @@
     },
     {
       "path": "immutable_config.py",
-      "sha256": "82042ed699577a224d81817f72af6ab5fff742036a0ec5774c579307f7d490a9",
-      "size": 2263,
+      "sha256": "c1fc1578331ebecc7209d7f1d9cbde3d052dc5dd225292602743ef253ed4fadf",
+      "size": 1974,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "mqtt_transport.py",
-      "sha256": "ed7937bc8a47b46962ea860222b80fa0613163482845860b6d59f4c66943a272",
-      "size": 6791,
+      "sha256": "43aebbf51a36ff6f0db9cec1186aedf512989ee32f882f552068ee165d94ec5c",
+      "size": 6698,
       "kind": "code",
       "reboot_required": true
     },
@@ -58,15 +58,15 @@
     },
     {
       "path": "recovery_app.py",
-      "sha256": "b1518ef7f359278256e990962f3dd5807441f4acf562595461bb8b5508424a2d",
-      "size": 23893,
+      "sha256": "6a88aa6201108a552e5205005513a33a593b71883a73ba4d135cd4bb904fdf24",
+      "size": 22568,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "runtime_config.py",
-      "sha256": "b8295078bf93ad1513876a15ee7ba2f1f653fa2a7707eed2fa61ee6cfc1e9fff",
-      "size": 5846,
+      "sha256": "c0b4f1376761e6aa2d63a3ed4570e7bf50bc3b6485ced7535781b05e4fb22bc6",
+      "size": 5500,
       "kind": "code",
       "reboot_required": true
     },
@@ -81,13 +81,6 @@
       "path": "storage.py",
       "sha256": "91caa900ca0d830c1517210d349b7af9757fc2c960caebf1df1367c1ed0f56a2",
       "size": 4678,
-      "kind": "code",
-      "reboot_required": true
-    },
-    {
-      "path": "udp_control.py",
-      "sha256": "0d291bc2ead18471ac3d333ca821b77bc859ec20f7a32308a2fdec97fb935756",
-      "size": 1790,
       "kind": "code",
       "reboot_required": true
     },
@@ -114,17 +107,20 @@
     },
     {
       "path": "wifi_manager.py",
-      "sha256": "b23a087a810f0b19b641c6c74d2f5c256a42ac50f35a93022c3ac09f31102117",
-      "size": 21942,
+      "sha256": "c850030299c4bc86087ce0de006a679407a0fc2fa69eb9e4329683be97d5e810",
+      "size": 19482,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "wifi_portal.py",
-      "sha256": "1a0bcc425969d6189c40c41a35511e70db3c176855d708ff33a4f74f9fced405",
-      "size": 23762,
+      "sha256": "e33e3f2764cc653414eaca6907f1e31d4da67cc630d5c43975e28f65b382d917",
+      "size": 21533,
       "kind": "code",
       "reboot_required": true
     }
+  ],
+  "delete": [
+    "udp_control.py"
   ]
 }

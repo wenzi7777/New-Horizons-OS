@@ -1,7 +1,7 @@
 FIRMWARE_NAME = "New Horizons OS"
 HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4"
 RUNTIME_VERSION = "v0.2.17"
-RECOVERY_VERSION = "v0.2.21"
+RECOVERY_VERSION = "v0.2.22"
 FIRMWARE_VERSION = RECOVERY_VERSION
 DEFAULT_MODE = "recovery"
 
@@ -26,30 +26,24 @@ DATA_LOG_DIR = "data/logs"
 DATA_TMP_DIR = "data/tmp"
 LOG_PATH = DATA_LOG_DIR + "/device.log"
 
-DEFAULT_MASTER_HOST = "192.168.1.153"
-DEFAULT_MASTER_PORT = 22345
-DEFAULT_DATA_HOST = "192.168.1.153"
-DEFAULT_DATA_PORT = 5005
 PRODUCTION_SERVER_HOST = "isensing-s1.u-aizu.ac.jp"
 DEFAULT_SERVER_PROFILE = "production"
-SERVER_PROFILES = {
-    "manual": {
-        "label": "Manual",
-        "master_server": {"host": DEFAULT_MASTER_HOST, "port": DEFAULT_MASTER_PORT},
-        "data_server": {"host": DEFAULT_DATA_HOST, "port": DEFAULT_DATA_PORT},
-    },
-    "production": {
-        "label": "Production",
-        "master_server": {"host": PRODUCTION_SERVER_HOST, "port": DEFAULT_MASTER_PORT},
-        "data_server": {"host": PRODUCTION_SERVER_HOST, "port": DEFAULT_DATA_PORT},
-    },
-}
 DEFAULT_MQTT_HOST = "192.168.1.153"
 DEFAULT_MQTT_PORT = 1883
 DEFAULT_MQTT_TLS = False
 PRODUCTION_MQTT_HOST = PRODUCTION_SERVER_HOST
 PRODUCTION_MQTT_PORT = 8883
 PRODUCTION_MQTT_TLS = True
+SERVER_PROFILES = {
+    "manual": {
+        "label": "Manual",
+        "mqtt": {"host": DEFAULT_MQTT_HOST, "port": DEFAULT_MQTT_PORT, "tls": DEFAULT_MQTT_TLS},
+    },
+    "production": {
+        "label": "Production",
+        "mqtt": {"host": PRODUCTION_MQTT_HOST, "port": PRODUCTION_MQTT_PORT, "tls": PRODUCTION_MQTT_TLS},
+    },
+}
 DEFAULT_MQTT_USERNAME = ""
 DEFAULT_MQTT_PASSWORD = ""
 DEFAULT_TOPIC_NAMESPACE = "newhorizons/v1"
@@ -58,10 +52,9 @@ DEFAULT_NTP_SERVERS = ["pool.ntp.org", "time.nist.gov"]
 DEFAULT_BUFFER_FRAMES = 8
 DEFAULT_TARGET_FPS = 60
 
-DEFAULT_CONTROL_PORT = 22345
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 DEFAULT_MANIFESTS = {
-    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.21/device/recovery/manifest.json",
-    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.21/device/os/manifest.json",
+    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.22/device/recovery/manifest.json",
+    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.22/device/os/manifest.json",
 }

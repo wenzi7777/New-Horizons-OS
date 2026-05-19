@@ -98,8 +98,6 @@ class FakeConfigStore:
         }
         self.runtime = {
             "server_profile": "manual",
-            "master_server": {"host": "192.168.1.153", "port": 22345},
-            "data_server": {"host": "192.168.1.153", "port": 5005},
             "mqtt": {"host": "192.168.1.153", "port": 1883, "tls": False},
             "transport": {"mode": "mqtt", "topic_namespace": "newhorizons/v1"},
             "update": {
@@ -121,8 +119,6 @@ class FakeConfigStore:
     def load_runtime(self):
         return {
             "server_profile": self.runtime.get("server_profile", "manual"),
-            "master_server": dict(self.runtime.get("master_server", {})),
-            "data_server": dict(self.runtime.get("data_server", {})),
             "mqtt": dict(self.runtime.get("mqtt", {})),
             "transport": dict(self.runtime.get("transport", {})),
             "update": dict(self.runtime.get("update", {})),
@@ -162,13 +158,11 @@ def load_wifi_manager(channel, include_os_dir=True):
         SERVER_PROFILES={
             "manual": {
                 "label": "Manual",
-                "master_server": {"host": "192.168.1.153", "port": 22345},
-                "data_server": {"host": "192.168.1.153", "port": 5005},
+                "mqtt": {"host": "192.168.1.153", "port": 1883, "tls": False},
             },
             "production": {
                 "label": "Production",
-                "master_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 22345},
-                "data_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 5005},
+                "mqtt": {"host": "isensing-s1.u-aizu.ac.jp", "port": 8883, "tls": True},
             },
         },
     )
@@ -354,15 +348,10 @@ class WiFiManagerApStartTests(unittest.TestCase):
             mqtt_host="192.168.1.153",
             mqtt_port="1883",
             mqtt_tls="false",
-            transport_mode="udp",
         )
 
         self.assertTrue(result["ok"])
         self.assertEqual(store.runtime["server_profile"], "production")
-        self.assertEqual(store.runtime["master_server"]["host"], "isensing-s1.u-aizu.ac.jp")
-        self.assertEqual(store.runtime["master_server"]["port"], 22345)
-        self.assertEqual(store.runtime["data_server"]["host"], "isensing-s1.u-aizu.ac.jp")
-        self.assertEqual(store.runtime["data_server"]["port"], 5005)
         self.assertEqual(store.runtime["mqtt"], {"host": "isensing-s1.u-aizu.ac.jp", "port": 8883, "tls": True})
         self.assertEqual(store.runtime["transport"]["mode"], "mqtt")
 
@@ -376,22 +365,13 @@ class WiFiManagerApStartTests(unittest.TestCase):
             "CampusWiFi",
             "pw",
             "manual",
-            master_host="192.168.1.200",
-            master_port="32001",
-            data_host="192.168.1.201",
-            data_port="32002",
             mqtt_host="192.168.1.153",
             mqtt_port="1883",
             mqtt_tls="true",
-            transport_mode="udp",
         )
 
         self.assertTrue(result["ok"])
         self.assertEqual(store.runtime["server_profile"], "manual")
-        self.assertEqual(store.runtime["master_server"]["host"], "192.168.1.200")
-        self.assertEqual(store.runtime["master_server"]["port"], 32001)
-        self.assertEqual(store.runtime["data_server"]["host"], "192.168.1.201")
-        self.assertEqual(store.runtime["data_server"]["port"], 32002)
         self.assertEqual(store.runtime["mqtt"], {"host": "192.168.1.153", "port": 1883, "tls": False})
         self.assertEqual(store.runtime["transport"]["mode"], "mqtt")
 
@@ -405,10 +385,6 @@ class WiFiManagerApStartTests(unittest.TestCase):
             "CampusWiFi",
             "pw",
             "manual",
-            master_host="192.168.1.200",
-            master_port="32001",
-            data_host="192.168.1.201",
-            data_port="32002",
         )
 
         self.assertTrue(result["ok"])
@@ -425,22 +401,13 @@ class WiFiManagerApStartTests(unittest.TestCase):
             "CampusWiFi",
             "pw",
             "manual",
-            master_host="192.168.1.210",
-            master_port="32101",
-            data_host="192.168.1.211",
-            data_port="32102",
             mqtt_host="192.168.1.154",
             mqtt_port="1884",
             mqtt_tls="false",
-            transport_mode="mqtt",
         )
 
         self.assertTrue(result["ok"])
         self.assertEqual(store.runtime["server_profile"], "manual")
-        self.assertEqual(store.runtime["master_server"]["host"], "192.168.1.210")
-        self.assertEqual(store.runtime["master_server"]["port"], 32101)
-        self.assertEqual(store.runtime["data_server"]["host"], "192.168.1.211")
-        self.assertEqual(store.runtime["data_server"]["port"], 32102)
         self.assertEqual(store.runtime["mqtt"], {"host": "192.168.1.154", "port": 1884, "tls": False})
         self.assertEqual(store.runtime["transport"]["mode"], "mqtt")
 
@@ -449,8 +416,7 @@ class WiFiManagerApStartTests(unittest.TestCase):
         store = FakeConfigStore()
         store.update_runtime({
             "server_profile": "production",
-            "master_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 22345},
-            "data_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 5005},
+            "mqtt": {"host": "isensing-s1.u-aizu.ac.jp", "port": 8883, "tls": True},
         })
 
         manager = module.WiFiManager(config_store=store)
@@ -463,14 +429,16 @@ class WiFiManagerApStartTests(unittest.TestCase):
                 {
                     "value": "manual",
                     "label": "Manual",
-                    "master_host": "192.168.1.153",
-                    "data_host": "192.168.1.153",
+                    "mqtt_host": "192.168.1.153",
+                    "mqtt_port": 1883,
+                    "mqtt_tls": False,
                 },
                 {
                     "value": "production",
                     "label": "Production",
-                    "master_host": "isensing-s1.u-aizu.ac.jp",
-                    "data_host": "isensing-s1.u-aizu.ac.jp",
+                    "mqtt_host": "isensing-s1.u-aizu.ac.jp",
+                    "mqtt_port": 8883,
+                    "mqtt_tls": True,
                 },
             ],
         )

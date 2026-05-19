@@ -112,6 +112,24 @@ class GenerateManifestTests(unittest.TestCase):
             )
             self.assertEqual(manifest["delete"], ["app.py", "main.py", "umqtt/simple.py"])
 
+    def test_recovery_manifest_does_not_publish_udp_control_and_deletes_old_file(self):
+        manifest_path = REPO_ROOT / "device" / "recovery" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        paths = [item["path"] for item in manifest.get("files", [])]
+
+        self.assertNotIn("udp_control.py", paths)
+        self.assertIn("udp_control.py", manifest.get("delete", []))
+
+    def test_os_manifest_does_not_publish_udp_modules_and_deletes_old_files(self):
+        manifest_path = REPO_ROOT / "device" / "os" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        paths = [item["path"] for item in manifest.get("files", [])]
+        deletes = set(manifest.get("delete", []))
+
+        self.assertNotIn("udp_control.mpy", paths)
+        self.assertNotIn("udp_stream.mpy", paths)
+        self.assertTrue({"udp_control.py", "udp_stream.py", "udp_control.mpy", "udp_stream.mpy"} <= deletes)
+
 
 if __name__ == "__main__":
     unittest.main()

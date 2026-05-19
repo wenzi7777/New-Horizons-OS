@@ -204,14 +204,9 @@ class WiFiManager:
         ssid,
         password,
         server_profile=None,
-        master_host="",
-        master_port="",
-        data_host="",
-        data_port="",
         mqtt_host="",
         mqtt_port="",
         mqtt_tls="",
-        transport_mode="",
         release_url="",
         log_enabled="",
         log_capacity="",
@@ -233,10 +228,6 @@ class WiFiManager:
             })
             runtime_patch = self._runtime_patch_for_server_profile(
                 server_profile,
-                master_host,
-                master_port,
-                data_host,
-                data_port,
             )
             runtime_patch = runtime_patch or {}
             selected_profile = runtime_patch.get("server_profile", "") or str(server_profile or "").strip()
@@ -289,14 +280,6 @@ class WiFiManager:
         network_cfg = self.config_store.load_network() if self.config_store is not None else {}
         runtime_cfg = self.config_store.load_runtime() if self.config_store is not None else {}
         selected_profile = self._selected_server_profile(runtime_cfg)
-        master_server = dict(runtime_cfg.get("master_server", {}))
-        data_server = dict(runtime_cfg.get("data_server", {}))
-        profile_runtime = self._runtime_patch_for_server_profile(selected_profile)
-        if profile_runtime is not None:
-            if not master_server:
-                master_server = dict(profile_runtime.get("master_server", {}))
-            if not data_server:
-                data_server = dict(profile_runtime.get("data_server", {}))
         portal_ip = config.SETUP_PORTAL_HOST
         portal_domain = getattr(config, "SETUP_PORTAL_DOMAIN", "")
         ap_ssid = self.ap_ssid()
@@ -322,8 +305,6 @@ class WiFiManager:
             "last_setup_result": self.last_setup_result,
             "server_profile": selected_profile,
             "server_profile_options": self._server_profile_options(),
-            "master_server": master_server,
-            "data_server": data_server,
             "mqtt": dict(runtime_cfg.get("mqtt", {})),
             "transport": dict(runtime_cfg.get("transport", {})),
             "logging": dict(runtime_cfg.get("logging", {})),
@@ -336,8 +317,7 @@ class WiFiManager:
             item = item or {}
             normalized[str(name)] = {
                 "label": str(item.get("label", name)),
-                "master_server": dict(item.get("master_server", {})),
-                "data_server": dict(item.get("data_server", {})),
+                "mqtt": dict(item.get("mqtt", {})),
             }
         return normalized
 
@@ -353,51 +333,16 @@ class WiFiManager:
     def _runtime_patch_for_server_profile(
         self,
         profile_name,
-        master_host="",
-        master_port="",
-        data_host="",
-        data_port="",
     ):
-        master_host = self._normalize_server_host(master_host)
-        data_host = self._normalize_server_host(data_host)
-        master_port = self._normalize_server_port(master_port)
-        data_port = self._normalize_server_port(data_port)
         profile_name = str(profile_name or "").strip()
         profiles = self._server_profiles()
         if not profiles:
             return None
         if not profile_name:
-            if master_host or data_host:
-                profile_name = "manual" if "manual" in profiles else self._default_server_profile()
-            else:
-                return None
+            return None
         if profile_name not in profiles:
             profile_name = self._default_server_profile()
-        profile = profiles.get(profile_name, {})
-        patch = {
-            "server_profile": profile_name,
-            "master_server": dict(profile.get("master_server", {})),
-            "data_server": dict(profile.get("data_server", {})),
-        }
-        if profile_name == "manual":
-            current_runtime = self.config_store.load_runtime() if self.config_store is not None else {}
-            current_master = current_runtime.get("master_server", {})
-            current_data = current_runtime.get("data_server", {})
-            patch["master_server"]["port"] = master_port or int(
-                current_master.get("port", patch["master_server"].get("port", 0)) or 0
-            )
-            patch["data_server"]["port"] = data_port or int(
-                current_data.get("port", patch["data_server"].get("port", 0)) or 0
-            )
-            resolved_master = master_host or str(current_master.get("host", "") or patch["master_server"].get("host", "")).strip()
-            resolved_data = data_host or str(current_data.get("host", "") or patch["data_server"].get("host", "")).strip()
-            if resolved_master and not resolved_data:
-                resolved_data = resolved_master
-            if resolved_data and not resolved_master:
-                resolved_master = resolved_data
-            patch["master_server"]["host"] = resolved_master
-            patch["data_server"]["host"] = resolved_data
-        return patch
+        return {"server_profile": profile_name}
 
     def _selected_server_profile(self, runtime_cfg):
         runtime_cfg = runtime_cfg or {}
@@ -405,11 +350,9 @@ class WiFiManager:
         requested = str(runtime_cfg.get("server_profile", "") or "").strip()
         if requested in profiles:
             return requested
-        master = runtime_cfg.get("master_server", {})
-        data = runtime_cfg.get("data_server", {})
+        mqtt_cfg = runtime_cfg.get("mqtt", {})
         for name, profile in profiles.items():
-            if self._server_equals(master, profile.get("master_server", {})) and self._server_equals(
-                    data, profile.get("data_server", {})):
+            if self._mqtt_equals(mqtt_cfg, profile.get("mqtt", {})):
                 return name
         return self._default_server_profile()
 
@@ -436,6 +379,14 @@ class WiFiManager:
 
     def _mqtt_defaults_for_profile(self, profile_name):
         profile_name = str(profile_name or "").strip()
+        profile = self._server_profiles().get(profile_name, {})
+        mqtt_cfg = profile.get("mqtt", {})
+        if mqtt_cfg:
+            return {
+                "host": str(mqtt_cfg.get("host", "")).strip(),
+                "port": int(mqtt_cfg.get("port", 8883)),
+                "tls": bool(mqtt_cfg.get("tls", True)),
+            }
         if profile_name == "production":
             return {
                 "host": getattr(config, "PRODUCTION_MQTT_HOST", getattr(config, "PRODUCTION_SERVER_HOST", "")),
@@ -490,17 +441,19 @@ class WiFiManager:
             options.append({
                 "value": name,
                 "label": profile.get("label", name),
-                "master_host": profile.get("master_server", {}).get("host", ""),
-                "data_host": profile.get("data_server", {}).get("host", ""),
+                "mqtt_host": profile.get("mqtt", {}).get("host", ""),
+                "mqtt_port": profile.get("mqtt", {}).get("port", ""),
+                "mqtt_tls": profile.get("mqtt", {}).get("tls", False),
             })
         return options
 
-    def _server_equals(self, lhs, rhs):
+    def _mqtt_equals(self, lhs, rhs):
         lhs = lhs or {}
         rhs = rhs or {}
         return (
             str(lhs.get("host", "")) == str(rhs.get("host", ""))
             and int(lhs.get("port", 0) or 0) == int(rhs.get("port", 0) or 0)
+            and bool(lhs.get("tls", False)) == bool(rhs.get("tls", False))
         )
 
     def _normalize_server_host(self, value):
