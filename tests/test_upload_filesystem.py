@@ -105,6 +105,29 @@ class UploadFilesystemTests(unittest.TestCase):
         self.assertIn("b'abcd'", exec_commands[1][4])
         self.assertIn("b'ef'", exec_commands[2][4])
 
+    def test_remote_copy_treats_missing_os_stat_as_success_after_copy_output(self):
+        module = load_upload_filesystem()
+        calls = []
+
+        def fake_run(cmd, check=False, capture_output=False, text=False):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                "cp local.py :recovery/wifi_manager.py\n",
+                "AttributeError: 'module' object has no attribute 'stat'\n",
+            )
+
+        module.subprocess.run = fake_run
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_path = Path(tmpdir) / "wifi_manager.py"
+            local_path.write_bytes(b"abcdef")
+
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                module.remote_copy("/dev/test", local_path, "recovery/wifi_manager.py")
+
+        self.assertEqual(len(calls), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

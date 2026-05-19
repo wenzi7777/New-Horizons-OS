@@ -56,6 +56,9 @@ def remote_copy(port: str, local_path: Path, remote_path: str) -> None:
     text = (result.stdout or "") + (result.stderr or "")
     if "has no attribute 'stat'" not in text:
         raise subprocess.CalledProcessError(result.returncode, cmd)
+    if f":{remote_path}" in text:
+        print(f"mpremote fs cp wrote {remote_path}; ignoring missing os.stat confirmation")
+        return
     print(f"mpremote fs cp failed without os.stat; retrying raw chunk copy for {remote_path}")
     remote_copy_raw(port, local_path, remote_path)
 
