@@ -59,7 +59,7 @@ DEFAULT_RUNTIME = {
     "buffer_frames": iconfig.DEFAULT_BUFFER_FRAMES,
     "ntp_servers": list(iconfig.DEFAULT_NTP_SERVERS),
     "transport": {
-        "mode": "udp",
+        "mode": "mqtt",
         "topic_namespace": iconfig.DEFAULT_TOPIC_NAMESPACE,
     },
     "logging": {
@@ -83,7 +83,6 @@ DEFAULT_RUNTIME = {
         "source": "github",
         "sources": {
             "github": dict(iconfig.DEFAULT_MANIFESTS),
-            "server": dict(iconfig.DEFAULT_SERVER_MANIFESTS),
         },
     },
 }

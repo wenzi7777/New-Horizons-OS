@@ -59,14 +59,18 @@ SERVER_PROFILES = {
         "data_server": {"host": PRODUCTION_SERVER_HOST, "port": UDP_SERVER_PORT},
     },
 }
-MQTT_BROKER_HOST = "isensing-s1.u-aizu.ac.jp"
-MQTT_BROKER_PORT = 8883
-MQTT_TLS = True
+MQTT_BROKER_HOST = "192.168.1.153"
+MQTT_BROKER_PORT = 1883
+MQTT_TLS = False
+PRODUCTION_MQTT_HOST = PRODUCTION_SERVER_HOST
+PRODUCTION_MQTT_PORT = 8883
+PRODUCTION_MQTT_TLS = True
 MQTT_TOPIC_NAMESPACE = "newhorizons/v1"
 MQTT_USERNAME = ""
 MQTT_PASSWORD = ""
-SERVER_BASE_URL = "https://isensing-s1.u-aizu.ac.jp/newhorizons/ota"
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.3/device"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.4/device"
+GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
+DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 # Packet format:

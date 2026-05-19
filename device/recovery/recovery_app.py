@@ -287,13 +287,7 @@ class RecoveryApp:
         return runtime.get("transport", {}).get("mode", "udp")
 
     def _release_url(self, request):
-        runtime = self.config_store.load_runtime()
-        update_cfg = runtime.get("update", {})
-        return (
-            request.get("release_url", "")
-            or update_cfg.get("release_url", "")
-            or getattr(iconfig, "DEFAULT_RELEASE_URL", "")
-        )
+        return getattr(iconfig, "DEFAULT_RELEASE_URL", "")
 
     def _ensure_os_writer(self):
         if self.os_writer is None:

@@ -262,11 +262,9 @@ class WiFiSetupPortal:
                     fields.get("data_port", ""),
                     fields.get("mqtt_host", ""),
                     fields.get("mqtt_port", ""),
-                    fields.get("mqtt_tls", ""),
-                    fields.get("transport_mode", ""),
-                    fields.get("release_url", ""),
-                    fields.get("log_enabled", ""),
-                    fields.get("log_capacity", ""),
+                    "",
+                    "",
+                    "",
                 )
                 content = self._render_result_page(result)
                 self._send_response(client, "200 OK", "text/html; charset=utf-8", content)
@@ -390,15 +388,20 @@ class WiFiSetupPortal:
             )
 
         server_options = []
+        manual_option = {}
         for item in server_profile_options:
             value = item.get("value", "")
             if not value:
                 continue
             selected = " selected" if value == selected_profile else ""
-            label = "{} ({})".format(
-                item.get("label", value),
-                item.get("master_host", ""),
-            )
+            if value == "manual":
+                manual_option = item
+                label = item.get("label", value)
+            else:
+                label = "{} ({})".format(
+                    item.get("label", value),
+                    item.get("master_host", ""),
+                )
             server_options.append(
                 '<option value="{value}"{selected}>{label}</option>'.format(
                     value=_escape_html(value),
@@ -421,12 +424,21 @@ class WiFiSetupPortal:
         master_server = status.get("master_server", {}) or {}
         data_server = status.get("data_server", {}) or {}
         mqtt_cfg = status.get("mqtt", {}) or {}
-        transport_cfg = status.get("transport", {}) or {}
-        logging_cfg = status.get("logging", {}) or {}
         recovery_mode = status.get("mode") == "recovery" or not status.get("os_installed", True)
         release_url = status.get("release_url", "")
-        log_enabled = logging_cfg.get("enabled", True)
-        log_capacity = logging_cfg.get("capacity", "default")
+        manual_master_host = manual_option.get("master_host", "192.168.1.153")
+        manual_data_host = manual_option.get("data_host", manual_master_host)
+        manual_master_port = manual_option.get("master_port", master_server.get("port", 22345))
+        manual_data_port = manual_option.get("data_port", data_server.get("port", 5005))
+        manual_mqtt_host = manual_option.get("mqtt_host", manual_master_host)
+        manual_mqtt_port = manual_option.get("mqtt_port", 1883)
+        if selected_profile == "manual":
+            manual_master_host = master_server.get("host", manual_master_host)
+            manual_master_port = master_server.get("port", manual_master_port)
+            manual_data_host = data_server.get("host", manual_data_host)
+            manual_data_port = data_server.get("port", manual_data_port)
+            manual_mqtt_host = mqtt_cfg.get("host", manual_mqtt_host)
+            manual_mqtt_port = mqtt_cfg.get("port", manual_mqtt_port)
         recovery_notice = ""
         if recovery_mode:
             recovery_notice = (
@@ -463,42 +475,19 @@ class WiFiSetupPortal:
         <p class="muted">Production uses the school server. Manual lets you enter custom control and data addresses.</p>
         <div id="manual_server_fields" style="display:{manual_fields_display}">
           <label for="master_host">Control server address</label>
-          <input id="master_host" name="master_host" value="{master_host}" placeholder="e.g. 192.168.1.153">
+          <input id="master_host" name="master_host" value="{manual_master_host}" placeholder="e.g. 192.168.1.153">
           <label for="master_port">Control server port</label>
-          <input id="master_port" name="master_port" value="{master_port}" inputmode="numeric" placeholder="e.g. 22345">
+          <input id="master_port" name="master_port" value="{manual_master_port}" inputmode="numeric" placeholder="e.g. 22345">
           <label for="data_host">Data server address</label>
-          <input id="data_host" name="data_host" value="{data_host}" placeholder="e.g. 192.168.1.153">
+          <input id="data_host" name="data_host" value="{manual_data_host}" placeholder="e.g. 192.168.1.153">
           <label for="data_port">Data server port</label>
-          <input id="data_port" name="data_port" value="{data_port}" inputmode="numeric" placeholder="e.g. 5005">
+          <input id="data_port" name="data_port" value="{manual_data_port}" inputmode="numeric" placeholder="e.g. 5005">
+          <label for="mqtt_host">MQTT broker address</label>
+          <input id="mqtt_host" name="mqtt_host" value="{manual_mqtt_host}" placeholder="e.g. 192.168.1.153">
+          <label for="mqtt_port">MQTT broker port</label>
+          <input id="mqtt_port" name="mqtt_port" value="{manual_mqtt_port}" inputmode="numeric" placeholder="e.g. 1883">
         </div>
-        <label for="transport_mode">Transport mode</label>
-        <select id="transport_mode" name="transport_mode">
-          <option value="udp"{transport_udp_selected}>UDP</option>
-          <option value="mqtt"{transport_mqtt_selected}>MQTT</option>
-        </select>
-        <label for="mqtt_host">MQTT broker address</label>
-        <input id="mqtt_host" name="mqtt_host" value="{mqtt_host}" placeholder="e.g. 192.168.1.153">
-        <label for="mqtt_port">MQTT broker port</label>
-        <input id="mqtt_port" name="mqtt_port" value="{mqtt_port}" inputmode="numeric" placeholder="e.g. 1883">
-        <label for="mqtt_tls">MQTT TLS</label>
-        <select id="mqtt_tls" name="mqtt_tls">
-          <option value="true"{mqtt_tls_true_selected}>Enabled</option>
-          <option value="false"{mqtt_tls_false_selected}>Disabled</option>
-        </select>
-        <label for="release_url">OS release URL</label>
-        <input id="release_url" name="release_url" value="{release_url}" placeholder="https://server/newhorizons/latest.json">
-        <h2>Device Logging</h2>
-        <label for="log_enabled">File log</label>
-        <select id="log_enabled" name="log_enabled">
-          <option value="true"{log_enabled_selected}>On</option>
-          <option value="false"{log_disabled_selected}>Off</option>
-        </select>
-        <label for="log_capacity">Log capacity</label>
-        <select id="log_capacity" name="log_capacity">
-          <option value="default"{log_default_selected}>Default 16KB</option>
-          <option value="extended"{log_extended_selected}>Extended 64KB</option>
-        </select>
-        <p class="muted">Serial status output stays enabled. File log stores only low-frequency status and errors.</p>
+        <p class="muted">Transport: MQTT. Manual uses plain MQTT; production uses TLS. OS release source: GitHub.</p>
         <label for="ssid">Wi-Fi SSID</label>
         <input id="ssid" name="ssid" value="{ssid}" placeholder="Your Wi-Fi name">
         <label for="password">Wi-Fi password</label>
@@ -516,9 +505,7 @@ class WiFiSetupPortal:
         <p class="muted">Master target: {master_host}:{master_port}</p>
         <p class="muted">Data target: {data_host}:{data_port}</p>
         <p class="muted">MQTT target: {mqtt_host}:{mqtt_port} ({mqtt_tls_label})</p>
-        <p class="muted">Release URL: {release_url}</p>
-        <p class="muted">File log: {log_status} ({log_capacity_label})</p>
-        <p class="muted">Transport mode: {transport_mode}</p>
+        <p class="muted">GitHub release: {release_url}</p>
         <p class="muted">Device state: {device_state}</p>
       </div>
   </main>
@@ -539,7 +526,7 @@ class WiFiSetupPortal:
             style=INDEX_CSS,
             eyebrow="Recovery Mode" if recovery_mode else "Device Setup",
             headline="寫入 New Horizons OS" if recovery_mode else _escape_html(self.config.SETUP_PORTAL_TITLE),
-            lead="偵測到處於 Recovery Mode 的設備。請連上 Wi-Fi 並確認 release URL，接著透過 WebUI 或 MQTT 寫入 OS。" if recovery_mode else "Join the device hotspot, then use this page to connect the board to Wi-Fi and choose where control and data should be sent. Most phones should auto-open this portal after joining the hotspot.",
+            lead="偵測到處於 Recovery Mode 的設備。請連上 Wi-Fi，接著透過 WebUI 或 MQTT 從 GitHub 寫入 OS。" if recovery_mode else "Join the device hotspot, then use this page to connect the board to Wi-Fi and choose where control and data should be sent. Most phones should auto-open this portal after joining the hotspot.",
             ip=ip_addr,
             notice=notice,
             recovery_notice=recovery_notice,
@@ -553,6 +540,12 @@ class WiFiSetupPortal:
             portal_url=portal_url,
             portal_domain=portal_domain or "(disabled)",
             manual_hint="" if not portal_domain else " Fallback: <strong>{}</strong>.".format(portal_ip_url),
+            manual_master_host=_escape_html(manual_master_host),
+            manual_master_port=_escape_html(manual_master_port),
+            manual_data_host=_escape_html(manual_data_host),
+            manual_data_port=_escape_html(manual_data_port),
+            manual_mqtt_host=_escape_html(manual_mqtt_host),
+            manual_mqtt_port=_escape_html(manual_mqtt_port),
             master_host=_escape_html(master_server.get("host", "")),
             master_port=_escape_html(master_server.get("port", "")),
             data_host=_escape_html(data_server.get("host", "")),
@@ -560,19 +553,8 @@ class WiFiSetupPortal:
             mqtt_host=_escape_html(mqtt_cfg.get("host", "")),
             mqtt_port=_escape_html(mqtt_cfg.get("port", "")),
             release_url=_escape_html(release_url),
-            log_enabled_selected=" selected" if log_enabled else "",
-            log_disabled_selected="" if log_enabled else " selected",
-            log_default_selected=" selected" if log_capacity != "extended" else "",
-            log_extended_selected=" selected" if log_capacity == "extended" else "",
-            log_status="on" if log_enabled else "off",
-            log_capacity_label="64KB" if log_capacity == "extended" else "16KB",
             primary_button="Save Recovery Settings" if recovery_mode else "Connect Wi-Fi",
             mqtt_tls_label="TLS" if mqtt_cfg.get("tls", False) else "plain",
-            mqtt_tls_true_selected=" selected" if mqtt_cfg.get("tls", False) else "",
-            mqtt_tls_false_selected="" if mqtt_cfg.get("tls", False) else " selected",
-            transport_mode=_escape_html(transport_cfg.get("mode", "udp")),
-            transport_udp_selected=" selected" if transport_cfg.get("mode", "udp") == "udp" else "",
-            transport_mqtt_selected=" selected" if transport_cfg.get("mode", "udp") == "mqtt" else "",
             manual_fields_display=manual_fields_display,
         )
 

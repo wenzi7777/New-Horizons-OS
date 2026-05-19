@@ -6,6 +6,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PORTAL_PATH = REPO_ROOT / "device" / "recovery" / "wifi_portal.py"
+GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 
 
 def load_portal_module():
@@ -50,10 +51,9 @@ class FakeManager:
             "data_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 5005},
             "mqtt": {"host": "isensing-s1.u-aizu.ac.jp", "port": 8883, "tls": True},
             "transport": {"mode": "mqtt"},
-            "logging": {"enabled": True, "capacity": "default", "serial": "status"},
             "mode": "normal",
             "os_installed": True,
-            "release_url": "https://isensing-s1.u-aizu.ac.jp/newhorizons/ota/latest.json",
+            "release_url": GITHUB_RELEASE_URL,
         }
 
     def scan_networks(self):
@@ -73,8 +73,6 @@ class FakeManager:
         mqtt_tls="",
         transport_mode="",
         release_url="",
-        log_enabled="",
-        log_capacity="",
     ):
         self.calls.append(
             (
@@ -90,8 +88,6 @@ class FakeManager:
                 mqtt_tls,
                 transport_mode,
                 release_url,
-                log_enabled,
-                log_capacity,
             )
         )
         return {"ok": True, "message": "Connected"}
@@ -138,19 +134,32 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
 
         self.assertIn('name="server_profile"', html)
         self.assertIn("Production (isensing-s1.u-aizu.ac.jp)", html)
-        self.assertIn("Manual (192.168.1.153)", html)
+        self.assertIn(">Manual</option>", html)
+        self.assertNotIn("Manual (192.168.1.153)", html)
         self.assertIn('name="master_host"', html)
         self.assertIn('name="master_port"', html)
         self.assertIn('name="data_host"', html)
         self.assertIn('name="data_port"', html)
         self.assertIn('name="mqtt_host"', html)
         self.assertIn('name="mqtt_port"', html)
-        self.assertIn('name="mqtt_tls"', html)
-        self.assertIn('name="release_url"', html)
-        self.assertIn('name="log_enabled"', html)
-        self.assertIn('name="log_capacity"', html)
-        self.assertIn('name="transport_mode"', html)
+        self.assertIn(GITHUB_RELEASE_URL, html)
+        self.assertNotIn('name="release_url"', html)
+        self.assertNotIn('id="release_url"', html)
+        self.assertNotIn('name="mqtt_tls"', html)
+        self.assertNotIn('name="log_enabled"', html)
+        self.assertNotIn('name="log_capacity"', html)
+        self.assertNotIn('name="transport_mode"', html)
+        self.assertNotIn(">UDP<", html)
         self.assertIn("isensing-s1.u-aizu.ac.jp", html)
+
+    def test_production_page_keeps_manual_defaults_out_of_option_label(self):
+        module = load_portal_module()
+        portal = module.WiFiSetupPortal(FakeManager(), FakeConfig(), None)
+
+        html = portal._render_index_page()
+
+        self.assertIn('value="192.168.1.153"', html)
+        self.assertNotIn("Manual (192.168.1.153)", html)
 
     def test_connect_post_forwards_server_profile_to_manager(self):
         module = load_portal_module()
@@ -161,7 +170,7 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         portal._read_request = lambda client: (
             "POST",
             "/connect",
-            "ssid=LabWiFi&password=secret&server_profile=manual&master_host=192.168.1.200&master_port=32001&data_host=192.168.1.201&data_port=32002&mqtt_host=192.168.1.153&mqtt_port=1883&mqtt_tls=false&transport_mode=mqtt&release_url=http://192.168.1.2:8000/latest.json&log_enabled=false&log_capacity=extended",
+            "ssid=LabWiFi&password=secret&server_profile=manual&master_host=192.168.1.200&master_port=32001&data_host=192.168.1.201&data_port=32002&mqtt_host=192.168.1.153&mqtt_port=1883",
         )
         portal._send_response = lambda client, status, content_type, body: None
 
@@ -181,11 +190,9 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
                     "32002",
                     "192.168.1.153",
                     "1883",
-                    "false",
-                    "mqtt",
-                    "http://192.168.1.2:8000/latest.json",
-                    "false",
-                    "extended",
+                    "",
+                    "",
+                    "",
                 )
             ],
         )

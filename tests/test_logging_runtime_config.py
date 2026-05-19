@@ -47,8 +47,9 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             MQTT_TLS=False,
             MQTT_USERNAME="",
             MQTT_PASSWORD="",
-            SERVER_BASE_URL="https://example.com/ota",
             GITHUB_BASE_URL="https://example.com/device",
+            GITHUB_RELEASE_URL="https://example.com/releases/latest.json",
+            DEFAULT_RELEASE_URL="https://example.com/releases/latest.json",
             WIFI_MODE="STA",
         )
         module = load_runtime_module(
@@ -62,6 +63,10 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             module.DEFAULT_RUNTIME["logging"],
             {"enabled": True, "capacity": "default", "serial": "status"},
         )
+        self.assertEqual(module.DEFAULT_RUNTIME["transport"]["mode"], "mqtt")
+        self.assertEqual(module.DEFAULT_RUNTIME["update"]["release_url"], "https://example.com/releases/latest.json")
+        self.assertEqual(module.DEFAULT_RUNTIME["update"]["source"], "github")
+        self.assertEqual(sorted(module.DEFAULT_RUNTIME["update"]["sources"].keys()), ["github"])
 
     def test_recovery_runtime_defaults_enable_default_logging(self):
         fake_iconfig = types.SimpleNamespace(
@@ -84,7 +89,6 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             DEFAULT_MQTT_PASSWORD="",
             DEFAULT_MANIFESTS={"recovery": "recovery.json", "os": "os.json"},
             DEFAULT_RELEASE_URL="https://example.com/latest.json",
-            DEFAULT_SERVER_MANIFESTS={"recovery": "server-recovery.json", "os": "server-os.json"},
             DEVICE_STATE_DIR="device_state",
         )
         module = load_runtime_module(
@@ -98,6 +102,10 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             module.DEFAULT_RUNTIME["logging"],
             {"enabled": True, "capacity": "default", "serial": "status"},
         )
+        self.assertEqual(module.DEFAULT_RUNTIME["transport"]["mode"], "mqtt")
+        self.assertEqual(module.DEFAULT_RUNTIME["update"]["release_url"], "https://example.com/latest.json")
+        self.assertEqual(module.DEFAULT_RUNTIME["update"]["source"], "github")
+        self.assertEqual(sorted(module.DEFAULT_RUNTIME["update"]["sources"].keys()), ["github"])
 
 
 if __name__ == "__main__":

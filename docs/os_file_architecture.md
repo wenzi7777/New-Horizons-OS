@@ -84,7 +84,7 @@ device/
 - `os`：只上傳 `device/os` 到 `/nhos`，用於本地開發測試。
 - `all`：上傳 root、recovery、OS。
 
-正式 OS 更新應使用 Recovery `write_os`。它會下載 OS manifest，並且只寫入 hash 不同的 `/nhos` 檔案。
+正式 OS 更新應使用 Recovery `write_os`。它固定從 GitHub `releases/latest.json` 取得 OS manifest，並且只寫入 hash 不同的 `/nhos` 檔案。本地開發測試不要切換 release URL，直接使用 `upload_filesystem.py --target os`。
 
 ## Firmware / Filesystem Commands
 
@@ -112,5 +112,5 @@ python3 firmware/scripts/upload_filesystem.py --port /dev/cu.usbserial-210 --tar
 重生 OS manifest：
 
 ```bash
-python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.3
+python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.4
 ```

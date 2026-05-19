@@ -21,6 +21,7 @@ def load_recovery_app_module():
             "recovery": "https://example.com/recovery/manifest.json",
             "os": "https://example.com/os/manifest.json",
         },
+        DEFAULT_RELEASE_URL="https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
     )
     fake_identity = types.SimpleNamespace(
         get_device_id=lambda: 0x12345678,
@@ -128,7 +129,7 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         self.assertEqual(result["message"], "unknown_command")
         self.assertEqual(result["error"], "upgrade_to_full")
 
-    def test_write_os_runs_in_recovery_and_uses_release_url(self):
+    def test_write_os_runs_in_recovery_and_uses_github_release_url(self):
         module = load_recovery_app_module()
         app = module.RecoveryApp.__new__(module.RecoveryApp)
         app.runtime = {
@@ -142,11 +143,17 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         app.os_writer = None
         app.logger = None
 
-        result = app._handle_request({"command": "write_os"}, None)
+        result = app._handle_request(
+            {"command": "write_os", "release_url": "http://192.168.1.2:8000/latest.json"},
+            None,
+        )
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["message"], "os_write_complete")
-        self.assertEqual(result["release_url"], "https://example.com/latest.json")
+        self.assertEqual(
+            result["release_url"],
+            "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
+        )
 
 
 if __name__ == "__main__":

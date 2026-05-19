@@ -59,7 +59,7 @@ DEFAULT_RUNTIME = {
     "buffer_frames": 8,
     "ntp_servers": ["pool.ntp.org", "time.nist.gov"],
     "transport": {
-        "mode": "udp",
+        "mode": "mqtt",
         "topic_namespace": config.MQTT_TOPIC_NAMESPACE,
     },
     "logging": {
@@ -76,7 +76,7 @@ DEFAULT_RUNTIME = {
     },
     "update": {
         "manifest_url": "",
-        "release_url": config.SERVER_BASE_URL + "/latest.json",
+        "release_url": getattr(config, "DEFAULT_RELEASE_URL", getattr(config, "GITHUB_RELEASE_URL", "")),
         "enabled": False,
         "check_on_boot": False,
         "auto_apply": False,
@@ -85,10 +85,6 @@ DEFAULT_RUNTIME = {
             "github": {
                 "recovery": config.GITHUB_BASE_URL + "/recovery/manifest.json",
                 "os": config.GITHUB_BASE_URL + "/os/manifest.json",
-            },
-            "server": {
-                "recovery": config.SERVER_BASE_URL + "/recovery/manifest.json",
-                "os": config.SERVER_BASE_URL + "/os/manifest.json",
             },
         },
     },

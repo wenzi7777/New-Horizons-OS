@@ -232,20 +232,18 @@ class WiFiManager:
                 data_port,
             )
             runtime_patch = runtime_patch or {}
+            selected_profile = runtime_patch.get("server_profile", "") or str(server_profile or "").strip()
+            if not selected_profile:
+                selected_profile = self._selected_server_profile(self.config_store.load_runtime())
             runtime_patch.update(
                 self._runtime_patch_for_transport(
+                    selected_profile,
                     mqtt_host,
                     mqtt_port,
-                    mqtt_tls,
-                    transport_mode,
                 )
             )
             runtime_patch.update(self._runtime_patch_for_logging(log_enabled, log_capacity))
-            release_url = str(release_url or "").strip()
-            if release_url:
-                update_cfg = dict(self.config_store.load_runtime().get("update", {}))
-                update_cfg["release_url"] = release_url
-                runtime_patch["update"] = update_cfg
+            runtime_patch.update(self._runtime_patch_for_github_update())
             if runtime_patch:
                 self.config_store.update_runtime(runtime_patch)
 
@@ -305,7 +303,7 @@ class WiFiManager:
             "state": self.state,
             "mode": runtime_cfg.get("mode", "recovery"),
             "os_installed": storage.exists(getattr(config, "OS_DIR", "nhos") + "/main.py"),
-            "release_url": runtime_cfg.get("update", {}).get("release_url", ""),
+            "release_url": self._github_release_url() or runtime_cfg.get("update", {}).get("release_url", ""),
             "ap_ssid": ap_ssid,
             "portal_ip": portal_ip,
             "portal_domain": portal_domain,
@@ -407,29 +405,60 @@ class WiFiManager:
                 return name
         return self._default_server_profile()
 
-    def _runtime_patch_for_transport(self, mqtt_host="", mqtt_port="", mqtt_tls="", transport_mode=""):
+    def _runtime_patch_for_transport(self, profile_name="", mqtt_host="", mqtt_port=""):
         current_runtime = self.config_store.load_runtime() if self.config_store is not None else {}
-        current_mqtt = dict(current_runtime.get("mqtt", {}))
         current_transport = dict(current_runtime.get("transport", {}))
-        patch = {}
-
+        defaults = self._mqtt_defaults_for_profile(profile_name)
         normalized_host = self._normalize_server_host(mqtt_host)
         normalized_port = self._normalize_server_port(mqtt_port)
-        normalized_tls = self._normalize_bool(mqtt_tls)
-        if normalized_host or normalized_port or normalized_tls is not None:
-            patch["mqtt"] = {
-                "host": normalized_host or current_mqtt.get("host", ""),
-                "port": normalized_port or int(current_mqtt.get("port", 0) or 0),
-                "tls": current_mqtt.get("tls", False) if normalized_tls is None else normalized_tls,
-            }
-
-        normalized_mode = str(transport_mode or "").strip().lower()
-        if normalized_mode in ("udp", "mqtt"):
-            patch["transport"] = {
-                "mode": normalized_mode,
+        if str(profile_name or "").strip() != "manual":
+            normalized_host = ""
+            normalized_port = 0
+        return {
+            "mqtt": {
+                "host": normalized_host or defaults["host"],
+                "port": normalized_port or defaults["port"],
+                "tls": defaults["tls"],
+            },
+            "transport": {
+                "mode": "mqtt",
                 "topic_namespace": current_transport.get("topic_namespace", "newhorizons/v1"),
+            },
+        }
+
+    def _mqtt_defaults_for_profile(self, profile_name):
+        profile_name = str(profile_name or "").strip()
+        if profile_name == "production":
+            return {
+                "host": getattr(config, "PRODUCTION_MQTT_HOST", getattr(config, "PRODUCTION_SERVER_HOST", "")),
+                "port": int(getattr(config, "PRODUCTION_MQTT_PORT", 8883)),
+                "tls": bool(getattr(config, "PRODUCTION_MQTT_TLS", True)),
             }
-        return patch
+        return {
+            "host": getattr(config, "MQTT_BROKER_HOST", "192.168.1.153"),
+            "port": int(getattr(config, "MQTT_BROKER_PORT", 1883)),
+            "tls": bool(getattr(config, "MQTT_TLS", False)),
+        }
+
+    def _runtime_patch_for_github_update(self):
+        release_url = self._github_release_url()
+        if not release_url:
+            return {}
+        current_runtime = self.config_store.load_runtime() if self.config_store is not None else {}
+        current_update = dict(current_runtime.get("update", {}))
+        current_update["release_url"] = release_url
+        current_update["source"] = "github"
+        sources = current_update.get("sources", {})
+        if isinstance(sources, dict) and isinstance(sources.get("github"), dict):
+            current_update["sources"] = {"github": dict(sources.get("github", {}))}
+        return {"update": current_update}
+
+    def _github_release_url(self):
+        return str(
+            getattr(config, "DEFAULT_RELEASE_URL", "")
+            or getattr(config, "GITHUB_RELEASE_URL", "")
+            or ""
+        ).strip()
 
     def _runtime_patch_for_logging(self, log_enabled="", log_capacity=""):
         patch = {}
