@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.1",
-  "version": "v0.2.1",
+  "firmware_version": "v0.2.2",
+  "version": "v0.2.2",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.1/device/os",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.2/device/os",
   "files": [
     {
       "path": "app.py",
@@ -44,7 +44,7 @@
     },
     {
       "path": "config.py",
-      "sha256": "dd6dfccc4bf46004469909fe7d7950c450446788c765bb8ab458f101decb098c",
+      "sha256": "78382609b49ad30c45d0a4474a6080d76a4403609c43d26c25f91e048e0b6415",
       "size": 4251,
       "kind": "code",
       "reboot_required": true
@@ -254,8 +254,8 @@
     },
     {
       "path": "wifi_manager.py",
-      "sha256": "9d54a08e7585bf02b2e0ce9aa6f513ee63711d2ff05beeab3aec9b51858b60f3",
-      "size": 18839,
+      "sha256": "5018bc35ec9edb50db3dc597baeef83c20f505b66a10839ab46c77c9de0d40be",
+      "size": 18859,
       "kind": "code",
       "reboot_required": true
     }

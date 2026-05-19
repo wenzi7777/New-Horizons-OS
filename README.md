@@ -72,7 +72,7 @@ python3 firmware/scripts/upload_filesystem.py --port /dev/cu.usbserial-210 --tar
 
 ```bash
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
-python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.1
+python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.2
 ```
 
 產物是：
@@ -97,8 +97,8 @@ Recovery 的 `check_os_release` / `write_os` 接收的是 release URL，不是�
 ```json
 {
   "product": "New Horizons OS",
-  "latest": "v0.2.1",
-  "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.1/device/os/manifest.json"
+  "latest": "v0.2.2",
+  "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.2/device/os/manifest.json"
 }
 ```
 

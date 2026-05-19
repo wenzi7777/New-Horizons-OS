@@ -111,5 +111,5 @@ python3 firmware/scripts/upload_filesystem.py --port /dev/cu.usbserial-210 --tar
 重生 OS manifest：
 
 ```bash
-python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.1
+python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.2
 ```

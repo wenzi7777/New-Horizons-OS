@@ -24,6 +24,7 @@ SERVER_PROFILES = {
     },
 }
 DEVICE_STATE_DIR = "device_state"
+OS_DIR = "nhos"
 CALIBRATION_DIR = DEVICE_STATE_DIR + "/calibration"
 LOG_PATH = DEVICE_STATE_DIR + "/logs/device.log"
 TARGET_FPS = 60

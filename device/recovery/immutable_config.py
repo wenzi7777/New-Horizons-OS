@@ -1,5 +1,5 @@
 FIRMWARE_NAME = "New Horizons OS"
-FIRMWARE_VERSION = "v0.2.1"
+FIRMWARE_VERSION = "v0.2.2"
 DEFAULT_MODE = "recovery"
 
 ACTION_BUTTON_PIN = 46
@@ -57,8 +57,8 @@ DEFAULT_CONTROL_PORT = 22345
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 DEFAULT_MANIFESTS = {
-    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.1/device/recovery/manifest.json",
-    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.1/device/os/manifest.json",
+    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.2/device/recovery/manifest.json",
+    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.2/device/os/manifest.json",
 }
 DEFAULT_SERVER_MANIFESTS = {
     "recovery": DEFAULT_SERVER_BASE_URL + "/recovery/manifest.json",

@@ -134,11 +134,11 @@ class FakeConfigStore:
         return self.load_runtime()
 
 
-def load_wifi_manager(channel):
+def load_wifi_manager(channel, include_os_dir=True):
     target_dir = "recovery" if channel == "minimal" else "os"
     path = REPO_ROOT / "device" / target_dir / "wifi_manager.py"
     fake_network = FakeNetwork()
-    fake_config = types.SimpleNamespace(
+    config_values = dict(
         WIFI_MODE="STA",
         SETUP_AP_PASSWORD="newhorizons",
         SETUP_AP_SSID_PREFIX="NewHorizonsOS",
@@ -146,7 +146,6 @@ def load_wifi_manager(channel):
         SETUP_PORTAL_HOST="192.168.4.1",
         SETUP_PORTAL_PORT=80,
         PRINT_WIFI_STATUS=True,
-        OS_DIR="nhos",
         DEFAULT_SERVER_PROFILE="manual",
         SERVER_PROFILES={
             "manual": {
@@ -161,11 +160,15 @@ def load_wifi_manager(channel):
             },
         },
     )
+    if include_os_dir:
+        config_values["OS_DIR"] = "nhos"
+    fake_config = types.SimpleNamespace(**config_values)
     fake_secrets = types.SimpleNamespace(WIFI_SSID="", WIFI_PASSWORD="")
     fake_portal = types.SimpleNamespace(WiFiSetupPortal=FakePortal)
     fake_identity = types.SimpleNamespace(get_device_suffix=lambda: "010203")
     fake_time = types.SimpleNamespace(sleep_ms=lambda _ms: None, sleep=lambda _s: None)
     fake_gc = types.SimpleNamespace(collect=lambda: None, mem_free=lambda: 65536)
+    fake_storage = types.SimpleNamespace(exists=lambda _path: False)
 
     saved_modules = {}
     for name, module in {
@@ -176,6 +179,7 @@ def load_wifi_manager(channel):
         "device_identity": fake_identity,
         "time": fake_time,
         "gc": fake_gc,
+        "storage": fake_storage,
     }.items():
         saved_modules[name] = sys.modules.get(name)
         sys.modules[name] = module
@@ -367,6 +371,16 @@ class WiFiManagerApStartTests(unittest.TestCase):
                 },
             ],
         )
+
+    def test_recovery_portal_status_defaults_missing_os_dir_to_nhos(self):
+        module, _fake_network = load_wifi_manager("minimal", include_os_dir=False)
+        checked_paths = []
+        module.storage.exists = lambda path: checked_paths.append(path) or False
+
+        status = module.WiFiManager(config_store=FakeConfigStore()).portal_status()
+
+        self.assertFalse(status["os_installed"])
+        self.assertEqual(checked_paths, ["nhos/main.py"])
 
 
 if __name__ == "__main__":
