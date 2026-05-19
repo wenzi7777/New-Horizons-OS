@@ -73,6 +73,39 @@ class FilesystemAPIChunkTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 api.download_begin("../os/main.py")
 
+    def test_scopes_map_to_separate_roots_and_default_to_user(self):
+        module = load_module(
+            REPO_ROOT / "device" / "os" / "filesystem_api.py",
+            "full_filesystem_api_scope_test",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            api = module.FilesystemAPI(
+                root=str(root / "files"),
+                tmp_root=str(root / "tmp"),
+                scope_roots={
+                    "user": str(root / "files"),
+                    "logs": str(root / "logs"),
+                    "calibration": str(root / "calibration"),
+                },
+            )
+
+            api.upload_begin("user.json", 2, "", scope="user")
+            api.upload_chunk("user.json", 0, "7b7d", scope="user")
+            api.upload_finish("user.json", scope="user")
+            (root / "logs").mkdir()
+            (root / "logs" / "device.log").write_text("hello", encoding="utf-8")
+            (root / "calibration").mkdir()
+            (root / "calibration" / "level.json").write_text("{}", encoding="utf-8")
+
+            self.assertEqual(api.download_begin("user.json")["scope"], "user")
+            self.assertEqual(api.download_begin("device.log", scope="logs")["scope"], "logs")
+            self.assertEqual(api.download_begin("level.json", scope="calibration")["scope"], "calibration")
+            self.assertTrue(any(item["scope"] == "logs" for item in api.list_files(scope="logs")))
+
+            with self.assertRaises(ValueError):
+                api.list_files(scope="system")
+
 
 if __name__ == "__main__":
     unittest.main()

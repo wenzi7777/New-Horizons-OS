@@ -2,7 +2,7 @@
 
 DEVICE_ID = 0x00000001
 DEVICE_NAME = "New Horizons OS"
-FIRMWARE_VERSION = "v0.2.16"
+FIRMWARE_VERSION = "v0.2.17"
 SETUP_AP_SSID_PREFIX = "NewHorizonsOS"
 SETUP_AP_PASSWORD = "newhorizons"
 SETUP_PORTAL_DOMAIN = "newhorizons.os"
@@ -69,7 +69,7 @@ PRODUCTION_MQTT_TLS = True
 MQTT_TOPIC_NAMESPACE = "newhorizons/v1"
 MQTT_USERNAME = ""
 MQTT_PASSWORD = ""
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.16/device"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.17/device"
 GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
 STATUS_ANNOUNCE_INTERVAL_MS = 2000

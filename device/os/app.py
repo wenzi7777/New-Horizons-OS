@@ -776,7 +776,8 @@ class App:
                 "message": "file_list",
                 "reboot_required": False,
                 "applied": False,
-                "items": self.filesystem.list_files(),
+                "scope": request.get("scope", "user"),
+                "items": self.filesystem.list_files(request.get("scope", "user")),
             }
 
         if cmd == "file_upload_begin":
@@ -785,6 +786,7 @@ class App:
                 request.get("path", ""),
                 request.get("size", 0),
                 request.get("sha256", ""),
+                request.get("scope", "user"),
             )
 
         if cmd == "file_upload_chunk":
@@ -793,13 +795,14 @@ class App:
                 request.get("path", ""),
                 request.get("offset", 0),
                 request.get("data", ""),
+                request.get("scope", "user"),
             )
 
         if cmd == "file_upload_finish":
-            return self._file_call(self.filesystem.upload_finish, request.get("path", ""))
+            return self._file_call(self.filesystem.upload_finish, request.get("path", ""), request.get("scope", "user"))
 
         if cmd == "file_download_begin":
-            return self._file_call(self.filesystem.download_begin, request.get("path", ""))
+            return self._file_call(self.filesystem.download_begin, request.get("path", ""), request.get("scope", "user"))
 
         if cmd == "file_download_chunk":
             return self._file_call(
@@ -807,11 +810,12 @@ class App:
                 request.get("path", ""),
                 request.get("offset", 0),
                 request.get("length", 1024),
+                request.get("scope", "user"),
             )
 
         if cmd == "file_delete":
             try:
-                deleted = self.filesystem.delete_file(request.get("path", ""))
+                deleted = self.filesystem.delete_file(request.get("path", ""), request.get("scope", "user"))
             except ValueError as exc:
                 return self._ok(str(exc), error=str(exc))
             return self._ok("file_deleted" if deleted else "file_not_found", applied=bool(deleted))
@@ -822,11 +826,12 @@ class App:
                 "message": "fs_list",
                 "reboot_required": False,
                 "applied": False,
-                "items": self.filesystem.list_files(),
+                "scope": request.get("scope", "user"),
+                "items": self.filesystem.list_files(request.get("scope", "user")),
             }
 
         if cmd == "fs_read":
-            result = self.filesystem.read_file(request.get("path", ""))
+            result = self.filesystem.read_file(request.get("path", ""), request.get("scope", "user"))
             if result is None:
                 return self._ok("fs_not_found", error="fs_not_found")
             return {
@@ -1282,6 +1287,11 @@ class App:
         self.filesystem = FilesystemAPI(
             getattr(config, "DATA_FILES_DIR", "data/files"),
             getattr(config, "DATA_TMP_DIR", "data/tmp"),
+            {
+                "user": getattr(config, "DATA_FILES_DIR", "data/files"),
+                "logs": getattr(config, "DATA_LOG_DIR", "data/logs"),
+                "calibration": getattr(config, "CALIBRATION_DIR", "device_state/calibration"),
+            },
         )
         self.control = UDPControlServer(config.UDP_CONTROL_PORT, self.logger)
         self.mqtt_transport = MQTTTransport(lambda: self.runtime, self.device_uid, self.logger)

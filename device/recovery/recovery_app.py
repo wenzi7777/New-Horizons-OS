@@ -32,7 +32,15 @@ class RecoveryApp:
         self.runtime = self.config_store.load_runtime()
         self.logger = DeviceLogger(iconfig.LOG_PATH)
         self._apply_logging_config(self.runtime.get("logging", {}))
-        self.filesystem = FilesystemAPI(iconfig.DEVICE_STATE_DIR)
+        self.filesystem = FilesystemAPI(
+            getattr(iconfig, "DATA_FILES_DIR", "data/files"),
+            getattr(iconfig, "DATA_TMP_DIR", "data/tmp"),
+            {
+                "user": getattr(iconfig, "DATA_FILES_DIR", "data/files"),
+                "logs": getattr(iconfig, "DATA_LOG_DIR", "data/logs"),
+                "calibration": getattr(iconfig, "CALIBRATION_DIR", "device_state/calibration"),
+            },
+        )
         self.wifi = WiFiManager(self.config_store, self.logger)
         self.control = UDPControlServer(iconfig.DEFAULT_CONTROL_PORT, self.logger)
         self.mqtt_transport = MQTTTransport(lambda: self.runtime, self.device_uid, self.logger)
@@ -263,15 +271,67 @@ class RecoveryApp:
         if command == "set_logging":
             return self._set_logging(request)
 
-        if command == "fs_list":
-            return {"status": "ok", "message": "fs_list", "items": self.filesystem.list_files(), "reboot_required": False}
+        if command in ("file_list", "fs_list"):
+            scope = request.get("scope", "user")
+            return {
+                "status": "ok",
+                "message": command,
+                "scope": scope,
+                "items": self.filesystem.list_files(scope),
+                "reboot_required": False,
+            }
 
         if command == "fs_read":
             path = request.get("path", "")
-            data = self.filesystem.read_file(path)
+            data = self.filesystem.read_file(path, request.get("scope", "user"))
             if data is None:
                 return {"status": "error", "message": "missing_file", "error": path, "reboot_required": False}
             return {"status": "ok", "message": "fs_read", "file": data, "reboot_required": False}
+
+        if command == "file_upload_begin":
+            return self._file_call(
+                self.filesystem.upload_begin,
+                request.get("path", ""),
+                request.get("size", 0),
+                request.get("sha256", ""),
+                request.get("scope", "user"),
+            )
+
+        if command == "file_upload_chunk":
+            return self._file_call(
+                self.filesystem.upload_chunk,
+                request.get("path", ""),
+                request.get("offset", 0),
+                request.get("data", ""),
+                request.get("scope", "user"),
+            )
+
+        if command == "file_upload_finish":
+            return self._file_call(self.filesystem.upload_finish, request.get("path", ""), request.get("scope", "user"))
+
+        if command == "file_download_begin":
+            return self._file_call(self.filesystem.download_begin, request.get("path", ""), request.get("scope", "user"))
+
+        if command == "file_download_chunk":
+            return self._file_call(
+                self.filesystem.download_chunk,
+                request.get("path", ""),
+                request.get("offset", 0),
+                request.get("length", 1024),
+                request.get("scope", "user"),
+            )
+
+        if command == "file_delete":
+            try:
+                deleted = self.filesystem.delete_file(request.get("path", ""), request.get("scope", "user"))
+            except ValueError as exc:
+                return {"status": "error", "message": str(exc), "error": str(exc), "reboot_required": False}
+            return {
+                "status": "ok",
+                "message": "file_deleted" if deleted else "file_not_found",
+                "applied": bool(deleted),
+                "reboot_required": False,
+            }
 
         if command == "set_servers":
             runtime_patch = {
@@ -341,6 +401,12 @@ class RecoveryApp:
             return {"status": "ok", "message": "rebooting", "reboot_required": True}
 
         return {"status": "error", "message": "unknown_command", "error": command, "reboot_required": False}
+
+    def _file_call(self, fn, *args):
+        try:
+            return fn(*args)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc), "error": str(exc), "reboot_required": False}
 
     def _transport_mode(self):
         runtime = getattr(self, "runtime", None) or {}
