@@ -43,12 +43,6 @@ def _parse_form(body):
     return result
 
 
-def _version_value(versions, key):
-    if not isinstance(versions, dict):
-        return "-"
-    return versions.get(key, "") or "-"
-
-
 def _normalize_path(path):
     path = str(path or "/")
     if path.startswith("http://") or path.startswith("https://"):
@@ -466,7 +460,6 @@ class WiFiSetupPortal:
                 '<p class="msg error">This device is in recovery mode. '
                 'New Horizons OS must be written.</p>'
             )
-        versions = status.get("versions", {}) or {}
         manual_fields_display = "block" if selected_profile == "manual" else "none"
         developer_checked = " checked" if selected_profile == "manual" else ""
         return """<!doctype html>
@@ -520,9 +513,6 @@ class WiFiSetupPortal:
         <p class="muted">MQTT: {mqtt_host}:{mqtt_port}</p>
         <p class="muted">Release: {release_url}</p>
         <p class="muted">State: {device_state}</p>
-        <p class="muted">Runtime version: <b>{runtime_version}</b></p>
-        <p class="muted">Recovery version: <b>{recovery_version}</b></p>
-        <p class="muted">OS version: <b>{os_version}</b></p>
       </div>
   </main>
   <div id="apply_overlay" class="overlay" role="status" aria-live="polite">
@@ -598,9 +588,6 @@ class WiFiSetupPortal:
             mqtt_host=_escape_html(mqtt_cfg.get("host", "")),
             mqtt_port=_escape_html(mqtt_cfg.get("port", "")),
             release_url=_escape_html(release_url),
-            runtime_version=_escape_html(_version_value(versions, "runtime")),
-            recovery_version=_escape_html(_version_value(versions, "recovery")),
-            os_version=_escape_html(_version_value(versions, "os")),
             primary_button="Save Recovery Settings" if recovery_mode else "Connect Wi-Fi",
             mqtt_tls_label="TLS" if mqtt_cfg.get("tls", False) else "plain",
             manual_fields_display=manual_fields_display,

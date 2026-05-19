@@ -256,18 +256,15 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         self.assertNotIn("Recovery device detected", html)
         self.assertIn("New Horizons OS must be written", html)
 
-    def test_index_page_shows_runtime_recovery_and_os_versions(self):
+    def test_index_page_omits_system_version_footer(self):
         module = load_portal_module()
         portal = module.WiFiSetupPortal(FakeManager(), FakeConfig(), None)
 
         html = portal._render_index_page()
 
-        self.assertIn("Runtime version", html)
-        self.assertIn("v0.2.17", html)
-        self.assertIn("Recovery version", html)
-        self.assertIn("v0.2.20", html)
-        self.assertIn("OS version", html)
-        self.assertIn("v0.2.18", html)
+        self.assertNotIn("Runtime version", html)
+        self.assertNotIn("Recovery version", html)
+        self.assertNotIn("OS version", html)
 
     def test_index_page_uses_compact_embedded_styles(self):
         module = load_portal_module()

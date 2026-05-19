@@ -1,5 +1,6 @@
 import machine
 import time
+import gc
 try:
     import uos as os
 except ImportError:  # pragma: no cover - CPython fallback
@@ -194,6 +195,7 @@ class RecoveryApp:
                 "device_uid": self.device_uid,
                 "device_name": self.device_name,
                 "system": self._system_status(runtime),
+                "memory": self._memory_status(),
                 "mode": "recovery",
                 "manifest_url": runtime.get("update", {}).get("manifest_url", ""),
                 "runtime": runtime,
@@ -278,6 +280,7 @@ class RecoveryApp:
                 "message": command,
                 "scope": scope,
                 "items": self.filesystem.list_files(scope),
+                "storage": self.filesystem.usage(),
                 "reboot_required": False,
             }
 
@@ -435,6 +438,23 @@ class RecoveryApp:
             "os_installed": self._os_installed(),
             "os_version": self._installed_os_version(runtime),
             "recovery_version": getattr(iconfig, "RECOVERY_VERSION", getattr(iconfig, "FIRMWARE_VERSION", "unknown")),
+        }
+
+    def _memory_status(self):
+        try:
+            free = int(gc.mem_free())
+        except Exception:
+            free = 0
+        try:
+            allocated = int(gc.mem_alloc())
+        except Exception:
+            allocated = 0
+        total = free + allocated if free or allocated else 0
+        return {
+            "heap_free": free,
+            "heap_allocated": allocated,
+            "heap_total": total,
+            "heap_used_percent": int((allocated * 100) // total) if total else 0,
         }
 
     def _release_url(self, request):

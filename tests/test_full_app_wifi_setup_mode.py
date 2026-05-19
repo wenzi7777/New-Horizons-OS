@@ -456,6 +456,8 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
     def test_status_includes_system_versions(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()
         try:
+            module.gc.mem_free = lambda: 123456
+            module.gc.mem_alloc = lambda: 65432
             app = module.App(wifi_setup_requested=False)
             status = app._status()
         finally:
@@ -471,6 +473,9 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(status["system"]["runtime_version"], "v-runtime-test")
         self.assertEqual(status["system"]["os_version"], "v-os-test")
         self.assertEqual(status["system"]["recovery_version"], "v-recovery-test")
+        self.assertEqual(status["memory"]["heap_free"], 123456)
+        self.assertEqual(status["memory"]["heap_allocated"], 65432)
+        self.assertEqual(status["memory"]["heap_total"], 188888)
 
     def test_runtime_services_are_deferred_until_after_wifi_boot(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()

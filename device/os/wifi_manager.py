@@ -285,23 +285,6 @@ class WiFiManager:
             return False
         return self.sta.isconnected()
 
-    def _version_status(self, runtime_cfg, os_installed):
-        system = runtime_cfg.get("system", {}) if isinstance(runtime_cfg, dict) else {}
-        if not isinstance(system, dict):
-            system = {}
-        runtime_version = getattr(config, "RUNTIME_VERSION", "unknown")
-        recovery_version = system.get("recovery_version", "") or getattr(
-            config,
-            "RECOVERY_VERSION",
-            getattr(config, "RECOVERY_FIRMWARE_VERSION", getattr(config, "FIRMWARE_VERSION", "unknown")),
-        )
-        os_version = system.get("os_version", "") or getattr(config, "OS_VERSION", getattr(config, "FIRMWARE_VERSION", "unknown"))
-        return {
-            "runtime": runtime_version,
-            "recovery": recovery_version,
-            "os": os_version or ("unknown" if os_installed else "-"),
-        }
-
     def portal_status(self):
         network_cfg = self.config_store.load_network() if self.config_store is not None else {}
         runtime_cfg = self.config_store.load_runtime() if self.config_store is not None else {}
@@ -328,7 +311,6 @@ class WiFiManager:
             "state": self.state,
             "mode": runtime_cfg.get("mode", "normal"),
             "os_installed": os_installed,
-            "versions": self._version_status(runtime_cfg, os_installed),
             "release_url": self._github_release_url() or runtime_cfg.get("update", {}).get("release_url", ""),
             "ap_ssid": ap_ssid,
             "portal_ip": portal_ip,

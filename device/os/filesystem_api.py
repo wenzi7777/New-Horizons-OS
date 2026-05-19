@@ -45,6 +45,22 @@ class FilesystemAPI:
             item["scope"] = scope
         return items
 
+    def usage(self):
+        usage = storage.fs_usage("/")
+        scopes = {}
+        scoped_bytes = 0
+        for scope, root in self.scope_roots.items():
+            size = storage.tree_size(root)
+            scopes[scope] = size
+            scoped_bytes += size
+        tmp_bytes = storage.tree_size(self.tmp_root)
+        known_bytes = scoped_bytes + tmp_bytes
+        usage["scopes"] = scopes
+        usage["tmp_bytes"] = tmp_bytes
+        usage["known_bytes"] = known_bytes
+        usage["other_bytes"] = max(0, int(usage.get("used_bytes", 0) or 0) - known_bytes)
+        return usage
+
     def read_file(self, relative_path, scope="user"):
         path = self._path(relative_path, scope)
         text = storage.read_text(path)

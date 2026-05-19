@@ -2,15 +2,15 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.20",
-  "version": "v0.2.20",
+  "firmware_version": "v0.2.21",
+  "version": "v0.2.21",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.20/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.21/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
-      "sha256": "4b2c53c4e349197fa85dfe6e0051a21cadd71e87aeb0af455989a64bfaaee142",
-      "size": 21780,
+      "sha256": "86986130c920c6ce84f47edbf16ed8df6e1f3eab83782774525c6aa485dd7798",
+      "size": 22058,
       "kind": "code",
       "reboot_required": true
     },
@@ -44,7 +44,7 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "faaa6f4d603d95e95e698e70a59eda1d1767c1799b46c8a9e00d0b561a49627f",
+      "sha256": "a352619a672b1009f71683f4c357bbba5d98161e134cb9638d6a55f024326329",
       "size": 2985,
       "kind": "code",
       "reboot_required": true
@@ -72,8 +72,8 @@
     },
     {
       "path": "filesystem_api.mpy",
-      "sha256": "3ccb696a630d95a0ff0bcdca6727d43fa6926775adfb7c810db8fce3a0fce3f3",
-      "size": 2673,
+      "sha256": "8be0a319bc869b87f6152922481e6bc25e83a32516a0cec23ab4b6d7fbb84b7e",
+      "size": 2891,
       "kind": "code",
       "reboot_required": true
     },
@@ -191,8 +191,8 @@
     },
     {
       "path": "storage.mpy",
-      "sha256": "9b3ae3712dd057663e82d3a3eec2b1cbd6c1238defe1037e8cfa0dd8218e5a77",
-      "size": 2015,
+      "sha256": "ff2224f360b550df477e8c05410c6537beb61cd2c88edbda1da29e50677dae15",
+      "size": 2317,
       "kind": "code",
       "reboot_required": true
     },
@@ -261,8 +261,8 @@
     },
     {
       "path": "wifi_manager.mpy",
-      "sha256": "6c25389432747637f124f9eee806ea21e2dc9e408e65157d456f39cb7d7e2277",
-      "size": 8566,
+      "sha256": "cad44a3c898ae53a4b9e5a51cac2418516ae53180baab221648046ae294c0155",
+      "size": 8133,
       "kind": "code",
       "reboot_required": true
     }

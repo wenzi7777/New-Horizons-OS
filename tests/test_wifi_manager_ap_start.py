@@ -317,6 +317,7 @@ class WiFiManagerApStartTests(unittest.TestCase):
         self.assertEqual(status["portal_domain"], "newhorizons.os")
         self.assertEqual(status["portal_url"], "http://newhorizons.os")
         self.assertEqual(status["portal_ip_url"], "http://192.168.4.1")
+        self.assertNotIn("versions", status)
 
     def test_minimal_channel_disables_ap_after_successful_sta_connect(self):
         module, fake_network = load_wifi_manager("minimal")

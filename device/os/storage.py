@@ -174,6 +174,33 @@ def list_tree(root):
     return items
 
 
+def tree_size(root):
+    total = 0
+    for item in list_tree(root):
+        if not item.get("is_dir"):
+            total += int(item.get("size", 0) or 0)
+    return total
+
+
+def fs_usage(path="/"):
+    try:
+        stats = os.statvfs(path)
+        block_size = int(stats[0] or stats[1] or 1)
+        total = int(stats[2]) * block_size
+        free = int(stats[3]) * block_size
+        used = max(0, total - free)
+    except (AttributeError, OSError, TypeError, ValueError):
+        total = 0
+        free = 0
+        used = 0
+    return {
+        "total_bytes": total,
+        "used_bytes": used,
+        "free_bytes": free,
+        "percent_used": int((used * 100) // total) if total else 0,
+    }
+
+
 def sha256_hex_bytes(data):
     if hashlib is None:
         raise RuntimeError("hashlib unavailable")

@@ -786,6 +786,7 @@ class App:
                 "applied": False,
                 "scope": request.get("scope", "user"),
                 "items": self.filesystem.list_files(request.get("scope", "user")),
+                "storage": self.filesystem.usage(),
             }
 
         if cmd == "file_upload_begin":
@@ -1161,6 +1162,23 @@ class App:
             "recovery_version": self._recovery_version(),
         }
 
+    def _memory_status(self):
+        try:
+            free = int(gc.mem_free())
+        except Exception:
+            free = 0
+        try:
+            allocated = int(gc.mem_alloc())
+        except Exception:
+            allocated = 0
+        total = free + allocated if free or allocated else 0
+        return {
+            "heap_free": free,
+            "heap_allocated": allocated,
+            "heap_total": total,
+            "heap_used_percent": int((allocated * 100) // total) if total else 0,
+        }
+
     def _file_call(self, fn, *args):
         try:
             return fn(*args)
@@ -1179,6 +1197,7 @@ class App:
             "device_uid": self.device_uid,
             "device_name": self.device_name,
             "system": self._system_status(),
+            "memory": self._memory_status(),
             "wifi_state": self.wifi.state,
             "wifi_setup": self.wifi.portal_status(),
             "ntp": self.time_sync.status() if self.time_sync is not None else {},

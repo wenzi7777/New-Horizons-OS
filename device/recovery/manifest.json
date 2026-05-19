@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "recovery",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.20",
-  "version": "v0.2.20",
+  "firmware_version": "v0.2.21",
+  "version": "v0.2.21",
   "target_root": "/recovery",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.20/device/recovery",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.21/device/recovery",
   "files": [
     {
       "path": "config.py",
@@ -30,14 +30,14 @@
     },
     {
       "path": "filesystem_api.py",
-      "sha256": "039023c4ee605dca5855f5305d586226affbd9a1ea4d0873e3d88cafcc4c7568",
-      "size": 6661,
+      "sha256": "24f5397775cf768c28dc52cf9e903c11332425dce55840c15fd04fb25631a4cd",
+      "size": 7254,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "immutable_config.py",
-      "sha256": "b6d19db1edfa2f16e13bbd4da21e7b2bc35a816788f730cc76adb2748c27627b",
+      "sha256": "82042ed699577a224d81817f72af6ab5fff742036a0ec5774c579307f7d490a9",
       "size": 2263,
       "kind": "code",
       "reboot_required": true
@@ -58,8 +58,8 @@
     },
     {
       "path": "recovery_app.py",
-      "sha256": "912f5c69178f0d34c1888466b55bdee116a82215ba647f935f6f83a285afb8c9",
-      "size": 23269,
+      "sha256": "b1518ef7f359278256e990962f3dd5807441f4acf562595461bb8b5508424a2d",
+      "size": 23893,
       "kind": "code",
       "reboot_required": true
     },
@@ -79,8 +79,8 @@
     },
     {
       "path": "storage.py",
-      "sha256": "345b39915b90b676af99af8f21eecb6d6c7ac06d4d80f9db0daf1bca71111418",
-      "size": 3978,
+      "sha256": "91caa900ca0d830c1517210d349b7af9757fc2c960caebf1df1367c1ed0f56a2",
+      "size": 4678,
       "kind": "code",
       "reboot_required": true
     },
@@ -114,15 +114,15 @@
     },
     {
       "path": "wifi_manager.py",
-      "sha256": "21e857ba98a8dd9198980af5a9e45cdcebcfec265ddaeaa313206665ecd234da",
-      "size": 23365,
+      "sha256": "b23a087a810f0b19b641c6c74d2f5c256a42ac50f35a93022c3ac09f31102117",
+      "size": 21942,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "wifi_portal.py",
-      "sha256": "1db62c8e16cd1822350d2c97a2fc999198f298416d20eb5d202f5f72c2feea4f",
-      "size": 24383,
+      "sha256": "1a0bcc425969d6189c40c41a35511e70db3c176855d708ff33a4f74f9fced405",
+      "size": 23762,
       "kind": "code",
       "reboot_required": true
     }

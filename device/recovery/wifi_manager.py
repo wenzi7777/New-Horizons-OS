@@ -285,35 +285,6 @@ class WiFiManager:
             return False
         return self.sta.isconnected()
 
-    def _version_status(self, runtime_cfg, os_installed):
-        system = runtime_cfg.get("system", {}) if isinstance(runtime_cfg, dict) else {}
-        if not isinstance(system, dict):
-            system = {}
-        runtime_version = getattr(config, "RUNTIME_VERSION", "unknown")
-        recovery_version = system.get("recovery_version", "") or getattr(
-            config,
-            "RECOVERY_VERSION",
-            getattr(config, "RECOVERY_FIRMWARE_VERSION", getattr(config, "FIRMWARE_VERSION", "unknown")),
-        )
-        os_version = system.get("os_version", "")
-        if not os_version and self.config_store is not None:
-            try:
-                update_state = self.config_store.load_update_state()
-                if update_state.get("operation") in ("check_os_release", "write_os"):
-                    os_version = update_state.get("version", "")
-            except Exception:
-                os_version = ""
-        if not os_version:
-            if runtime_cfg.get("mode", "recovery") == "normal":
-                os_version = getattr(config, "OS_VERSION", getattr(config, "FIRMWARE_VERSION", "unknown"))
-            elif os_installed:
-                os_version = "unknown"
-        return {
-            "runtime": runtime_version,
-            "recovery": recovery_version,
-            "os": os_version or "-",
-        }
-
     def portal_status(self):
         network_cfg = self.config_store.load_network() if self.config_store is not None else {}
         runtime_cfg = self.config_store.load_runtime() if self.config_store is not None else {}
@@ -340,7 +311,6 @@ class WiFiManager:
             "state": self.state,
             "mode": runtime_cfg.get("mode", "recovery"),
             "os_installed": os_installed,
-            "versions": self._version_status(runtime_cfg, os_installed),
             "release_url": self._github_release_url() or runtime_cfg.get("update", {}).get("release_url", ""),
             "ap_ssid": ap_ssid,
             "portal_ip": portal_ip,

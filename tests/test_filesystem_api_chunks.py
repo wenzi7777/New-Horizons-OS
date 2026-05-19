@@ -106,6 +106,35 @@ class FilesystemAPIChunkTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 api.list_files(scope="system")
 
+    def test_usage_reports_scoped_storage_bytes(self):
+        for module_path, module_name in self.MODULES:
+            with self.subTest(module=module_name), tempfile.TemporaryDirectory() as tmpdir:
+                module = load_module(module_path, module_name)
+                root = Path(tmpdir)
+                api = module.FilesystemAPI(
+                    root=str(root / "files"),
+                    tmp_root=str(root / "tmp"),
+                    scope_roots={
+                        "user": str(root / "files"),
+                        "logs": str(root / "logs"),
+                        "calibration": str(root / "calibration"),
+                    },
+                )
+                (root / "files").mkdir()
+                (root / "logs").mkdir()
+                (root / "calibration").mkdir()
+                (root / "files" / "profile.json").write_bytes(b"{}")
+                (root / "logs" / "device.log").write_bytes(b"hello")
+                (root / "calibration" / "level.json").write_bytes(b"1234")
+
+                usage = api.usage()
+
+                self.assertGreaterEqual(usage["total_bytes"], usage["used_bytes"])
+                self.assertEqual(usage["scopes"]["user"], 2)
+                self.assertEqual(usage["scopes"]["logs"], 5)
+                self.assertEqual(usage["scopes"]["calibration"], 4)
+                self.assertIn("other_bytes", usage)
+
 
 if __name__ == "__main__":
     unittest.main()

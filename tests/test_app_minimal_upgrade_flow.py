@@ -214,6 +214,8 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
     def test_recovery_status_includes_system_versions(self):
         module = load_recovery_app_module()
         app = module.RecoveryApp.__new__(module.RecoveryApp)
+        module.gc.mem_free = lambda: 120000
+        module.gc.mem_alloc = lambda: 56000
         app.device_id = 0x12345678
         app.device_uid = "UID123"
         app.device_name = "New Horizons OS"
@@ -240,6 +242,9 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         self.assertEqual(result["system"]["runtime_version"], "v-runtime-test")
         self.assertEqual(result["system"]["recovery_version"], "v-recovery-test")
         self.assertEqual(result["system"]["os_installed"], True)
+        self.assertEqual(result["memory"]["heap_free"], 120000)
+        self.assertEqual(result["memory"]["heap_allocated"], 56000)
+        self.assertEqual(result["memory"]["heap_total"], 176000)
 
     def test_upgrade_to_full_is_not_supported(self):
         module = load_recovery_app_module()
