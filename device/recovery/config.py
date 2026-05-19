@@ -18,7 +18,7 @@ PRODUCTION_MQTT_PORT = 8883
 PRODUCTION_MQTT_TLS = True
 GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
-DEFAULT_SERVER_PROFILE = "manual"
+DEFAULT_SERVER_PROFILE = "production"
 SERVER_PROFILES = {
     "manual": {
         "label": "Manual",

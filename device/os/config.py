@@ -46,7 +46,7 @@ UDP_SERVER_IP = "192.168.1.153"
 UDP_SERVER_PORT = 5005
 UDP_CONTROL_PORT = 22345
 PRODUCTION_SERVER_HOST = "isensing-s1.u-aizu.ac.jp"
-DEFAULT_SERVER_PROFILE = "manual"
+DEFAULT_SERVER_PROFILE = "production"
 SERVER_PROFILES = {
     "manual": {
         "label": "Manual",
@@ -68,7 +68,7 @@ PRODUCTION_MQTT_TLS = True
 MQTT_TOPIC_NAMESPACE = "newhorizons/v1"
 MQTT_USERNAME = ""
 MQTT_PASSWORD = ""
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.5/device"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.6/device"
 GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
 STATUS_ANNOUNCE_INTERVAL_MS = 2000

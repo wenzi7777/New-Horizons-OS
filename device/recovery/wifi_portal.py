@@ -76,11 +76,13 @@ INDEX_CSS = (
     "p{line-height:1.35;margin:8px 0}"
     "label{display:block;margin:10px 0 4px;font-weight:700}"
     "input,select,button{width:100%;padding:10px;font-size:16px;border:1px solid #999;border-radius:6px}"
+    "input[type=checkbox]{width:auto;margin:0 8px 0 0}"
     "button{margin-top:14px;background:#12325a;color:#fff;border:0}"
     ".msg{padding:10px;border:1px solid #bbb;background:#f6f6f6}"
     ".ok{color:#075b2a}.error{color:#9b1c14}"
     ".muted{color:#555;font-size:13px}"
     ".meta{border-top:1px solid #ddd;margin-top:14px;padding-top:8px;word-break:break-word}"
+    ".check{display:flex;align-items:center}"
 )
 
 RESULT_CSS = (
@@ -367,6 +369,11 @@ class WiFiSetupPortal:
         selected_ssid = status.get("saved_ssid", "")
         selected_profile = status.get("server_profile", "")
         server_profile_options = status.get("server_profile_options", [])
+        if not selected_profile:
+            for item in server_profile_options:
+                if item.get("value") == "production":
+                    selected_profile = "production"
+                    break
 
         options = ['<option value="">Manual input</option>']
         for item in networks:
@@ -397,15 +404,18 @@ class WiFiSetupPortal:
             if value == "manual":
                 manual_option = item
                 label = item.get("label", value)
+                developer_attr = ' data-developer="1"'
             else:
                 label = "{} ({})".format(
                     item.get("label", value),
                     item.get("master_host", ""),
                 )
+                developer_attr = ""
             server_options.append(
-                '<option value="{value}"{selected}>{label}</option>'.format(
+                '<option value="{value}"{selected}{developer_attr}>{label}</option>'.format(
                     value=_escape_html(value),
                     selected=selected,
+                    developer_attr=developer_attr,
                     label=_escape_html(label),
                 )
             )
@@ -442,10 +452,11 @@ class WiFiSetupPortal:
         recovery_notice = ""
         if recovery_mode:
             recovery_notice = (
-                '<p class="msg error">偵測到處於 Recovery Mode 的設備，'
-                '需要寫入 New Horizons OS。</p>'
+                '<p class="msg error">Recovery device detected. '
+                'New Horizons OS must be written.</p>'
             )
         manual_fields_display = "block" if selected_profile == "manual" else "none"
+        developer_checked = " checked" if selected_profile == "manual" else ""
         return """<!doctype html>
 <html>
 <head>
@@ -467,6 +478,7 @@ class WiFiSetupPortal:
         <select id="ssid_select" onchange="document.getElementById('ssid').value = this.value;">
           {options}
         </select>
+        <label class="check"><input id="developer_options" type="checkbox"{developer_checked} onchange="toggleDeveloperOptions(this.checked);"> Developer options</label>
         <label for="server_profile">Server</label>
         <select id="server_profile" name="server_profile" onchange="toggleManualServerFields(this.value);">
           {server_options}
@@ -506,6 +518,23 @@ class WiFiSetupPortal:
       }}
       section.style.display = value === "manual" ? "block" : "none";
     }}
+    function toggleDeveloperOptions(enabled) {{
+      var select = document.getElementById("server_profile");
+      if (!select) {{
+        return;
+      }}
+      for (var i = 0; i < select.options.length; i++) {{
+        var option = select.options[i];
+        if (option.getAttribute("data-developer") === "1") {{
+          option.disabled = !enabled;
+        }}
+      }}
+      if (!enabled && select.value === "manual") {{
+        select.value = "production";
+      }}
+      toggleManualServerFields(select.value);
+    }}
+    toggleDeveloperOptions({developer_enabled});
     toggleManualServerFields("{selected_profile}");
   </script>
 </body>
@@ -514,8 +543,8 @@ class WiFiSetupPortal:
             title=_escape_html(self.config.SETUP_PORTAL_TITLE),
             style=INDEX_CSS,
             eyebrow="Recovery Mode" if recovery_mode else "Device Setup",
-            headline="寫入 New Horizons OS" if recovery_mode else _escape_html(self.config.SETUP_PORTAL_TITLE),
-            lead="偵測到處於 Recovery Mode 的設備。請連上 Wi-Fi，接著透過 WebUI 或 MQTT 從 GitHub 寫入 OS。" if recovery_mode else "Join the device hotspot, then use this page to connect the board to Wi-Fi and choose where control and data should be sent. Most phones should auto-open this portal after joining the hotspot.",
+            headline="Write New Horizons OS" if recovery_mode else _escape_html(self.config.SETUP_PORTAL_TITLE),
+            lead="Recovery device detected. Connect Wi-Fi, then write OS from GitHub through WebUI or MQTT." if recovery_mode else "Join the device hotspot, then use this page to connect the board to Wi-Fi and choose where control and data should be sent. Most phones should auto-open this portal after joining the hotspot.",
             ip=ip_addr,
             notice=notice,
             recovery_notice=recovery_notice,
@@ -545,6 +574,8 @@ class WiFiSetupPortal:
             primary_button="Save Recovery Settings" if recovery_mode else "Connect Wi-Fi",
             mqtt_tls_label="TLS" if mqtt_cfg.get("tls", False) else "plain",
             manual_fields_display=manual_fields_display,
+            developer_checked=developer_checked,
+            developer_enabled="true" if selected_profile == "manual" else "false",
         )
 
     def _render_result_page(self, result):

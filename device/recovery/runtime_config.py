@@ -28,6 +28,23 @@ def _server_endpoint(profile_name, key, fallback_host, fallback_port):
 DEFAULT_SERVER_PROFILE = _default_server_profile_name()
 
 
+def _mqtt_defaults_for_profile(profile_name):
+    if profile_name == "production":
+        return {
+            "host": getattr(iconfig, "PRODUCTION_MQTT_HOST", getattr(iconfig, "PRODUCTION_SERVER_HOST", "")),
+            "port": int(getattr(iconfig, "PRODUCTION_MQTT_PORT", 8883)),
+            "tls": bool(getattr(iconfig, "PRODUCTION_MQTT_TLS", True)),
+        }
+    return {
+        "host": iconfig.DEFAULT_MQTT_HOST,
+        "port": iconfig.DEFAULT_MQTT_PORT,
+        "tls": iconfig.DEFAULT_MQTT_TLS,
+    }
+
+
+DEFAULT_MQTT = _mqtt_defaults_for_profile(DEFAULT_SERVER_PROFILE)
+
+
 DEFAULT_RUNTIME = {
     "firmware_name": iconfig.FIRMWARE_NAME,
     "mode": iconfig.DEFAULT_MODE,
@@ -68,9 +85,9 @@ DEFAULT_RUNTIME = {
         "serial": "status",
     },
     "mqtt": {
-        "host": iconfig.DEFAULT_MQTT_HOST,
-        "port": iconfig.DEFAULT_MQTT_PORT,
-        "tls": iconfig.DEFAULT_MQTT_TLS,
+        "host": DEFAULT_MQTT["host"],
+        "port": DEFAULT_MQTT["port"],
+        "tls": DEFAULT_MQTT["tls"],
         "username": iconfig.DEFAULT_MQTT_USERNAME,
         "password": iconfig.DEFAULT_MQTT_PASSWORD,
     },

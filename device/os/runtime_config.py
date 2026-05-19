@@ -28,6 +28,23 @@ def _server_endpoint(profile_name, key, fallback_host, fallback_port):
 DEFAULT_SERVER_PROFILE = _default_server_profile_name()
 
 
+def _mqtt_defaults_for_profile(profile_name):
+    if profile_name == "production":
+        return {
+            "host": getattr(config, "PRODUCTION_MQTT_HOST", getattr(config, "PRODUCTION_SERVER_HOST", "")),
+            "port": int(getattr(config, "PRODUCTION_MQTT_PORT", 8883)),
+            "tls": bool(getattr(config, "PRODUCTION_MQTT_TLS", True)),
+        }
+    return {
+        "host": config.MQTT_BROKER_HOST,
+        "port": config.MQTT_BROKER_PORT,
+        "tls": config.MQTT_TLS,
+    }
+
+
+DEFAULT_MQTT = _mqtt_defaults_for_profile(DEFAULT_SERVER_PROFILE)
+
+
 DEFAULT_RUNTIME = {
     "firmware_name": "New Horizons OS",
     "mode": "normal",
@@ -68,9 +85,9 @@ DEFAULT_RUNTIME = {
         "serial": "status",
     },
     "mqtt": {
-        "host": config.MQTT_BROKER_HOST,
-        "port": config.MQTT_BROKER_PORT,
-        "tls": config.MQTT_TLS,
+        "host": DEFAULT_MQTT["host"],
+        "port": DEFAULT_MQTT["port"],
+        "tls": DEFAULT_MQTT["tls"],
         "username": config.MQTT_USERNAME,
         "password": config.MQTT_PASSWORD,
     },

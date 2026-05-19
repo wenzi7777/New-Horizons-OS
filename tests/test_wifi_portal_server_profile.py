@@ -32,7 +32,7 @@ class FakeManager:
             "state": "wifi_setup_active",
             "last_error": "",
             "last_setup_result": "",
-            "server_profile": "production",
+            "server_profile": "",
             "server_profile_options": [
                 {
                     "value": "manual",
@@ -133,7 +133,10 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         html = portal._render_index_page()
 
         self.assertIn('name="server_profile"', html)
+        self.assertIn('value="production" selected', html)
         self.assertIn("Production (isensing-s1.u-aizu.ac.jp)", html)
+        self.assertIn('id="developer_options"', html)
+        self.assertIn('data-developer="1"', html)
         self.assertIn(">Manual</option>", html)
         self.assertNotIn("Manual (192.168.1.153)", html)
         self.assertIn('name="master_host"', html)
@@ -212,8 +215,8 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         html = portal._render_index_page()
 
         self.assertIn("Recovery Mode", html)
-        self.assertIn("偵測到處於 Recovery Mode 的設備", html)
-        self.assertIn("需要寫入 New Horizons OS", html)
+        self.assertIn("Recovery device detected", html)
+        self.assertIn("New Horizons OS must be written", html)
 
     def test_index_page_uses_compact_embedded_styles(self):
         module = load_portal_module()

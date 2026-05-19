@@ -1,5 +1,5 @@
 FIRMWARE_NAME = "New Horizons OS"
-FIRMWARE_VERSION = "v0.2.5"
+FIRMWARE_VERSION = "v0.2.6"
 DEFAULT_MODE = "recovery"
 
 ACTION_BUTTON_PIN = 46
@@ -28,7 +28,7 @@ DEFAULT_MASTER_PORT = 22345
 DEFAULT_DATA_HOST = "192.168.1.153"
 DEFAULT_DATA_PORT = 5005
 PRODUCTION_SERVER_HOST = "isensing-s1.u-aizu.ac.jp"
-DEFAULT_SERVER_PROFILE = "manual"
+DEFAULT_SERVER_PROFILE = "production"
 SERVER_PROFILES = {
     "manual": {
         "label": "Manual",
@@ -59,6 +59,6 @@ DEFAULT_CONTROL_PORT = 22345
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 DEFAULT_MANIFESTS = {
-    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.5/device/recovery/manifest.json",
-    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.5/device/os/manifest.json",
+    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.6/device/recovery/manifest.json",
+    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.6/device/os/manifest.json",
 }

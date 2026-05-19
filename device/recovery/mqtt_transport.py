@@ -32,7 +32,26 @@ class MQTTTransport:
         if handler is not None:
             while self.pending:
                 request = self.pending.pop(0)
-                response = handler(request, ("mqtt", 0))
+                command = self._command_name(request)
+                self._info("mqtt_command_received command={}".format(command))
+                try:
+                    response = handler(request, ("mqtt", 0))
+                    self._info(
+                        "mqtt_command_done command={} status={} message={}".format(
+                            command,
+                            self._response_value(response, "status"),
+                            self._response_value(response, "message"),
+                        )
+                    )
+                except Exception as exc:
+                    self._warn("mqtt_command_failed command={} error={}".format(command, exc))
+                    response = {
+                        "status": "error",
+                        "message": "command_failed",
+                        "command": command,
+                        "error": str(exc),
+                        "reboot_required": False,
+                    }
                 if response is not None:
                     self.publish_result(response, wifi_connected)
         return True
@@ -127,6 +146,17 @@ class MQTTTransport:
             if len(self.pending) >= self.MAX_PENDING:
                 self.pending.pop(0)
             self.pending.append(data)
+
+    def _command_name(self, request):
+        if not isinstance(request, dict):
+            return "unknown"
+        return str(request.get("command", request.get("cmd", "unknown")) or "unknown")
+
+    def _response_value(self, response, key):
+        if not isinstance(response, dict):
+            return ""
+        value = response.get(key, "")
+        return "" if value is None else value
 
     def _info(self, message):
         if self.logger:
