@@ -56,6 +56,90 @@ class FakePinFactory:
 
 
 class LauncherWifiSetupModeTests(unittest.TestCase):
+    def test_missing_os_dir_defaults_to_nhos_and_starts_recovery(self):
+        recovery_calls = []
+        checked_paths = []
+        fake_logger = FakeLogger("device_state/logs/device.log")
+
+        injected = {
+            "machine": types.SimpleNamespace(Pin=FakePinFactory()),
+            "immutable_config": types.SimpleNamespace(
+                ACTION_BUTTON_PIN=46,
+                BOOT_WINDOW_MS=3000,
+                BOOT_WINDOW_POLL_MS=50,
+                DEFAULT_MODE="recovery",
+                DEVICE_STATE_DIR="device_state",
+                LOG_PATH="device_state/logs/device.log",
+            ),
+            "device_logging": types.SimpleNamespace(DeviceLogger=lambda path: fake_logger),
+            "runtime_config": types.SimpleNamespace(
+                RuntimeConfigStore=lambda base_dir: types.SimpleNamespace(load_runtime=lambda: {"mode": "recovery"})
+            ),
+            "storage": types.SimpleNamespace(
+                exists=lambda path: checked_paths.append(path) or False,
+            ),
+            "recovery_app": types.SimpleNamespace(
+                run=lambda wifi_setup_requested=False, recovery_error="": recovery_calls.append(
+                    (wifi_setup_requested, recovery_error)
+                )
+            ),
+        }
+        module, saved_modules = load_launcher_module(injected)
+        try:
+            module.run()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(checked_paths, ["nhos/app.py", "nhos/main.py"])
+        self.assertEqual(recovery_calls, [(True, "")])
+
+    def test_launcher_fallback_calls_recovery_app_without_recovery_wrapper(self):
+        recovery_calls = []
+        fake_logger = FakeLogger("device_state/logs/device.log")
+
+        def failing_exists(path):
+            raise RuntimeError("missing os dir")
+
+        injected = {
+            "machine": types.SimpleNamespace(Pin=FakePinFactory()),
+            "immutable_config": types.SimpleNamespace(
+                ACTION_BUTTON_PIN=46,
+                BOOT_WINDOW_MS=3000,
+                BOOT_WINDOW_POLL_MS=50,
+                DEFAULT_MODE="recovery",
+                DEVICE_STATE_DIR="device_state",
+                LOG_PATH="device_state/logs/device.log",
+                OS_DIR="nhos",
+            ),
+            "device_logging": types.SimpleNamespace(DeviceLogger=lambda path: fake_logger),
+            "runtime_config": types.SimpleNamespace(
+                RuntimeConfigStore=lambda base_dir: types.SimpleNamespace(load_runtime=lambda: {"mode": "recovery"})
+            ),
+            "storage": types.SimpleNamespace(exists=failing_exists),
+            "recovery_app": types.SimpleNamespace(
+                run=lambda wifi_setup_requested=False, recovery_error="": recovery_calls.append(
+                    (wifi_setup_requested, recovery_error)
+                )
+            ),
+            "recovery": types.SimpleNamespace(),
+        }
+        module, saved_modules = load_launcher_module(injected)
+        try:
+            module.run()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(recovery_calls, [(True, "missing os dir")])
+        self.assertIn(("error", "launcher_fallback missing os dir"), fake_logger.messages)
+
     def test_wifi_setup_request_keeps_normal_mode_when_runtime_mode_is_normal(self):
         minimal_calls = []
         full_calls = []
