@@ -116,7 +116,6 @@ class WiFiManager:
         self.state = "wifi_setup_active"
         self.last_setup_result = reason
 
-        portal = self._ensure_portal()
         ap = self._ensure_ap()
         ap_ssid = self.ap_ssid()
 
@@ -132,7 +131,9 @@ class WiFiManager:
             pass
 
         ap.config(essid=ap_ssid, password=config.SETUP_AP_PASSWORD)
+        gc.collect()
 
+        portal = self._ensure_portal()
         portal.start()
         ifconfig = ap.ifconfig()
         self._log_info("wifi_setup_ap_started ssid={} ip={}".format(ap_ssid, ifconfig[0]))

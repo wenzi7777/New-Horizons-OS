@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.19",
-  "version": "v0.2.19",
+  "firmware_version": "v0.2.20",
+  "version": "v0.2.20",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.19/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.20/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
@@ -44,7 +44,7 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "04e1c4d1150c6effd1fe4080da384feefc46d61353bdb4e65369b90fe18dcab3",
+      "sha256": "faaa6f4d603d95e95e698e70a59eda1d1767c1799b46c8a9e00d0b561a49627f",
       "size": 2985,
       "kind": "code",
       "reboot_required": true
@@ -261,8 +261,8 @@
     },
     {
       "path": "wifi_manager.mpy",
-      "sha256": "d6e8c000d37cdb6fd233315de6367a349e973ad182c55eea1a8c5df8174c78b6",
-      "size": 8558,
+      "sha256": "6c25389432747637f124f9eee806ea21e2dc9e408e65157d456f39cb7d7e2277",
+      "size": 8566,
       "kind": "code",
       "reboot_required": true
     }

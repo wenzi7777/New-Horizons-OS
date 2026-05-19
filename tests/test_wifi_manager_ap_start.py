@@ -265,6 +265,48 @@ class WiFiManagerApStartTests(unittest.TestCase):
         self.assertEqual(fake_network.ap.calls[1], ("active", True))
         self.assertEqual(fake_network.ap.calls[2][0], "config")
 
+    def test_minimal_channel_starts_ap_before_constructing_portal(self):
+        module, fake_network = load_wifi_manager("minimal")
+        original_ensure_portal = module.WiFiManager._ensure_portal
+
+        def tracked_ensure_portal(manager):
+            fake_network.ap.calls.append(("ensure_portal", None))
+            return original_ensure_portal(manager)
+
+        module.WiFiManager._ensure_portal = tracked_ensure_portal
+
+        module.WiFiManager().start_setup_portal()
+
+        self.assertLess(
+            fake_network.ap.calls.index(("active", True)),
+            fake_network.ap.calls.index(("ensure_portal", None)),
+        )
+        self.assertLess(
+            next(i for i, call in enumerate(fake_network.ap.calls) if call[0] == "config"),
+            fake_network.ap.calls.index(("ensure_portal", None)),
+        )
+
+    def test_full_channel_starts_ap_before_constructing_portal(self):
+        module, fake_network = load_wifi_manager("full")
+        original_ensure_portal = module.WiFiManager._ensure_portal
+
+        def tracked_ensure_portal(manager):
+            fake_network.ap.calls.append(("ensure_portal", None))
+            return original_ensure_portal(manager)
+
+        module.WiFiManager._ensure_portal = tracked_ensure_portal
+
+        module.WiFiManager().start_setup_portal()
+
+        self.assertLess(
+            fake_network.ap.calls.index(("active", True)),
+            fake_network.ap.calls.index(("ensure_portal", None)),
+        )
+        self.assertLess(
+            next(i for i, call in enumerate(fake_network.ap.calls) if call[0] == "config"),
+            fake_network.ap.calls.index(("ensure_portal", None)),
+        )
+
     def test_portal_status_prefers_friendly_domain(self):
         module, fake_network = load_wifi_manager("minimal")
 

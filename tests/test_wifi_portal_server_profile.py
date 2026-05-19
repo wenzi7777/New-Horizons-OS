@@ -56,7 +56,7 @@ class FakeManager:
             "release_url": GITHUB_RELEASE_URL,
             "versions": {
                 "runtime": "v0.2.17",
-                "recovery": "v0.2.19",
+                "recovery": "v0.2.20",
                 "os": "v0.2.18",
             },
         }
@@ -265,7 +265,7 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         self.assertIn("Runtime version", html)
         self.assertIn("v0.2.17", html)
         self.assertIn("Recovery version", html)
-        self.assertIn("v0.2.19", html)
+        self.assertIn("v0.2.20", html)
         self.assertIn("OS version", html)
         self.assertIn("v0.2.18", html)
 
