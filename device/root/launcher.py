@@ -28,18 +28,17 @@ def run():
     wifi_setup_requested = _wait_boot_window(logger)
     store = RuntimeConfigStore(iconfig.DEVICE_STATE_DIR)
     runtime = store.load_runtime()
-    channel = runtime.get("channel", iconfig.DEFAULT_CHANNEL)
+    mode = runtime.get("mode", iconfig.DEFAULT_MODE)
     boot_request = runtime.get("boot_request", "")
-    os_installed = storage.exists("os/app.py") or storage.exists("os/main.py")
-    legacy_full_installed = storage.exists("app.py")
-    logger.info("launcher_channel={} os_installed={} boot_request={}".format(channel, os_installed, boot_request))
+    os_installed = storage.exists(iconfig.OS_DIR + "/app.py") or storage.exists(iconfig.OS_DIR + "/main.py")
+    logger.info("launcher_mode={} os_installed={} boot_request={}".format(mode, os_installed, boot_request))
 
     try:
-        if boot_request == "recovery" or channel == "minimal":
+        if boot_request == "recovery" or mode == "recovery":
             import recovery_app
             recovery_app.run(wifi_setup_requested=wifi_setup_requested)
         elif os_installed:
-            sys.path.insert(0, "os")
+            sys.path.insert(0, iconfig.OS_DIR)
             try:
                 from app import App
                 App(wifi_setup_requested=wifi_setup_requested).run()
@@ -48,9 +47,6 @@ def run():
                     sys.path.pop(0)
                 except Exception:
                     pass
-        elif channel == "full" and legacy_full_installed:
-            from app import App
-            App(wifi_setup_requested=wifi_setup_requested).run()
         else:
             import recovery_app
             recovery_app.run(wifi_setup_requested=wifi_setup_requested)

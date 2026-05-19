@@ -30,7 +30,7 @@ DEFAULT_SERVER_PROFILE = _default_server_profile_name()
 
 DEFAULT_RUNTIME = {
     "firmware_name": iconfig.FIRMWARE_NAME,
-    "channel": iconfig.DEFAULT_CHANNEL,
+    "mode": iconfig.DEFAULT_MODE,
     "server_profile": DEFAULT_SERVER_PROFILE,
     "master_server": _server_endpoint(
         DEFAULT_SERVER_PROFILE,
@@ -70,7 +70,7 @@ DEFAULT_RUNTIME = {
         "password": iconfig.DEFAULT_MQTT_PASSWORD,
     },
     "update": {
-        "manifest_url": iconfig.DEFAULT_MANIFESTS[iconfig.DEFAULT_CHANNEL],
+        "manifest_url": iconfig.DEFAULT_MANIFESTS["recovery"],
         "release_url": iconfig.DEFAULT_RELEASE_URL,
         "enabled": True,
         "check_on_boot": True,

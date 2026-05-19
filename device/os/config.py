@@ -66,7 +66,7 @@ MQTT_TOPIC_NAMESPACE = "newhorizons/v1"
 MQTT_USERNAME = ""
 MQTT_PASSWORD = ""
 SERVER_BASE_URL = "https://isensing-s1.u-aizu.ac.jp/newhorizons/ota"
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.19/device"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.0/device"
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 # Packet format:
@@ -119,7 +119,7 @@ BOOT_WINDOW_MS = 3000
 BOOT_WINDOW_POLL_MS = 50
 DEVICE_STATE_DIR = "device_state"
 RECOVERY_DIR = "recovery"
-OS_DIR = "os"
+OS_DIR = "nhos"
 OTA_STAGE_DIR = "ota_stage"
 CALIBRATION_DIR = DEVICE_STATE_DIR + "/calibration"
 DATA_FILES_DIR = "data/files"

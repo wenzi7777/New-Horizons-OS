@@ -1,5 +1,8 @@
 import json
-import os
+try:
+    import uos as os
+except ImportError:  # pragma: no cover - CPython fallback
+    import os
 
 import storage
 
@@ -20,6 +23,7 @@ except ImportError:
 
 class OSWriter:
     DOWNLOAD_CHUNK_SIZE = 1024
+    OS_TARGET_ROOT = "nhos"
 
     def __init__(self, root_dir=".", logger=None, progress=None):
         self.root_dir = root_dir.rstrip("/") if root_dir not in ("", ".") else "."
@@ -174,20 +178,20 @@ class OSWriter:
         return rel if self.root_dir in ("", ".") else self.root_dir + "/" + rel
 
     def _target_root(self, manifest):
-        target = manifest.get("target_root", "/os")
-        target = str(target or "/os").strip("/")
+        target = manifest.get("target_root", "/" + self.OS_TARGET_ROOT)
+        target = str(target or "/" + self.OS_TARGET_ROOT).strip("/")
         if not target:
-            target = "os"
-        if target != "os":
+            target = self.OS_TARGET_ROOT
+        if target != self.OS_TARGET_ROOT:
             raise ValueError("invalid_target_root")
         return target
 
     def _os_path(self, relative_path, manifest=None):
-        target_root = self._target_root(manifest or {"target_root": "/os"})
+        target_root = self._target_root(manifest or {"target_root": "/" + self.OS_TARGET_ROOT})
         return self._rooted(target_root + "/" + self._safe_rel(relative_path))
 
     def _stage_path(self, relative_path):
-        return self._rooted("ota_stage/os/" + self._safe_rel(relative_path))
+        return self._rooted("ota_stage/" + self.OS_TARGET_ROOT + "/" + self._safe_rel(relative_path))
 
     def _safe_rel(self, relative_path):
         path = str(relative_path or "").replace("\\", "/").strip("/")

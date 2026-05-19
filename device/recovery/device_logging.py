@@ -1,4 +1,7 @@
-import os
+try:
+    import uos as os
+except ImportError:  # pragma: no cover - CPython fallback
+    import os
 import time
 
 import storage

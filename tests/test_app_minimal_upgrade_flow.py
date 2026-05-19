@@ -6,10 +6,10 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-APP_MINIMAL_PATH = REPO_ROOT / "device" / "recovery" / "recovery_app.py"
+RECOVERY_APP_PATH = REPO_ROOT / "device" / "recovery" / "recovery_app.py"
 
 
-def load_app_minimal_module():
+def load_recovery_app_module():
     fake_machine = types.SimpleNamespace(reset=lambda: None)
     fake_iconfig = types.SimpleNamespace(
         FIRMWARE_NAME="New Horizons OS",
@@ -18,8 +18,8 @@ def load_app_minimal_module():
         DEFAULT_CONTROL_PORT=22345,
         STATUS_ANNOUNCE_INTERVAL_MS=2000,
         DEFAULT_MANIFESTS={
-            "minimal": "https://example.com/minimal/manifest.json",
-            "full": "https://example.com/full/manifest.json",
+            "recovery": "https://example.com/recovery/manifest.json",
+            "os": "https://example.com/os/manifest.json",
         },
     )
     fake_identity = types.SimpleNamespace(
@@ -74,7 +74,7 @@ def load_app_minimal_module():
         sys.modules[name] = module
 
     try:
-        spec = importlib.util.spec_from_file_location("app_minimal_test_module", APP_MINIMAL_PATH)
+        spec = importlib.util.spec_from_file_location("recovery_app_test_module", RECOVERY_APP_PATH)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         module.time.ticks_add = lambda now, delta: now + delta
@@ -107,56 +107,38 @@ class FakeConfigStore:
         return dict(self.runtime)
 
 
-class FakeUpdates:
-    def __init__(self):
-        self.started = 0
-
-    def is_busy(self):
-        return False
-
-    def status(self):
-        return {"phase": "idle", "reboot_required": False}
-
-    def start_apply(self):
-        self.started += 1
-        return {"status": "ok", "message": "update_started", "reboot_required": False}
-
-
-class MinimalUpgradeFlowTests(unittest.TestCase):
-    def test_upgrade_to_full_is_replaced_by_write_os(self):
-        module = load_app_minimal_module()
-        app = module.MinimalApp.__new__(module.MinimalApp)
+class RecoveryOSWriterFlowTests(unittest.TestCase):
+    def test_upgrade_to_full_is_not_supported(self):
+        module = load_recovery_app_module()
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
         app.runtime = {
-            "channel": "minimal",
+            "mode": "recovery",
             "update": {
-                "manifest_url": "https://example.com/minimal/manifest.json",
+                "manifest_url": "https://example.com/recovery/manifest.json",
                 "enabled": True,
             },
         }
         app.config_store = FakeConfigStore(app.runtime)
-        app.updates = FakeUpdates()
-        app.pending_channel_switch = None
         app.reboot_required = False
         app.reboot_deadline_ms = None
 
         result = app._handle_request({"command": "upgrade_to_full"}, None)
 
         self.assertEqual(result["status"], "error")
-        self.assertEqual(result["message"], "command_removed")
-        self.assertEqual(result["next_command"], "write_os")
+        self.assertEqual(result["message"], "unknown_command")
+        self.assertEqual(result["error"], "upgrade_to_full")
 
     def test_write_os_runs_in_recovery_and_uses_release_url(self):
-        module = load_app_minimal_module()
-        app = module.MinimalApp.__new__(module.MinimalApp)
+        module = load_recovery_app_module()
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
         app.runtime = {
-            "channel": "minimal",
+            "mode": "recovery",
             "update": {
                 "release_url": "https://example.com/latest.json",
                 "enabled": True,
             },
         }
         app.config_store = FakeConfigStore(app.runtime)
-        app.updates = FakeUpdates()
         app.os_writer = None
         app.logger = None
 

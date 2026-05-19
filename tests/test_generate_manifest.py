@@ -49,7 +49,7 @@ class GenerateManifestTests(unittest.TestCase):
             manifest_path = repo_root / "device" / "os" / "manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["type"], "os")
-            self.assertEqual(manifest["target_root"], "/os")
+            self.assertEqual(manifest["target_root"], "/nhos")
             self.assertEqual(
                 manifest["base_url"],
                 "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v9.9.9/device/os",

@@ -56,7 +56,7 @@ class FakePinFactory:
 
 
 class LauncherWifiSetupModeTests(unittest.TestCase):
-    def test_wifi_setup_request_keeps_full_channel_when_runtime_channel_is_full(self):
+    def test_wifi_setup_request_keeps_normal_mode_when_runtime_mode_is_normal(self):
         minimal_calls = []
         full_calls = []
         fake_logger = FakeLogger("device_state/logs/device.log")
@@ -67,17 +67,18 @@ class LauncherWifiSetupModeTests(unittest.TestCase):
                 ACTION_BUTTON_PIN=46,
                 BOOT_WINDOW_MS=3000,
                 BOOT_WINDOW_POLL_MS=50,
-                DEFAULT_CHANNEL="minimal",
+                DEFAULT_MODE="recovery",
                 DEVICE_STATE_DIR="device_state",
                 LOG_PATH="device_state/logs/device.log",
+                OS_DIR="nhos",
             ),
             "device_logging": types.SimpleNamespace(DeviceLogger=lambda path: fake_logger),
             "runtime_config": types.SimpleNamespace(
                 RuntimeConfigStore=lambda base_dir: types.SimpleNamespace(
-                    load_runtime=lambda: {"channel": "full"}
+                    load_runtime=lambda: {"mode": "normal"}
                 )
             ),
-            "storage": types.SimpleNamespace(exists=lambda path: path == "app.py"),
+            "storage": types.SimpleNamespace(exists=lambda path: path == "nhos/app.py"),
             "recovery_app": types.SimpleNamespace(
                 run=lambda wifi_setup_requested=False, recovery_error="": minimal_calls.append(
                     (wifi_setup_requested, recovery_error)

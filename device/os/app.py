@@ -36,7 +36,6 @@ class App:
 
         self.wifi = WiFiManager(self.config_store, self.logger)
         self.filesystem = None
-        self.update_manager = None
         self.control = None
         self.time_sync = None
         self.calibration = None
@@ -116,9 +115,6 @@ class App:
             self.logger.info("setup_ntp_sync_start")
             self._sync_time()
             self.logger.info("setup_ntp_sync_done")
-            self.logger.info("setup_boot_update_check_start")
-            self._check_updates_on_boot()
-            self.logger.info("setup_boot_update_check_done")
             self.logger.info("setup_status_announce_start")
             self._announce_status(force=True)
             self.logger.info("setup_status_announce_done")
@@ -144,22 +140,12 @@ class App:
                 self.control.poll(self._handle_control_request)
             if self.mqtt_transport is not None:
                 self.mqtt_transport.poll(self.wifi.is_connected(), self._handle_control_request)
-            update_result = (
-                self.update_manager.service()
-                if self.update_manager is not None and not self._in_maintenance()
-                else None
-            )
-            if update_result is not None:
-                self._handle_update_result(update_result, now)
-                self._announce_status(now, force=True)
-
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
                 self._ensure_runtime_services()
                 self._ensure_control_started()
                 self._ensure_udp_data_socket(True)
                 self._sync_time()
-                self._check_updates_on_boot()
                 self._announce_status(now, force=True)
                 self.update_led_state()
 
@@ -415,14 +401,6 @@ class App:
             return True
         return time.ticks_diff(now, self.reboot_deadline_ms) >= 0
 
-    def _handle_update_result(self, result, now):
-        if (result.get("status") == "ok"
-                and result.get("message") == "update_applied"
-                and result.get("reboot_required")):
-            self.reboot_required = True
-            if self.reboot_deadline_ms is None:
-                self.reboot_deadline_ms = time.ticks_add(now, 1200)
-
     def _announce_status(self, now=None, force=False):
         if self.control is None and self.mqtt_transport is None:
             return False
@@ -453,21 +431,6 @@ class App:
         if ok:
             self.last_status_announce_ms = now
         return ok
-
-    def _check_updates_on_boot(self):
-        runtime = self.config_store.load_runtime()
-        update_cfg = runtime.get("update", {})
-        if not update_cfg.get("check_on_boot", True):
-            return
-        if self.led:
-            self.led.set_updating()
-        try:
-            result = self.update_manager.check()
-            self.logger.info("update_check {}".format(result.get("message")))
-        except Exception as exc:
-            self.logger.warn("update_check_failed {}".format(exc))
-        finally:
-            self.update_led_state()
 
     def _apply_runtime_reload(self):
         self.runtime = self.config_store.load_runtime()
@@ -518,7 +481,7 @@ class App:
             return self._exit_maintenance()
 
         if cmd == "reboot_to_recovery":
-            self.config_store.update_runtime({"channel": "minimal", "boot_request": "recovery"})
+            self.config_store.update_runtime({"mode": "recovery", "boot_request": "recovery"})
             self.reboot_required = True
             return self._ok("reboot_to_recovery_scheduled", applied=True, reboot_required=True)
 
@@ -528,12 +491,6 @@ class App:
         if cmd == "reload_config":
             self._apply_runtime_reload()
             return self._ok("config_reloaded", applied=True)
-
-        if cmd == "check_update":
-            return self.update_manager.start_check()
-
-        if cmd == "apply_update":
-            return self.update_manager.start_apply()
 
         if cmd == "set_servers":
             runtime_patch = {
@@ -558,31 +515,6 @@ class App:
             self.runtime = runtime
             self._ensure_udp_data_socket(self.wifi.is_connected())
             return self._ok("transport_updated", applied=True)
-
-        if cmd == "set_update_source":
-            runtime = self.config_store.load_runtime()
-            update_cfg = runtime.get("update", {})
-            source = request.get("update_source", request.get("source", "server"))
-            channel = runtime.get("channel", "full")
-            sources = update_cfg.get("sources", {})
-            manifest_url = request.get("manifest_url", "")
-            if not manifest_url:
-                manifest_url = ((sources.get(source) or {}).get(channel) or "")
-            runtime = self.config_store.update_runtime({
-                "update": {
-                    "source": source,
-                    "manifest_url": manifest_url,
-                    "enabled": True,
-                }
-            })
-            self.runtime = runtime
-            return {
-                "status": "ok",
-                "message": "update_source_updated",
-                "reboot_required": False,
-                "applied": True,
-                "runtime": runtime,
-            }
 
         if cmd == "set_filter":
             filter_data = self.config_store.update_filter(request.get("filter", {}))
@@ -1020,7 +952,7 @@ class App:
             "ntp": self.time_sync.status() if self.time_sync is not None else {},
             "filter": self.config_store.load_filter(),
             "runtime": self.config_store.load_runtime(),
-            "update_state": self.update_manager.status() if self.update_manager is not None else {},
+            "update_state": {},
             "calibration_mode": self.calibration_mode,
             "calibration_levels": self.calibration.list_levels() if self.calibration is not None else [],
             "available_rows": list(config.AVAILABLE_ROWS),
@@ -1238,7 +1170,7 @@ class App:
             self.vdboard = vdboard
 
     def _ensure_runtime_services(self):
-        if self.update_manager is not None:
+        if self.control is not None:
             return
         from calibration_store import CalibrationStore
         from filesystem_api import FilesystemAPI
@@ -1247,14 +1179,12 @@ class App:
         from packet_buffer import PacketBuffer
         from time_sync import TimeSync
         from udp_control import UDPControlServer
-        from update_manager import UpdateManager
         from utils import RateCounter
 
         self.filesystem = FilesystemAPI(
             getattr(config, "DATA_FILES_DIR", "data/files"),
             getattr(config, "DATA_TMP_DIR", "data/tmp"),
         )
-        self.update_manager = UpdateManager(self.config_store, self.logger, ".")
         self.control = UDPControlServer(config.UDP_CONTROL_PORT, self.logger)
         self.mqtt_transport = MQTTTransport(lambda: self.runtime, self.device_uid, self.logger)
         self.time_sync = TimeSync(self.runtime.get("ntp_servers", []))

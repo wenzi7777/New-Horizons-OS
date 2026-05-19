@@ -2,16 +2,15 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.1.19",
-  "version": "v0.1.19",
-  "channel": "os",
-  "target_root": "/os",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.19/device/os",
+  "firmware_version": "v0.2.0",
+  "version": "v0.2.0",
+  "target_root": "/nhos",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.0/device/os",
   "files": [
     {
       "path": "app.py",
-      "sha256": "382f6dbaf64b557dd8ab7f68b8e9f48cf2fa3130a82b8aa24bfa8cc8d8a5c616",
-      "size": 49412,
+      "sha256": "faac81052ca4a6effb7e875175912e8563f4def2673bb54732c85c729e3a3922",
+      "size": 46487,
       "kind": "code",
       "reboot_required": true
     },
@@ -45,8 +44,8 @@
     },
     {
       "path": "config.py",
-      "sha256": "997cd6d45429a4c06691bac02979fd0773e0f836421d0bb8d018420dd2830cf5",
-      "size": 4250,
+      "sha256": "3f10048f3e70554692ada77245e06838d541e09a4e0256e0b9ac1e57d151a779",
+      "size": 4251,
       "kind": "code",
       "reboot_required": true
     },
@@ -66,8 +65,8 @@
     },
     {
       "path": "device_logging.py",
-      "sha256": "9db316ccc9d3ff5cccc8c74ccf260c126868e98f5fab423f19c973814f3bf67c",
-      "size": 1950,
+      "sha256": "4adfc2512157cb851b2c2ff147bdb2b1e588ad129b3a89a1a8befb9364bcaeba",
+      "size": 2039,
       "kind": "code",
       "reboot_required": true
     },
@@ -156,13 +155,6 @@
       "reboot_required": true
     },
     {
-      "path": "ota.py",
-      "sha256": "206670b5b910022fc9514de96506315f626fbd53d10c3cad640cee11ad797b74",
-      "size": 296,
-      "kind": "code",
-      "reboot_required": true
-    },
-    {
       "path": "packet.py",
       "sha256": "1c6c89aeb6f9c4d5d657302de6997af545660bdda4659469a9a7bb3b95b96634",
       "size": 6831,
@@ -178,8 +170,8 @@
     },
     {
       "path": "runtime_config.py",
-      "sha256": "9d66921ba65d88efaf6b115ff827efcbae951f68e122febddf52931932b92fcd",
-      "size": 6350,
+      "sha256": "66e0fa894411fc8476c1c52a9b6d2bb803b8f23340e898ce1b13d20243b38e8c",
+      "size": 6051,
       "kind": "code",
       "reboot_required": true
     },
@@ -199,8 +191,8 @@
     },
     {
       "path": "storage.py",
-      "sha256": "0fa97e5880f3f2c8337ebf1f1bad5900fa9cfcb220ee371676e5f7ece37d624b",
-      "size": 4149,
+      "sha256": "70a13121756164da14f72f4e748d34d1ac6adf0ec39d6bf9d55c738450a8ed5f",
+      "size": 4238,
       "kind": "code",
       "reboot_required": true
     },
@@ -247,13 +239,6 @@
       "reboot_required": true
     },
     {
-      "path": "update_manager.py",
-      "sha256": "b130dfa03d6eec31373b9807ac2b0caeceed42f39e134e58c39844223ecdff39",
-      "size": 11190,
-      "kind": "code",
-      "reboot_required": true
-    },
-    {
       "path": "utils.py",
       "sha256": "c73c160324edb54c15f479c7f328d01a41ba5a56f6c01b48b5c5c7562a6909b7",
       "size": 622,
@@ -269,8 +254,8 @@
     },
     {
       "path": "wifi_manager.py",
-      "sha256": "092144b58b5805ec5b751352d07f49d2b67396909ca242722e38f66521d21afd",
-      "size": 18867,
+      "sha256": "9d54a08e7585bf02b2e0ce9aa6f513ee63711d2ff05beeab3aec9b51858b60f3",
+      "size": 18839,
       "kind": "code",
       "reboot_required": true
     }

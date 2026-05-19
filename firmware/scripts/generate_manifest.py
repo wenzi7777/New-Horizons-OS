@@ -31,21 +31,11 @@ def should_include(path: Path, root: Path) -> bool:
     return True
 
 
-def resolve_target(target: str | None, channel: str | None) -> str:
-    if target:
-        return target
-    if channel == "minimal":
-        return "recovery"
-    if channel == "full":
-        return "os"
-    raise SystemExit("請指定 --target os/recovery，或使用相容舊參數 --channel minimal/full")
-
-
 def target_paths(repo_root: Path, target: str) -> tuple[Path, Path, str, str]:
     if target == "os":
         files_root = repo_root / "device" / "os"
         manifest_path = files_root / "manifest.json"
-        return files_root, manifest_path, "/os", "os"
+        return files_root, manifest_path, "/nhos", "os"
     if target == "recovery":
         files_root = repo_root / "device" / "recovery"
         manifest_path = files_root / "manifest.json"
@@ -55,15 +45,14 @@ def target_paths(repo_root: Path, target: str) -> tuple[Path, Path, str, str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target", choices=["os", "recovery"])
-    parser.add_argument("--channel", choices=["minimal", "full"], help="Deprecated: minimal maps to recovery, full maps to os")
+    parser.add_argument("--target", choices=["os", "recovery"], required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--firmware-name", default="New Horizons OS")
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
-    target = resolve_target(args.target, args.channel)
+    target = args.target
     files_root, manifest_path, target_root, manifest_type = target_paths(repo_root, target)
     base_url = f"https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/{args.version}/device/{target}"
 
@@ -84,7 +73,6 @@ def main() -> None:
         "firmware_name": args.firmware_name,
         "firmware_version": args.version,
         "version": args.version,
-        "channel": target,
         "target_root": target_root,
         "base_url": base_url,
         "files": files,

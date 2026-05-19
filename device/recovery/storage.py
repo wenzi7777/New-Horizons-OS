@@ -1,5 +1,8 @@
 import json
-import os
+try:
+    import uos as os
+except ImportError:  # pragma: no cover - CPython fallback
+    import os
 
 try:
     import hashlib

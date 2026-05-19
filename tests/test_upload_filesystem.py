@@ -56,7 +56,7 @@ class UploadFilesystemTests(unittest.TestCase):
         )
         self.assertEqual(
             [(item.name, item.remote_root) for item in module.target_layers("os", target_only=False)],
-            [("os", "os")],
+            [("os", "nhos")],
         )
 
     def test_upload_tree_creates_remote_root_before_nested_dirs(self):
@@ -105,7 +105,7 @@ class UploadFilesystemTests(unittest.TestCase):
         self.assertIn("b'abcd'", exec_commands[1][4])
         self.assertIn("b'ef'", exec_commands[2][4])
 
-    def test_remote_copy_treats_missing_os_stat_as_success_after_copy_output(self):
+    def test_remote_copy_falls_back_even_when_missing_os_stat_has_copy_output(self):
         module = load_upload_filesystem()
         calls = []
 
@@ -126,12 +126,17 @@ class UploadFilesystemTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 module.remote_copy("/dev/test", local_path, "recovery/wifi_manager.py")
 
-        self.assertEqual(len(calls), 1)
+        exec_commands = [cmd for cmd in calls if cmd[:3] == ["mpremote", "connect", "/dev/test"] and cmd[3] == "exec"]
+        self.assertGreaterEqual(len(exec_commands), 2)
 
-    def test_remote_copy_suppresses_expected_missing_os_stat_error_output(self):
+    def test_remote_copy_suppresses_expected_missing_os_stat_error_output_and_falls_back(self):
         module = load_upload_filesystem()
+        calls = []
 
         def fake_run(cmd, check=False, capture_output=False, text=False):
+            calls.append(cmd)
+            if cmd[:4] == ["mpremote", "connect", "/dev/test", "exec"]:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
             return subprocess.CompletedProcess(
                 cmd,
                 1,
@@ -151,8 +156,11 @@ class UploadFilesystemTests(unittest.TestCase):
 
         self.assertNotIn("AttributeError", stdout.getvalue())
         self.assertNotIn("AttributeError", stderr.getvalue())
-        self.assertIn("skipped missing os.stat confirmation", stdout.getvalue())
-
+        self.assertIn("using raw copy", stdout.getvalue())
+        self.assertGreaterEqual(
+            len([cmd for cmd in calls if cmd[:3] == ["mpremote", "connect", "/dev/test"] and cmd[3] == "exec"]),
+            2,
+        )
 
 if __name__ == "__main__":
     unittest.main()

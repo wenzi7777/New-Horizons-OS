@@ -30,7 +30,7 @@ DEFAULT_SERVER_PROFILE = _default_server_profile_name()
 
 DEFAULT_RUNTIME = {
     "firmware_name": "New Horizons OS",
-    "channel": "full",
+    "mode": "normal",
     "server_profile": DEFAULT_SERVER_PROFILE,
     "master_server": _server_endpoint(
         DEFAULT_SERVER_PROFILE,
@@ -80,14 +80,10 @@ DEFAULT_RUNTIME = {
             "github": {
                 "recovery": config.GITHUB_BASE_URL + "/recovery/manifest.json",
                 "os": config.GITHUB_BASE_URL + "/os/manifest.json",
-                "minimal": config.GITHUB_BASE_URL + "/recovery/manifest.json",
-                "full": config.GITHUB_BASE_URL + "/os/manifest.json",
             },
             "server": {
                 "recovery": config.SERVER_BASE_URL + "/recovery/manifest.json",
                 "os": config.SERVER_BASE_URL + "/os/manifest.json",
-                "minimal": config.SERVER_BASE_URL + "/recovery/manifest.json",
-                "full": config.SERVER_BASE_URL + "/os/manifest.json",
             },
         },
     },

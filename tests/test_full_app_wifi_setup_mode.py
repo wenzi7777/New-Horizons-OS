@@ -241,13 +241,6 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         ),
         "udp_control": types.SimpleNamespace(UDPControlServer=lambda port, logger=None: FakeControl()),
         "udp_stream": types.SimpleNamespace(UDPStreamer=lambda host, port: types.SimpleNamespace(send=lambda payload: True)),
-        "update_manager": types.SimpleNamespace(
-            UpdateManager=lambda *args, **kwargs: types.SimpleNamespace(
-                service=lambda: None,
-                status=lambda: {},
-                check=update_check or (lambda: {"message": "update_disabled"}),
-            )
-        ),
         "utils": types.SimpleNamespace(RateCounter=lambda interval: None),
         "wifi_manager": types.SimpleNamespace(WiFiManager=lambda *args, **kwargs: FakeWiFi(events)),
     }
@@ -309,7 +302,6 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         try:
             app = module.App(wifi_setup_requested=False)
 
-            self.assertIsNone(app.update_manager)
             self.assertIsNone(app.control)
             self.assertIsNone(app.time_sync)
             self.assertIsNone(app.calibration)
@@ -325,7 +317,6 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 else:
                     sys.modules[name] = saved
 
-        self.assertIsNotNone(app.update_manager)
         self.assertIsNotNone(app.control)
         self.assertIsNotNone(app.time_sync)
         self.assertIsNotNone(app.calibration)
@@ -481,26 +472,6 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
         self.assertEqual(response["status"], "ok")
         self.assertEqual(response["runtime"]["matrix_layout"], {"active_rows": [1], "active_cols": [1]})
-
-    def test_boot_update_check_failure_does_not_escape_or_leave_led_updating(self):
-        module, _fake_scan, _events, saved_modules = load_full_app_module(
-            runtime_override={"update": {"check_on_boot": True}},
-            update_check=lambda: (_ for _ in ()).throw(MemoryError("manifest parse oom")),
-            enable_led=True,
-        )
-        try:
-            app = module.App(wifi_setup_requested=False)
-            app.setup()
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        self.assertIn("updating", app.led.states)
-        self.assertEqual(app.led.states[-1], "normal")
-        self.assertTrue(any("update_check_failed" in message for message in app.logger.warns))
 
     def test_enter_maintenance_stops_scan_and_rejects_os_writer(self):
         module, fake_scan, _events, saved_modules = load_full_app_module()

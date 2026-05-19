@@ -1,6 +1,6 @@
 FIRMWARE_NAME = "New Horizons OS"
-FIRMWARE_VERSION = "v0.1.19"
-DEFAULT_CHANNEL = "minimal"
+FIRMWARE_VERSION = "v0.2.0"
+DEFAULT_MODE = "recovery"
 
 ACTION_BUTTON_PIN = 46
 BOOT_WINDOW_MS = 3000
@@ -15,7 +15,7 @@ SETUP_PORTAL_TITLE = "New Horizons OS Wi-Fi Setup"
 
 DEVICE_STATE_DIR = "device_state"
 RECOVERY_DIR = "recovery"
-OS_DIR = "os"
+OS_DIR = "nhos"
 OTA_STAGE_DIR = "ota_stage"
 CALIBRATION_DIR = DEVICE_STATE_DIR + "/calibration"
 DATA_FILES_DIR = "data/files"
@@ -57,14 +57,10 @@ DEFAULT_CONTROL_PORT = 22345
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 DEFAULT_MANIFESTS = {
-    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.19/device/recovery/manifest.json",
-    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.19/device/os/manifest.json",
+    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.0/device/recovery/manifest.json",
+    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.0/device/os/manifest.json",
 }
-DEFAULT_MANIFESTS["minimal"] = DEFAULT_MANIFESTS["recovery"]
-DEFAULT_MANIFESTS["full"] = DEFAULT_MANIFESTS["os"]
 DEFAULT_SERVER_MANIFESTS = {
     "recovery": DEFAULT_SERVER_BASE_URL + "/recovery/manifest.json",
     "os": DEFAULT_SERVER_BASE_URL + "/os/manifest.json",
 }
-DEFAULT_SERVER_MANIFESTS["minimal"] = DEFAULT_SERVER_MANIFESTS["recovery"]
-DEFAULT_SERVER_MANIFESTS["full"] = DEFAULT_SERVER_MANIFESTS["os"]

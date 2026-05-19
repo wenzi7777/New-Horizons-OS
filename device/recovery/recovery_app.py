@@ -36,7 +36,6 @@ class RecoveryApp:
         self.boot_network_initialized = False
         self.last_status_announce_ms = 0
         self.reboot_deadline_ms = None
-        self.pending_channel_switch = None
 
     def setup(self):
         wifi_ok = False
@@ -95,7 +94,7 @@ class RecoveryApp:
             "device_id": "0x{:08X}".format(self.device_id),
             "device_uid": self.device_uid,
             "device_name": self.device_name,
-            "channel": self.runtime.get("channel", "minimal"),
+            "mode": "recovery",
             "manifest_url": self.runtime.get("update", {}).get("manifest_url", ""),
             "runtime": self.runtime,
             "wifi_connected": self.wifi.is_connected(),
@@ -124,24 +123,6 @@ class RecoveryApp:
             return True
         return time.ticks_diff(now, self.reboot_deadline_ms) >= 0
 
-    def _handle_update_result(self, result, now):
-        if (result.get("status") == "ok"
-                and result.get("message") == "update_applied"
-                and self.pending_channel_switch):
-            runtime = self.config_store.update_runtime({
-                "channel": self.pending_channel_switch,
-            })
-            self.runtime = runtime
-            self.pending_channel_switch = None
-        if (result.get("status") == "ok"
-                and result.get("message") == "update_applied"
-                and result.get("reboot_required")):
-            self.reboot_required = True
-            if self.reboot_deadline_ms is None:
-                self.reboot_deadline_ms = time.ticks_add(now, 1200)
-        elif result.get("status") in ("error", "disabled"):
-            self.pending_channel_switch = None
-
     def _handle_request(self, request, addr):
         command = request.get("command", "status")
 
@@ -149,11 +130,11 @@ class RecoveryApp:
             runtime = self.config_store.load_runtime()
             return {
                 "status": "ok",
-                "message": "minimal_status",
+                "message": "recovery_status",
                 "device_id": "0x{:08X}".format(self.device_id),
                 "device_uid": self.device_uid,
                 "device_name": self.device_name,
-                "channel": runtime.get("channel", "minimal"),
+                "mode": "recovery",
                 "manifest_url": runtime.get("update", {}).get("manifest_url", ""),
                 "runtime": runtime,
                 "wifi_connected": self.wifi.is_connected(),
@@ -161,22 +142,6 @@ class RecoveryApp:
                 "update_state": {},
                 "recovery_error": self.recovery_error,
                 "reboot_required": self.reboot_required,
-            }
-
-        if command == "check_update":
-            return {
-                "status": "error",
-                "message": "command_removed",
-                "next_command": "check_os_release",
-                "reboot_required": False,
-            }
-
-        if command == "apply_update":
-            return {
-                "status": "error",
-                "message": "command_removed",
-                "next_command": "write_os",
-                "reboot_required": False,
             }
 
         if command == "check_os_release":
@@ -194,7 +159,7 @@ class RecoveryApp:
             return result
 
         if command == "reboot_to_os":
-            runtime = self.config_store.update_runtime({"channel": "full"})
+            runtime = self.config_store.update_runtime({"mode": "normal", "boot_request": ""})
             self.runtime = runtime
             self.reboot_required = True
             self.reboot_deadline_ms = None
@@ -213,16 +178,6 @@ class RecoveryApp:
             if data is None:
                 return {"status": "error", "message": "missing_file", "error": path, "reboot_required": False}
             return {"status": "ok", "message": "fs_read", "file": data, "reboot_required": False}
-
-        if command == "set_channel":
-            channel = request.get("channel", "minimal")
-            manifest_url = request.get("manifest_url", iconfig.DEFAULT_MANIFESTS.get(channel, iconfig.DEFAULT_MANIFESTS["minimal"]))
-            runtime = self.config_store.update_runtime({
-                "channel": channel,
-                "update": {"manifest_url": manifest_url, "enabled": True},
-            })
-            self.runtime = runtime
-            return {"status": "ok", "message": "channel_updated", "runtime": runtime, "reboot_required": False}
 
         if command == "set_servers":
             runtime_patch = {
@@ -245,29 +200,6 @@ class RecoveryApp:
             })
             self.runtime = runtime
             return {"status": "ok", "message": "transport_updated", "runtime": runtime, "reboot_required": False}
-
-        if command == "set_update_source":
-            runtime = self.config_store.load_runtime()
-            update_cfg = runtime.get("update", {})
-            source = request.get("update_source", request.get("source", "server"))
-            channel = runtime.get("channel", "minimal")
-            sources = update_cfg.get("sources", {})
-            manifest_url = request.get("manifest_url", "")
-            if not manifest_url:
-                manifest_url = ((sources.get(source) or {}).get(channel) or "")
-            runtime = self.config_store.update_runtime({
-                "update": {"manifest_url": manifest_url, "enabled": True, "source": source},
-            })
-            self.runtime = runtime
-            return {"status": "ok", "message": "update_source_updated", "runtime": runtime, "reboot_required": False}
-
-        if command == "upgrade_to_full":
-            return {
-                "status": "error",
-                "message": "command_removed",
-                "next_command": "write_os",
-                "reboot_required": False,
-            }
 
         if command == "start_wifi_setup":
             self.wifi.start_setup_portal("udp_command")
@@ -338,6 +270,3 @@ class RecoveryApp:
 
 def run(wifi_setup_requested=False, recovery_error=""):
     RecoveryApp(wifi_setup_requested=wifi_setup_requested, recovery_error=recovery_error).run()
-
-
-MinimalApp = RecoveryApp

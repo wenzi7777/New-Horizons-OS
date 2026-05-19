@@ -57,7 +57,7 @@ class OSWriterTests(unittest.TestCase):
             "type": "os",
             "version": "v0.2.0",
             "base_url": "https://example.com/os",
-            "target_root": "/os",
+            "target_root": "/nhos",
             "files": [
                 {
                     "path": "app.py",
@@ -90,7 +90,7 @@ class OSWriterTests(unittest.TestCase):
         module.requests = type("FakeRequests", (), {"get": staticmethod(fake_get)})
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            os_root = Path(tmpdir) / "os"
+            os_root = Path(tmpdir) / "nhos"
             os_root.mkdir()
             (os_root / "app.py").write_bytes(app_payload)
             writer = module.OSWriter(root_dir=tmpdir)

@@ -310,8 +310,8 @@ class WiFiManager:
         return {
             "active": self.setup_active(),
             "state": self.state,
-            "mode": "recovery" if runtime_cfg.get("channel", "full") == "minimal" else "normal",
-            "os_installed": storage.exists("os/main.py"),
+            "mode": runtime_cfg.get("mode", "normal"),
+            "os_installed": storage.exists(config.OS_DIR + "/main.py"),
             "release_url": runtime_cfg.get("update", {}).get("release_url", ""),
             "ap_ssid": ap_ssid,
             "portal_ip": portal_ip,

@@ -146,6 +146,7 @@ def load_wifi_manager(channel):
         SETUP_PORTAL_HOST="192.168.4.1",
         SETUP_PORTAL_PORT=80,
         PRINT_WIFI_STATUS=True,
+        OS_DIR="nhos",
         DEFAULT_SERVER_PROFILE="manual",
         SERVER_PROFILES={
             "manual": {

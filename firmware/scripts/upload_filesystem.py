@@ -7,7 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-RAW_COPY_CHUNK_SIZE = 512
+RAW_COPY_CHUNK_SIZE = 2048
+DEVICE_OS_DIR = "nhos"
 
 STALE_TARGET_FILES = {
     "recovery": ["device_state/network_config.json"],
@@ -55,19 +56,13 @@ def remote_copy(port: str, local_path: Path, remote_path: str) -> None:
         return
     text = (result.stdout or "") + (result.stderr or "")
     missing_stat = "has no attribute 'stat'" in text
-    wrote_file = f":{remote_path}" in text
-    if missing_stat and wrote_file:
-        if result.stdout:
-            print(result.stdout, end="")
-        print(f"mpremote fs cp wrote {remote_path}; skipped missing os.stat confirmation")
-        return
     if result.stdout:
         print(result.stdout, end="")
-    if result.stderr:
+    if result.stderr and not missing_stat:
         print(result.stderr, end="", file=sys.stderr)
     if not missing_stat:
         raise subprocess.CalledProcessError(result.returncode, cmd)
-    print(f"mpremote fs cp failed without os.stat; retrying raw chunk copy for {remote_path}")
+    print(f"mpremote fs cp cannot use remote os.stat; using raw copy for {remote_path}")
     remote_copy_raw(port, local_path, remote_path)
 
 
@@ -163,22 +158,12 @@ def remove_stale_target_files(port: str, target: str, target_only: bool = False)
         remote_remove(port, path)
 
 
-def resolve_target(target: str | None, channel: str | None) -> str:
-    if target:
-        return target
-    if channel == "minimal":
-        return "recovery"
-    if channel == "full":
-        return "os"
-    return "recovery"
-
-
 def target_layers(target: str, target_only: bool = False, repo_root: Path | None = None) -> list[UploadLayer]:
     repo_root = repo_root or Path(__file__).resolve().parents[2]
     layers = {
         "root": UploadLayer("root", repo_root / "device" / "root", ""),
         "recovery": UploadLayer("recovery", repo_root / "device" / "recovery", "recovery"),
-        "os": UploadLayer("os", repo_root / "device" / "os", "os"),
+        "os": UploadLayer("os", repo_root / "device" / "os", DEVICE_OS_DIR),
     }
     if target == "recovery":
         return [layers["recovery"]] if target_only else [layers["root"], layers["recovery"]]
@@ -192,10 +177,8 @@ def target_layers(target: str, target_only: bool = False, repo_root: Path | None
 def main() -> int:
     parser = argparse.ArgumentParser(description="Upload New Horizons OS files to a MicroPython board via mpremote.")
     parser.add_argument("--port", default="/dev/cu.usbserial-10", help="Serial port of the MicroPython board")
-    parser.add_argument("--target", choices=["recovery", "os", "all"], help="Filesystem target to upload")
+    parser.add_argument("--target", choices=["recovery", "os", "all"], required=True, help="Filesystem target to upload")
     parser.add_argument("--target-only", action="store_true", help="Only upload the selected target, skip root layer")
-    parser.add_argument("--channel", choices=["minimal", "full"], help="Deprecated: minimal maps to recovery, full maps to os")
-    parser.add_argument("--channel-only", action="store_true", help="Deprecated alias for --target-only")
     parser.add_argument("--no-reset", action="store_true", help="Do not soft-reset after upload")
     args = parser.parse_args()
 
@@ -204,8 +187,8 @@ def main() -> int:
         return 2
 
     repo_root = Path(__file__).resolve().parents[2]
-    target = resolve_target(args.target, args.channel)
-    target_only = args.target_only or args.channel_only
+    target = args.target
+    target_only = args.target_only
     try:
         layers = target_layers(target, target_only=target_only, repo_root=repo_root)
     except ValueError as exc:
