@@ -42,6 +42,9 @@ class FakeLogger:
         self.infos = []
         self.warns = []
         self.errors = []
+        self.enabled = True
+        self.capacity = "default"
+        self.max_bytes = 16384
 
     def info(self, message):
         self.infos.append(message)
@@ -51,6 +54,19 @@ class FakeLogger:
 
     def error(self, message):
         self.errors.append(message)
+
+    def configure(self, enabled=True, capacity="default"):
+        self.enabled = bool(enabled)
+        self.capacity = capacity if capacity in ("default", "extended") else "default"
+        self.max_bytes = 65536 if self.capacity == "extended" else 16384
+
+    def settings(self):
+        return {
+            "enabled": self.enabled,
+            "capacity": self.capacity,
+            "serial": "status",
+            "max_bytes": self.max_bytes,
+        }
 
 
 class FakeWiFi:
@@ -93,6 +109,7 @@ class FakeRuntimeConfigStore:
             "buffer_frames": 8,
             "master_server": {},
             "matrix_layout": {"active_rows": [1], "active_cols": [1]},
+            "logging": {"enabled": True, "capacity": "default", "serial": "status"},
         }
         if runtime_override:
             self.runtime.update(runtime_override)
@@ -213,7 +230,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
             get_device_uid=lambda: "UID123",
             get_device_name=lambda default: default,
         ),
-        "device_logging": types.SimpleNamespace(DeviceLogger=lambda path: FakeLogger()),
+        "device_logging": types.SimpleNamespace(DeviceLogger=lambda *args, **kwargs: FakeLogger()),
         "filesystem_api": types.SimpleNamespace(FilesystemAPI=lambda *args, **kwargs: None),
         "filter_engine": types.SimpleNamespace(FilterChain=lambda **kwargs: types.SimpleNamespace(process=lambda idx, value: value, apply_config=lambda *args: None)),
         "frame_protocol": types.SimpleNamespace(decode_scan_frame=lambda payload: {}),
@@ -556,6 +573,52 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
         self.assertEqual(response["status"], "error")
         self.assertEqual(response["message"], "maintenance_command_disabled")
+
+    def test_set_logging_updates_runtime_and_logger_in_normal_mode(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            response = app._handle_control_request(
+                {"command": "set_logging", "enabled": False, "capacity": "extended"},
+                ("mqtt", 0),
+            )
+            status = app._status()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["message"], "logging_updated")
+        self.assertFalse(response["logging"]["enabled"])
+        self.assertEqual(response["logging"]["capacity"], "extended")
+        self.assertEqual(response["logging"]["max_bytes"], 65536)
+        self.assertEqual(app.config_store.runtime["logging"]["enabled"], False)
+        self.assertEqual(status["logging"]["capacity"], "extended")
+
+    def test_set_logging_is_allowed_in_maintenance_mode(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            app._handle_control_request({"command": "enter_maintenance"}, ("mqtt", 0))
+
+            response = app._handle_control_request(
+                {"command": "set_logging", "enabled": True, "capacity": "extended"},
+                ("mqtt", 0),
+            )
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["message"], "logging_updated")
+        self.assertEqual(response["logging"]["capacity"], "extended")
 
 
 if __name__ == "__main__":

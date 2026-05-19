@@ -47,11 +47,19 @@ class MatrixScanner:
 
     def begin(self):
         if HAS_NATIVE:
-            print("Using native matrix scanner")
+            print("matrix_scan_backend=native rows={} cols={} points={}".format(
+                self.rows,
+                self.cols,
+                self.active_count,
+            ))
             matrix_scan_native.init(self.rows, self.cols, self.active_count)
             return
 
-        print("Using MicroPython matrix scanner")
+        print("matrix_scan_backend=micropython rows={} cols={} points={}".format(
+            self.rows,
+            self.cols,
+            self.active_count,
+        ))
         self._begin_python()
 
     def scan_once(self):
@@ -89,13 +97,10 @@ class MatrixScanner:
     def _begin_python(self):
         self._validate_active_pins()
 
-        print("Init active row ADC GPIOs:", self.active_row_pins)
         self.row_adcs = []
         self.row_pin_map = []
 
         for pin_no in self.active_row_pins:
-            print("Init ROW ADC GPIO", pin_no)
-
             try:
                 pin = machine.Pin(pin_no)
                 adc = machine.ADC(pin)
@@ -112,11 +117,12 @@ class MatrixScanner:
                     print("ADC width warning on GPIO", pin_no, ":", e)
 
                 # Test read once
-                try:
-                    v = adc.read()
-                    print(" ROW ADC GPIO", pin_no, "test read:", v)
-                except Exception as e:
-                    print(" ROW ADC GPIO", pin_no, "test read failed:", e)
+                if getattr(config, "PRINT_MATRIX_INIT_DETAILS", False):
+                    try:
+                        v = adc.read()
+                        print("ROW ADC GPIO", pin_no, "test read:", v)
+                    except Exception as e:
+                        print("ROW ADC GPIO", pin_no, "test read failed:", e)
 
                 self.row_adcs.append(adc)
                 self.row_pin_map.append(pin_no)
@@ -125,13 +131,10 @@ class MatrixScanner:
                 print("FAILED: ROW ADC GPIO", pin_no, ":", repr(e))
                 raise
 
-        print("Init active col GPIOs:", self.active_col_pins)
         self.col_pins = []
         self.col_pin_map = []
 
         for pin_no in self.active_col_pins:
-            print("Init COL GPIO", pin_no)
-
             try:
                 pin = self._make_col_pin(pin_no)
                 self.col_pins.append(pin)
@@ -143,13 +146,12 @@ class MatrixScanner:
 
         self._all_cols_off()
 
-        print("Matrix scanner initialized")
-        print("Available row GPIOs:", self.available_row_pins)
-        print("Available col GPIOs:", self.available_col_pins)
-        print("Active row GPIOs:", self.active_row_pins)
-        print("Active col GPIOs:", self.active_col_pins)
-        print("Active output points:", self.active_count)
-        print("Settle us:", self.settle_us)
+        print("matrix_scan_initialized rows={} cols={} points={} settle_us={}".format(
+            len(self.active_row_pins),
+            len(self.active_col_pins),
+            self.active_count,
+            self.settle_us,
+        ))
 
     def _validate_active_pins(self):
         for pin in self.active_row_pins:

@@ -128,6 +128,7 @@ Normal/Maintenance：
 - `file_download_begin`
 - `file_download_chunk`
 - `file_delete`
+- `set_logging`
 - `log_tail`
 - `log_clear`
 
@@ -140,6 +141,28 @@ Normal/Maintenance 收到 `write_os` 會回：
   "next_command": "reboot_to_recovery"
 }
 ```
+
+## Logging / Serial Status
+
+File log 預設啟用，寫入 `/data/logs/device.log`，並使用兩段輪替：
+
+- Default：總容量 16KB。
+- Extended：總容量 64KB。
+- active 檔與 `.1` backup 各使用約一半容量。
+- `log_tail` 串流讀取 `.1` 與 active，只保留最後 N 行在 RAM。
+- `log_clear` 會清除 active 與 `.1`。
+
+設定 logging：
+
+```json
+{
+  "command": "set_logging",
+  "enabled": true,
+  "capacity": "default"
+}
+```
+
+`capacity` 只接受 `default` 或 `extended`。關閉 file log 時，serial 的狀態摘要仍會輸出；預設不記錄 raw matrix frame、每次 packet 成功送出、或每秒等待訊息。
 
 ## 重新 Build Firmware
 

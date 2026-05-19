@@ -47,11 +47,19 @@ class MatrixScanner:
 
     def begin(self):
         if HAS_NATIVE:
-            print("Using native matrix scanner")
+            print("matrix_scan_backend=native rows={} cols={} points={}".format(
+                self.rows,
+                self.cols,
+                self.active_count,
+            ))
             matrix_scan_native.init(self.rows, self.cols, self.active_count)
             return
 
-        print("Using optimized MicroPython matrix scanner")
+        print("matrix_scan_backend=micropython rows={} cols={} points={}".format(
+            self.rows,
+            self.cols,
+            self.active_count,
+        ))
         self._begin_python()
 
     def scan_once(self):
@@ -88,13 +96,12 @@ class MatrixScanner:
 
         self._all_cols_off()
 
-        print("Matrix scanner initialized")
-        print("Available row GPIOs:", self.available_row_pins)
-        print("Available col GPIOs:", self.available_col_pins)
-        print("Active row GPIOs:", self.active_row_pins)
-        print("Active col GPIOs:", self.active_col_pins)
-        print("Active output points:", self.active_count)
-        print("Settle us:", self.settle_us)
+        print("matrix_scan_initialized rows={} cols={} points={} settle_us={}".format(
+            len(self.active_row_pins),
+            len(self.active_col_pins),
+            self.active_count,
+            self.settle_us,
+        ))
 
     def _validate_active_pins(self):
         for pin in self.active_row_pins:

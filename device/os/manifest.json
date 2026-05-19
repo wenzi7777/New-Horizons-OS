@@ -9,8 +9,8 @@
   "files": [
     {
       "path": "app.py",
-      "sha256": "faac81052ca4a6effb7e875175912e8563f4def2673bb54732c85c729e3a3922",
-      "size": 46487,
+      "sha256": "07756199ff6cfbb043890bc5fd8ff4225a627b716fcbd23985804f62b38957d7",
+      "size": 49062,
       "kind": "code",
       "reboot_required": true
     },
@@ -44,8 +44,8 @@
     },
     {
       "path": "config.py",
-      "sha256": "78382609b49ad30c45d0a4474a6080d76a4403609c43d26c25f91e048e0b6415",
-      "size": 4251,
+      "sha256": "b09d20938263f23bbbb5935d67822f459eb272966adee7214274bbda0c1402c7",
+      "size": 4287,
       "kind": "code",
       "reboot_required": true
     },
@@ -65,8 +65,8 @@
     },
     {
       "path": "device_logging.py",
-      "sha256": "4adfc2512157cb851b2c2ff147bdb2b1e588ad129b3a89a1a8befb9364bcaeba",
-      "size": 2039,
+      "sha256": "1fc331fbde794f945522750d8bc13f17f428b3e7ebe3cd1377385e4bcb6621e5",
+      "size": 4580,
       "kind": "code",
       "reboot_required": true
     },
@@ -107,15 +107,15 @@
     },
     {
       "path": "matrix_scan.py",
-      "sha256": "0f550d93491a3a35bd368538a6d617db9656b9fb1cf9b91f492960b19fdb2343",
-      "size": 7173,
+      "sha256": "bce87a8f1ffef16b5d10e2a514b25605fbf35fa92c14ddb65b0e0bb43a095783",
+      "size": 7148,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "matrix_scan_mock.py",
-      "sha256": "dbd3adc2f025b8abf1d5740fbce1eb437e178e4f2edf4f5f91c2c979903b7a66",
-      "size": 5994,
+      "sha256": "07cd81b54817c359652fe3a67e9b0b9f88a72f036ca65c78b9db16118bf8965a",
+      "size": 6090,
       "kind": "code",
       "reboot_required": true
     },
@@ -170,8 +170,8 @@
     },
     {
       "path": "runtime_config.py",
-      "sha256": "66e0fa894411fc8476c1c52a9b6d2bb803b8f23340e898ce1b13d20243b38e8c",
-      "size": 6051,
+      "sha256": "ddb12c4369d69e5ebb124d4624d422de592b13833e9079a23670c59bba17889a",
+      "size": 6159,
       "kind": "code",
       "reboot_required": true
     },
@@ -254,8 +254,8 @@
     },
     {
       "path": "wifi_manager.py",
-      "sha256": "5018bc35ec9edb50db3dc597baeef83c20f505b66a10839ab46c77c9de0d40be",
-      "size": 18859,
+      "sha256": "81eeebbde10bb5e248d6323ef4d44cce73c87c02c5ccd4dceef671f3a15c3d57",
+      "size": 20081,
       "kind": "code",
       "reboot_required": true
     }

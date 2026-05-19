@@ -42,8 +42,7 @@ class WiFiManager:
         time.sleep_ms(300)
 
         if sta.isconnected():
-            if config.PRINT_WIFI_STATUS:
-                print("Wi-Fi already connected:", sta.ifconfig())
+            self._log_info("wifi_sta_already_connected ip={}".format(sta.ifconfig()[0]))
             self.state = "wifi_connected"
             return True
 
@@ -55,9 +54,9 @@ class WiFiManager:
             self.state = "wifi_failed"
             return False
 
+        self._log_info("wifi_sta_connect_start ssid={}".format(ssid))
         for attempt in range(1, 4):
-            print("Wi-Fi connect attempt:", attempt)
-            print("Free memory:", gc.mem_free())
+            self._log_info("wifi_sta_connect_attempt={} free={}".format(attempt, gc.mem_free()))
 
             try:
                 try:
@@ -66,57 +65,49 @@ class WiFiManager:
                 except Exception:
                     pass
 
-                if config.PRINT_WIFI_STATUS:
-                    print("Connecting Wi-Fi:", ssid)
-
                 sta.connect(ssid, password)
 
                 for _ in range(20):
                     if sta.isconnected():
-                        if config.PRINT_WIFI_STATUS:
-                            print("Wi-Fi connected:", sta.ifconfig())
+                        self._log_info("wifi_sta_connected ip={}".format(sta.ifconfig()[0]))
                         self.stop_setup_portal()
                         self._disable_ap()
                         self.state = "wifi_connected"
                         return True
 
-                    if config.PRINT_WIFI_STATUS:
-                        print("Waiting Wi-Fi...")
                     time.sleep(1)
 
-                print("Wi-Fi connect timeout")
+                self._log_warn("wifi_sta_connect_timeout attempt={}".format(attempt))
 
             except RuntimeError as e:
-                print("Wi-Fi connect RuntimeError:", e)
-                print("Free memory:", gc.mem_free())
+                self._log_warn("wifi_sta_connect_runtime_error {} free={}".format(e, gc.mem_free()))
 
             except OSError as e:
-                print("Wi-Fi connect OSError:", e)
-                print("Free memory:", gc.mem_free())
+                self._log_warn("wifi_sta_connect_os_error {} free={}".format(e, gc.mem_free()))
 
             self._reset_sta_interface()
             gc.collect()
 
-        print("Wi-Fi connect failed after retries")
+        self._log_warn("wifi_sta_connect_failed")
         self.last_error = "wifi_connect_failed"
         self.state = "wifi_failed"
         return False
 
     def _reset_sta_interface(self):
-        print("Reset Wi-Fi STA interface")
+        self._log_info("wifi_sta_reset")
         sta = self._ensure_sta()
 
         try:
             sta.active(False)
             time.sleep_ms(800)
         except Exception as e:
-            print("Wi-Fi active(False) warning:", e)
+            self._log_warn("wifi_sta_active_false_warning {}".format(e))
 
         try:
             sta.active(True)
             time.sleep_ms(800)
         except Exception as e:
-            print("Wi-Fi active(True) warning:", e)
+            self._log_warn("wifi_sta_active_true_warning {}".format(e))
 
     def start_setup_portal(self, reason="manual"):
         gc.collect()
@@ -140,9 +131,8 @@ class WiFiManager:
         ap.config(essid=ap_ssid, password=config.SETUP_AP_PASSWORD)
 
         self.portal.start()
-        if self.logger:
-            self.logger.info("wifi_setup_ap_ssid={}".format(ap_ssid))
-        print("AP started:", ap.ifconfig())
+        ifconfig = ap.ifconfig()
+        self._log_info("wifi_setup_ap_started ssid={} ip={}".format(ap_ssid, ifconfig[0]))
         return True
 
     def service_setup_portal(self):
@@ -216,6 +206,8 @@ class WiFiManager:
         mqtt_tls="",
         transport_mode="",
         release_url="",
+        log_enabled="",
+        log_capacity="",
     ):
         ssid = (ssid or "").strip()
         password = password or ""
@@ -248,6 +240,7 @@ class WiFiManager:
                     transport_mode,
                 )
             )
+            runtime_patch.update(self._runtime_patch_for_logging(log_enabled, log_capacity))
             release_url = str(release_url or "").strip()
             if release_url:
                 update_cfg = dict(self.config_store.load_runtime().get("update", {}))
@@ -327,6 +320,7 @@ class WiFiManager:
             "data_server": data_server,
             "mqtt": dict(runtime_cfg.get("mqtt", {})),
             "transport": dict(runtime_cfg.get("transport", {})),
+            "logging": dict(runtime_cfg.get("logging", {})),
         }
 
     def _server_profiles(self):
@@ -437,6 +431,22 @@ class WiFiManager:
             }
         return patch
 
+    def _runtime_patch_for_logging(self, log_enabled="", log_capacity=""):
+        patch = {}
+        current_runtime = self.config_store.load_runtime() if self.config_store is not None else {}
+        current_logging = dict(current_runtime.get("logging", {}))
+        normalized_enabled = self._normalize_bool(log_enabled)
+        normalized_capacity = str(log_capacity or "").strip().lower()
+        if normalized_capacity not in ("default", "extended"):
+            normalized_capacity = ""
+        if normalized_enabled is not None or normalized_capacity:
+            patch["logging"] = {
+                "enabled": current_logging.get("enabled", True) if normalized_enabled is None else normalized_enabled,
+                "capacity": normalized_capacity or current_logging.get("capacity", "default"),
+                "serial": "status",
+            }
+        return patch
+
     def _server_profile_options(self):
         options = []
         for name, profile in self._server_profiles().items():
@@ -520,6 +530,18 @@ class WiFiManager:
         if int(config.SETUP_PORTAL_PORT) == 80:
             return "http://{}".format(host)
         return "http://{}:{}".format(host, config.SETUP_PORTAL_PORT)
+
+    def _log_info(self, message):
+        if self.logger:
+            self.logger.info(message)
+        else:
+            print(message)
+
+    def _log_warn(self, message):
+        if self.logger:
+            self.logger.warn(message)
+        else:
+            print(message)
 
     def _auth_name(self, value):
         mapping = {

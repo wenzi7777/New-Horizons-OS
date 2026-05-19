@@ -265,6 +265,8 @@ class WiFiSetupPortal:
                     fields.get("mqtt_tls", ""),
                     fields.get("transport_mode", ""),
                     fields.get("release_url", ""),
+                    fields.get("log_enabled", ""),
+                    fields.get("log_capacity", ""),
                 )
                 content = self._render_result_page(result)
                 self._send_response(client, "200 OK", "text/html; charset=utf-8", content)
@@ -420,8 +422,11 @@ class WiFiSetupPortal:
         data_server = status.get("data_server", {}) or {}
         mqtt_cfg = status.get("mqtt", {}) or {}
         transport_cfg = status.get("transport", {}) or {}
+        logging_cfg = status.get("logging", {}) or {}
         recovery_mode = status.get("mode") == "recovery" or not status.get("os_installed", True)
         release_url = status.get("release_url", "")
+        log_enabled = logging_cfg.get("enabled", True)
+        log_capacity = logging_cfg.get("capacity", "default")
         recovery_notice = ""
         if recovery_mode:
             recovery_notice = (
@@ -482,6 +487,18 @@ class WiFiSetupPortal:
         </select>
         <label for="release_url">OS release URL</label>
         <input id="release_url" name="release_url" value="{release_url}" placeholder="https://server/newhorizons/latest.json">
+        <h2>Device Logging</h2>
+        <label for="log_enabled">File log</label>
+        <select id="log_enabled" name="log_enabled">
+          <option value="true"{log_enabled_selected}>On</option>
+          <option value="false"{log_disabled_selected}>Off</option>
+        </select>
+        <label for="log_capacity">Log capacity</label>
+        <select id="log_capacity" name="log_capacity">
+          <option value="default"{log_default_selected}>Default 16KB</option>
+          <option value="extended"{log_extended_selected}>Extended 64KB</option>
+        </select>
+        <p class="muted">Serial status output stays enabled. File log stores only low-frequency status and errors.</p>
         <label for="ssid">Wi-Fi SSID</label>
         <input id="ssid" name="ssid" value="{ssid}" placeholder="Your Wi-Fi name">
         <label for="password">Wi-Fi password</label>
@@ -500,6 +517,7 @@ class WiFiSetupPortal:
         <p class="muted">Data target: {data_host}:{data_port}</p>
         <p class="muted">MQTT target: {mqtt_host}:{mqtt_port} ({mqtt_tls_label})</p>
         <p class="muted">Release URL: {release_url}</p>
+        <p class="muted">File log: {log_status} ({log_capacity_label})</p>
         <p class="muted">Transport mode: {transport_mode}</p>
         <p class="muted">Device state: {device_state}</p>
       </div>
@@ -542,6 +560,12 @@ class WiFiSetupPortal:
             mqtt_host=_escape_html(mqtt_cfg.get("host", "")),
             mqtt_port=_escape_html(mqtt_cfg.get("port", "")),
             release_url=_escape_html(release_url),
+            log_enabled_selected=" selected" if log_enabled else "",
+            log_disabled_selected="" if log_enabled else " selected",
+            log_default_selected=" selected" if log_capacity != "extended" else "",
+            log_extended_selected=" selected" if log_capacity == "extended" else "",
+            log_status="on" if log_enabled else "off",
+            log_capacity_label="64KB" if log_capacity == "extended" else "16KB",
             primary_button="Save Recovery Settings" if recovery_mode else "Connect Wi-Fi",
             mqtt_tls_label="TLS" if mqtt_cfg.get("tls", False) else "plain",
             mqtt_tls_true_selected=" selected" if mqtt_cfg.get("tls", False) else "",

@@ -37,6 +37,7 @@
     files/
     logs/
       device.log
+      device.log.1
       maintenance.log
       writer.log
     tmp/
@@ -48,7 +49,7 @@
 - `/nhos` 是已安裝的 New Horizons OS；Recovery `write_os` 只安裝或更新這棵樹。設備端不能使用 `/os`，因為會遮蔽 MicroPython 內建 `os` 模組並造成 `mpremote` 的 `os.stat` 失敗。
 - `/ota_stage/nhos` 是 OS writer 的暫存下載區；只有 hash 驗證成功後才會 promote 到 `/nhos`。
 - `/data/files` 是 Maintenance file commands 唯一可管理的使用者檔案區。
-- `/data/logs` 是 Maintenance log commands 唯一可暴露的 log 區。
+- `/data/logs` 是 Maintenance log commands 唯一可暴露的 log 區。`device.log` 預設啟用，總容量 default 16KB / extended 64KB，使用 active + `.1` 兩段輪替。
 - `/data/tmp` 是 upload/download 暫存區。
 - `/device_state` 存放小型設定與 boot/update state，只能透過明確定義的 config/state API 更新。
 

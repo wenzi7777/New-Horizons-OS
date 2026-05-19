@@ -29,8 +29,9 @@ class App:
         self.scan_ready = False
 
         self.config_store = RuntimeConfigStore(config.DEVICE_STATE_DIR)
-        self.logger = DeviceLogger(config.LOG_PATH)
         self.runtime = self.config_store.load_runtime()
+        self.logger = DeviceLogger(config.LOG_PATH)
+        self._apply_logging_config(self.runtime.get("logging", {}))
         self.network = self.config_store.load_network()
         self.filter_config = self.config_store.load_filter()
 
@@ -434,6 +435,7 @@ class App:
 
     def _apply_runtime_reload(self):
         self.runtime = self.config_store.load_runtime()
+        self._apply_logging_config(self.runtime.get("logging", {}))
         self.filter_config = self.config_store.load_filter()
         self._apply_matrix_layout()
         self.time_sync.servers = list(self.runtime.get("ntp_servers", []))
@@ -515,6 +517,9 @@ class App:
             self.runtime = runtime
             self._ensure_udp_data_socket(self.wifi.is_connected())
             return self._ok("transport_updated", applied=True)
+
+        if cmd == "set_logging":
+            return self._set_logging(request)
 
         if cmd == "set_filter":
             filter_data = self.config_store.update_filter(request.get("filter", {}))
@@ -718,7 +723,12 @@ class App:
                 request.get("mqtt_port", ""),
                 request.get("mqtt_tls", ""),
                 request.get("transport_mode", ""),
+                "",
+                request.get("log_enabled", ""),
+                request.get("log_capacity", ""),
             )
+            self.runtime = self.config_store.load_runtime()
+            self._apply_logging_config(self.runtime.get("logging", {}))
             self._ensure_udp_data_socket(self.wifi.is_connected())
             self.update_led_state()
             return {
@@ -737,8 +747,12 @@ class App:
             return self._log_tail(request)
 
         if cmd == "log_clear":
-            import storage
-            storage.remove(config.LOG_PATH)
+            if hasattr(self.logger, "clear"):
+                self.logger.clear()
+            else:
+                import storage
+                storage.remove(config.LOG_PATH)
+                storage.remove(config.LOG_PATH + ".1")
             return self._ok("log_cleared", applied=True)
 
         if cmd == "file_list":
@@ -930,6 +944,52 @@ class App:
             "lines": self.logger.read_tail(int(request.get("max_lines", 50))),
         }
 
+    def _set_logging(self, request):
+        logging_cfg = self._normalize_logging_config(request)
+        runtime = self.config_store.update_runtime({"logging": logging_cfg})
+        self.runtime = runtime
+        self._apply_logging_config(logging_cfg)
+        return {
+            "status": "ok",
+            "message": "logging_updated",
+            "reboot_required": False,
+            "applied": True,
+            "logging": self._logging_status(),
+        }
+
+    def _normalize_logging_config(self, source):
+        enabled = self._normalize_logging_enabled(source.get("enabled", True))
+        capacity = str(source.get("capacity", "default") or "default")
+        if capacity not in ("default", "extended"):
+            capacity = "default"
+        return {
+            "enabled": bool(enabled),
+            "capacity": capacity,
+            "serial": "status",
+        }
+
+    def _normalize_logging_enabled(self, value):
+        normalized = str(value).strip().lower()
+        if normalized in ("0", "false", "no", "off", "disabled"):
+            return False
+        if normalized in ("1", "true", "yes", "on", "enabled"):
+            return True
+        return bool(value)
+
+    def _apply_logging_config(self, logging_cfg):
+        logging_cfg = self._normalize_logging_config(logging_cfg or {})
+        if hasattr(self.logger, "configure"):
+            self.logger.configure(
+                enabled=logging_cfg.get("enabled", True),
+                capacity=logging_cfg.get("capacity", "default"),
+            )
+        return logging_cfg
+
+    def _logging_status(self):
+        if hasattr(self.logger, "settings"):
+            return self.logger.settings()
+        return self._normalize_logging_config(self.runtime.get("logging", {}))
+
     def _file_call(self, fn, *args):
         try:
             return fn(*args)
@@ -952,6 +1012,7 @@ class App:
             "ntp": self.time_sync.status() if self.time_sync is not None else {},
             "filter": self.config_store.load_filter(),
             "runtime": self.config_store.load_runtime(),
+            "logging": self._logging_status(),
             "update_state": {},
             "calibration_mode": self.calibration_mode,
             "calibration_levels": self.calibration.list_levels() if self.calibration is not None else [],
@@ -1010,19 +1071,25 @@ class App:
             "file_download_begin",
             "file_download_chunk",
             "file_delete",
+            "set_logging",
             "log_tail",
             "log_read_tail",
             "log_clear",
         )
 
     def _print_setup(self):
-        print("========== Setup ==========")
-        print("Device:", self.device_name)
-        print("Device ID:", hex(self.device_id))
-        print("Matrix:", config.ROWS, "x", config.COLS)
-        print("Active rows:", self._active_rows())
-        print("Active cols:", self._active_cols())
-        print("Wi-Fi setup requested:", self.wifi_setup_requested)
+        self.logger.info(
+            "boot mode=normal device={} id={} version={} matrix={}x{} active={}x{} wifi_setup={}".format(
+                self.device_name,
+                hex(self.device_id),
+                getattr(config, "FIRMWARE_VERSION", "unknown"),
+                config.ROWS,
+                config.COLS,
+                len(self._active_rows()),
+                len(self._active_cols()),
+                bool(self.wifi_setup_requested),
+            )
+        )
 
     def _has_network_hint(self):
         network_cfg = self.config_store.load_network()

@@ -50,6 +50,7 @@ class FakeManager:
             "data_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 5005},
             "mqtt": {"host": "isensing-s1.u-aizu.ac.jp", "port": 8883, "tls": True},
             "transport": {"mode": "mqtt"},
+            "logging": {"enabled": True, "capacity": "default", "serial": "status"},
             "mode": "normal",
             "os_installed": True,
             "release_url": "https://isensing-s1.u-aizu.ac.jp/newhorizons/ota/latest.json",
@@ -72,6 +73,8 @@ class FakeManager:
         mqtt_tls="",
         transport_mode="",
         release_url="",
+        log_enabled="",
+        log_capacity="",
     ):
         self.calls.append(
             (
@@ -87,6 +90,8 @@ class FakeManager:
                 mqtt_tls,
                 transport_mode,
                 release_url,
+                log_enabled,
+                log_capacity,
             )
         )
         return {"ok": True, "message": "Connected"}
@@ -142,6 +147,8 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         self.assertIn('name="mqtt_port"', html)
         self.assertIn('name="mqtt_tls"', html)
         self.assertIn('name="release_url"', html)
+        self.assertIn('name="log_enabled"', html)
+        self.assertIn('name="log_capacity"', html)
         self.assertIn('name="transport_mode"', html)
         self.assertIn("isensing-s1.u-aizu.ac.jp", html)
 
@@ -154,7 +161,7 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         portal._read_request = lambda client: (
             "POST",
             "/connect",
-            "ssid=LabWiFi&password=secret&server_profile=manual&master_host=192.168.1.200&master_port=32001&data_host=192.168.1.201&data_port=32002&mqtt_host=192.168.1.153&mqtt_port=1883&mqtt_tls=false&transport_mode=mqtt&release_url=http://192.168.1.2:8000/latest.json",
+            "ssid=LabWiFi&password=secret&server_profile=manual&master_host=192.168.1.200&master_port=32001&data_host=192.168.1.201&data_port=32002&mqtt_host=192.168.1.153&mqtt_port=1883&mqtt_tls=false&transport_mode=mqtt&release_url=http://192.168.1.2:8000/latest.json&log_enabled=false&log_capacity=extended",
         )
         portal._send_response = lambda client, status, content_type, body: None
 
@@ -177,6 +184,8 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
                     "false",
                     "mqtt",
                     "http://192.168.1.2:8000/latest.json",
+                    "false",
+                    "extended",
                 )
             ],
         )

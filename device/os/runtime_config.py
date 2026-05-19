@@ -62,6 +62,11 @@ DEFAULT_RUNTIME = {
         "mode": "udp",
         "topic_namespace": config.MQTT_TOPIC_NAMESPACE,
     },
+    "logging": {
+        "enabled": True,
+        "capacity": "default",
+        "serial": "status",
+    },
     "mqtt": {
         "host": config.MQTT_BROKER_HOST,
         "port": config.MQTT_BROKER_PORT,

@@ -62,6 +62,11 @@ DEFAULT_RUNTIME = {
         "mode": "udp",
         "topic_namespace": iconfig.DEFAULT_TOPIC_NAMESPACE,
     },
+    "logging": {
+        "enabled": True,
+        "capacity": "default",
+        "serial": "status",
+    },
     "mqtt": {
         "host": iconfig.DEFAULT_MQTT_HOST,
         "port": iconfig.DEFAULT_MQTT_PORT,

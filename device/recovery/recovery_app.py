@@ -1,5 +1,9 @@
 import machine
 import time
+try:
+    import uos as os
+except ImportError:  # pragma: no cover - CPython fallback
+    import os
 
 import immutable_config as iconfig
 
@@ -24,9 +28,10 @@ class RecoveryApp:
         self.device_uid = get_device_uid()
         self.device_name = get_device_name(iconfig.FIRMWARE_NAME)
         self.reboot_required = False
-        self.logger = DeviceLogger(iconfig.LOG_PATH)
         self.config_store = RuntimeConfigStore(iconfig.DEVICE_STATE_DIR)
         self.runtime = self.config_store.load_runtime()
+        self.logger = DeviceLogger(iconfig.LOG_PATH)
+        self._apply_logging_config(self.runtime.get("logging", {}))
         self.filesystem = FilesystemAPI(iconfig.DEVICE_STATE_DIR)
         self.wifi = WiFiManager(self.config_store, self.logger)
         self.control = UDPControlServer(iconfig.DEFAULT_CONTROL_PORT, self.logger)
@@ -38,6 +43,15 @@ class RecoveryApp:
         self.reboot_deadline_ms = None
 
     def setup(self):
+        self.logger.info(
+            "boot mode=recovery device={} id={} version={} os_installed={} wifi_setup={}".format(
+                self.device_name,
+                hex(self.device_id),
+                getattr(iconfig, "FIRMWARE_VERSION", "unknown"),
+                self._path_exists(getattr(iconfig, "OS_DIR", "nhos") + "/main.py"),
+                bool(self.wifi_setup_requested),
+            )
+        )
         wifi_ok = False
         if self.wifi_setup_requested or not self._has_network_hint():
             self.wifi.start_setup_portal("boot_window" if self.wifi_setup_requested else "missing_credentials")
@@ -46,6 +60,7 @@ class RecoveryApp:
             if not wifi_ok:
                 self.wifi.start_setup_portal("connect_failed")
         self.control.begin()
+        self.logger.info("control_server_started port={}".format(iconfig.DEFAULT_CONTROL_PORT))
         if wifi_ok:
             self._announce_status(force=True)
         self.boot_network_initialized = wifi_ok
@@ -79,6 +94,13 @@ class RecoveryApp:
     def _has_network_hint(self):
         network_cfg = self.config_store.load_network()
         return bool(network_cfg.get("ssid"))
+
+    def _path_exists(self, path):
+        try:
+            os.stat(path)
+            return True
+        except OSError:
+            return False
 
     def _announce_status(self, now=None, force=False):
         if not self.wifi.is_connected():
@@ -137,6 +159,7 @@ class RecoveryApp:
                 "mode": "recovery",
                 "manifest_url": runtime.get("update", {}).get("manifest_url", ""),
                 "runtime": runtime,
+                "logging": self._logging_status(),
                 "wifi_connected": self.wifi.is_connected(),
                 "wifi_setup": self.wifi.portal_status(),
                 "update_state": {},
@@ -167,7 +190,16 @@ class RecoveryApp:
 
         if command == "read_logs":
             max_lines = int(request.get("max_lines", 50))
-            return {"status": "ok", "message": "logs", "lines": self.logger.read_tail(max_lines), "reboot_required": False}
+            lines = self.logger.read_tail(max_lines) if self.logger is not None else []
+            return {"status": "ok", "message": "logs", "lines": lines, "reboot_required": False}
+
+        if command in ("log_clear", "clear_logs"):
+            if self.logger is not None and hasattr(self.logger, "clear"):
+                self.logger.clear()
+            return {"status": "ok", "message": "log_cleared", "applied": True, "reboot_required": False}
+
+        if command == "set_logging":
+            return self._set_logging(request)
 
         if command == "fs_list":
             return {"status": "ok", "message": "fs_list", "items": self.filesystem.list_files(), "reboot_required": False}
@@ -222,7 +254,12 @@ class RecoveryApp:
                 request.get("mqtt_port", ""),
                 request.get("mqtt_tls", ""),
                 request.get("transport_mode", ""),
+                request.get("release_url", ""),
+                request.get("log_enabled", ""),
+                request.get("log_capacity", ""),
             )
+            self.runtime = self.config_store.load_runtime()
+            self._apply_logging_config(self.runtime.get("logging", {}))
             return {
                 "status": "ok" if result.get("ok") else "error",
                 "message": result.get("message", ""),
@@ -266,6 +303,50 @@ class RecoveryApp:
                 OSWriter = LoadedOSWriter
             self.os_writer = OSWriter(".", self.logger)
         return self.os_writer
+
+    def _set_logging(self, request):
+        logging_cfg = self._normalize_logging_config(request)
+        self.runtime = self.config_store.update_runtime({"logging": logging_cfg})
+        self._apply_logging_config(logging_cfg)
+        return {
+            "status": "ok",
+            "message": "logging_updated",
+            "applied": True,
+            "reboot_required": False,
+            "logging": self._logging_status(),
+        }
+
+    def _normalize_logging_config(self, source):
+        capacity = str(source.get("capacity", "default") or "default")
+        if capacity not in ("default", "extended"):
+            capacity = "default"
+        return {
+            "enabled": self._normalize_logging_enabled(source.get("enabled", True)),
+            "capacity": capacity,
+            "serial": "status",
+        }
+
+    def _normalize_logging_enabled(self, value):
+        normalized = str(value).strip().lower()
+        if normalized in ("0", "false", "no", "off", "disabled"):
+            return False
+        if normalized in ("1", "true", "yes", "on", "enabled"):
+            return True
+        return bool(value)
+
+    def _apply_logging_config(self, logging_cfg):
+        if self.logger is None or not hasattr(self.logger, "configure"):
+            return
+        logging_cfg = self._normalize_logging_config(logging_cfg or {})
+        self.logger.configure(
+            enabled=logging_cfg.get("enabled", True),
+            capacity=logging_cfg.get("capacity", "default"),
+        )
+
+    def _logging_status(self):
+        if self.logger is not None and hasattr(self.logger, "settings"):
+            return self.logger.settings()
+        return self._normalize_logging_config(self.runtime.get("logging", {}))
 
 
 def run(wifi_setup_requested=False, recovery_error=""):
