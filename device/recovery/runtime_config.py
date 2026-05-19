@@ -143,9 +143,7 @@ class RuntimeConfigStore:
         return result
 
     def load_runtime(self):
-        runtime = self._merged(DEFAULT_RUNTIME, storage.load_json(self.runtime_path, {}))
-        self.save_runtime(runtime)
-        return runtime
+        return self._merged(DEFAULT_RUNTIME, storage.load_json(self.runtime_path, {}))
 
     def save_runtime(self, runtime):
         storage.save_json(self.runtime_path, runtime)
@@ -156,9 +154,7 @@ class RuntimeConfigStore:
         return runtime
 
     def load_network(self):
-        network = self._merged(DEFAULT_NETWORK, storage.load_json(self.network_path, {}))
-        self.save_network(network)
-        return network
+        return self._merged(DEFAULT_NETWORK, storage.load_json(self.network_path, {}))
 
     def save_network(self, network_data):
         storage.save_json(self.network_path, network_data)
@@ -169,9 +165,7 @@ class RuntimeConfigStore:
         return network_data
 
     def load_filter(self):
-        filt = self._merged(DEFAULT_FILTER, storage.load_json(self.filter_path, {}))
-        self.save_filter(filt)
-        return filt
+        return self._merged(DEFAULT_FILTER, storage.load_json(self.filter_path, {}))
 
     def save_filter(self, filter_data):
         storage.save_json(self.filter_path, filter_data)

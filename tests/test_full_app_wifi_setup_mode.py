@@ -70,12 +70,13 @@ class FakeLogger:
 
 
 class FakeWiFi:
-    def __init__(self, events=None):
+    def __init__(self, events=None, connect_result=True):
         self.setup_started = []
         self.connected = False
         self.portal_active = False
         self.events = events if events is not None else []
         self.state = "idle"
+        self.connect_result = connect_result
 
     def start_setup_portal(self, reason):
         self.setup_started.append(reason)
@@ -88,9 +89,9 @@ class FakeWiFi:
 
     def connect(self):
         self.events.append("wifi_connect")
-        self.connected = True
-        self.state = "connected"
-        return True
+        self.connected = bool(self.connect_result)
+        self.state = "connected" if self.connected else "offline"
+        return self.connected
 
     def is_connected(self):
         return self.connected
@@ -176,7 +177,7 @@ class FakeControl:
         return True
 
 
-def load_full_app_module(runtime_override=None, update_check=None, enable_led=False):
+def load_full_app_module(runtime_override=None, update_check=None, enable_led=False, wifi_connect_result=True):
     events = []
     fake_scan = FakeScan(events)
     fake_vdboard = types.SimpleNamespace(scan=fake_scan)
@@ -262,7 +263,9 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         "udp_control": types.SimpleNamespace(UDPControlServer=lambda port, logger=None: FakeControl()),
         "udp_stream": types.SimpleNamespace(UDPStreamer=lambda host, port: types.SimpleNamespace(send=lambda payload: True)),
         "utils": types.SimpleNamespace(RateCounter=lambda interval: None),
-        "wifi_manager": types.SimpleNamespace(WiFiManager=lambda *args, **kwargs: FakeWiFi(events)),
+        "wifi_manager": types.SimpleNamespace(
+            WiFiManager=lambda *args, **kwargs: FakeWiFi(events, connect_result=wifi_connect_result)
+        ),
     }
     if enable_led:
         injected["sk6812"] = types.SimpleNamespace(SK6812Status=lambda: FakeLED(events))
@@ -375,6 +378,24 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(fake_scan.init_calls, [])
         self.assertEqual(fake_scan.start_calls, 0)
         self.assertFalse(app.scan_ready)
+
+    def test_normal_boot_does_not_start_ap_portal_after_sta_connect_failure(self):
+        module, fake_scan, events, saved_modules = load_full_app_module(wifi_connect_result=False)
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(events, ["wifi_connect"])
+        self.assertEqual(app.wifi.setup_started, [])
+        self.assertFalse(app.boot_network_initialized)
+        self.assertEqual(fake_scan.init_calls, [])
+        self.assertEqual(fake_scan.start_calls, 0)
 
     def test_gc_collects_once_per_frame_interval(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()

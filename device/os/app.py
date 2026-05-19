@@ -90,8 +90,7 @@ class App:
             wifi_ok = self.wifi.connect()
             self.logger.info("setup_wifi_connect_done ok={}".format(bool(wifi_ok)))
             if not wifi_ok:
-                self.wifi.start_setup_portal("connect_failed")
-                self.logger.info("setup_wifi_portal_started reason=connect_failed")
+                self.logger.warn("setup_wifi_connect_failed_offline")
 
         self._ensure_led()
         if self.led:
@@ -149,7 +148,10 @@ class App:
                 self._announce_status(now, force=True)
                 self.update_led_state()
 
-            if not self.hardware_ready and not self.wifi.setup_active() and not self._in_maintenance():
+            if (self.boot_network_initialized
+                    and not self.hardware_ready
+                    and not self.wifi.setup_active()
+                    and not self._in_maintenance()):
                 self._ensure_runtime_hardware()
                 self.update_led_state()
 
@@ -186,7 +188,7 @@ class App:
                 if wifi_ok:
                     self.update_led_state()
                 else:
-                    self.wifi.start_setup_portal("reconnect_failed")
+                    self.logger.warn("wifi_reconnect_failed_offline")
                     self.update_led_state()
 
             if self.led and time.ticks_diff(now, self.last_led_ms) >= led_interval:

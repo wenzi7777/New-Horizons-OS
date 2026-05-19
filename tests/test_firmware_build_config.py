@@ -32,9 +32,9 @@ class FirmwareBuildConfigTests(unittest.TestCase):
         self.assertNotIn("CONFIG_SPIRAM=y", sdkconfig)
         self.assertNotIn("CONFIG_SPIRAM_BOOT_INIT=y", sdkconfig)
         self.assertIn("CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6", sdkconfig)
-        self.assertIn("CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16", sdkconfig)
-        self.assertIn("CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16", sdkconfig)
-        self.assertIn("CONFIG_ESP_WIFI_MGMT_SBUF_NUM=16", sdkconfig)
+        self.assertIn("CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=24", sdkconfig)
+        self.assertIn("CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=24", sdkconfig)
+        self.assertIn("CONFIG_ESP_WIFI_MGMT_SBUF_NUM=32", sdkconfig)
         self.assertIn("CONFIG_ESP_WIFI_RX_BA_WIN=4", sdkconfig)
 
     def test_committed_micropython_image_declares_8mb_flash(self):

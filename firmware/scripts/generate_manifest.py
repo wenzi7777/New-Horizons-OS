@@ -43,18 +43,50 @@ def target_paths(repo_root: Path, target: str) -> tuple[Path, Path, str, str]:
     raise ValueError("unsupported target")
 
 
+def resolve_root(repo_root: Path, value: str | None, default: Path) -> Path:
+    if not value:
+        return default
+    path = Path(value)
+    if not path.is_absolute():
+        path = repo_root / path
+    return path.resolve()
+
+
+def collect_deletes(delete_root: Path | None, suffixes: list[str]) -> list[str]:
+    if delete_root is None or not suffixes:
+        return []
+    deletes = []
+    for path in sorted(p for p in delete_root.rglob("*") if p.is_file() and should_include(p, delete_root)):
+        rel = path.relative_to(delete_root).as_posix()
+        if any(rel.endswith(suffix) for suffix in suffixes):
+            deletes.append(rel)
+    return deletes
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", choices=["os", "recovery"], required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--firmware-name", default="New Horizons OS")
+    parser.add_argument("--source-root", default="", help="Optional source tree for files in this manifest.")
+    parser.add_argument("--base-url-path", default="", help="Repo-relative path used in manifest base_url.")
+    parser.add_argument("--delete-source-root", default="", help="Optional tree used to collect delete entries.")
+    parser.add_argument(
+        "--delete-suffix",
+        action="append",
+        default=[],
+        help="Suffix to delete from --delete-source-root. May be passed more than once.",
+    )
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
     target = args.target
-    files_root, manifest_path, target_root, manifest_type = target_paths(repo_root, target)
-    base_url = f"https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/{args.version}/device/{target}"
+    default_files_root, manifest_path, target_root, manifest_type = target_paths(repo_root, target)
+    files_root = resolve_root(repo_root, args.source_root, default_files_root)
+    base_url_path = (args.base_url_path or f"device/{target}").strip("/")
+    base_url = f"https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/{args.version}/{base_url_path}"
+    delete_root = resolve_root(repo_root, args.delete_source_root, default_files_root) if args.delete_source_root else None
 
     files = []
     for path in sorted(p for p in files_root.rglob("*") if p.is_file() and should_include(p, files_root)):
@@ -64,7 +96,7 @@ def main() -> None:
             "sha256": sha256_file(path),
             "size": path.stat().st_size,
             "kind": "config" if rel.endswith(".json") else "code",
-            "reboot_required": rel.endswith(".py"),
+            "reboot_required": rel.endswith((".py", ".mpy")),
         })
 
     manifest = {
@@ -77,6 +109,9 @@ def main() -> None:
         "base_url": base_url,
         "files": files,
     }
+    deletes = collect_deletes(delete_root, args.delete_suffix)
+    if deletes:
+        manifest["delete"] = deletes
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 

@@ -59,6 +59,57 @@ class GenerateManifestTests(unittest.TestCase):
                 ["app.py"],
             )
 
+    def test_os_manifest_can_publish_mpy_artifacts_and_delete_source_py(self):
+        module = load_generate_manifest_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            source_root = repo_root / "device" / "os_mpy"
+            delete_root = repo_root / "device" / "os"
+            (source_root / "umqtt").mkdir(parents=True)
+            (delete_root / "umqtt").mkdir(parents=True)
+            (source_root / "app.mpy").write_bytes(b"mpy-app")
+            (source_root / "umqtt" / "simple.mpy").write_bytes(b"mpy-simple")
+            (source_root / "micropython_bmi270" / "config_file.bin").parent.mkdir(parents=True)
+            (source_root / "micropython_bmi270" / "config_file.bin").write_bytes(b"bin")
+            (delete_root / "app.py").write_text("print('old')\n", encoding="utf-8")
+            (delete_root / "umqtt" / "simple.py").write_text("print('old')\n", encoding="utf-8")
+            (delete_root / "manifest.json").write_text("{}", encoding="utf-8")
+
+            old_argv = sys.argv
+            sys.argv = [
+                "generate_manifest.py",
+                "--repo-root",
+                str(repo_root),
+                "--target",
+                "os",
+                "--version",
+                "v9.9.9",
+                "--source-root",
+                str(source_root),
+                "--base-url-path",
+                "device/os_mpy",
+                "--delete-source-root",
+                str(delete_root),
+                "--delete-suffix",
+                ".py",
+            ]
+            try:
+                module.main()
+            finally:
+                sys.argv = old_argv
+
+            manifest_path = repo_root / "device" / "os" / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                manifest["base_url"],
+                "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v9.9.9/device/os_mpy",
+            )
+            self.assertEqual(
+                [item["path"] for item in manifest["files"]],
+                ["app.mpy", "micropython_bmi270/config_file.bin", "umqtt/simple.mpy"],
+            )
+            self.assertEqual(manifest["delete"], ["app.py", "umqtt/simple.py"])
+
 
 if __name__ == "__main__":
     unittest.main()
