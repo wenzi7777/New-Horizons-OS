@@ -53,6 +53,7 @@ class MQTTTransport:
                         "reboot_required": False,
                     }
                 if response is not None:
+                    response = self._annotate_response(request, response, command)
                     self.publish_result(response, wifi_connected)
         return True
 
@@ -178,6 +179,17 @@ class MQTTTransport:
             return ""
         value = response.get(key, "")
         return "" if value is None else value
+
+    def _annotate_response(self, request, response, command):
+        if not isinstance(response, dict):
+            return response
+        if "command" not in response:
+            response["command"] = command
+        if isinstance(request, dict):
+            request_id = request.get("request_id", "")
+            if request_id and "request_id" not in response:
+                response["request_id"] = request_id
+        return response
 
     def _info(self, message):
         if self.logger:

@@ -88,6 +88,38 @@ _INIT_ADDR_1 = const(0x5C)
 _INIT_DATA = const(0x5E)
 
 
+def _config_file_paths():
+    paths = [CONFIG_FILE_PATH]
+    try:
+        module_file = __file__
+    except NameError:
+        module_file = ""
+    if module_file and "/" in module_file:
+        paths.append(module_file.rsplit("/", 1)[0] + "/config_file.bin")
+    paths.append("nhos/" + CONFIG_FILE_PATH)
+    paths.append("/nhos/" + CONFIG_FILE_PATH)
+
+    unique = []
+    seen = {}
+    for path in paths:
+        if path and path not in seen:
+            seen[path] = True
+            unique.append(path)
+    return unique
+
+
+def _open_config_file():
+    last_error = None
+    for path in _config_file_paths():
+        try:
+            return open(path, "rb")
+        except OSError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise OSError("BMI270 config file missing")
+
+
 class BMI270:
     """Driver for the BMI270 Sensor connected over I2C.
 
@@ -297,7 +329,7 @@ class BMI270:
             self._power_configuration = 0x00
             time.sleep(0.00045)
             self._init_control = 0x00
-            with open(CONFIG_FILE_PATH, "rb") as config_file:
+            with _open_config_file() as config_file:
                 for i in range(256):
                     chunk = config_file.read(32)
                     if len(chunk) != 32:

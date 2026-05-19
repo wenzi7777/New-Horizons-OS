@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.13",
-  "version": "v0.2.13",
+  "firmware_version": "v0.2.14",
+  "version": "v0.2.14",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.13/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.14/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
@@ -44,7 +44,7 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "1c567d2291d8f9c3a2dd7c8d68774bfedab78796a1dd2fc585a2937f3a9c7b34",
+      "sha256": "ca33100aa9cf9d7c800d2ed7a644f58e8e9d0f89585fce455dd369f9af167879",
       "size": 2773,
       "kind": "code",
       "reboot_required": true
@@ -128,8 +128,8 @@
     },
     {
       "path": "micropython_bmi270/bmi270.mpy",
-      "sha256": "9d9a59e07447b082039710149e269bdc21885875ddb8a5e981919a2c7cd3d8aa",
-      "size": 3645,
+      "sha256": "8b0aec25f91b062bb8115c7d86241767402abdfb2aa0816a7a3fb5f9baa46efe",
+      "size": 3975,
       "kind": "code",
       "reboot_required": true
     },
@@ -149,8 +149,8 @@
     },
     {
       "path": "mqtt_transport.mpy",
-      "sha256": "caf4bfe329ccd97d621d005cbecf383d5926d28cd24b7b4deb793589212a7b31",
-      "size": 2878,
+      "sha256": "b3f0916c3dba04e42c064346cccb02032bc88a9a7e78bf42c079a34a3dc34685",
+      "size": 3005,
       "kind": "code",
       "reboot_required": true
     },

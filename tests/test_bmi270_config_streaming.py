@@ -90,6 +90,35 @@ class BMI270ConfigStreamingTests(unittest.TestCase):
         self.assertEqual(len(sensor.writes), 256)
         self.assertTrue(all(len(payload) == 32 for _addr, _reg, payload in sensor.writes))
 
+    def test_load_config_file_finds_binary_asset_next_to_driver_module(self):
+        module, saved_modules = load_driver_module()
+        original_open = builtins.open
+        opened_paths = []
+        module_relative_path = str(BMI270_DRIVER_PATH.parent / "config_file.bin")
+        try:
+            module.time.sleep = lambda _seconds: None
+
+            def fake_open(path, mode="r", *args, **kwargs):
+                opened_paths.append((str(path), mode))
+                if str(path) == module_relative_path and mode == "rb":
+                    return BytesIO(bytes(range(32)) * 256)
+                raise OSError(2, "ENOENT")
+
+            builtins.open = fake_open
+            sensor = FakeSensor()
+
+            module.BMI270.load_config_file(sensor)
+        finally:
+            builtins.open = original_open
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertIn((module_relative_path, "rb"), opened_paths)
+        self.assertEqual(len(sensor.writes), 256)
+
 
 if __name__ == "__main__":
     unittest.main()

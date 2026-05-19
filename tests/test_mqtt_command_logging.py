@@ -1,4 +1,5 @@
 import importlib
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -25,7 +26,7 @@ class FakeClient:
         self.published = []
 
     def check_msg(self):
-        self.callback(b"newhorizons/v1/device/ABC/cmd", b'{"command":"check_os_release"}')
+        self.callback(b"newhorizons/v1/device/ABC/cmd", b'{"command":"check_os_release","request_id":"req-1"}')
 
     def publish(self, topic, payload, qos=0):
         self.published.append((topic, payload, qos))
@@ -77,6 +78,21 @@ class MQTTCommandLoggingTest(unittest.TestCase):
 
                 self.assertTrue(any("mqtt_command_failed command=check_os_release" in item for item in logger.warns))
                 self.assertTrue(transport.client.published)
+
+    def test_mqtt_result_echoes_command_and_request_id(self):
+        for layer in ("recovery", "os"):
+            with self.subTest(layer=layer):
+                module = import_transport(layer)
+                logger = FakeLogger()
+                transport = self._transport(module, logger)
+
+                transport.poll(True, lambda _request, _addr: {"status": "ok", "message": "done"})
+
+                self.assertTrue(transport.client.published)
+                _topic, payload, _qos = transport.client.published[-1]
+                result = json.loads(payload.decode())
+                self.assertEqual(result["command"], "check_os_release")
+                self.assertEqual(result["request_id"], "req-1")
 
 
 if __name__ == "__main__":
