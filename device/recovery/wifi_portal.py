@@ -67,6 +67,29 @@ CAPTIVE_PORTAL_PATHS = (
     "/fwlink",
 )
 
+INDEX_CSS = (
+    "*{box-sizing:border-box}"
+    "body{font-family:Arial,sans-serif;margin:0;padding:16px;color:#111;background:#fff}"
+    "main{max-width:680px;margin:auto}"
+    "h1{font-size:24px;margin:8px 0}"
+    "h2{font-size:16px;margin:18px 0 8px}"
+    "p{line-height:1.35}"
+    "label{display:block;margin:10px 0 4px;font-weight:700}"
+    "input,select,button{width:100%;padding:10px;font-size:16px;border:1px solid #999;border-radius:6px}"
+    "button{margin-top:14px;background:#12325a;color:#fff;border:0}"
+    ".msg{padding:10px;border:1px solid #bbb;background:#f6f6f6}"
+    ".ok{color:#075b2a}.error{color:#9b1c14}"
+    ".muted{color:#555;font-size:13px}"
+    ".meta{border-top:1px solid #ddd;margin-top:14px;padding-top:8px;word-break:break-word}"
+)
+
+RESULT_CSS = (
+    "body{font-family:Arial,sans-serif;margin:0;padding:16px;color:#111}"
+    "main{max-width:560px;margin:auto}"
+    ".ok{color:#075b2a}.error{color:#9b1c14}"
+    ".muted{color:#555}a{color:#12325a;font-weight:700}"
+)
+
 
 class CaptiveDnsServer:
     def __init__(self, ip_addr, logger=None):
@@ -384,9 +407,9 @@ class WiFiSetupPortal:
 
         notice = ""
         if status.get("last_error"):
-            notice = '<div class="notice error">Last error: {}</div>'.format(_escape_html(status["last_error"]))
+            notice = '<p class="msg error">Last error: {}</p>'.format(_escape_html(status["last_error"]))
         elif status.get("last_setup_result"):
-            notice = '<div class="notice ok">Last result: {}</div>'.format(_escape_html(status["last_setup_result"]))
+            notice = '<p class="msg ok">Last result: {}</p>'.format(_escape_html(status["last_setup_result"]))
 
         ip_addr = _escape_html(status.get("portal_ip", self.config.SETUP_PORTAL_HOST))
         portal_url = _escape_html(status.get("portal_url", "http://{}".format(self.config.SETUP_PORTAL_HOST)))
@@ -402,8 +425,8 @@ class WiFiSetupPortal:
         recovery_notice = ""
         if recovery_mode:
             recovery_notice = (
-                '<div class="notice error">偵測到處於 Recovery Mode 的設備，'
-                '需要寫入 New Horizons OS。</div>'
+                '<p class="msg error">偵測到處於 Recovery Mode 的設備，'
+                '需要寫入 New Horizons OS。</p>'
             )
         manual_fields_display = "block" if selected_profile == "manual" else "none"
         return """<!doctype html>
@@ -412,61 +435,17 @@ class WiFiSetupPortal:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title}</title>
-  <style>
-    * {{ box-sizing: border-box; }}
-    body {{ font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; background:
-      radial-gradient(circle at top left, #233b67 0, #1a2740 28%, #0f1728 100%); color: #e7edf7; min-height: 100vh; }}
-    .wrap {{ max-width: 640px; margin: 0 auto; padding: 24px 16px 40px; }}
-    .hero {{ padding: 6px 2px 18px; }}
-    .eyebrow {{ display: inline-block; padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,0.08); color: #a9c5ff; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }}
-    h1 {{ margin: 14px 0 8px; font-size: 32px; line-height: 1.05; }}
-    .lead {{ margin: 0; color: #c7d4ea; line-height: 1.55; }}
-    .card {{ background: rgba(255,255,255,0.96); color: #142033; border-radius: 22px; padding: 22px; box-shadow: 0 18px 60px rgba(0,0,0,0.26); }}
-    .grid {{ display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 18px; }}
-    .stat {{ background: #f4f7fb; border: 1px solid #dde6f3; border-radius: 14px; padding: 12px; }}
-    .stat-label {{ font-size: 12px; color: #6b7788; text-transform: uppercase; letter-spacing: 0.06em; }}
-    .stat-value {{ margin-top: 6px; font-size: 15px; font-weight: 700; word-break: break-word; }}
-    .notice {{ margin: 0 0 16px; border-radius: 14px; padding: 12px 14px; font-weight: 600; }}
-    .ok {{ background: #ecfdf3; color: #027a48; border: 1px solid #abefc6; }}
-    .error {{ background: #fef3f2; color: #b42318; border: 1px solid #fecdca; }}
-    .section-title {{ margin: 4px 0 8px; font-size: 14px; color: #506074; text-transform: uppercase; letter-spacing: 0.08em; }}
-    label {{ display: block; margin: 14px 0 6px; font-weight: 700; }}
-    input, select, button {{ width: 100%; border-radius: 14px; border: 1px solid #c8d2e1; padding: 13px 14px; font-size: 16px; }}
-    input, select {{ background: #fff; }}
-    button {{ background: linear-gradient(135deg, #163157, #254f8c); color: #fff; border: 0; margin-top: 18px; font-weight: 800; box-shadow: 0 10px 24px rgba(22,49,87,0.25); }}
-    .muted {{ color: #5b6778; font-size: 14px; }}
-    .hint {{ margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: #eef4ff; color: #264372; font-size: 14px; line-height: 1.5; }}
-    .meta {{ margin-top: 18px; padding-top: 16px; border-top: 1px solid #e7ecf3; }}
-    .meta p {{ margin: 6px 0; }}
-    .manual-server-fields {{ display: {manual_fields_display}; }}
-    @media (max-width: 560px) {{
-      .grid {{ grid-template-columns: 1fr; }}
-      h1 {{ font-size: 28px; }}
-      .card {{ padding: 18px; border-radius: 18px; }}
-    }}
-  </style>
+  <style>{style}</style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="hero">
-      <div class="eyebrow">{eyebrow}</div>
+  <main>
+      <p class="muted">{eyebrow}</p>
       <h1>{headline}</h1>
-      <p class="lead">{lead}</p>
-    </div>
-    <div class="card">
-      <div class="grid">
-        <div class="stat">
-          <div class="stat-label">Hotspot SSID</div>
-          <div class="stat-value">{ap_ssid}</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Portal URL</div>
-          <div class="stat-value">{portal_url}</div>
-        </div>
-      </div>
+      <p>{lead}</p>
+      <p class="msg">Hotspot: <b>{ap_ssid}</b><br>Portal: <b>{portal_url}</b></p>
       {recovery_notice}
       {notice}
-      <div class="section-title">Wi-Fi Connection</div>
+      <h2>Wi-Fi Connection</h2>
       <form method="post" action="/connect">
         <label for="ssid_select">Detected networks</label>
         <select id="ssid_select" onchange="document.getElementById('ssid').value = this.value;">
@@ -477,7 +456,7 @@ class WiFiSetupPortal:
           {server_options}
         </select>
         <p class="muted">Production uses the school server. Manual lets you enter custom control and data addresses.</p>
-        <div id="manual_server_fields" class="manual-server-fields">
+        <div id="manual_server_fields" style="display:{manual_fields_display}">
           <label for="master_host">Control server address</label>
           <input id="master_host" name="master_host" value="{master_host}" placeholder="e.g. 192.168.1.153">
           <label for="master_port">Control server port</label>
@@ -509,10 +488,10 @@ class WiFiSetupPortal:
         <input id="password" name="password" type="password" placeholder="Your Wi-Fi password">
         <button type="submit">{primary_button}</button>
       </form>
-      <div class="hint">
+      <p class="msg">
         If this page did not open automatically, use <strong>{portal_url}</strong> in your browser while connected to the hotspot.
         {manual_hint}
-      </div>
+      </p>
       <div class="meta">
         <p class="muted">Portal IP: {ip}</p>
         <p class="muted">Friendly domain: {portal_domain}</p>
@@ -524,8 +503,7 @@ class WiFiSetupPortal:
         <p class="muted">Transport mode: {transport_mode}</p>
         <p class="muted">Device state: {device_state}</p>
       </div>
-    </div>
-  </div>
+  </main>
   <script>
     function toggleManualServerFields(value) {{
       var section = document.getElementById("manual_server_fields");
@@ -540,6 +518,7 @@ class WiFiSetupPortal:
 </html>
 """.format(
             title=_escape_html(self.config.SETUP_PORTAL_TITLE),
+            style=INDEX_CSS,
             eyebrow="Recovery Mode" if recovery_mode else "Device Setup",
             headline="寫入 New Horizons OS" if recovery_mode else _escape_html(self.config.SETUP_PORTAL_TITLE),
             lead="偵測到處於 Recovery Mode 的設備。請連上 Wi-Fi 並確認 release URL，接著透過 WebUI 或 MQTT 寫入 OS。" if recovery_mode else "Join the device hotspot, then use this page to connect the board to Wi-Fi and choose where control and data should be sent. Most phones should auto-open this portal after joining the hotspot.",
@@ -588,27 +567,19 @@ class WiFiSetupPortal:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title}</title>
-  <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; background: #f6f8fb; color: #142033; }}
-    .wrap {{ max-width: 560px; margin: 0 auto; padding: 24px 18px 48px; }}
-    .card {{ background: #fff; border-radius: 16px; padding: 20px; box-shadow: 0 10px 35px rgba(20,32,51,0.08); }}
-    .ok {{ color: #0b7a3c; }}
-    .error {{ color: #b42318; }}
-    a {{ color: #13294b; font-weight: 700; }}
-  </style>
+  <style>{style}</style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
+  <main>
       <h1 class="{cls}">{title}</h1>
       <p>{message}</p>
       {details}
       <p><a href="/">Back to setup page</a></p>
-    </div>
-  </div>
+  </main>
 </body>
 </html>
 """.format(
+            style=RESULT_CSS,
             cls=cls,
             title=_escape_html(title),
             message=_escape_html(message),

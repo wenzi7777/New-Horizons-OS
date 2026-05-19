@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import unittest
 from pathlib import Path
 
@@ -119,6 +120,11 @@ class FakeServer:
 
 
 class WiFiPortalServerProfileTests(unittest.TestCase):
+    def _style_block(self, html):
+        match = re.search(r"<style>(.*?)</style>", html, re.S)
+        self.assertIsNotNone(match)
+        return match.group(1)
+
     def test_index_page_renders_server_profile_selector(self):
         module = load_portal_module()
         portal = module.WiFiSetupPortal(FakeManager(), FakeConfig(), None)
@@ -189,6 +195,26 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         self.assertIn("Recovery Mode", html)
         self.assertIn("偵測到處於 Recovery Mode 的設備", html)
         self.assertIn("需要寫入 New Horizons OS", html)
+
+    def test_index_page_uses_compact_embedded_styles(self):
+        module = load_portal_module()
+        portal = module.WiFiSetupPortal(FakeManager(), FakeConfig(), None)
+
+        css = self._style_block(portal._render_index_page())
+
+        self.assertLess(len(css), 1400)
+        self.assertNotIn("gradient", css)
+        self.assertNotIn("box-shadow", css)
+        self.assertNotIn("@media", css)
+
+    def test_result_page_uses_compact_embedded_styles(self):
+        module = load_portal_module()
+        portal = module.WiFiSetupPortal(FakeManager(), FakeConfig(), None)
+
+        css = self._style_block(portal._render_result_page({"ok": True, "message": "Connected"}))
+
+        self.assertLess(len(css), 700)
+        self.assertNotIn("box-shadow", css)
 
 
 if __name__ == "__main__":
