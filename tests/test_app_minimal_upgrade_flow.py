@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-APP_MINIMAL_PATH = REPO_ROOT / "device" / "channels" / "minimal" / "files" / "app_minimal.py"
+APP_MINIMAL_PATH = REPO_ROOT / "device" / "recovery" / "recovery_app.py"
 
 
 def load_app_minimal_module():
@@ -37,8 +37,24 @@ def load_app_minimal_module():
     )
     fake_runtime_mod = types.SimpleNamespace(RuntimeConfigStore=lambda root: None)
     fake_udp_mod = types.SimpleNamespace(UDPControlServer=lambda port, logger=None: None)
-    fake_update_mod = types.SimpleNamespace(UpdateManager=lambda *args, **kwargs: None)
     fake_wifi_mod = types.SimpleNamespace(WiFiManager=lambda *args, **kwargs: None)
+    fake_os_writer_mod = types.SimpleNamespace(
+        OSWriter=lambda *args, **kwargs: types.SimpleNamespace(
+            check_os_release=lambda release_url: {
+                "status": "ok",
+                "message": "os_release_checked",
+                "latest_version": "v0.2.0",
+                "manifest_url": "https://example.com/os-manifest.json",
+            },
+            write_os=lambda release_url: {
+                "status": "ok",
+                "message": "os_write_complete",
+                "downloaded_files": 1,
+                "skipped_files": 2,
+                "reboot_required": True,
+            },
+        )
+    )
 
     injected = {
         "machine": fake_machine,
@@ -49,8 +65,8 @@ def load_app_minimal_module():
         "mqtt_transport": fake_mqtt_mod,
         "runtime_config": fake_runtime_mod,
         "udp_control": fake_udp_mod,
-        "update_manager": fake_update_mod,
         "wifi_manager": fake_wifi_mod,
+        "os_writer": fake_os_writer_mod,
     }
     old_modules = {}
     for name, module in injected.items():
@@ -107,7 +123,7 @@ class FakeUpdates:
 
 
 class MinimalUpgradeFlowTests(unittest.TestCase):
-    def test_upgrade_to_full_switches_channel_only_after_apply_completes(self):
+    def test_upgrade_to_full_is_replaced_by_write_os(self):
         module = load_app_minimal_module()
         app = module.MinimalApp.__new__(module.MinimalApp)
         app.runtime = {
@@ -125,23 +141,30 @@ class MinimalUpgradeFlowTests(unittest.TestCase):
 
         result = app._handle_request({"command": "upgrade_to_full"}, None)
 
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "command_removed")
+        self.assertEqual(result["next_command"], "write_os")
+
+    def test_write_os_runs_in_recovery_and_uses_release_url(self):
+        module = load_app_minimal_module()
+        app = module.MinimalApp.__new__(module.MinimalApp)
+        app.runtime = {
+            "channel": "minimal",
+            "update": {
+                "release_url": "https://example.com/latest.json",
+                "enabled": True,
+            },
+        }
+        app.config_store = FakeConfigStore(app.runtime)
+        app.updates = FakeUpdates()
+        app.os_writer = None
+        app.logger = None
+
+        result = app._handle_request({"command": "write_os"}, None)
+
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["message"], "upgrade_to_full_started")
-        self.assertEqual(app.runtime["channel"], "minimal")
-        self.assertEqual(
-            app.runtime["update"]["manifest_url"],
-            "https://example.com/full/manifest.json",
-        )
-        self.assertEqual(app.pending_channel_switch, "full")
-
-        app._handle_update_result(
-            {"status": "ok", "message": "update_applied", "reboot_required": True},
-            5000,
-        )
-
-        self.assertEqual(app.runtime["channel"], "full")
-        self.assertEqual(app.pending_channel_switch, None)
-        self.assertTrue(app.reboot_required)
+        self.assertEqual(result["message"], "os_write_complete")
+        self.assertEqual(result["release_url"], "https://example.com/latest.json")
 
 
 if __name__ == "__main__":

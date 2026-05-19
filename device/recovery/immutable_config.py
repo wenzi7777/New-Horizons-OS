@@ -1,0 +1,70 @@
+FIRMWARE_NAME = "New Horizons OS"
+FIRMWARE_VERSION = "v0.1.19"
+DEFAULT_CHANNEL = "minimal"
+
+ACTION_BUTTON_PIN = 46
+BOOT_WINDOW_MS = 3000
+BOOT_WINDOW_POLL_MS = 50
+
+SETUP_AP_SSID_PREFIX = "NewHorizonsOS"
+SETUP_AP_PASSWORD = "newhorizons"
+SETUP_PORTAL_DOMAIN = "newhorizons.os"
+SETUP_PORTAL_HOST = "192.168.4.1"
+SETUP_PORTAL_PORT = 80
+SETUP_PORTAL_TITLE = "New Horizons OS Wi-Fi Setup"
+
+DEVICE_STATE_DIR = "device_state"
+RECOVERY_DIR = "recovery"
+OS_DIR = "os"
+OTA_STAGE_DIR = "ota_stage"
+CALIBRATION_DIR = DEVICE_STATE_DIR + "/calibration"
+DATA_FILES_DIR = "data/files"
+DATA_LOG_DIR = "data/logs"
+DATA_TMP_DIR = "data/tmp"
+LOG_PATH = DATA_LOG_DIR + "/device.log"
+
+DEFAULT_MASTER_HOST = "192.168.1.153"
+DEFAULT_MASTER_PORT = 22345
+DEFAULT_DATA_HOST = "192.168.1.153"
+DEFAULT_DATA_PORT = 5005
+PRODUCTION_SERVER_HOST = "isensing-s1.u-aizu.ac.jp"
+DEFAULT_SERVER_PROFILE = "manual"
+SERVER_PROFILES = {
+    "manual": {
+        "label": "Manual",
+        "master_server": {"host": DEFAULT_MASTER_HOST, "port": DEFAULT_MASTER_PORT},
+        "data_server": {"host": DEFAULT_DATA_HOST, "port": DEFAULT_DATA_PORT},
+    },
+    "production": {
+        "label": "Production",
+        "master_server": {"host": PRODUCTION_SERVER_HOST, "port": DEFAULT_MASTER_PORT},
+        "data_server": {"host": PRODUCTION_SERVER_HOST, "port": DEFAULT_DATA_PORT},
+    },
+}
+DEFAULT_MQTT_HOST = "isensing-s1.u-aizu.ac.jp"
+DEFAULT_MQTT_PORT = 8883
+DEFAULT_MQTT_TLS = True
+DEFAULT_MQTT_USERNAME = ""
+DEFAULT_MQTT_PASSWORD = ""
+DEFAULT_TOPIC_NAMESPACE = "newhorizons/v1"
+DEFAULT_SERVER_BASE_URL = "https://isensing-s1.u-aizu.ac.jp/newhorizons/ota"
+DEFAULT_RELEASE_URL = DEFAULT_SERVER_BASE_URL + "/latest.json"
+DEFAULT_NTP_SERVERS = ["pool.ntp.org", "time.nist.gov"]
+DEFAULT_BUFFER_FRAMES = 8
+DEFAULT_TARGET_FPS = 60
+
+DEFAULT_CONTROL_PORT = 22345
+STATUS_ANNOUNCE_INTERVAL_MS = 2000
+
+DEFAULT_MANIFESTS = {
+    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.19/device/recovery/manifest.json",
+    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.19/device/os/manifest.json",
+}
+DEFAULT_MANIFESTS["minimal"] = DEFAULT_MANIFESTS["recovery"]
+DEFAULT_MANIFESTS["full"] = DEFAULT_MANIFESTS["os"]
+DEFAULT_SERVER_MANIFESTS = {
+    "recovery": DEFAULT_SERVER_BASE_URL + "/recovery/manifest.json",
+    "os": DEFAULT_SERVER_BASE_URL + "/os/manifest.json",
+}
+DEFAULT_SERVER_MANIFESTS["minimal"] = DEFAULT_SERVER_MANIFESTS["recovery"]
+DEFAULT_SERVER_MANIFESTS["full"] = DEFAULT_SERVER_MANIFESTS["os"]

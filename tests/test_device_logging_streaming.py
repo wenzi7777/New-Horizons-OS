@@ -23,12 +23,12 @@ def load_module(module_path: Path, module_name: str):
 class DeviceLoggingStreamingTests(unittest.TestCase):
     MODULES = (
         (
-            REPO_ROOT / "device" / "immutable" / "device_logging.py",
-            "immutable_device_logging_streaming_test",
+            REPO_ROOT / "device" / "recovery" / "device_logging.py",
+            "recovery_device_logging_streaming_test",
         ),
         (
-            REPO_ROOT / "device" / "channels" / "full" / "files" / "device_logging.py",
-            "full_device_logging_streaming_test",
+            REPO_ROOT / "device" / "os" / "device_logging.py",
+            "os_device_logging_streaming_test",
         ),
     )
 

@@ -24,23 +24,48 @@ def should_include(path: Path, root: Path) -> bool:
         return False
     if path.suffix == ".pyc":
         return False
-    if rel_parts and rel_parts[0] == ".device" and path.suffix == ".json":
+    if rel_parts and rel_parts[0] in (".device", "device_state"):
+        return False
+    if rel_parts and rel_parts[-1] == "manifest.json":
         return False
     return True
 
 
+def resolve_target(target: str | None, channel: str | None) -> str:
+    if target:
+        return target
+    if channel == "minimal":
+        return "recovery"
+    if channel == "full":
+        return "os"
+    raise SystemExit("請指定 --target os/recovery，或使用相容舊參數 --channel minimal/full")
+
+
+def target_paths(repo_root: Path, target: str) -> tuple[Path, Path, str, str]:
+    if target == "os":
+        files_root = repo_root / "device" / "os"
+        manifest_path = files_root / "manifest.json"
+        return files_root, manifest_path, "/os", "os"
+    if target == "recovery":
+        files_root = repo_root / "device" / "recovery"
+        manifest_path = files_root / "manifest.json"
+        return files_root, manifest_path, "/recovery", "recovery"
+    raise ValueError("unsupported target")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--channel", required=True, choices=["minimal", "full"])
+    parser.add_argument("--target", choices=["os", "recovery"])
+    parser.add_argument("--channel", choices=["minimal", "full"], help="Deprecated: minimal maps to recovery, full maps to os")
     parser.add_argument("--version", required=True)
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--firmware-name", default="New Horizons OS")
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
-    files_root = repo_root / "device" / "channels" / args.channel / "files"
-    manifest_path = repo_root / "device" / "channels" / args.channel / "manifest.json"
-    base_url = f"https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/{args.version}/device/channels/{args.channel}/files"
+    target = resolve_target(args.target, args.channel)
+    files_root, manifest_path, target_root, manifest_type = target_paths(repo_root, target)
+    base_url = f"https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/{args.version}/device/{target}"
 
     files = []
     for path in sorted(p for p in files_root.rglob("*") if p.is_file() and should_include(p, files_root)):
@@ -55,9 +80,12 @@ def main() -> None:
 
     manifest = {
         "manifest_version": 1,
+        "type": manifest_type,
         "firmware_name": args.firmware_name,
         "firmware_version": args.version,
-        "channel": args.channel,
+        "version": args.version,
+        "channel": target,
+        "target_root": target_root,
         "base_url": base_url,
         "files": files,
     }

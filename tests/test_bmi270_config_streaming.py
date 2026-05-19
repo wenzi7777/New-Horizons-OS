@@ -11,9 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BMI270_DRIVER_PATH = (
     REPO_ROOT
     / "device"
-    / "channels"
-    / "full"
-    / "files"
+    / "os"
     / "micropython_bmi270"
     / "bmi270.py"
 )

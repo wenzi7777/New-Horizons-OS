@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PORTAL_PATH = REPO_ROOT / "device" / "immutable" / "wifi_portal.py"
+PORTAL_PATH = REPO_ROOT / "device" / "recovery" / "wifi_portal.py"
 
 
 def load_portal_module():
@@ -49,6 +49,9 @@ class FakeManager:
             "data_server": {"host": "isensing-s1.u-aizu.ac.jp", "port": 5005},
             "mqtt": {"host": "isensing-s1.u-aizu.ac.jp", "port": 8883, "tls": True},
             "transport": {"mode": "mqtt"},
+            "mode": "normal",
+            "os_installed": True,
+            "release_url": "https://isensing-s1.u-aizu.ac.jp/newhorizons/ota/latest.json",
         }
 
     def scan_networks(self):
@@ -67,6 +70,7 @@ class FakeManager:
         mqtt_port="",
         mqtt_tls="",
         transport_mode="",
+        release_url="",
     ):
         self.calls.append(
             (
@@ -81,6 +85,7 @@ class FakeManager:
                 mqtt_port,
                 mqtt_tls,
                 transport_mode,
+                release_url,
             )
         )
         return {"ok": True, "message": "Connected"}
@@ -130,6 +135,7 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         self.assertIn('name="mqtt_host"', html)
         self.assertIn('name="mqtt_port"', html)
         self.assertIn('name="mqtt_tls"', html)
+        self.assertIn('name="release_url"', html)
         self.assertIn('name="transport_mode"', html)
         self.assertIn("isensing-s1.u-aizu.ac.jp", html)
 
@@ -142,7 +148,7 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         portal._read_request = lambda client: (
             "POST",
             "/connect",
-            "ssid=LabWiFi&password=secret&server_profile=manual&master_host=192.168.1.200&master_port=32001&data_host=192.168.1.201&data_port=32002&mqtt_host=192.168.1.153&mqtt_port=1883&mqtt_tls=false&transport_mode=mqtt",
+            "ssid=LabWiFi&password=secret&server_profile=manual&master_host=192.168.1.200&master_port=32001&data_host=192.168.1.201&data_port=32002&mqtt_host=192.168.1.153&mqtt_port=1883&mqtt_tls=false&transport_mode=mqtt&release_url=http://192.168.1.2:8000/latest.json",
         )
         portal._send_response = lambda client, status, content_type, body: None
 
@@ -164,9 +170,25 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
                     "1883",
                     "false",
                     "mqtt",
+                    "http://192.168.1.2:8000/latest.json",
                 )
             ],
         )
+
+    def test_recovery_page_prompts_os_write(self):
+        module = load_portal_module()
+        manager = FakeManager()
+        status = manager.portal_status()
+        status["mode"] = "recovery"
+        status["os_installed"] = False
+        manager.portal_status = lambda: status
+        portal = module.WiFiSetupPortal(manager, FakeConfig(), None)
+
+        html = portal._render_index_page()
+
+        self.assertIn("Recovery Mode", html)
+        self.assertIn("偵測到處於 Recovery Mode 的設備", html)
+        self.assertIn("需要寫入 New Horizons OS", html)
 
 
 if __name__ == "__main__":

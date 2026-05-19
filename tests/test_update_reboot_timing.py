@@ -6,8 +6,8 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MINIMAL_APP_PATH = REPO_ROOT / "device" / "channels" / "minimal" / "files" / "app_minimal.py"
-FULL_APP_PATH = REPO_ROOT / "device" / "channels" / "full" / "files" / "app.py"
+MINIMAL_APP_PATH = REPO_ROOT / "device" / "recovery" / "recovery_app.py"
+FULL_APP_PATH = REPO_ROOT / "device" / "os" / "app.py"
 
 
 def _load_module(module_name, module_path, injected_modules):
@@ -32,7 +32,7 @@ def _load_module(module_name, module_path, injected_modules):
 
 def load_minimal_app_module():
     return _load_module(
-        "app_minimal_reboot_timing_test",
+        "recovery_app_reboot_timing_test",
         MINIMAL_APP_PATH,
         {
             "machine": types.SimpleNamespace(reset=lambda: None),
@@ -62,7 +62,6 @@ def load_minimal_app_module():
             ),
             "runtime_config": types.SimpleNamespace(RuntimeConfigStore=lambda root: None),
             "udp_control": types.SimpleNamespace(UDPControlServer=lambda port, logger=None: None),
-            "update_manager": types.SimpleNamespace(UpdateManager=lambda *args, **kwargs: None),
             "wifi_manager": types.SimpleNamespace(WiFiManager=lambda *args, **kwargs: None),
         },
     )

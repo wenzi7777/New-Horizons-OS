@@ -18,14 +18,14 @@ def load_generate_manifest_module():
 
 
 class GenerateManifestTests(unittest.TestCase):
-    def test_manifest_includes_device_state_json_files_but_skips_legacy_hidden_state(self):
+    def test_os_manifest_uses_new_os_tree_and_skips_device_state(self):
         module = load_generate_manifest_module()
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir)
-            files_root = repo_root / "device" / "channels" / "minimal" / "files"
+            files_root = repo_root / "device" / "os"
             (files_root / ".device").mkdir(parents=True)
             (files_root / "device_state").mkdir(parents=True)
-            (files_root / "app_minimal.py").write_text("print('ok')\n", encoding="utf-8")
+            (files_root / "app.py").write_text("print('ok')\n", encoding="utf-8")
             (files_root / ".device" / "runtime_config.json").write_text("{}", encoding="utf-8")
             (files_root / ".device" / "filter_config.json").write_text("{}", encoding="utf-8")
             (files_root / "device_state" / "runtime_config.json").write_text("{}", encoding="utf-8")
@@ -36,8 +36,8 @@ class GenerateManifestTests(unittest.TestCase):
                 "generate_manifest.py",
                 "--repo-root",
                 str(repo_root),
-                "--channel",
-                "minimal",
+                "--target",
+                "os",
                 "--version",
                 "v9.9.9",
             ]
@@ -46,15 +46,17 @@ class GenerateManifestTests(unittest.TestCase):
             finally:
                 sys.argv = old_argv
 
-            manifest_path = repo_root / "device" / "channels" / "minimal" / "manifest.json"
+            manifest_path = repo_root / "device" / "os" / "manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["type"], "os")
+            self.assertEqual(manifest["target_root"], "/os")
+            self.assertEqual(
+                manifest["base_url"],
+                "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v9.9.9/device/os",
+            )
             self.assertEqual(
                 [item["path"] for item in manifest["files"]],
-                [
-                    "app_minimal.py",
-                    "device_state/filter_config.json",
-                    "device_state/runtime_config.json",
-                ],
+                ["app.py"],
             )
 
 

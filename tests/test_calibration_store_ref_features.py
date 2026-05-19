@@ -9,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_calibration_store():
-    path = REPO_ROOT / "device" / "channels" / "full" / "files" / "calibration_store.py"
+    path = REPO_ROOT / "device" / "os" / "calibration_store.py"
     fake_storage = types.SimpleNamespace(
         load_json=lambda *_args, **_kwargs: {"points": {}},
         save_json=lambda *_args, **_kwargs: None,

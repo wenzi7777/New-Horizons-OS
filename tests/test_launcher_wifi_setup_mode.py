@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-LAUNCHER_PATH = REPO_ROOT / "device" / "immutable" / "launcher.py"
+LAUNCHER_PATH = REPO_ROOT / "device" / "root" / "launcher.py"
 
 
 def load_launcher_module(injected_modules):
@@ -77,7 +77,8 @@ class LauncherWifiSetupModeTests(unittest.TestCase):
                     load_runtime=lambda: {"channel": "full"}
                 )
             ),
-            "app_minimal": types.SimpleNamespace(
+            "storage": types.SimpleNamespace(exists=lambda path: path == "app.py"),
+            "recovery_app": types.SimpleNamespace(
                 run=lambda wifi_setup_requested=False, recovery_error="": minimal_calls.append(
                     (wifi_setup_requested, recovery_error)
                 )

@@ -7,7 +7,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_device_identity():
-    path = REPO_ROOT / "device" / "immutable" / "device_identity.py"
+    path = REPO_ROOT / "device" / "recovery" / "device_identity.py"
     spec = importlib.util.spec_from_file_location("device_identity_test", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

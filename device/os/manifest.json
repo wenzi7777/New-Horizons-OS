@@ -1,0 +1,278 @@
+{
+  "manifest_version": 1,
+  "type": "os",
+  "firmware_name": "New Horizons OS",
+  "firmware_version": "v0.1.19",
+  "version": "v0.1.19",
+  "channel": "os",
+  "target_root": "/os",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.1.19/device/os",
+  "files": [
+    {
+      "path": "app.py",
+      "sha256": "382f6dbaf64b557dd8ab7f68b8e9f48cf2fa3130a82b8aa24bfa8cc8d8a5c616",
+      "size": 49412,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "bmi270.py",
+      "sha256": "3a6040b0aba253436466f0dc9e2fa6ac9dbda5f611ef1d50e26fc1cf4db107c1",
+      "size": 3649,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "board_pins.py",
+      "sha256": "657119633e89d75dc3f6ea845a65a6766712a415329350fd36f7ae6e81592af9",
+      "size": 908,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "bq25180.py",
+      "sha256": "8d18730eb1798c16fbf0882e37747566c32c00a59c0c078bb8a0d32929194aad",
+      "size": 6822,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "calibration_store.py",
+      "sha256": "313203db98727a5288ab32b92173899c2ca45c19cfa928bf01a6ee91d9390761",
+      "size": 3371,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "config.py",
+      "sha256": "997cd6d45429a4c06691bac02979fd0773e0f836421d0bb8d018420dd2830cf5",
+      "size": 4250,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "crypto_hmac.py",
+      "sha256": "aee50d5f95a5b68ce067c40b234d8bdced4be201180f09a062c9a078f7fa60dc",
+      "size": 442,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "device_identity.py",
+      "sha256": "a197e30cba20ba2236f14fd5cb32da711b5426e41d008de4ad19b1ec7da4ec63",
+      "size": 1840,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "device_logging.py",
+      "sha256": "9db316ccc9d3ff5cccc8c74ccf260c126868e98f5fab423f19c973814f3bf67c",
+      "size": 1950,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "filesystem_api.py",
+      "sha256": "51f903bf7466dbc33632ca6f6f0872c942690b7c9c0cff475f197a8719a3c660",
+      "size": 5411,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "filter_engine.py",
+      "sha256": "e8a66600791da0c20ca27565628f77a020e9a6932d8756ff49f9d740c56edd73",
+      "size": 2059,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "frame_protocol.py",
+      "sha256": "877b1c0d354613ad912a72bd70ee41cb3ccb2ac04a88d25d42e1a9202e47c99c",
+      "size": 1566,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "i2c_bus.py",
+      "sha256": "e7406ca6d98899d8d65e0ab195798fb3e3506647821afde8b63ba6ba3a09ee6d",
+      "size": 435,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "manifest_update.py",
+      "sha256": "991dd68a4a58bc377c57be7523cceb21b344ee312e56f68c6620e835f621bfee",
+      "size": 1768,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "matrix_scan.py",
+      "sha256": "0f550d93491a3a35bd368538a6d617db9656b9fb1cf9b91f492960b19fdb2343",
+      "size": 7173,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "matrix_scan_mock.py",
+      "sha256": "dbd3adc2f025b8abf1d5740fbce1eb437e178e4f2edf4f5f91c2c979903b7a66",
+      "size": 5994,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "micropython_bmi270/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "micropython_bmi270/bmi270.py",
+      "sha256": "97794f04b078986a4b23c82708e3823c50e4336a89e51a3446afc682a404552f",
+      "size": 11891,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "micropython_bmi270/config_file.bin",
+      "sha256": "2d75e68e343a13ff99be98261dfbd99d9e8c6f267da9e3c5aeb883276ad178db",
+      "size": 8192,
+      "kind": "code",
+      "reboot_required": false
+    },
+    {
+      "path": "micropython_bmi270/i2c_helpers.py",
+      "sha256": "acd247cc4dc3cd88cb83f0a8702310cc42aa0f5fa9f7cda3ba691de8acdb674e",
+      "size": 3911,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "mqtt_transport.py",
+      "sha256": "dcfd00adba7a7664bc9c83e49103efa5ae453ba2a43262bd3660d70c84731fbb",
+      "size": 5405,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "ota.py",
+      "sha256": "206670b5b910022fc9514de96506315f626fbd53d10c3cad640cee11ad797b74",
+      "size": 296,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "packet.py",
+      "sha256": "1c6c89aeb6f9c4d5d657302de6997af545660bdda4659469a9a7bb3b95b96634",
+      "size": 6831,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "packet_buffer.py",
+      "sha256": "8c3be97752ecf14f1fe2ab13bc088b27b403d2e5716473085ae2d61578050410",
+      "size": 1689,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "runtime_config.py",
+      "sha256": "9d66921ba65d88efaf6b115ff827efcbae951f68e122febddf52931932b92fcd",
+      "size": 6350,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "secrets.py",
+      "sha256": "11c5a5bd090342a3b1b148d4744506bfc4fcd16338d7c1f518fa1b7fe7ae1ea9",
+      "size": 209,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "sk6812.py",
+      "sha256": "ccb113123c15e3aa4810f6fa96649314e764f68ce716bd8a734c7904db64cad8",
+      "size": 4374,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "storage.py",
+      "sha256": "0fa97e5880f3f2c8337ebf1f1bad5900fa9cfcb220ee371676e5f7ece37d624b",
+      "size": 4149,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "time_sync.py",
+      "sha256": "974d6eb4ead2b09cda32399d46178448c95976eb930b698e1106ba88bfacd6a6",
+      "size": 1899,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "udp_control.py",
+      "sha256": "0d291bc2ead18471ac3d333ca821b77bc859ec20f7a32308a2fdec97fb935756",
+      "size": 1790,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "udp_stream.py",
+      "sha256": "48a95ca635e860c651733be19013c90e57782bab0bfdf6540826d1901a193713",
+      "size": 896,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "umqtt/__init__.py",
+      "sha256": "c651471e7b8c1fe829964df7e1995d141c802284523afe87075871a781dc466a",
+      "size": 23,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "umqtt/robust.py",
+      "sha256": "64a91e6f367b610021136d65a653574826d940f85cf5c6f64582d550e40fabb1",
+      "size": 1012,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "umqtt/simple.py",
+      "sha256": "68f557c30328a7cbc4dffbd3f808de5c8a6ffeac84b2faaf85d177499759be4b",
+      "size": 4624,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "update_manager.py",
+      "sha256": "b130dfa03d6eec31373b9807ac2b0caeceed42f39e134e58c39844223ecdff39",
+      "size": 11190,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "utils.py",
+      "sha256": "c73c160324edb54c15f479c7f328d01a41ba5a56f6c01b48b5c5c7562a6909b7",
+      "size": 622,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "vdboard.py",
+      "sha256": "6e4995cf430e4bfd7be6497918015317b7399369f4f531058e0b5b61120975b1",
+      "size": 7185,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "wifi_manager.py",
+      "sha256": "092144b58b5805ec5b751352d07f49d2b67396909ca242722e38f66521d21afd",
+      "size": 18867,
+      "kind": "code",
+      "reboot_required": true
+    }
+  ]
+}

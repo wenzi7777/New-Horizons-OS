@@ -108,16 +108,10 @@ class UpdateManagerProgressTests(unittest.TestCase):
         self.assertEqual(store.update_state["last_result"], "applied")
         self.assertEqual([item[0] for item in planner.applied], ["alpha.py", "beta.py"])
 
-    def test_immutable_update_manager_reports_incremental_progress(self):
+    def test_os_update_manager_reports_incremental_progress(self):
         self._assert_progress_flow(
-            REPO_ROOT / "device" / "immutable" / "update_manager.py",
-            "immutable_update_manager_test",
-        )
-
-    def test_full_update_manager_reports_incremental_progress(self):
-        self._assert_progress_flow(
-            REPO_ROOT / "device" / "channels" / "full" / "files" / "update_manager.py",
-            "full_update_manager_test",
+            REPO_ROOT / "device" / "os" / "update_manager.py",
+            "os_update_manager_test",
         )
 
     def _assert_manifest_planning_error_is_reported(self, module_path: Path, module_name: str):
@@ -137,16 +131,10 @@ class UpdateManagerProgressTests(unittest.TestCase):
         self.assertEqual(store.update_state["phase"], "error")
         self.assertIn("manifest planning exhausted memory", store.update_state["last_error"])
 
-    def test_immutable_update_manager_reports_manifest_planning_memory_error(self):
+    def test_os_update_manager_reports_manifest_planning_memory_error(self):
         self._assert_manifest_planning_error_is_reported(
-            REPO_ROOT / "device" / "immutable" / "update_manager.py",
-            "immutable_update_manager_manifest_memory_test",
-        )
-
-    def test_full_update_manager_reports_manifest_planning_memory_error(self):
-        self._assert_manifest_planning_error_is_reported(
-            REPO_ROOT / "device" / "channels" / "full" / "files" / "update_manager.py",
-            "full_update_manager_manifest_memory_test",
+            REPO_ROOT / "device" / "os" / "update_manager.py",
+            "os_update_manager_manifest_memory_test",
         )
 
 

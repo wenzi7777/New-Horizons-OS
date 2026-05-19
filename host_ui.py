@@ -1126,9 +1126,9 @@ INDEX_HTML = """<!doctype html>
               </div>
               <div class="button-grid">
                 <button data-cmd="status">Status</button>
-                <button data-cmd="check_update">Check Update</button>
-                <button data-cmd="apply_update">Apply Update</button>
-                <button data-cmd="upgrade_to_full" class="warn">Upgrade To Full</button>
+                <button data-cmd="check_os_release">Check OS Release</button>
+                <button data-cmd="write_os" class="warn">Write OS</button>
+                <button data-cmd="reboot_to_recovery" class="warn">Recovery</button>
                 <button data-cmd="reboot" class="danger">Reboot</button>
               </div>
             </div>

@@ -135,7 +135,8 @@ class FakeConfigStore:
 
 
 def load_wifi_manager(channel):
-    path = REPO_ROOT / "device" / "channels" / channel / "files" / "wifi_manager.py"
+    target_dir = "recovery" if channel == "minimal" else "os"
+    path = REPO_ROOT / "device" / target_dir / "wifi_manager.py"
     fake_network = FakeNetwork()
     fake_config = types.SimpleNamespace(
         WIFI_MODE="STA",

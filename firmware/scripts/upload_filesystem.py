@@ -7,9 +7,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-STALE_CHANNEL_FILES = {
-    "minimal": ["device_state/network_config.json"],
+STALE_TARGET_FILES = {
+    "recovery": ["device_state/network_config.json"],
 }
+
+
+class UploadLayer:
+    def __init__(self, name: str, source_root: Path, remote_root: str):
+        self.name = name
+        self.source_root = source_root
+        self.remote_root = remote_root
 
 
 def run(cmd: list[str]) -> None:
@@ -70,6 +77,9 @@ def collect_files(root: Path) -> list[Path]:
 
 def upload_tree(port: str, source_root: Path, remote_root: str = "") -> None:
     files = collect_files(source_root)
+    if remote_root:
+        remote_mkdir(port, remote_root.rstrip("/"))
+
     dirs = sorted(
         {
             str(p.parent.relative_to(source_root)).replace("\\", "/")
@@ -89,22 +99,52 @@ def upload_tree(port: str, source_root: Path, remote_root: str = "") -> None:
         remote_copy(port, path, target)
 
 
-def stale_device_paths(channel: str, channel_only: bool) -> list[str]:
-    if channel_only:
+def stale_device_paths(target: str, target_only: bool) -> list[str]:
+    if target_only:
         return []
-    return list(STALE_CHANNEL_FILES.get(channel, []))
+    if target == "all":
+        return list(STALE_TARGET_FILES.get("recovery", []))
+    return list(STALE_TARGET_FILES.get(target, []))
 
 
-def remove_stale_channel_files(port: str, channel: str, channel_only: bool = False) -> None:
-    for path in stale_device_paths(channel, channel_only):
+def remove_stale_target_files(port: str, target: str, target_only: bool = False) -> None:
+    for path in stale_device_paths(target, target_only):
         remote_remove(port, path)
+
+
+def resolve_target(target: str | None, channel: str | None) -> str:
+    if target:
+        return target
+    if channel == "minimal":
+        return "recovery"
+    if channel == "full":
+        return "os"
+    return "recovery"
+
+
+def target_layers(target: str, target_only: bool = False, repo_root: Path | None = None) -> list[UploadLayer]:
+    repo_root = repo_root or Path(__file__).resolve().parents[2]
+    layers = {
+        "root": UploadLayer("root", repo_root / "device" / "root", ""),
+        "recovery": UploadLayer("recovery", repo_root / "device" / "recovery", "recovery"),
+        "os": UploadLayer("os", repo_root / "device" / "os", "os"),
+    }
+    if target == "recovery":
+        return [layers["recovery"]] if target_only else [layers["root"], layers["recovery"]]
+    if target == "os":
+        return [layers["os"]]
+    if target == "all":
+        return [layers["recovery"], layers["os"]] if target_only else [layers["root"], layers["recovery"], layers["os"]]
+    raise ValueError("unsupported target")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Upload New Horizons OS files to a MicroPython board via mpremote.")
     parser.add_argument("--port", default="/dev/cu.usbserial-10", help="Serial port of the MicroPython board")
-    parser.add_argument("--channel", choices=["minimal", "full"], default="minimal", help="Channel files to upload")
-    parser.add_argument("--channel-only", action="store_true", help="Only upload channel files, skip immutable layer")
+    parser.add_argument("--target", choices=["recovery", "os", "all"], help="Filesystem target to upload")
+    parser.add_argument("--target-only", action="store_true", help="Only upload the selected target, skip root layer")
+    parser.add_argument("--channel", choices=["minimal", "full"], help="Deprecated: minimal maps to recovery, full maps to os")
+    parser.add_argument("--channel-only", action="store_true", help="Deprecated alias for --target-only")
     parser.add_argument("--no-reset", action="store_true", help="Do not soft-reset after upload")
     args = parser.parse_args()
 
@@ -113,23 +153,25 @@ def main() -> int:
         return 2
 
     repo_root = Path(__file__).resolve().parents[2]
-    immutable_root = repo_root / "device" / "immutable"
-    channel_root = repo_root / "device" / "channels" / args.channel / "files"
-
-    if not immutable_root.exists():
-        print(f"找不到 immutable 目錄: {immutable_root}", file=sys.stderr)
-        return 2
-    if not channel_root.exists():
-        print(f"找不到 channel 目錄: {channel_root}", file=sys.stderr)
+    target = resolve_target(args.target, args.channel)
+    target_only = args.target_only or args.channel_only
+    try:
+        layers = target_layers(target, target_only=target_only, repo_root=repo_root)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
         return 2
 
-    if not args.channel_only:
-        print(f"Uploading immutable layer from {immutable_root}")
-        upload_tree(args.port, immutable_root)
+    for layer in layers:
+        if not layer.source_root.exists():
+            print(f"找不到 {layer.name} 目錄: {layer.source_root}", file=sys.stderr)
+            return 2
 
-    remove_stale_channel_files(args.port, args.channel, channel_only=args.channel_only)
-    print(f"Uploading channel '{args.channel}' from {channel_root}")
-    upload_tree(args.port, channel_root)
+    remove_stale_target_files(args.port, target, target_only=target_only)
+
+    for layer in layers:
+        remote_label = "/" + layer.remote_root.strip("/") if layer.remote_root else "/"
+        print(f"Uploading target '{layer.name}' from {layer.source_root} to {remote_label}")
+        upload_tree(args.port, layer.source_root, layer.remote_root)
 
     if not args.no_reset:
         run(["mpremote", "connect", args.port, "soft-reset"])

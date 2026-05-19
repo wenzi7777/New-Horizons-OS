@@ -124,16 +124,10 @@ class UpdateManagerStreamingTests(unittest.TestCase):
             self.assertEqual(result["message"], "update_applied")
             self.assertEqual(module.storage.read_bytes(str(Path(tmpdir) / "big.py")), payload)
 
-    def test_immutable_update_manager_streams_large_downloads(self):
+    def test_os_update_manager_streams_large_downloads(self):
         self._assert_streaming_download(
-            REPO_ROOT / "device" / "immutable" / "update_manager.py",
-            "immutable_update_manager_streaming_test",
-        )
-
-    def test_full_update_manager_streams_large_downloads(self):
-        self._assert_streaming_download(
-            REPO_ROOT / "device" / "channels" / "full" / "files" / "update_manager.py",
-            "full_update_manager_streaming_test",
+            REPO_ROOT / "device" / "os" / "update_manager.py",
+            "os_update_manager_streaming_test",
         )
 
 

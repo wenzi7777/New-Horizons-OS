@@ -6,13 +6,14 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-FULL_APP_PATH = REPO_ROOT / "device" / "channels" / "full" / "files" / "app.py"
+FULL_APP_PATH = REPO_ROOT / "device" / "os" / "app.py"
 
 
 class FakeScan:
     def __init__(self, events=None):
         self.init_calls = []
         self.start_calls = 0
+        self.stop_calls = 0
         self.events = events if events is not None else []
 
     def init(self, **kwargs):
@@ -21,6 +22,10 @@ class FakeScan:
     def start(self):
         self.events.append("scan_start")
         self.start_calls += 1
+
+    def stop(self):
+        self.events.append("scan_stop")
+        self.stop_calls += 1
 
     def service(self):
         return False
@@ -188,11 +193,20 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
             PRINT_FPS=False,
             UDP_SERVER_IP="127.0.0.1",
             UDP_SERVER_PORT=5005,
+            DATA_FILES_DIR="data/files",
+            DATA_LOG_DIR="data/logs",
+            DATA_TMP_DIR="data/tmp",
         ),
         "board_pins": types.SimpleNamespace(validate_pins=lambda: {}),
         "vdboard": fake_vdboard,
         "calibration_store": types.SimpleNamespace(
-            CalibrationStore=lambda root: types.SimpleNamespace(load=lambda: None, apply=lambda *args: 0.0, list_levels=lambda: [])
+            CalibrationStore=lambda root: types.SimpleNamespace(
+                load=lambda: None,
+                apply=lambda *args: 0.0,
+                list_levels=lambda: [],
+                set_point=lambda *args: None,
+                save=lambda: None,
+            )
         ),
         "device_identity": types.SimpleNamespace(
             get_device_id=lambda: 0x12345678,
@@ -200,7 +214,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
             get_device_name=lambda default: default,
         ),
         "device_logging": types.SimpleNamespace(DeviceLogger=lambda path: FakeLogger()),
-        "filesystem_api": types.SimpleNamespace(FilesystemAPI=lambda root: None),
+        "filesystem_api": types.SimpleNamespace(FilesystemAPI=lambda *args, **kwargs: None),
         "filter_engine": types.SimpleNamespace(FilterChain=lambda **kwargs: types.SimpleNamespace(process=lambda idx, value: value, apply_config=lambda *args: None)),
         "frame_protocol": types.SimpleNamespace(decode_scan_frame=lambda payload: {}),
         "mqtt_transport": types.SimpleNamespace(
@@ -487,6 +501,90 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertIn("updating", app.led.states)
         self.assertEqual(app.led.states[-1], "normal")
         self.assertTrue(any("update_check_failed" in message for message in app.logger.warns))
+
+    def test_enter_maintenance_stops_scan_and_rejects_os_writer(self):
+        module, fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+
+            response = app._handle_control_request(
+                {"command": "enter_maintenance", "reason": "calibration"},
+                ("mqtt", 0),
+            )
+            denied = app._handle_control_request({"command": "write_os"}, ("mqtt", 0))
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["message"], "maintenance_entered")
+        self.assertEqual(app.mode, "maintenance")
+        self.assertFalse(app.scan_ready)
+        self.assertGreaterEqual(fake_scan.stop_calls, 1)
+        self.assertEqual(denied["status"], "error")
+        self.assertEqual(denied["message"], "requires_recovery")
+        self.assertEqual(denied["next_command"], "reboot_to_recovery")
+
+    def test_maintenance_sample_cell_runs_bounded_scan_and_stops_afterwards(self):
+        module, fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            app._handle_control_request({"command": "enter_maintenance"}, ("mqtt", 0))
+            fake_scan.sample_cell_mv = lambda analog_pin, select_pin, duration_ms: 123.5
+            gc_calls = []
+            module.gc.collect = lambda: gc_calls.append("collect")
+
+            response = app._handle_control_request(
+                {
+                    "command": "calibration_sample_cell",
+                    "analog_pin": 1,
+                    "select_pin": 1,
+                    "level": 2.5,
+                    "duration_ms": 3000,
+                },
+                ("mqtt", 0),
+            )
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["message"], "calibration_cell_sampled")
+        self.assertEqual(response["avg_mv"], 123.5)
+        self.assertEqual(app.mode, "maintenance")
+        self.assertFalse(app.scan_ready)
+        self.assertGreaterEqual(fake_scan.start_calls, 2)
+        self.assertGreaterEqual(fake_scan.stop_calls, 2)
+        self.assertEqual(gc_calls, ["collect"])
+
+    def test_maintenance_rejects_normal_runtime_commands(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            app._handle_control_request({"command": "enter_maintenance"}, ("mqtt", 0))
+
+            response = app._handle_control_request(
+                {"command": "set_matrix_layout", "active_rows": [1], "active_cols": [1]},
+                ("mqtt", 0),
+            )
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "error")
+        self.assertEqual(response["message"], "maintenance_command_disabled")
 
 
 if __name__ == "__main__":

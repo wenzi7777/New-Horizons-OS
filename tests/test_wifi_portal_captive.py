@@ -8,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_wifi_portal():
-    path = REPO_ROOT / "device" / "immutable" / "wifi_portal.py"
+    path = REPO_ROOT / "device" / "recovery" / "wifi_portal.py"
     spec = importlib.util.spec_from_file_location("wifi_portal_test", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
