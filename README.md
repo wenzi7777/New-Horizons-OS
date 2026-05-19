@@ -72,7 +72,7 @@ python3 firmware/scripts/upload_filesystem.py --port /dev/cu.usbserial-210 --tar
 
 ```bash
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
-python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.6
+python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.7
 ```
 
 產物是：
@@ -103,8 +103,8 @@ release JSON 格式：
 ```json
 {
   "product": "New Horizons OS",
-  "latest": "v0.2.6",
-  "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.6/device/os/manifest.json"
+  "latest": "v0.2.7",
+  "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.7/device/os/manifest.json"
 }
 ```
 

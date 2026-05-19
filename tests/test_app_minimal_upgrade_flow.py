@@ -108,6 +108,38 @@ class FakeConfigStore:
         return dict(self.runtime)
 
 
+class FakeLogger:
+    def __init__(self):
+        self.infos = []
+        self.configured = []
+
+    def info(self, message):
+        self.infos.append(message)
+
+    def configure(self, enabled=True, capacity="default"):
+        self.configured.append((enabled, capacity))
+
+
+class FakeMQTTTransport:
+    def __init__(self):
+        self.reconfigure_calls = 0
+        self.close_calls = 0
+
+    def reconfigure(self):
+        self.reconfigure_calls += 1
+
+    def close(self):
+        self.close_calls += 1
+
+
+class FakePortalWiFi:
+    def __init__(self, handled=True):
+        self.handled = handled
+
+    def service_setup_portal(self):
+        return self.handled
+
+
 class RecoveryOSWriterFlowTests(unittest.TestCase):
     def test_upgrade_to_full_is_not_supported(self):
         module = load_recovery_app_module()
@@ -154,6 +186,35 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
             result["release_url"],
             "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
         )
+
+    def test_wifi_portal_post_reload_reconfigures_mqtt_runtime(self):
+        module = load_recovery_app_module()
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.runtime = {
+            "server_profile": "production",
+            "transport": {"mode": "mqtt", "topic_namespace": "newhorizons/v1"},
+            "mqtt": {"host": "isensing-s1.u-aizu.ac.jp", "port": 8883, "tls": True},
+            "logging": {"enabled": True, "capacity": "default"},
+        }
+        app.config_store = FakeConfigStore({
+            "server_profile": "manual",
+            "transport": {"mode": "mqtt", "topic_namespace": "newhorizons/v1"},
+            "mqtt": {"host": "192.168.1.153", "port": 1883, "tls": False},
+            "logging": {"enabled": True, "capacity": "default"},
+        })
+        app.logger = FakeLogger()
+        app.mqtt_transport = FakeMQTTTransport()
+        app.wifi = FakePortalWiFi(handled=True)
+
+        handled = app._service_wifi_setup_portal()
+
+        self.assertTrue(handled)
+        self.assertEqual(app.runtime["server_profile"], "manual")
+        self.assertEqual(app.runtime["mqtt"]["host"], "192.168.1.153")
+        self.assertEqual(app.runtime["mqtt"]["port"], 1883)
+        self.assertFalse(app.runtime["mqtt"]["tls"])
+        self.assertEqual(app.mqtt_transport.reconfigure_calls, 1)
+        self.assertIn("runtime_config_reloaded source=wifi_portal", app.logger.infos)
 
 
 if __name__ == "__main__":

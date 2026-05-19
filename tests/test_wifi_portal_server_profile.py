@@ -158,6 +158,17 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         self.assertNotIn("placeholder=\"e.g. 192.168.1.153\"", html)
         self.assertIn("isensing-s1.u-aizu.ac.jp", html)
 
+    def test_connect_form_shows_apply_overlay_on_submit(self):
+        module = load_portal_module()
+        portal = module.WiFiSetupPortal(FakeManager(), FakeConfig(), None)
+
+        html = portal._render_index_page()
+
+        self.assertIn('onsubmit="showApplyOverlay();"', html)
+        self.assertIn('id="apply_overlay"', html)
+        self.assertIn("配置正在套用 請不要觸碰電源開關。", html)
+        self.assertIn("function showApplyOverlay()", html)
+
     def test_production_page_keeps_manual_defaults_out_of_option_label(self):
         module = load_portal_module()
         portal = module.WiFiSetupPortal(FakeManager(), FakeConfig(), None)
@@ -224,7 +235,7 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
 
         css = self._style_block(portal._render_index_page())
 
-        self.assertLess(len(css), 1400)
+        self.assertLess(len(css), 1900)
         self.assertNotIn("gradient", css)
         self.assertNotIn("box-shadow", css)
         self.assertNotIn("@media", css)

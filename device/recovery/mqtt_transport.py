@@ -75,6 +75,10 @@ class MQTTTransport:
         self.client = None
         self.client_key = None
 
+    def reconfigure(self):
+        self.last_attempt_ms = 0
+        self.close()
+
     def ensure_connected(self, wifi_connected):
         if not self.enabled() or not wifi_connected:
             self.close()

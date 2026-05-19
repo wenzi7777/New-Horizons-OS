@@ -69,7 +69,7 @@ class RecoveryApp:
         self.setup()
         while True:
             now = time.ticks_ms()
-            self.wifi.service_setup_portal()
+            self._service_wifi_setup_portal()
             self.control.poll(self._handle_request)
             self.mqtt_transport.poll(self.wifi.is_connected(), self._handle_request)
 
@@ -101,6 +101,29 @@ class RecoveryApp:
             return True
         except OSError:
             return False
+
+    def _service_wifi_setup_portal(self):
+        handled = self.wifi.service_setup_portal()
+        if handled:
+            self._reload_runtime_from_store("wifi_portal")
+        return handled
+
+    def _reload_runtime_from_store(self, source="runtime"):
+        runtime = self.config_store.load_runtime()
+        if runtime == self.runtime:
+            return False
+        old_transport = self.runtime.get("transport", {})
+        old_mqtt = self.runtime.get("mqtt", {})
+        self.runtime = runtime
+        self._apply_logging_config(self.runtime.get("logging", {}))
+        if old_transport != self.runtime.get("transport", {}) or old_mqtt != self.runtime.get("mqtt", {}):
+            if hasattr(self.mqtt_transport, "reconfigure"):
+                self.mqtt_transport.reconfigure()
+            else:
+                self.mqtt_transport.close()
+        if self.logger is not None:
+            self.logger.info("runtime_config_reloaded source={}".format(source))
+        return True
 
     def _announce_status(self, now=None, force=False):
         if not self.wifi.is_connected():

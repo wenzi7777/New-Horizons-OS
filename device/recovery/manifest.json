@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "recovery",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.6",
-  "version": "v0.2.6",
+  "firmware_version": "v0.2.7",
+  "version": "v0.2.7",
   "target_root": "/recovery",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.6/device/recovery",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.7/device/recovery",
   "files": [
     {
       "path": "config.py",
@@ -37,15 +37,15 @@
     },
     {
       "path": "immutable_config.py",
-      "sha256": "e578ca62427c594f71403057f4fde7749fab97b1a6c6e5bcaa0e16f9cdecc018",
+      "sha256": "470d3b98b2eaad4d414124ab960b56caccdda1625a82208957e7b74171f694fe",
       "size": 2154,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "mqtt_transport.py",
-      "sha256": "f24133fbb3294edcc4f6e96e937ad2d788f62daff8bbd4e66a5414e61fdca922",
-      "size": 6146,
+      "sha256": "81b06c3c94e80ecd4fb3824e93d0d148a479d595c871078fd1b95019277f6e1c",
+      "size": 6228,
       "kind": "code",
       "reboot_required": true
     },
@@ -58,8 +58,8 @@
     },
     {
       "path": "recovery_app.py",
-      "sha256": "56e1358d6d5b313a85a8429b8b363702e06689aaee7bb7a172a0fc5988e5a075",
-      "size": 14627,
+      "sha256": "e79e28384a6426326911c1912380c0e4419266073e720bf39c3380ed418c576d",
+      "size": 15618,
       "kind": "code",
       "reboot_required": true
     },
@@ -121,8 +121,8 @@
     },
     {
       "path": "wifi_portal.py",
-      "sha256": "b63f0fc6a020fd6ef8afdada0227e3ae9a96bfa923486697d37358abc21203c6",
-      "size": 22841,
+      "sha256": "157da501a8bcfef0bf322bdcad9c82c61dca381f388a6e057eaa465849db14fe",
+      "size": 23658,
       "kind": "code",
       "reboot_required": true
     }

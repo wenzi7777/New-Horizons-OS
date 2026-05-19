@@ -83,6 +83,9 @@ INDEX_CSS = (
     ".muted{color:#555;font-size:13px}"
     ".meta{border-top:1px solid #ddd;margin-top:14px;padding-top:8px;word-break:break-word}"
     ".check{display:flex;align-items:center}"
+    ".overlay{display:none;position:fixed;inset:0;background:rgba(255,255,255,.92);z-index:9;align-items:center;justify-content:center;text-align:center;padding:24px}"
+    ".overlay.on{display:flex}.spinner{width:38px;height:38px;border:4px solid #ccc;border-top-color:#12325a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}"
+    "@keyframes spin{to{transform:rotate(360deg)}}"
 )
 
 RESULT_CSS = (
@@ -473,7 +476,7 @@ class WiFiSetupPortal:
       {recovery_notice}
       {notice}
       <h2>Wi-Fi</h2>
-      <form method="post" action="/connect">
+      <form method="post" action="/connect" onsubmit="showApplyOverlay();">
         <label for="ssid_select">Networks</label>
         <select id="ssid_select" onchange="document.getElementById('ssid').value = this.value;">
           {options}
@@ -510,7 +513,19 @@ class WiFiSetupPortal:
         <p class="muted">State: {device_state}</p>
       </div>
   </main>
+  <div id="apply_overlay" class="overlay" role="status" aria-live="polite">
+    <div>
+      <div class="spinner"></div>
+      <div>配置正在套用 請不要觸碰電源開關。</div>
+    </div>
+  </div>
   <script>
+    function showApplyOverlay() {{
+      var overlay = document.getElementById("apply_overlay");
+      if (overlay) {{
+        overlay.className = "overlay on";
+      }}
+    }}
     function toggleManualServerFields(value) {{
       var section = document.getElementById("manual_server_fields");
       if (!section) {{

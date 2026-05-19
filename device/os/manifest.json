@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.6",
-  "version": "v0.2.6",
+  "firmware_version": "v0.2.7",
+  "version": "v0.2.7",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.6/device/os",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.7/device/os",
   "files": [
     {
       "path": "app.py",
@@ -44,7 +44,7 @@
     },
     {
       "path": "config.py",
-      "sha256": "fda40951cb877406304def38160e931104ddeddb483e726e714fbfb7c66a28ab",
+      "sha256": "67f9bceb4eaf57579a56de6fb25afda040d2dd6895f531138981aa86280ca5f9",
       "size": 4463,
       "kind": "code",
       "reboot_required": true
@@ -149,8 +149,8 @@
     },
     {
       "path": "mqtt_transport.py",
-      "sha256": "d0661ab3ffb09515feaad4e88a112c2bb85857219ce09515e7971bfd372760ac",
-      "size": 6722,
+      "sha256": "abe383645eaa2f6c8604ad26ff4c99a53120785dd8428a091f42ea443094478e",
+      "size": 6804,
       "kind": "code",
       "reboot_required": true
     },
