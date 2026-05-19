@@ -94,7 +94,7 @@ cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
 zsh firmware/scripts/flash_firmware.sh /dev/cu.usbserial-210
 ```
 
-`flash_firmware.sh` 會先 `erase_flash`，所以這是乾淨刷入流程，不保留舊 filesystem。
+`flash_firmware.sh` 只寫入 bootloader、partition table 與 MicroPython firmware，不會先整片 erase flash。
 
 刷完 firmware 後寫入 Recovery：
 

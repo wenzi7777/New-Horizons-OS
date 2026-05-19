@@ -25,7 +25,7 @@ cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
 zsh firmware/scripts/flash_firmware.sh /dev/cu.usbserial-210
 ```
 
-這個腳本會先執行 `erase_flash`，再寫入 bootloader、partition table 與 MicroPython firmware；既有 filesystem、Wi-Fi 設定與舊 `/os` 目錄都會被清掉。
+這個腳本只寫入 bootloader、partition table 與 MicroPython firmware，不會先整片 erase flash。
 
 刷完 firmware 後，上傳 Recovery 檔案系統：
 
@@ -39,7 +39,7 @@ python3 firmware/scripts/upload_filesystem.py --port /dev/cu.usbserial-210 --tar
 - `device/root/*` 到裝置 `/`
 - `device/recovery/*` 到裝置 `/recovery`
 
-`--target recovery` 預設會清掉 `device_state/network_config.json`，方便空白板重新進入配網流程。若只想覆蓋 Recovery 程式，不想動既有 Wi-Fi 設定：
+上傳會建立需要的目錄，檔案同名時直接覆蓋，不會刪 `device_state/network_config.json` 或其他狀態檔。若只想覆蓋 Recovery 程式、跳過 root launcher：
 
 ```bash
 python3 firmware/scripts/upload_filesystem.py --port /dev/cu.usbserial-210 --target recovery --target-only

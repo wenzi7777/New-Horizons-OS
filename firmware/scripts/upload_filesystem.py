@@ -10,10 +10,6 @@ from pathlib import Path
 RAW_COPY_CHUNK_SIZE = 2048
 DEVICE_OS_DIR = "nhos"
 
-STALE_TARGET_FILES = {
-    "recovery": ["device_state/network_config.json"],
-}
-
 
 class UploadLayer:
     def __init__(self, name: str, source_root: Path, remote_root: str):
@@ -27,19 +23,42 @@ def run(cmd: list[str], display: str | None = None) -> None:
     subprocess.run(cmd, check=True)
 
 
+def board_not_running_micropython(text: str) -> bool:
+    return (
+        "invalid header: 0xffffffff" in text
+        or "could not enter raw repl" in text
+        or "ESP-ROM:esp32s3" in text
+    )
+
+
+def raise_if_board_not_ready(text: str) -> None:
+    if not board_not_running_micropython(text):
+        return
+    print(
+        "Device is not running MicroPython. Flash base firmware first, then rerun this upload command:\n"
+        "  zsh firmware/scripts/flash_firmware.sh <port>\n"
+        "  python3 firmware/scripts/upload_filesystem.py --port <port> --target recovery",
+        file=sys.stderr,
+    )
+    raise SystemExit(3)
+
+
 def remote_mkdir(port: str, remote_dir: str) -> None:
     if not remote_dir or remote_dir == ".":
         return
     cmd = ["mpremote", "connect", port, "fs", "mkdir", remote_dir]
     print("+", " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True)
+    text = (result.stdout or "") + (result.stderr or "")
+    if result.returncode != 0:
+        raise_if_board_not_ready(text)
     if result.stdout:
         print(result.stdout, end="")
     if result.stderr:
         print(result.stderr, end="", file=sys.stderr)
     if result.returncode == 0:
         return
-    if "File exists" in result.stdout or "File exists" in result.stderr:
+    if "File exists" in text:
         return
     raise subprocess.CalledProcessError(result.returncode, cmd)
 
@@ -55,6 +74,7 @@ def remote_copy(port: str, local_path: Path, remote_path: str) -> None:
             print(result.stderr, end="", file=sys.stderr)
         return
     text = (result.stdout or "") + (result.stderr or "")
+    raise_if_board_not_ready(text)
     missing_stat = "has no attribute 'stat'" in text
     if result.stdout:
         print(result.stdout, end="")
@@ -89,22 +109,6 @@ def remote_copy_raw(port: str, local_path: Path, remote_path: str) -> None:
                 f"mpremote connect {port} exec <write {remote_path} +{len(chunk)} bytes @{offset}>",
             )
             offset += len(chunk)
-
-
-def remote_remove(port: str, remote_path: str) -> None:
-    cmd = ["mpremote", "connect", port, "fs", "rm", remote_path]
-    print("+", " ".join(cmd))
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.stdout:
-        print(result.stdout, end="")
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
-    if result.returncode == 0:
-        return
-    text = (result.stdout or "") + (result.stderr or "")
-    if "No such file" in text or "ENOENT" in text:
-        return
-    raise subprocess.CalledProcessError(result.returncode, cmd)
 
 
 def collect_files(root: Path) -> list[Path]:
@@ -143,19 +147,6 @@ def upload_tree(port: str, source_root: Path, remote_root: str = "") -> None:
         rel = str(path.relative_to(source_root)).replace("\\", "/")
         target = rel if not remote_root else f"{remote_root.rstrip('/')}/{rel}"
         remote_copy(port, path, target)
-
-
-def stale_device_paths(target: str, target_only: bool) -> list[str]:
-    if target_only:
-        return []
-    if target == "all":
-        return list(STALE_TARGET_FILES.get("recovery", []))
-    return list(STALE_TARGET_FILES.get(target, []))
-
-
-def remove_stale_target_files(port: str, target: str, target_only: bool = False) -> None:
-    for path in stale_device_paths(target, target_only):
-        remote_remove(port, path)
 
 
 def target_layers(target: str, target_only: bool = False, repo_root: Path | None = None) -> list[UploadLayer]:
@@ -199,8 +190,6 @@ def main() -> int:
         if not layer.source_root.exists():
             print(f"找不到 {layer.name} 目錄: {layer.source_root}", file=sys.stderr)
             return 2
-
-    remove_stale_target_files(args.port, target, target_only=target_only)
 
     for layer in layers:
         remote_label = "/" + layer.remote_root.strip("/") if layer.remote_root else "/"

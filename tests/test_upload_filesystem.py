@@ -19,33 +19,37 @@ def load_upload_filesystem():
 
 
 class UploadFilesystemTests(unittest.TestCase):
-    def test_recovery_upload_resets_network_state(self):
+    def test_upload_script_has_no_remote_remove_step(self):
+        source = SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertNotIn('"fs", "rm"', source)
+        self.assertNotIn("device_state/network_config.json", source)
+
+    def test_flash_firmware_does_not_mass_erase_flash(self):
+        script = REPO_ROOT / "firmware" / "scripts" / "flash_firmware.sh"
+
+        self.assertNotIn("erase_flash", script.read_text(encoding="utf-8"))
+
+    def test_remote_mkdir_reports_missing_firmware_without_dumping_rom_log(self):
         module = load_upload_filesystem()
 
-        paths = module.stale_device_paths("recovery", target_only=False)
+        def fake_run(cmd, check=False, capture_output=False, text=False):
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                "",
+                "invalid header: 0xffffffff\nmpremote.transport.TransportError: could not enter raw repl\n",
+            )
 
-        self.assertIn("device_state/network_config.json", paths)
+        module.subprocess.run = fake_run
+        stderr = io.StringIO()
 
-    def test_recovery_target_only_preserves_network_state(self):
-        module = load_upload_filesystem()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            module.remote_mkdir("/dev/test", "recovery")
 
-        paths = module.stale_device_paths("recovery", target_only=True)
-
-        self.assertNotIn("device_state/network_config.json", paths)
-
-    def test_os_upload_does_not_reset_network_state(self):
-        module = load_upload_filesystem()
-
-        paths = module.stale_device_paths("os", target_only=False)
-
-        self.assertEqual(paths, [])
-
-    def test_all_upload_resets_network_state(self):
-        module = load_upload_filesystem()
-
-        paths = module.stale_device_paths("all", target_only=False)
-
-        self.assertIn("device_state/network_config.json", paths)
+        self.assertEqual(raised.exception.code, 3)
+        self.assertIn("Device is not running MicroPython", stderr.getvalue())
+        self.assertNotIn("invalid header", stderr.getvalue())
 
     def test_new_layout_upload_layers(self):
         module = load_upload_filesystem()
