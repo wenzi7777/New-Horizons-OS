@@ -166,7 +166,7 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
 
         self.assertIn('onsubmit="showApplyOverlay();"', html)
         self.assertIn('id="apply_overlay"', html)
-        self.assertIn("設備正在套用<br>請不要觸碰電源開關。", html)
+        self.assertIn("正在套用設定<br>請不要觸碰設備電源開關。", html)
         self.assertIn("function showApplyOverlay()", html)
 
     def test_connect_post_still_reports_handled_when_response_aborts_after_apply(self):

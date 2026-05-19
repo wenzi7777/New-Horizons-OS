@@ -4,7 +4,11 @@ if "recovery" not in sys.path:
     sys.path.insert(0, "recovery")
 
 import immutable_config as iconfig
-import storage
+
+try:
+    import uos as os
+except ImportError:
+    import os
 
 
 _CONFIG_DEFAULTS = {
@@ -24,6 +28,22 @@ for name, value in _CONFIG_DEFAULTS.items():
         setattr(iconfig, name, value)
 
 
+def _ensure_dir(path):
+    if not path:
+        return
+    parts = [part for part in path.replace("\\", "/").split("/") if part]
+    current = "/" if path.startswith("/") else ""
+    for part in parts:
+        if current in ("", "/"):
+            current = current + part
+        else:
+            current = current + "/" + part
+        try:
+            os.mkdir(current)
+        except OSError:
+            pass
+
+
 for path in (
     iconfig.DEVICE_STATE_DIR,
     iconfig.RECOVERY_DIR,
@@ -34,4 +54,4 @@ for path in (
     iconfig.DATA_LOG_DIR,
     iconfig.DATA_TMP_DIR,
 ):
-    storage.ensure_dir(path)
+    _ensure_dir(path)

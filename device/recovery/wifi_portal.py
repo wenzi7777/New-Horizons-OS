@@ -518,7 +518,7 @@ class WiFiSetupPortal:
   <div id="apply_overlay" class="overlay" role="status" aria-live="polite">
     <div>
       <div class="spinner"></div>
-      <div>設備正在套用<br>請不要觸碰電源開關。</div>
+      <div>正在套用設定<br>請不要觸碰設備電源開關。</div>
     </div>
   </div>
   <script>
