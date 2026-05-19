@@ -1,4 +1,7 @@
+import contextlib
+import io
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -72,6 +75,35 @@ class UploadFilesystemTests(unittest.TestCase):
         self.assertEqual(calls[0], ("mkdir", "recovery"))
         self.assertIn(("mkdir", "recovery/umqtt"), calls)
         self.assertIn(("copy", "recovery/umqtt/simple.py"), calls)
+
+    def test_remote_copy_falls_back_to_raw_exec_when_os_stat_is_missing(self):
+        module = load_upload_filesystem()
+        calls = []
+
+        def fake_run(cmd, check=False, capture_output=False, text=False):
+            calls.append(cmd)
+            if cmd[:4] == ["mpremote", "connect", "/dev/test", "fs"]:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    1,
+                    "",
+                    "AttributeError: 'module' object has no attribute 'stat'\n",
+                )
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        module.subprocess.run = fake_run
+        module.RAW_COPY_CHUNK_SIZE = 4
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_path = Path(tmpdir) / "udp_control.py"
+            local_path.write_bytes(b"abcdef")
+
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                module.remote_copy("/dev/test", local_path, "recovery/udp_control.py")
+
+        exec_commands = [cmd for cmd in calls if cmd[:3] == ["mpremote", "connect", "/dev/test"] and cmd[3] == "exec"]
+        self.assertEqual(exec_commands[0][4], "f=open('recovery/udp_control.py','wb');f.close()")
+        self.assertIn("b'abcd'", exec_commands[1][4])
+        self.assertIn("b'ef'", exec_commands[2][4])
 
 
 if __name__ == "__main__":

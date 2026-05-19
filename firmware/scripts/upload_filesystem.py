@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+RAW_COPY_CHUNK_SIZE = 512
+
 STALE_TARGET_FILES = {
     "recovery": ["device_state/network_config.json"],
 }
@@ -19,8 +21,8 @@ class UploadLayer:
         self.remote_root = remote_root
 
 
-def run(cmd: list[str]) -> None:
-    print("+", " ".join(cmd))
+def run(cmd: list[str], display: str | None = None) -> None:
+    print("+", display or " ".join(cmd))
     subprocess.run(cmd, check=True)
 
 
@@ -42,7 +44,45 @@ def remote_mkdir(port: str, remote_dir: str) -> None:
 
 
 def remote_copy(port: str, local_path: Path, remote_path: str) -> None:
-    run(["mpremote", "connect", port, "fs", "cp", "-f", str(local_path), f":{remote_path}"])
+    cmd = ["mpremote", "connect", port, "fs", "cp", "-f", str(local_path), f":{remote_path}"]
+    print("+", " ".join(cmd))
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+    if result.returncode == 0:
+        return
+    text = (result.stdout or "") + (result.stderr or "")
+    if "has no attribute 'stat'" not in text:
+        raise subprocess.CalledProcessError(result.returncode, cmd)
+    print(f"mpremote fs cp failed without os.stat; retrying raw chunk copy for {remote_path}")
+    remote_copy_raw(port, local_path, remote_path)
+
+
+def remote_exec(port: str, code: str, display: str) -> None:
+    run(["mpremote", "connect", port, "exec", code], display=display)
+
+
+def remote_copy_raw(port: str, local_path: Path, remote_path: str) -> None:
+    remote_exec(
+        port,
+        f"f=open({remote_path!r},'wb');f.close()",
+        f"mpremote connect {port} exec <truncate {remote_path}>",
+    )
+    with local_path.open("rb") as handle:
+        offset = 0
+        while True:
+            chunk = handle.read(RAW_COPY_CHUNK_SIZE)
+            if not chunk:
+                break
+            code = f"f=open({remote_path!r},'ab');f.write({chunk!r});f.close()"
+            remote_exec(
+                port,
+                code,
+                f"mpremote connect {port} exec <write {remote_path} +{len(chunk)} bytes @{offset}>",
+            )
+            offset += len(chunk)
 
 
 def remote_remove(port: str, remote_path: str) -> None:
