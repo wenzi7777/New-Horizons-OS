@@ -144,6 +144,7 @@ class RecoveryApp:
             "device_id": "0x{:08X}".format(self.device_id),
             "device_uid": self.device_uid,
             "device_name": self.device_name,
+            "system": self._system_status(self.runtime),
             "mode": "recovery",
             "manifest_url": self.runtime.get("update", {}).get("manifest_url", ""),
             "runtime": self.runtime,
@@ -184,6 +185,7 @@ class RecoveryApp:
                 "device_id": "0x{:08X}".format(self.device_id),
                 "device_uid": self.device_uid,
                 "device_name": self.device_name,
+                "system": self._system_status(runtime),
                 "mode": "recovery",
                 "manifest_url": runtime.get("update", {}).get("manifest_url", ""),
                 "runtime": runtime,
@@ -222,6 +224,9 @@ class RecoveryApp:
             writer = self._ensure_os_writer()
             result = writer.write_os(release_url)
             result["release_url"] = release_url
+            installed_version = result.get("version", "")
+            if installed_version:
+                self.runtime = self.config_store.update_runtime({"system": {"os_version": installed_version}})
             self._set_update_state({
                 "phase": "done",
                 "operation": "write_os",
@@ -342,6 +347,27 @@ class RecoveryApp:
         if not isinstance(runtime, dict):
             return "udp"
         return runtime.get("transport", {}).get("mode", "udp")
+
+    def _installed_os_version(self, runtime=None):
+        runtime = runtime if isinstance(runtime, dict) else getattr(self, "runtime", {})
+        system = runtime.get("system", {}) if isinstance(runtime, dict) else {}
+        version = system.get("os_version", "")
+        if version:
+            return version
+        state = self._current_update_state()
+        version = state.get("version", "")
+        if version:
+            return version
+        return "unknown" if self._os_installed() else ""
+
+    def _system_status(self, runtime=None):
+        return {
+            "name": self.device_name,
+            "mode": "recovery",
+            "os_installed": self._os_installed(),
+            "os_version": self._installed_os_version(runtime),
+            "recovery_version": getattr(iconfig, "FIRMWARE_VERSION", "unknown"),
+        }
 
     def _release_url(self, request):
         return getattr(iconfig, "DEFAULT_RELEASE_URL", "")

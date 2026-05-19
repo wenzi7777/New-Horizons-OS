@@ -163,8 +163,42 @@ class FakeLED:
     def set_normal(self):
         self.states.append("normal")
 
+    def set_charging(self):
+        self.states.append("charging")
+
+    def set_charge_done(self):
+        self.states.append("charge_done")
+
     def set_error(self):
         self.states.append("error")
+
+
+class FakeBattery:
+    STATUS_UNKNOWN = 0
+    STATUS_NOT_CHARGING = 1
+    STATUS_CHARGING_CC = 2
+    STATUS_DONE = 4
+
+    def __init__(self):
+        self.begin_calls = 0
+        self.last_status_code = self.STATUS_UNKNOWN
+        self.next_status_code = self.STATUS_NOT_CHARGING
+        self.read_calls = 0
+
+    def begin(self):
+        self.begin_calls += 1
+        return True
+
+    def read_status(self):
+        self.read_calls += 1
+        self.last_status_code = self.next_status_code
+        return (self.last_status_code, 0, 0)
+
+    def is_charging(self):
+        return self.last_status_code == self.STATUS_CHARGING_CC
+
+    def is_charge_done(self):
+        return self.last_status_code == self.STATUS_DONE
 
 
 class FakeControl:
@@ -183,17 +217,21 @@ class FakeControl:
         return True
 
 
-def load_full_app_module(runtime_override=None, update_check=None, enable_led=False, wifi_connect_result=True):
+def load_full_app_module(runtime_override=None, update_check=None, enable_led=False, enable_battery=False, wifi_connect_result=True):
     events = []
     fake_scan = FakeScan(events)
     fake_vdboard = types.SimpleNamespace(scan=fake_scan)
     saved_modules = {}
     injected = {
         "machine": types.SimpleNamespace(reset=lambda: None),
+        "immutable_config": types.SimpleNamespace(
+            FIRMWARE_VERSION="v-recovery-test",
+        ),
         "config": types.SimpleNamespace(
             DEVICE_NAME="New Horizons OS",
+            FIRMWARE_VERSION="v-os-test",
             ENABLE_IMU=False,
-            ENABLE_BATTERY=False,
+            ENABLE_BATTERY=enable_battery,
             ENABLE_LED=enable_led,
             USE_PACKET_BUFFER=False,
             DEVICE_STATE_DIR="device_state",
@@ -275,6 +313,8 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
     }
     if enable_led:
         injected["sk6812"] = types.SimpleNamespace(SK6812Status=lambda: FakeLED(events))
+    if enable_battery:
+        injected["bq25180"] = types.SimpleNamespace(BQ25180=FakeBattery)
     for name, module in injected.items():
         saved_modules[name] = sys.modules.get(name)
         sys.modules[name] = module
@@ -371,6 +411,61 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     sys.modules[name] = saved
 
         self.assertEqual(app.led.states[-1], "maintenance")
+
+    def test_battery_status_refresh_updates_led_when_usb_power_starts_charging(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module(enable_led=True, enable_battery=True)
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            self.assertEqual(app.led.states[-1], "normal")
+
+            app.battery.next_status_code = app.battery.STATUS_CHARGING_CC
+            changed = app._service_battery_status()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertTrue(changed)
+        self.assertEqual(app.led.states[-1], "charging")
+
+    def test_reboot_required_led_overrides_battery_charging(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module(enable_led=True, enable_battery=True)
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+
+            app.reboot_required = True
+            app.battery.next_status_code = app.battery.STATUS_CHARGING_CC
+            changed = app._service_battery_status()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertTrue(changed)
+        self.assertEqual(app.led.states[-1], "reboot_required")
+
+    def test_status_includes_system_versions(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            status = app._status()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(status["system"]["name"], "New Horizons OS")
+        self.assertEqual(status["system"]["mode"], "normal")
+        self.assertEqual(status["system"]["os_version"], "v-os-test")
+        self.assertEqual(status["system"]["recovery_version"], "v-recovery-test")
 
     def test_runtime_services_are_deferred_until_after_wifi_boot(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()

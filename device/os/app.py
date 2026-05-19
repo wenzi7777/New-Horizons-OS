@@ -167,7 +167,7 @@ class App:
                     and self.battery
                     and time.ticks_diff(now, self.last_battery_ms) >= battery_interval):
                 self.last_battery_ms = now
-                self.latest_battery = self.battery.read_status()
+                self._service_battery_status()
 
             if self.scan_ready and not self.calibration_mode and not self._in_maintenance():
                 self.vdboard.scan.service()
@@ -365,6 +365,17 @@ class App:
             self.led.set_normal()
         else:
             self.led.set_error()
+
+    def _service_battery_status(self):
+        if not self.battery:
+            return False
+        previous_status = getattr(self.battery, "last_status_code", None)
+        self.latest_battery = self.battery.read_status()
+        current_status = getattr(self.battery, "last_status_code", None)
+        changed = current_status != previous_status
+        if changed:
+            self.update_led_state()
+        return changed
 
     def _ensure_udp_data_socket(self, wifi_ok):
         if not wifi_ok or self._transport_mode() != "udp":
@@ -994,6 +1005,21 @@ class App:
             return self.logger.settings()
         return self._normalize_logging_config(self.runtime.get("logging", {}))
 
+    def _recovery_version(self):
+        try:
+            import immutable_config as recovery_config
+            return getattr(recovery_config, "FIRMWARE_VERSION", "unknown")
+        except Exception:
+            return getattr(config, "RECOVERY_FIRMWARE_VERSION", "unknown")
+
+    def _system_status(self):
+        return {
+            "name": self.device_name,
+            "mode": self.mode,
+            "os_version": getattr(config, "FIRMWARE_VERSION", "unknown"),
+            "recovery_version": self._recovery_version(),
+        }
+
     def _file_call(self, fn, *args):
         try:
             return fn(*args)
@@ -1011,6 +1037,7 @@ class App:
             "device_id": "0x{:08X}".format(self.device_id),
             "device_uid": self.device_uid,
             "device_name": self.device_name,
+            "system": self._system_status(),
             "wifi_state": self.wifi.state,
             "wifi_setup": self.wifi.portal_status(),
             "ntp": self.time_sync.status() if self.time_sync is not None else {},

@@ -13,6 +13,7 @@ def load_recovery_app_module():
     fake_machine = types.SimpleNamespace(reset=lambda: None)
     fake_iconfig = types.SimpleNamespace(
         FIRMWARE_NAME="New Horizons OS",
+        FIRMWARE_VERSION="v-recovery-test",
         LOG_PATH="device_state/logs/device.log",
         DEVICE_STATE_DIR="device_state",
         DEFAULT_CONTROL_PORT=22345,
@@ -206,6 +207,34 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         app._path_exists = lambda path: path in existing_paths
 
         self.assertFalse(app._os_installed())
+
+    def test_recovery_status_includes_system_versions(self):
+        module = load_recovery_app_module()
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.device_id = 0x12345678
+        app.device_uid = "UID123"
+        app.device_name = "New Horizons OS"
+        app.runtime = {
+            "mode": "recovery",
+            "update": {"manifest_url": "https://example.com/os-manifest.json"},
+        }
+        app.config_store = FakeConfigStore(app.runtime)
+        app.wifi = type("FakeWiFi", (), {
+            "is_connected": lambda self: True,
+            "portal_status": lambda self: {"active": False},
+        })()
+        app.update_state = app._default_update_state()
+        app.recovery_error = ""
+        app.reboot_required = False
+        app._path_exists = lambda path: path == "nhos/app.mpy"
+        app.logger = None
+
+        result = app._handle_request({"command": "status"}, None)
+
+        self.assertEqual(result["system"]["name"], "New Horizons OS")
+        self.assertEqual(result["system"]["mode"], "recovery")
+        self.assertEqual(result["system"]["recovery_version"], "v-recovery-test")
+        self.assertEqual(result["system"]["os_installed"], True)
 
     def test_upgrade_to_full_is_not_supported(self):
         module = load_recovery_app_module()
