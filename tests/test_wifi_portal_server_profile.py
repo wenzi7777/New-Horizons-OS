@@ -54,6 +54,11 @@ class FakeManager:
             "mode": "normal",
             "os_installed": True,
             "release_url": GITHUB_RELEASE_URL,
+            "versions": {
+                "runtime": "v0.2.17",
+                "recovery": "v0.2.19",
+                "os": "v0.2.18",
+            },
         }
 
     def scan_networks(self):
@@ -247,8 +252,22 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         html = portal._render_index_page()
 
         self.assertIn("Recovery Mode", html)
-        self.assertIn("Recovery device detected", html)
+        self.assertIn("This device is in recovery mode.", html)
+        self.assertNotIn("Recovery device detected", html)
         self.assertIn("New Horizons OS must be written", html)
+
+    def test_index_page_shows_runtime_recovery_and_os_versions(self):
+        module = load_portal_module()
+        portal = module.WiFiSetupPortal(FakeManager(), FakeConfig(), None)
+
+        html = portal._render_index_page()
+
+        self.assertIn("Runtime version", html)
+        self.assertIn("v0.2.17", html)
+        self.assertIn("Recovery version", html)
+        self.assertIn("v0.2.19", html)
+        self.assertIn("OS version", html)
+        self.assertIn("v0.2.18", html)
 
     def test_index_page_uses_compact_embedded_styles(self):
         module = load_portal_module()
