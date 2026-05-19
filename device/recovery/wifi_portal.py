@@ -244,6 +244,7 @@ class WiFiSetupPortal:
         except Exception:
             pass
 
+        request_applied = False
         try:
             method, path, body = self._read_request(client)
             path = _normalize_path(path)
@@ -271,6 +272,7 @@ class WiFiSetupPortal:
                     "",
                     "",
                 )
+                request_applied = True
                 content = self._render_result_page(result)
                 self._send_response(client, "200 OK", "text/html; charset=utf-8", content)
                 return True
@@ -294,7 +296,7 @@ class WiFiSetupPortal:
                 )
             except Exception:
                 pass
-            return False
+            return request_applied
         finally:
             try:
                 client.close()
@@ -516,7 +518,7 @@ class WiFiSetupPortal:
   <div id="apply_overlay" class="overlay" role="status" aria-live="polite">
     <div>
       <div class="spinner"></div>
-      <div>配置正在套用 請不要觸碰電源開關。</div>
+      <div>Applying configuration. Do not touch the power switch.</div>
     </div>
   </div>
   <script>

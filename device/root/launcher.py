@@ -45,6 +45,16 @@ def _run_recovery(wifi_setup_requested=False, error=""):
     recovery_app.run(wifi_setup_requested=wifi_setup_requested, recovery_error=error)
 
 
+def _schedule_recovery_reboot(store, logger, error):
+    logger.error("launcher_os_failed {}".format(error))
+    try:
+        store.update_runtime({"mode": "recovery", "boot_request": "recovery"})
+    except Exception as exc:
+        logger.error("launcher_recovery_schedule_failed {}".format(exc))
+    time.sleep_ms(250)
+    machine.reset()
+
+
 def run():
     logger = DeviceLogger(iconfig.LOG_PATH)
     wifi_setup_requested = _wait_boot_window(logger)
@@ -63,7 +73,11 @@ def run():
             sys.path.insert(0, iconfig.OS_DIR)
             try:
                 from app import App
-                App(wifi_setup_requested=wifi_setup_requested).run()
+                try:
+                    App(wifi_setup_requested=wifi_setup_requested).run()
+                except Exception as exc:
+                    _schedule_recovery_reboot(store, logger, str(exc))
+                    return
             finally:
                 try:
                     sys.path.pop(0)

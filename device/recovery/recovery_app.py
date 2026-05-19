@@ -48,7 +48,7 @@ class RecoveryApp:
                 self.device_name,
                 hex(self.device_id),
                 getattr(iconfig, "FIRMWARE_VERSION", "unknown"),
-                self._path_exists(getattr(iconfig, "OS_DIR", "nhos") + "/main.py"),
+                self._os_installed(),
                 bool(self.wifi_setup_requested),
             )
         )
@@ -101,6 +101,10 @@ class RecoveryApp:
             return True
         except OSError:
             return False
+
+    def _os_installed(self):
+        os_dir = getattr(iconfig, "OS_DIR", "nhos")
+        return self._path_exists(os_dir + "/app.py") or self._path_exists(os_dir + "/main.py")
 
     def _service_wifi_setup_portal(self):
         handled = self.wifi.service_setup_portal()

@@ -9,6 +9,9 @@ except ImportError:
     network = None
 
 
+_cached_mac_bytes = None
+
+
 def _coerce_bytes(value):
     if value is None:
         return b""
@@ -20,8 +23,19 @@ def _coerce_bytes(value):
 
 
 def mac_bytes(value=None):
+    global _cached_mac_bytes
     if value is not None:
         return _coerce_bytes(value)
+    if _cached_mac_bytes is not None:
+        return _cached_mac_bytes
+    if machine is not None:
+        try:
+            data = _coerce_bytes(machine.unique_id())
+            if data:
+                _cached_mac_bytes = data
+                return data
+        except Exception:
+            pass
     if network is not None:
         for iface in (getattr(network, "STA_IF", None), getattr(network, "AP_IF", None)):
             if iface is None:
@@ -30,14 +44,11 @@ def mac_bytes(value=None):
                 wlan = network.WLAN(iface)
                 mac = wlan.config("mac")
                 if mac:
-                    return _coerce_bytes(mac)
+                    data = _coerce_bytes(mac)
+                    _cached_mac_bytes = data
+                    return data
             except Exception:
                 pass
-    if machine is not None:
-        try:
-            return _coerce_bytes(machine.unique_id())
-        except Exception:
-            pass
     return b""
 
 

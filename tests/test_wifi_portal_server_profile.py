@@ -166,8 +166,27 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
 
         self.assertIn('onsubmit="showApplyOverlay();"', html)
         self.assertIn('id="apply_overlay"', html)
-        self.assertIn("配置正在套用 請不要觸碰電源開關。", html)
+        self.assertIn("Applying configuration. Do not touch the power switch.", html)
         self.assertIn("function showApplyOverlay()", html)
+
+    def test_connect_post_still_reports_handled_when_response_aborts_after_apply(self):
+        module = load_portal_module()
+        manager = FakeManager()
+        portal = module.WiFiSetupPortal(manager, FakeConfig(), None)
+        portal.active = True
+        portal.server = FakeServer(FakeClient())
+        portal._read_request = lambda client: (
+            "POST",
+            "/connect",
+            "ssid=LabWiFi&password=secret&server_profile=manual&master_host=192.168.1.153&master_port=22345&data_host=192.168.1.153&data_port=5005&mqtt_host=192.168.1.153&mqtt_port=1883",
+        )
+        portal._send_response = lambda client, status, content_type, body: (_ for _ in ()).throw(OSError("ECONNABORTED"))
+
+        handled = portal.service()
+
+        self.assertTrue(handled)
+        self.assertEqual(manager.calls[0][2], "manual")
+        self.assertEqual(manager.calls[0][7], "192.168.1.153")
 
     def test_production_page_keeps_manual_defaults_out_of_option_label(self):
         module = load_portal_module()

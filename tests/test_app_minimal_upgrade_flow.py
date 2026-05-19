@@ -141,6 +141,14 @@ class FakePortalWiFi:
 
 
 class RecoveryOSWriterFlowTests(unittest.TestCase):
+    def test_recovery_os_installed_detects_app_entrypoint(self):
+        module = load_recovery_app_module()
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        existing_paths = {"nhos/app.py"}
+        app._path_exists = lambda path: path in existing_paths
+
+        self.assertTrue(app._os_installed())
+
     def test_upgrade_to_full_is_not_supported(self):
         module = load_recovery_app_module()
         app = module.RecoveryApp.__new__(module.RecoveryApp)

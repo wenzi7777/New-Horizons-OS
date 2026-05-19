@@ -189,6 +189,64 @@ class LauncherWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(full_calls, [True])
         self.assertNotIn(("warn", "launcher_force_minimal_for_wifi_setup"), fake_logger.messages)
 
+    def test_normal_os_failure_schedules_recovery_reset_instead_of_inline_fallback(self):
+        recovery_calls = []
+        runtime_updates = []
+        reset_calls = []
+        fake_logger = FakeLogger("device_state/logs/device.log")
+
+        class FakeStore:
+            def load_runtime(self):
+                return {"mode": "normal"}
+
+            def update_runtime(self, updates):
+                runtime_updates.append(updates)
+                return {"mode": updates.get("mode", "normal"), "boot_request": updates.get("boot_request", "")}
+
+        class FailingApp:
+            def __init__(self, wifi_setup_requested=False):
+                self.wifi_setup_requested = wifi_setup_requested
+
+            def run(self):
+                raise OSError("WiFi Out of Memory")
+
+        injected = {
+            "machine": types.SimpleNamespace(Pin=FakePinFactory(), reset=lambda: reset_calls.append(True)),
+            "immutable_config": types.SimpleNamespace(
+                ACTION_BUTTON_PIN=46,
+                BOOT_WINDOW_MS=3000,
+                BOOT_WINDOW_POLL_MS=50,
+                DEFAULT_MODE="recovery",
+                DEVICE_STATE_DIR="device_state",
+                LOG_PATH="device_state/logs/device.log",
+                OS_DIR="nhos",
+            ),
+            "device_logging": types.SimpleNamespace(DeviceLogger=lambda path: fake_logger),
+            "runtime_config": types.SimpleNamespace(RuntimeConfigStore=lambda base_dir: FakeStore()),
+            "storage": types.SimpleNamespace(exists=lambda path: path == "nhos/app.py"),
+            "recovery_app": types.SimpleNamespace(
+                run=lambda wifi_setup_requested=False, recovery_error="": recovery_calls.append(
+                    (wifi_setup_requested, recovery_error)
+                )
+            ),
+            "app": types.SimpleNamespace(App=FailingApp),
+            "recovery": types.SimpleNamespace(run=lambda **kwargs: None),
+        }
+        module, saved_modules = load_launcher_module(injected)
+        try:
+            module.run()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(recovery_calls, [])
+        self.assertEqual(runtime_updates, [{"mode": "recovery", "boot_request": "recovery"}])
+        self.assertEqual(reset_calls, [True])
+        self.assertIn(("error", "launcher_os_failed WiFi Out of Memory"), fake_logger.messages)
+
 
 if __name__ == "__main__":
     unittest.main()
