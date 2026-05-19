@@ -47,18 +47,26 @@ def remote_copy(port: str, local_path: Path, remote_path: str) -> None:
     cmd = ["mpremote", "connect", port, "fs", "cp", "-f", str(local_path), f":{remote_path}"]
     print("+", " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        if result.stdout:
+            print(result.stdout, end="")
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr)
+        return
+    text = (result.stdout or "") + (result.stderr or "")
+    missing_stat = "has no attribute 'stat'" in text
+    wrote_file = f":{remote_path}" in text
+    if missing_stat and wrote_file:
+        if result.stdout:
+            print(result.stdout, end="")
+        print(f"mpremote fs cp wrote {remote_path}; skipped missing os.stat confirmation")
+        return
     if result.stdout:
         print(result.stdout, end="")
     if result.stderr:
         print(result.stderr, end="", file=sys.stderr)
-    if result.returncode == 0:
-        return
-    text = (result.stdout or "") + (result.stderr or "")
-    if "has no attribute 'stat'" not in text:
+    if not missing_stat:
         raise subprocess.CalledProcessError(result.returncode, cmd)
-    if f":{remote_path}" in text:
-        print(f"mpremote fs cp wrote {remote_path}; ignoring missing os.stat confirmation")
-        return
     print(f"mpremote fs cp failed without os.stat; retrying raw chunk copy for {remote_path}")
     remote_copy_raw(port, local_path, remote_path)
 
