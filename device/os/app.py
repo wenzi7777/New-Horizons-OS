@@ -52,6 +52,8 @@ class App:
         self.led = None
         self.udp = None
         self.mqtt_transport = None
+        self.recovery_writer = None
+        self.update_state = self._default_update_state()
 
         self.latest_matrix = None
         self.latest_frame = None
@@ -505,6 +507,12 @@ class App:
         if self._in_maintenance() and cmd not in self._maintenance_allowed_commands():
             return self._ok("maintenance_command_disabled", error="maintenance_command_disabled")
 
+        if cmd == "check_recovery_release":
+            return self._check_recovery_release(request)
+
+        if cmd == "write_recovery":
+            return self._write_recovery(request)
+
         if cmd == "reload_config":
             self._apply_runtime_reload()
             return self._ok("config_reloaded", applied=True)
@@ -548,8 +556,8 @@ class App:
         if cmd == "set_matrix_layout":
             try:
                 rows, cols = self._validate_matrix_layout(
-                    request.get("active_rows", []),
-                    request.get("active_cols", []),
+                    request.get("analog_pins", []),
+                    request.get("select_pins", []),
                 )
             except ValueError as exc:
                 return self._ok("matrix_layout_invalid", error=str(exc))
@@ -977,6 +985,124 @@ class App:
             "logging": self._logging_status(),
         }
 
+    def _release_url(self, request):
+        if request.get("release_url"):
+            return request.get("release_url")
+        runtime = getattr(self, "runtime", {}) if isinstance(getattr(self, "runtime", {}), dict) else {}
+        release_url = runtime.get("update", {}).get("release_url", "")
+        return release_url or getattr(config, "DEFAULT_RELEASE_URL", getattr(config, "GITHUB_RELEASE_URL", ""))
+
+    def _ensure_recovery_writer(self):
+        if self.recovery_writer is None:
+            from update_writer import ManifestTargetWriter
+            self.recovery_writer = ManifestTargetWriter(
+                "recovery",
+                ".",
+                self.logger,
+                progress=self._target_write_progress,
+            )
+        return self.recovery_writer
+
+    def _check_recovery_release(self, request):
+        release_url = self._release_url(request)
+        writer = self._ensure_recovery_writer()
+        result = writer.check_release(release_url)
+        result["release_url"] = release_url
+        self._set_update_state({
+            "phase": "ready",
+            "operation": "check_recovery_release",
+            "version": result.get("latest_version", ""),
+            "manifest_url": result.get("manifest_url", ""),
+            "total_files": 0,
+            "applied_files": 0,
+            "downloaded_files": 0,
+            "skipped_files": 0,
+            "current_file": "",
+            "last_error": "",
+            "last_result": "manifest_ready",
+            "reboot_required": False,
+        })
+        result["update_state"] = self._current_update_state()
+        return result
+
+    def _write_recovery(self, request):
+        release_url = self._release_url(request)
+        writer = self._ensure_recovery_writer()
+        result = writer.write_release(release_url)
+        result["release_url"] = release_url
+        installed_version = result.get("version", "")
+        if installed_version:
+            self.runtime = self.config_store.update_runtime({"system": {"recovery_version": installed_version}})
+        self._set_update_state({
+            "phase": "done",
+            "operation": "write_recovery",
+            "version": result.get("version", ""),
+            "total_files": int(result.get("downloaded_files", 0)) + int(result.get("skipped_files", 0)),
+            "applied_files": int(result.get("downloaded_files", 0)) + int(result.get("skipped_files", 0)),
+            "downloaded_files": int(result.get("downloaded_files", 0)),
+            "skipped_files": int(result.get("skipped_files", 0)),
+            "deleted_files": int(result.get("deleted_files", 0)),
+            "current_file": "",
+            "last_error": "",
+            "last_result": "applied",
+            "reboot_required": bool(result.get("reboot_required", True)),
+        })
+        result["update_state"] = self._current_update_state()
+        return result
+
+    def _default_update_state(self):
+        return {
+            "phase": "idle",
+            "operation": "",
+            "version": "",
+            "manifest_url": "",
+            "total_files": 0,
+            "applied_files": 0,
+            "downloaded_files": 0,
+            "skipped_files": 0,
+            "current_file": "",
+            "last_error": "",
+            "last_result": "",
+            "reboot_required": False,
+        }
+
+    def _current_update_state(self):
+        state = getattr(self, "update_state", None)
+        if not isinstance(state, dict):
+            state = self._default_update_state()
+            self.update_state = state
+        return state
+
+    def _set_update_state(self, patch):
+        state = self._default_update_state()
+        state.update(self._current_update_state())
+        state.update(patch or {})
+        self.update_state = state
+        return state
+
+    def _target_write_progress(self, payload):
+        raw_phase = str(payload.get("phase", "") or "")
+        downloaded = int(payload.get("written_files", payload.get("downloaded_files", 0)) or 0)
+        skipped = int(payload.get("skipped_files", 0) or 0)
+        total = int(payload.get("total_files", downloaded + skipped) or 0)
+        operation = str(payload.get("operation", "write_recovery") or "write_recovery")
+        phase = "done" if raw_phase == "complete" else "downloading"
+        last_result = "applied" if raw_phase == "complete" else raw_phase
+        self._set_update_state({
+            "phase": phase,
+            "operation": operation,
+            "version": payload.get("version", ""),
+            "total_files": total,
+            "applied_files": min(total, downloaded + skipped) if total else downloaded + skipped,
+            "downloaded_files": downloaded,
+            "skipped_files": skipped,
+            "current_file": "" if raw_phase == "complete" else payload.get("current_file", ""),
+            "last_error": "",
+            "last_result": last_result,
+            "reboot_required": raw_phase == "complete",
+        })
+        self._announce_status(force=True)
+
     def _normalize_logging_config(self, source):
         enabled = self._normalize_logging_enabled(source.get("enabled", True))
         capacity = str(source.get("capacity", "default") or "default")
@@ -1011,15 +1137,25 @@ class App:
         return self._normalize_logging_config(self.runtime.get("logging", {}))
 
     def _recovery_version(self):
+        runtime = getattr(self, "runtime", {}) if isinstance(getattr(self, "runtime", {}), dict) else {}
+        runtime_version = runtime.get("system", {}).get("recovery_version", "")
+        if runtime_version:
+            return runtime_version
         try:
             import immutable_config as recovery_config
-            return getattr(recovery_config, "FIRMWARE_VERSION", "unknown")
+            return getattr(
+                recovery_config,
+                "RECOVERY_VERSION",
+                getattr(recovery_config, "FIRMWARE_VERSION", "unknown"),
+            )
         except Exception:
-            return getattr(config, "RECOVERY_FIRMWARE_VERSION", "unknown")
+            return getattr(config, "RECOVERY_VERSION", getattr(config, "RECOVERY_FIRMWARE_VERSION", "unknown"))
 
     def _system_status(self):
         return {
             "name": self.device_name,
+            "hardware_model": getattr(config, "HARDWARE_MODEL", "unknown"),
+            "runtime_version": getattr(config, "RUNTIME_VERSION", "unknown"),
             "mode": self.mode,
             "os_version": getattr(config, "FIRMWARE_VERSION", "unknown"),
             "recovery_version": self._recovery_version(),
@@ -1049,7 +1185,7 @@ class App:
             "filter": self.config_store.load_filter(),
             "runtime": self.config_store.load_runtime(),
             "logging": self._logging_status(),
-            "update_state": {},
+            "update_state": self._current_update_state(),
             "calibration_mode": self.calibration_mode,
             "calibration_levels": self.calibration.list_levels() if self.calibration is not None else [],
             "available_rows": list(config.AVAILABLE_ROWS),

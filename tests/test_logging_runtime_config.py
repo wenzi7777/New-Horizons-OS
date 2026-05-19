@@ -49,6 +49,7 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             MQTT_USERNAME="",
             MQTT_PASSWORD="",
             GITHUB_BASE_URL="https://example.com/device",
+            RECOVERY_GITHUB_BASE_URL="https://example.com/base-device",
             GITHUB_RELEASE_URL="https://example.com/releases/latest.json",
             DEFAULT_RELEASE_URL="https://example.com/releases/latest.json",
             WIFI_MODE="STA",
@@ -68,6 +69,14 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
         self.assertEqual(module.DEFAULT_RUNTIME["update"]["release_url"], "https://example.com/releases/latest.json")
         self.assertEqual(module.DEFAULT_RUNTIME["update"]["source"], "github")
         self.assertEqual(sorted(module.DEFAULT_RUNTIME["update"]["sources"].keys()), ["github"])
+        self.assertEqual(
+            module.DEFAULT_RUNTIME["update"]["sources"]["github"]["os"],
+            "https://example.com/device/os/manifest.json",
+        )
+        self.assertEqual(
+            module.DEFAULT_RUNTIME["update"]["sources"]["github"]["recovery"],
+            "https://example.com/base-device/recovery/manifest.json",
+        )
 
     def test_os_runtime_loads_do_not_write_merged_defaults(self):
         saves = []

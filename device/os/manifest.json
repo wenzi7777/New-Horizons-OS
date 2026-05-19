@@ -2,15 +2,15 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.17",
-  "version": "v0.2.17",
+  "firmware_version": "v0.2.18",
+  "version": "v0.2.18",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.17/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.18/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
-      "sha256": "fd4ba3cce99e25811f622a8ed1688dd13f18147f6b9f6d3d3c1542e0dae57a5b",
-      "size": 19647,
+      "sha256": "4b2c53c4e349197fa85dfe6e0051a21cadd71e87aeb0af455989a64bfaaee142",
+      "size": 21780,
       "kind": "code",
       "reboot_required": true
     },
@@ -44,8 +44,8 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "8d23a2e9a9004139ba95c4e9b9092d8fcaaa7d2a43c7e193d0c559f83a06fc10",
-      "size": 2805,
+      "sha256": "eb8bbf71f100ff6922ecd14300e90e4ddb5570d2940c527e95ced00c6220edd3",
+      "size": 2985,
       "kind": "code",
       "reboot_required": true
     },
@@ -170,8 +170,8 @@
     },
     {
       "path": "runtime_config.mpy",
-      "sha256": "d460175a064e083f8b93a5c1d849e8bd09eb879e0103de34d0ea8e411c8558f2",
-      "size": 3506,
+      "sha256": "7185bcc2745b4725fe7427d8fa9a30bd1378013df89c8d43ddcc26e81aa77f0d",
+      "size": 3575,
       "kind": "code",
       "reboot_required": true
     },
@@ -239,6 +239,13 @@
       "reboot_required": true
     },
     {
+      "path": "update_writer.mpy",
+      "sha256": "32f3146fdc08b15ec8725e096c8ca777e9e8c382ded70743b5e4aa8e6cb9ac48",
+      "size": 3880,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
       "path": "utils.mpy",
       "sha256": "ab7316e6bad93602411bfb680a2e04127505824d568e53442966453efe69a005",
       "size": 387,
@@ -294,6 +301,7 @@
     "umqtt/__init__.py",
     "umqtt/robust.py",
     "umqtt/simple.py",
+    "update_writer.py",
     "utils.py",
     "vdboard.py",
     "wifi_manager.py"

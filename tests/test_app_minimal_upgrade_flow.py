@@ -13,6 +13,9 @@ def load_recovery_app_module():
     fake_machine = types.SimpleNamespace(reset=lambda: None)
     fake_iconfig = types.SimpleNamespace(
         FIRMWARE_NAME="New Horizons OS",
+        HARDWARE_MODEL="VD-CTL/R v1.0.F 2026.4",
+        RUNTIME_VERSION="v-runtime-test",
+        RECOVERY_VERSION="v-recovery-test",
         FIRMWARE_VERSION="v-recovery-test",
         LOG_PATH="device_state/logs/device.log",
         DEVICE_STATE_DIR="device_state",
@@ -233,6 +236,8 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
 
         self.assertEqual(result["system"]["name"], "New Horizons OS")
         self.assertEqual(result["system"]["mode"], "recovery")
+        self.assertEqual(result["system"]["hardware_model"], "VD-CTL/R v1.0.F 2026.4")
+        self.assertEqual(result["system"]["runtime_version"], "v-runtime-test")
         self.assertEqual(result["system"]["recovery_version"], "v-recovery-test")
         self.assertEqual(result["system"]["os_installed"], True)
 

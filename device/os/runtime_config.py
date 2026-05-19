@@ -43,6 +43,8 @@ def _mqtt_defaults_for_profile(profile_name):
 
 
 DEFAULT_MQTT = _mqtt_defaults_for_profile(DEFAULT_SERVER_PROFILE)
+OS_GITHUB_BASE_URL = getattr(config, "GITHUB_BASE_URL", "")
+RECOVERY_GITHUB_BASE_URL = getattr(config, "RECOVERY_GITHUB_BASE_URL", OS_GITHUB_BASE_URL)
 
 
 DEFAULT_RUNTIME = {
@@ -100,8 +102,8 @@ DEFAULT_RUNTIME = {
         "source": "github",
         "sources": {
             "github": {
-                "recovery": config.GITHUB_BASE_URL + "/recovery/manifest.json",
-                "os": config.GITHUB_BASE_URL + "/os/manifest.json",
+                "recovery": RECOVERY_GITHUB_BASE_URL + "/recovery/manifest.json",
+                "os": OS_GITHUB_BASE_URL + "/os/manifest.json",
             },
         },
     },

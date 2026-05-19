@@ -429,10 +429,12 @@ class RecoveryApp:
     def _system_status(self, runtime=None):
         return {
             "name": self.device_name,
+            "hardware_model": getattr(iconfig, "HARDWARE_MODEL", "unknown"),
+            "runtime_version": getattr(iconfig, "RUNTIME_VERSION", "unknown"),
             "mode": "recovery",
             "os_installed": self._os_installed(),
             "os_version": self._installed_os_version(runtime),
-            "recovery_version": getattr(iconfig, "FIRMWARE_VERSION", "unknown"),
+            "recovery_version": getattr(iconfig, "RECOVERY_VERSION", getattr(iconfig, "FIRMWARE_VERSION", "unknown")),
         }
 
     def _release_url(self, request):

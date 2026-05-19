@@ -226,9 +226,12 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         "machine": types.SimpleNamespace(reset=lambda: None),
         "immutable_config": types.SimpleNamespace(
             FIRMWARE_VERSION="v-recovery-test",
+            RECOVERY_VERSION="v-recovery-test",
         ),
         "config": types.SimpleNamespace(
             DEVICE_NAME="New Horizons OS",
+            HARDWARE_MODEL="VD-CTL/R v1.0.F 2026.4",
+            RUNTIME_VERSION="v-runtime-test",
             FIRMWARE_VERSION="v-os-test",
             ENABLE_IMU=False,
             ENABLE_BATTERY=enable_battery,
@@ -464,6 +467,8 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
         self.assertEqual(status["system"]["name"], "New Horizons OS")
         self.assertEqual(status["system"]["mode"], "normal")
+        self.assertEqual(status["system"]["hardware_model"], "VD-CTL/R v1.0.F 2026.4")
+        self.assertEqual(status["system"]["runtime_version"], "v-runtime-test")
         self.assertEqual(status["system"]["os_version"], "v-os-test")
         self.assertEqual(status["system"]["recovery_version"], "v-recovery-test")
 
@@ -648,7 +653,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         try:
             app = module.App(wifi_setup_requested=False)
             response = app._handle_control_request(
-                {"command": "set_matrix_layout", "active_rows": [1], "active_cols": [1]},
+                {"command": "set_matrix_layout", "analog_pins": [1], "select_pins": [1]},
                 ("127.0.0.1", 22345),
             )
         finally:
@@ -687,6 +692,80 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(denied["status"], "error")
         self.assertEqual(denied["message"], "requires_recovery")
         self.assertEqual(denied["next_command"], "reboot_to_recovery")
+
+    def test_recovery_update_commands_use_release_writer_in_normal_mode(self):
+        writer_calls = []
+
+        class FakeWriter:
+            def __init__(self, target, root_dir=".", logger=None, progress=None):
+                self.target = target
+                self.progress = progress
+                writer_calls.append(("init", target, root_dir))
+
+            def check_release(self, release_url):
+                writer_calls.append(("check", release_url))
+                return {
+                    "status": "ok",
+                    "message": "recovery_release_checked",
+                    "latest_version": "v-recovery-next",
+                    "manifest_url": "https://example.com/recovery/manifest.json",
+                }
+
+            def write_release(self, release_url):
+                writer_calls.append(("write", release_url))
+                if self.progress:
+                    self.progress({
+                        "phase": "complete",
+                        "operation": "write_recovery",
+                        "version": "v-recovery-next",
+                        "total_files": 2,
+                        "written_files": 2,
+                        "skipped_files": 0,
+                        "current_file": "",
+                    })
+                return {
+                    "status": "ok",
+                    "message": "recovery_write_complete",
+                    "version": "v-recovery-next",
+                    "downloaded_files": 2,
+                    "skipped_files": 0,
+                    "deleted_files": 0,
+                    "reboot_required": True,
+                }
+
+        module, _fake_scan, _events, saved_modules = load_full_app_module(
+            runtime_override={"update": {"release_url": "https://example.com/latest.json"}}
+        )
+        saved_update_writer = sys.modules.get("update_writer")
+        sys.modules["update_writer"] = types.SimpleNamespace(ManifestTargetWriter=FakeWriter)
+        try:
+            app = module.App(wifi_setup_requested=False)
+            checked = app._handle_control_request({"command": "check_recovery_release"}, ("mqtt", 0))
+            written = app._handle_control_request({"command": "write_recovery"}, ("mqtt", 0))
+            status = app._status()
+        finally:
+            if saved_update_writer is None:
+                sys.modules.pop("update_writer", None)
+            else:
+                sys.modules["update_writer"] = saved_update_writer
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(checked["message"], "recovery_release_checked")
+        self.assertEqual(written["message"], "recovery_write_complete")
+        self.assertEqual(written["update_state"]["operation"], "write_recovery")
+        self.assertEqual(status["system"]["recovery_version"], "v-recovery-next")
+        self.assertEqual(
+            writer_calls,
+            [
+                ("init", "recovery", "."),
+                ("check", "https://example.com/latest.json"),
+                ("write", "https://example.com/latest.json"),
+            ],
+        )
 
     def test_maintenance_sample_cell_runs_bounded_scan_and_stops_afterwards(self):
         module, fake_scan, _events, saved_modules = load_full_app_module()
@@ -732,7 +811,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app._handle_control_request({"command": "enter_maintenance"}, ("mqtt", 0))
 
             response = app._handle_control_request(
-                {"command": "set_matrix_layout", "active_rows": [1], "active_cols": [1]},
+                {"command": "set_matrix_layout", "analog_pins": [1], "select_pins": [1]},
                 ("mqtt", 0),
             )
         finally:
