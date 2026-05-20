@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "recovery",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.24",
-  "version": "v0.2.24",
+  "firmware_version": "v0.2.25",
+  "version": "v0.2.25",
   "target_root": "/recovery",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.24/device/recovery",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.25/device/recovery",
   "files": [
     {
       "path": "config.py",
@@ -37,7 +37,7 @@
     },
     {
       "path": "immutable_config.py",
-      "sha256": "05ffabfd0a40eb09e5d56b8d550d601091c920b194aab0241aafde46d695efa4",
+      "sha256": "0536fec9794236aefcaaf34d67ad025955169663130aa01ce6968ea24a78b594",
       "size": 1974,
       "kind": "code",
       "reboot_required": true
@@ -51,15 +51,15 @@
     },
     {
       "path": "os_writer.py",
-      "sha256": "4f2c0a46f136e33961ad8b5c4e8a323a0ee56324d3418eaf20aba79664440a6b",
-      "size": 8507,
+      "sha256": "640f6418381e2ab59a4ce3e4fbdec2fa05e803e32e4a283638b75a53dff1663f",
+      "size": 9206,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "recovery_app.py",
-      "sha256": "6a88aa6201108a552e5205005513a33a593b71883a73ba4d135cd4bb904fdf24",
-      "size": 22568,
+      "sha256": "fd04f150c658886f7b9778b4230617d38af22a4f07b54719ff31b7596a5d417a",
+      "size": 23041,
       "kind": "code",
       "reboot_required": true
     },
@@ -107,8 +107,8 @@
     },
     {
       "path": "wifi_manager.py",
-      "sha256": "c850030299c4bc86087ce0de006a679407a0fc2fa69eb9e4329683be97d5e810",
-      "size": 19482,
+      "sha256": "07d6bfb7f3fee8eb6212e1b3cf6600158508822bd5aed92c679dc387349a9457",
+      "size": 20001,
       "kind": "code",
       "reboot_required": true
     },

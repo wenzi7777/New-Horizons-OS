@@ -14,10 +14,8 @@ from filesystem_api import FilesystemAPI
 from mqtt_transport import MQTTTransport
 from runtime_config import RuntimeConfigStore
 from wifi_manager import WiFiManager
-try:
-    from os_writer import OSWriter
-except ImportError:
-    OSWriter = None
+
+OSWriter = None
 
 
 class RecoveryApp:
@@ -193,6 +191,7 @@ class RecoveryApp:
             }
 
         if command == "check_os_release":
+            self._prepare_ota_memory()
             release_url = self._release_url(request)
             writer = self._ensure_os_writer()
             result = writer.check_os_release(release_url)
@@ -215,6 +214,7 @@ class RecoveryApp:
             return result
 
         if command == "write_os":
+            self._prepare_ota_memory()
             release_url = self._release_url(request)
             writer = self._ensure_os_writer()
             result = writer.write_os(release_url)
@@ -440,6 +440,20 @@ class RecoveryApp:
                 OSWriter = LoadedOSWriter
             self.os_writer = OSWriter(".", self.logger, progress=self._os_write_progress)
         return self.os_writer
+
+    def _prepare_ota_memory(self):
+        try:
+            if hasattr(self.wifi, "release_setup_portal"):
+                self.wifi.release_setup_portal()
+            else:
+                self.wifi.stop_setup_portal()
+        except Exception as exc:
+            if self.logger is not None:
+                self.logger.warn("ota_prepare_wifi_release_failed {}".format(exc))
+        try:
+            gc.collect()
+        except Exception:
+            pass
 
     def _default_update_state(self):
         return {

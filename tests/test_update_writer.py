@@ -48,6 +48,14 @@ class FakeResponse:
 
 
 class ManifestTargetWriterTests(unittest.TestCase):
+    def test_update_writer_uses_streamed_plan_to_reduce_heap(self):
+        source = UPDATE_WRITER_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("def _iter_downloads", source)
+        self.assertIn("def _summarize", source)
+        self.assertNotIn("downloaded = []", source)
+        self.assertNotIn('for item in plan["downloads"]', source)
+
     def test_write_recovery_uses_nested_release_and_recovery_target_root(self):
         module = load_update_writer_module()
         app_payload = b"RECOVERY_VERSION = 'v0.2.18'\n"

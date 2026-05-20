@@ -48,6 +48,14 @@ class FakeResponse:
 
 
 class OSWriterTests(unittest.TestCase):
+    def test_write_os_uses_streamed_plan_to_reduce_recovery_heap(self):
+        source = OS_WRITER_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("def _iter_downloads", source)
+        self.assertIn("def _summarize", source)
+        self.assertNotIn("downloaded = []", source)
+        self.assertNotIn('for item in plan["downloads"]', source)
+
     def test_write_os_skips_matching_hashes_and_downloads_only_changed_files(self):
         module = load_os_writer_module()
         app_payload = b"print('already installed')\n"

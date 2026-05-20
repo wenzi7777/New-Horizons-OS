@@ -51,70 +51,87 @@ class OSWriter:
             raise ValueError("missing_manifest_url")
         manifest = self._fetch_json(manifest_url)
         version = manifest.get("version", release.get("latest", ""))
-        plan = self._plan(manifest)
-        self._emit("planned", version, plan, "")
+        summary = self._summarize(manifest)
+        self._emit("planned", version, summary, "")
 
-        downloaded = []
-        for item in plan["downloads"]:
+        downloaded = 0
+        for item in self._iter_downloads(manifest):
             self._collect()
             staged_path = self._stage_path(item["path"])
-            self._emit("downloading", version, plan, item["path"])
+            self._emit("downloading", version, summary, item["path"], downloaded=downloaded)
             self._download_to_path(item["url"], staged_path, item["sha256"])
-            downloaded.append(item["path"])
-            self._emit("file_done", version, plan, item["path"], downloaded=len(downloaded))
-            self._collect()
-
-        for item in plan["downloads"]:
             src = self._stage_path(item["path"])
             dst = self._os_path(item["path"], manifest)
             storage.ensure_dir(storage.dirname(dst))
             storage.remove(dst)
             os.rename(src, dst)
+            downloaded += 1
+            self._emit("file_done", version, summary, item["path"], downloaded=downloaded)
+            self._collect()
 
-        deleted = []
-        for rel in plan["deletes"]:
+        deleted = 0
+        for rel in self._iter_deletes(manifest):
             if storage.remove(self._os_path(rel, manifest)):
-                deleted.append(rel)
+                deleted += 1
 
         state = {
             "version": version,
             "manifest_url": manifest_url,
-            "downloaded_files": len(downloaded),
-            "skipped_files": len(plan["skips"]),
-            "deleted_files": len(deleted),
+            "downloaded_files": downloaded,
+            "skipped_files": summary["skipped_files"],
+            "deleted_files": deleted,
             "last_result": "applied",
         }
         storage.save_json(self.state_path, state)
-        self._emit("complete", version, plan, "")
+        self._emit("complete", version, summary, "", downloaded=downloaded)
         return {
             "status": "ok",
             "message": "os_write_complete",
             "version": version,
-            "downloaded_files": len(downloaded),
-            "skipped_files": len(plan["skips"]),
-            "deleted_files": len(deleted),
+            "downloaded_files": downloaded,
+            "skipped_files": summary["skipped_files"],
+            "deleted_files": deleted,
             "reboot_required": True,
         }
 
-    def _plan(self, manifest):
-        downloads = []
-        skips = []
+    def _summarize(self, manifest):
+        total = 0
+        downloads = 0
+        skips = 0
+        for entry in manifest.get("files", []):
+            total += 1
+            rel = self._safe_rel(entry.get("path", ""))
+            expected = entry.get("sha256", "")
+            current = storage.sha256_hex_file(self._os_path(rel, manifest))
+            if current == expected:
+                skips += 1
+                continue
+            downloads += 1
+        return {
+            "total_files": total,
+            "download_files": downloads,
+            "skipped_files": skips,
+        }
+
+    def _iter_downloads(self, manifest):
         base_url = manifest.get("base_url", "")
         for entry in manifest.get("files", []):
             rel = self._safe_rel(entry.get("path", ""))
             expected = entry.get("sha256", "")
             current = storage.sha256_hex_file(self._os_path(rel, manifest))
             if current == expected:
-                skips.append(rel)
                 continue
-            downloads.append({
+            yield {
                 "path": rel,
                 "url": self._make_url(base_url, rel),
                 "sha256": expected,
                 "size": int(entry.get("size", 0)),
-            })
-        deletes = [self._safe_rel(path) for path in manifest.get("delete", []) if path]
-        return {"downloads": downloads, "skips": skips, "deletes": deletes}
+            }
+
+    def _iter_deletes(self, manifest):
+        for path in manifest.get("delete", []):
+            if path:
+                yield self._safe_rel(path)
 
     def _download_to_path(self, url, local_path, expected_sha256):
         storage.ensure_dir(storage.dirname(local_path))
@@ -122,6 +139,8 @@ class OSWriter:
         hasher = self._new_hasher()
         stream = None
         closer = None
+        chunk = None
+        self._collect()
         try:
             if requests is not None:
                 resp = requests.get(url)
@@ -144,6 +163,10 @@ class OSWriter:
                     closer.close()
                 except Exception:
                     pass
+            stream = None
+            closer = None
+            chunk = None
+            self._collect()
         actual = self._hexdigest(hasher)
         if actual != expected_sha256:
             storage.remove(tmp_path)
@@ -220,14 +243,14 @@ class OSWriter:
             except Exception:
                 pass
 
-    def _emit(self, phase, version, plan, current_file, downloaded=0):
+    def _emit(self, phase, version, summary, current_file, downloaded=0):
         payload = {
             "message": "os_write_progress" if phase != "complete" else "os_write_complete",
             "phase": phase,
             "version": version,
-            "total_files": len(plan["downloads"]) + len(plan["skips"]),
-            "download_files": len(plan["downloads"]),
-            "skipped_files": len(plan["skips"]),
+            "total_files": int(summary.get("total_files", 0)),
+            "download_files": int(summary.get("download_files", 0)),
+            "skipped_files": int(summary.get("skipped_files", 0)),
             "written_files": downloaded,
             "current_file": current_file,
         }

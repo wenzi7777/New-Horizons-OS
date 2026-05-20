@@ -2,6 +2,10 @@
 import time
 import gc
 import network
+try:
+    import sys
+except ImportError:  # pragma: no cover - CPython fallback
+    sys = None
 
 import config
 import secrets
@@ -72,8 +76,7 @@ class WiFiManager:
                 for _ in range(20):
                     if sta.isconnected():
                         self._log_info("wifi_sta_connected ip={}".format(sta.ifconfig()[0]))
-                        self.stop_setup_portal()
-                        self._disable_ap()
+                        self.release_setup_portal()
                         self.state = "wifi_connected"
                         return True
 
@@ -148,6 +151,23 @@ class WiFiManager:
         if self.portal is not None:
             self.portal.stop()
         self._disable_ap()
+
+    def release_setup_portal(self):
+        global WiFiSetupPortal
+        if self.portal is not None:
+            try:
+                self.portal.stop()
+            except Exception:
+                pass
+        self.portal = None
+        WiFiSetupPortal = None
+        if sys is not None:
+            try:
+                sys.modules.pop("wifi_portal", None)
+            except Exception:
+                pass
+        self._disable_ap()
+        gc.collect()
 
     def setup_active(self):
         return bool(self.portal is not None and self.portal.active)
@@ -248,7 +268,7 @@ class WiFiManager:
         ok = self.connect_sta(ssid, password)
         if ok:
             self.last_setup_result = "connected"
-            self.stop_setup_portal()
+            self.release_setup_portal()
             return {
                 "ok": True,
                 "message": "Connected to {}".format(ssid),

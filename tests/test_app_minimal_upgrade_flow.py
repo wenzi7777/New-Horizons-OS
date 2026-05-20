@@ -155,6 +155,11 @@ class FakePortalWiFi:
 
 
 class RecoveryOSWriterFlowTests(unittest.TestCase):
+    def test_recovery_app_loads_os_writer_lazily(self):
+        module = load_recovery_app_module()
+
+        self.assertIsNone(module.OSWriter)
+
     def test_os_write_progress_updates_state_and_publishes_status(self):
         module = load_recovery_app_module()
         app = module.RecoveryApp.__new__(module.RecoveryApp)
@@ -271,6 +276,21 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
 
     def test_write_os_runs_in_recovery_and_uses_github_release_url(self):
         module = load_recovery_app_module()
+
+        class FakeOSWriter:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def write_os(self, release_url):
+                return {
+                    "status": "ok",
+                    "message": "os_write_complete",
+                    "downloaded_files": 1,
+                    "skipped_files": 2,
+                    "reboot_required": True,
+                }
+
+        module.OSWriter = FakeOSWriter
         app = module.RecoveryApp.__new__(module.RecoveryApp)
         app.runtime = {
             "mode": "recovery",
