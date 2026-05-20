@@ -37,6 +37,12 @@ class FakeScan:
         return ()
 
 
+class FailingInitScan(FakeScan):
+    def init(self, **kwargs):
+        super().init(**kwargs)
+        raise MemoryError("stream buffer alloc failed")
+
+
 class FakeLogger:
     def __init__(self):
         self.infos = []
@@ -656,6 +662,31 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     sys.modules[name] = saved
 
         self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["runtime"]["matrix_layout"], {"active_rows": [1], "active_cols": [1]})
+
+    def test_set_matrix_layout_rolls_back_when_scan_alloc_fails(self):
+        module, _fake_scan, events, saved_modules = load_full_app_module()
+        try:
+            module.config.AVAILABLE_ROWS = [1, 2]
+            module.config.AVAILABLE_COLS = [1, 2]
+            failing_scan = FailingInitScan(events)
+            app = module.App(wifi_setup_requested=False)
+            app.hardware_ready = True
+            app.vdboard = types.SimpleNamespace(scan=failing_scan)
+
+            response = app._handle_control_request(
+                {"command": "set_matrix_layout", "analog_pins": [1, 2], "select_pins": [1, 2]},
+                ("mqtt", 0),
+            )
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "error")
+        self.assertEqual(response["message"], "matrix_layout_failed")
         self.assertEqual(response["runtime"]["matrix_layout"], {"active_rows": [1], "active_cols": [1]})
 
     def test_enter_maintenance_stops_scan_and_rejects_os_writer(self):

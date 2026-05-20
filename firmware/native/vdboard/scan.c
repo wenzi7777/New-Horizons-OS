@@ -58,6 +58,8 @@ typedef struct _vdboard_stream_context_t {
     vdboard_stream_filter_state_t *filter_states;
     vdboard_stream_cal_point_t *calibration_points;
     uint8_t *calibration_counts;
+    uint16_t *calibration_offsets;
+    uint16_t calibration_point_capacity;
     uint16_t capacity_points;
     bool filter_enabled;
     uint8_t filter_median;
@@ -127,6 +129,8 @@ static vdboard_stream_context_t g_stream_ctx = {
     .filter_states = NULL,
     .calibration_points = NULL,
     .calibration_counts = NULL,
+    .calibration_offsets = NULL,
+    .calibration_point_capacity = 0,
     .capacity_points = 0,
     .filter_enabled = false,
     .filter_median = 3,
@@ -165,12 +169,15 @@ static void vdboard_stream_release_buffers(void) {
     free(g_stream_ctx.filter_states);
     free(g_stream_ctx.calibration_points);
     free(g_stream_ctx.calibration_counts);
+    free(g_stream_ctx.calibration_offsets);
     g_stream_ctx.frame_scratch = NULL;
     g_stream_ctx.packet_scratch = NULL;
     g_stream_ctx.packet_scratch_size = 0;
     g_stream_ctx.filter_states = NULL;
     g_stream_ctx.calibration_points = NULL;
     g_stream_ctx.calibration_counts = NULL;
+    g_stream_ctx.calibration_offsets = NULL;
+    g_stream_ctx.calibration_point_capacity = 0;
     g_stream_ctx.capacity_points = 0;
     g_stream_ctx.packet_frames = 0;
 }
@@ -194,19 +201,18 @@ static void vdboard_stream_prepare_buffers(void) {
         + VDBOARD_STREAM_HMAC_MAX_LEN;
     g_stream_ctx.packet_scratch = malloc(g_stream_ctx.packet_scratch_size);
     g_stream_ctx.filter_states = calloc(g_scan_state.point_count, sizeof(vdboard_stream_filter_state_t));
-    g_stream_ctx.calibration_points = calloc(
-        g_scan_state.point_count * VDBOARD_STREAM_MAX_CAL_POINTS,
-        sizeof(vdboard_stream_cal_point_t)
-    );
     g_stream_ctx.calibration_counts = calloc(g_scan_state.point_count, sizeof(uint8_t));
+    g_stream_ctx.calibration_offsets = calloc(g_scan_state.point_count, sizeof(uint16_t));
     if (g_stream_ctx.frame_scratch == NULL
             || g_stream_ctx.packet_scratch == NULL
             || g_stream_ctx.filter_states == NULL
-            || g_stream_ctx.calibration_points == NULL
-            || g_stream_ctx.calibration_counts == NULL) {
+            || g_stream_ctx.calibration_counts == NULL
+            || g_stream_ctx.calibration_offsets == NULL) {
         vdboard_stream_release_buffers();
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("stream buffer alloc failed"));
     }
+    g_stream_ctx.calibration_points = NULL;
+    g_stream_ctx.calibration_point_capacity = 0;
     g_stream_ctx.capacity_points = g_scan_state.point_count;
 }
 
@@ -266,7 +272,10 @@ static float vdboard_stream_apply_filter(uint16_t sensor_index, float value) {
 }
 
 static float vdboard_stream_apply_calibration(uint16_t sensor_index, float raw_mv) {
-    if (g_stream_ctx.calibration_counts == NULL || g_stream_ctx.calibration_points == NULL || sensor_index >= g_stream_ctx.capacity_points) {
+    if (g_stream_ctx.calibration_counts == NULL
+            || g_stream_ctx.calibration_offsets == NULL
+            || g_stream_ctx.calibration_points == NULL
+            || sensor_index >= g_stream_ctx.capacity_points) {
         return raw_mv;
     }
     uint8_t count = g_stream_ctx.calibration_counts[sensor_index];
@@ -274,7 +283,11 @@ static float vdboard_stream_apply_calibration(uint16_t sensor_index, float raw_m
         return raw_mv;
     }
 
-    vdboard_stream_cal_point_t *points = &g_stream_ctx.calibration_points[sensor_index * VDBOARD_STREAM_MAX_CAL_POINTS];
+    uint16_t offset = g_stream_ctx.calibration_offsets[sensor_index];
+    if ((uint32_t)offset + count > g_stream_ctx.calibration_point_capacity) {
+        return raw_mv;
+    }
+    vdboard_stream_cal_point_t *points = &g_stream_ctx.calibration_points[offset];
     if (raw_mv <= points[0].sample_mv) {
         return points[0].level;
     }
@@ -821,15 +834,15 @@ static mp_obj_t vdboard_stream_configure_filter(mp_obj_t enabled_obj, mp_obj_t m
 static MP_DEFINE_CONST_FUN_OBJ_3(vdboard_stream_configure_filter_obj, vdboard_stream_configure_filter);
 
 static mp_obj_t vdboard_stream_load_calibration(mp_obj_t table_obj) {
-    if (g_stream_ctx.calibration_points == NULL || g_stream_ctx.calibration_counts == NULL) {
+    if (g_stream_ctx.calibration_counts == NULL || g_stream_ctx.calibration_offsets == NULL) {
         mp_raise_ValueError(MP_ERROR_TEXT("scan not initialized"));
     }
-    memset(
-        g_stream_ctx.calibration_points,
-        0,
-        g_stream_ctx.capacity_points * VDBOARD_STREAM_MAX_CAL_POINTS * sizeof(vdboard_stream_cal_point_t)
-    );
+
+    free(g_stream_ctx.calibration_points);
+    g_stream_ctx.calibration_points = NULL;
+    g_stream_ctx.calibration_point_capacity = 0;
     memset(g_stream_ctx.calibration_counts, 0, g_stream_ctx.capacity_points * sizeof(uint8_t));
+    memset(g_stream_ctx.calibration_offsets, 0, g_stream_ctx.capacity_points * sizeof(uint16_t));
 
     if (table_obj == mp_const_none) {
         return mp_const_true;
@@ -841,6 +854,7 @@ static mp_obj_t vdboard_stream_load_calibration(mp_obj_t table_obj) {
         mp_raise_ValueError(MP_ERROR_TEXT("calibration table too large"));
     }
 
+    uint32_t total_points = 0;
     for (size_t sensor = 0; sensor < sensor_len; ++sensor) {
         if (sensor_items[sensor] == mp_const_none) {
             continue;
@@ -851,7 +865,6 @@ static mp_obj_t vdboard_stream_load_calibration(mp_obj_t table_obj) {
         if (point_len > VDBOARD_STREAM_MAX_CAL_POINTS) {
             mp_raise_ValueError(MP_ERROR_TEXT("too many calibration points"));
         }
-        vdboard_stream_cal_point_t *points = &g_stream_ctx.calibration_points[sensor * VDBOARD_STREAM_MAX_CAL_POINTS];
         for (size_t idx = 0; idx < point_len; ++idx) {
             size_t pair_len = 0;
             mp_obj_t *pair_items = NULL;
@@ -859,12 +872,51 @@ static mp_obj_t vdboard_stream_load_calibration(mp_obj_t table_obj) {
             if (pair_len != 2) {
                 mp_raise_ValueError(MP_ERROR_TEXT("calibration point must be pair"));
             }
+        }
+        total_points += point_len;
+        if (total_points > 65535) {
+            mp_raise_ValueError(MP_ERROR_TEXT("calibration table too large"));
+        }
+    }
+
+    vdboard_stream_cal_point_t *new_points = NULL;
+    if (total_points > 0) {
+        new_points = calloc(total_points, sizeof(vdboard_stream_cal_point_t));
+        if (new_points == NULL) {
+            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("calibration alloc failed"));
+        }
+    }
+
+    uint16_t cursor = 0;
+    for (size_t sensor = 0; sensor < sensor_len; ++sensor) {
+        if (sensor_items[sensor] == mp_const_none) {
+            continue;
+        }
+        size_t point_len = 0;
+        mp_obj_t *point_items = NULL;
+        mp_obj_get_array(sensor_items[sensor], &point_len, &point_items);
+        if (point_len == 0) {
+            continue;
+        }
+        vdboard_stream_cal_point_t *points = &new_points[cursor];
+        for (size_t idx = 0; idx < point_len; ++idx) {
+            size_t pair_len = 0;
+            mp_obj_t *pair_items = NULL;
+            mp_obj_get_array(point_items[idx], &pair_len, &pair_items);
+            if (pair_len != 2) {
+                free(new_points);
+                mp_raise_ValueError(MP_ERROR_TEXT("calibration point must be pair"));
+            }
             points[idx].sample_mv = (float)mp_obj_get_float(pair_items[0]);
             points[idx].level = (float)mp_obj_get_float(pair_items[1]);
         }
+        g_stream_ctx.calibration_offsets[sensor] = cursor;
         g_stream_ctx.calibration_counts[sensor] = (uint8_t)point_len;
         vdboard_stream_sort_cal_points(points, (uint8_t)point_len);
+        cursor += (uint16_t)point_len;
     }
+    g_stream_ctx.calibration_points = new_points;
+    g_stream_ctx.calibration_point_capacity = (uint16_t)total_points;
     return mp_const_true;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(vdboard_stream_load_calibration_obj, vdboard_stream_load_calibration);
@@ -1024,7 +1076,10 @@ static mp_obj_t vdboard_stream_memory_stats(void) {
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_frame_scratch_bytes), mp_obj_new_int(g_scan_ctx.frame_size));
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_packet_scratch_bytes), mp_obj_new_int(g_stream_ctx.packet_scratch_size));
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_filter_state_bytes), mp_obj_new_int(g_stream_ctx.capacity_points * sizeof(vdboard_stream_filter_state_t)));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_calibration_bytes), mp_obj_new_int(g_stream_ctx.capacity_points * VDBOARD_STREAM_MAX_CAL_POINTS * sizeof(vdboard_stream_cal_point_t)));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_calibration_bytes), mp_obj_new_int(
+        (g_stream_ctx.calibration_point_capacity * sizeof(vdboard_stream_cal_point_t))
+        + (g_stream_ctx.capacity_points * (sizeof(uint8_t) + sizeof(uint16_t)))
+    ));
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_ring_bytes), mp_obj_new_int(g_scan_state.buffer_frames * g_scan_ctx.frame_size));
     return dict;
 }

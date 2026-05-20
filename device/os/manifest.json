@@ -2,15 +2,15 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.23",
-  "version": "v0.2.23",
+  "firmware_version": "v0.2.24",
+  "version": "v0.2.24",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.23/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.24/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
-      "sha256": "5ec6677c736d71305b6dee3fb21f5f79457c00bb22f5701ace0cad5e43eba5fa",
-      "size": 22357,
+      "sha256": "8f492e05eb427a50037531a4378e4cdc1503cf872c94d4e77e0025b6a2057400",
+      "size": 22642,
       "kind": "code",
       "reboot_required": true
     },
@@ -44,8 +44,8 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "c1d0dd1e2d89b1118fe062736b4a8a317ca68548d60b3ee9be29d5c712872930",
-      "size": 2876,
+      "sha256": "00647e261c447a9efbfd8692d236a6e16957d4bcd8bee018dfac9f979e3904a5",
+      "size": 2874,
       "kind": "code",
       "reboot_required": true
     },

@@ -533,6 +533,11 @@ class App:
                 )
             except ValueError as exc:
                 return self._ok("matrix_layout_invalid", error=str(exc))
+            old_layout = (self.runtime or {}).get("matrix_layout", {}) or {}
+            rollback_layout = {
+                "active_rows": list(old_layout.get("active_rows", [])),
+                "active_cols": list(old_layout.get("active_cols", [])),
+            }
             runtime = self.config_store.update_runtime({
                 "matrix_layout": {
                     "active_rows": rows,
@@ -540,7 +545,24 @@ class App:
                 },
             })
             self.runtime = runtime
-            self._apply_matrix_layout()
+            try:
+                self._apply_matrix_layout()
+            except Exception as exc:
+                rollback_runtime = self.config_store.update_runtime({"matrix_layout": rollback_layout})
+                self.runtime = rollback_runtime
+                try:
+                    self._apply_matrix_layout()
+                except Exception as rollback_exc:
+                    self._stop_scan()
+                    self.logger.warn("matrix_layout_rollback_scan_failed {}".format(rollback_exc))
+                return {
+                    "status": "error",
+                    "message": "matrix_layout_failed",
+                    "runtime": rollback_runtime,
+                    "reboot_required": False,
+                    "applied": False,
+                    "error": str(exc),
+                }
             return {
                 "status": "ok",
                 "message": "matrix_layout_updated",
