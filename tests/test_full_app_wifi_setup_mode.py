@@ -163,8 +163,8 @@ class FakeRuntimeConfigStore:
             "matrix_layout": {"active_rows": [1], "active_cols": [1]},
             "matrix_layout_state": {"pending": False, "committed": True, "last_error": ""},
             "matrix_scan_state": {"active": False, "autostart_disabled": False, "last_error": ""},
-            "mqtt": {"host": "127.0.0.1", "port": 1883, "tls": False},
-            "transport": {"mode": "mqtt", "topic_namespace": "newhorizons/v1"},
+            "server": {"host": "127.0.0.1", "tcp_port": 22345, "udp_port": 13250},
+            "transport": {"mode": "udp_tcp"},
             "logging": {"enabled": True, "capacity": "default", "serial": "status"},
         }
         if runtime_override:
@@ -262,9 +262,40 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
     fake_vdboard = types.SimpleNamespace(scan=fake_scan)
     saved_modules = {}
 
-    class ForbiddenUdpModule(types.ModuleType):
+    class ForbiddenMqttModule(types.ModuleType):
         def __getattr__(self, name):
-            raise AssertionError("New Horizons OS must not import UDP modules")
+            raise AssertionError("New Horizons OS must not import MQTT modules")
+
+    class FakeTCPControlTransport:
+        def __init__(self, *args, **kwargs):
+            self.poll_calls = 0
+            self.status_payloads = []
+            self.reconfigure_calls = 0
+
+        def poll(self, *args, **kwargs):
+            self.poll_calls += 1
+
+        def publish_status(self, payload, connected):
+            self.status_payloads.append((payload, connected))
+            return True
+
+        def reconfigure(self):
+            self.reconfigure_calls += 1
+
+        def is_connected(self):
+            return True
+
+    class FakeUDPStreamTransport:
+        def __init__(self, *args, **kwargs):
+            self.sent = []
+            self.reconfigure_calls = 0
+
+        def send(self, payload, connected):
+            self.sent.append((payload, connected))
+            return True
+
+        def reconfigure(self):
+            self.reconfigure_calls += 1
 
     injected = {
         "machine": types.SimpleNamespace(reset=lambda: None),
@@ -327,13 +358,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         "filesystem_api": types.SimpleNamespace(FilesystemAPI=lambda *args, **kwargs: None),
         "filter_engine": types.SimpleNamespace(FilterChain=lambda **kwargs: types.SimpleNamespace(process=lambda idx, value: value, apply_config=lambda *args: None)),
         "frame_protocol": types.SimpleNamespace(decode_scan_frame=lambda payload: {}),
-        "mqtt_transport": types.SimpleNamespace(
-            MQTTTransport=lambda *args, **kwargs: types.SimpleNamespace(
-                poll=lambda *poll_args, **poll_kwargs: None,
-                publish_raw=lambda *raw_args, **raw_kwargs: True,
-                publish_status=lambda *status_args, **status_kwargs: True,
-            )
-        ),
+        "mqtt_transport": ForbiddenMqttModule("mqtt_transport"),
         "packet": types.SimpleNamespace(
             PacketBuilder=lambda **kwargs: types.SimpleNamespace(build=lambda **packet_kwargs: b"packet")
         ),
@@ -349,8 +374,9 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
                 last_error="",
             )
         ),
-        "udp_control": ForbiddenUdpModule("udp_control"),
-        "udp_stream": ForbiddenUdpModule("udp_stream"),
+        "tcp_control": types.SimpleNamespace(TCPControlTransport=FakeTCPControlTransport),
+        "udp_control": types.ModuleType("udp_control"),
+        "udp_stream": types.SimpleNamespace(UDPStreamTransport=FakeUDPStreamTransport),
         "utils": types.SimpleNamespace(RateCounter=lambda interval: None),
         "wifi_manager": types.SimpleNamespace(
             WiFiManager=lambda *args, **kwargs: FakeWiFi(events, connect_result=wifi_connect_result)
@@ -524,7 +550,8 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         try:
             app = module.App(wifi_setup_requested=False)
 
-            self.assertIsNone(app.mqtt_transport)
+            self.assertIsNone(app.control_transport)
+            self.assertIsNone(app.udp_stream)
             self.assertIsNone(app.time_sync)
             self.assertIsNone(app.calibration)
             self.assertIsNone(app.tx_buffer)
@@ -539,7 +566,8 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 else:
                     sys.modules[name] = saved
 
-        self.assertIsNotNone(app.mqtt_transport)
+        self.assertIsNotNone(app.control_transport)
+        self.assertIsNotNone(app.udp_stream)
         self.assertIsNotNone(app.time_sync)
         self.assertIsNone(app.calibration)
         self.assertIsNone(app.packet)
@@ -670,7 +698,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
         try:
             app = module.App.__new__(module.App)
-            app.mqtt_transport = types.SimpleNamespace(publish_raw=lambda payload, connected: False)
+            app.udp_stream = types.SimpleNamespace(send=lambda payload, connected: False)
             app.wifi = types.SimpleNamespace(is_connected=lambda: True)
             app.tx_buffer = FakeBuffer()
             app.sent_packets = 0
@@ -716,7 +744,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app.send_backoff_until_ms = 1100
             app.time_sync = types.SimpleNamespace(status=lambda: {"synced": False})
             app.scan_rate = types.SimpleNamespace(tick=lambda: None)
-            app.mqtt_transport = types.SimpleNamespace(publish_raw=lambda payload, connected: True)
+            app.udp_stream = types.SimpleNamespace(send=lambda payload, connected: True)
             app.wifi = types.SimpleNamespace(is_connected=lambda: True)
             app.sent_packets = 0
             app.failed_sends = 0
@@ -751,7 +779,8 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app.frame_id = 0
             app.send_backoff_until_ms = 1100
             app.scan_rate = types.SimpleNamespace(tick=lambda: None)
-            app.mqtt_transport = types.SimpleNamespace(publish_raw=lambda payload, connected: True)
+            app.control_transport = types.SimpleNamespace(is_connected=lambda: True)
+            app.udp_stream = types.SimpleNamespace(send=lambda payload, connected: True)
             app.wifi = types.SimpleNamespace(is_connected=lambda: True)
             app.sent_packets = 0
             app.failed_sends = 0
@@ -776,7 +805,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app = module.App(wifi_setup_requested=False)
             response = app._handle_control_request(
                 {"command": "set_matrix_layout", "analog_pins": [1], "select_pins": [1]},
-                ("mqtt", 0),
+                ("tcp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -801,7 +830,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
             response = app._handle_control_request(
                 {"command": "set_matrix_layout", "analog_pins": [1, 2], "select_pins": [1, 2]},
-                ("mqtt", 0),
+                ("tcp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -827,7 +856,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
             response = app._handle_control_request(
                 {"command": "set_matrix_layout", "analog_pins": [1, 2], "select_pins": [1, 2]},
-                ("mqtt", 0),
+                ("tcp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -848,9 +877,9 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
             response = app._handle_control_request(
                 {"command": "enter_maintenance", "reason": "calibration"},
-                ("mqtt", 0),
+                ("tcp", 0),
             )
-            denied = app._handle_control_request({"command": "write_os"}, ("mqtt", 0))
+            denied = app._handle_control_request({"command": "write_os"}, ("tcp", 0))
         finally:
             for name, saved in saved_modules.items():
                 if saved is None:
@@ -914,8 +943,8 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         sys.modules["update_writer"] = types.SimpleNamespace(ManifestTargetWriter=FakeWriter)
         try:
             app = module.App(wifi_setup_requested=False)
-            checked = app._handle_control_request({"command": "check_recovery_release"}, ("mqtt", 0))
-            written = app._handle_control_request({"command": "write_recovery"}, ("mqtt", 0))
+            checked = app._handle_control_request({"command": "check_recovery_release"}, ("tcp", 0))
+            written = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
             status = app._status()
         finally:
             if saved_update_writer is None:
@@ -946,7 +975,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         try:
             app = module.App(wifi_setup_requested=False)
             app.setup()
-            app._handle_control_request({"command": "enter_maintenance"}, ("mqtt", 0))
+            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
             fake_scan.sample_cell_mv = lambda analog_pin, select_pin, duration_ms: 123.5
             gc_calls = []
             module.gc.collect = lambda: gc_calls.append("collect")
@@ -959,7 +988,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     "level": 2.5,
                     "duration_ms": 3000,
                 },
-                ("mqtt", 0),
+                ("tcp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -982,7 +1011,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         try:
             app = module.App(wifi_setup_requested=False)
             responses = [
-                app._handle_control_request({"command": command}, ("mqtt", 0))
+                app._handle_control_request({"command": command}, ("tcp", 0))
                 for command in (
                     "enter_calibration_mode",
                     "start_calibration",
@@ -1006,11 +1035,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         try:
             app = module.App(wifi_setup_requested=False)
             app.setup()
-            app._handle_control_request({"command": "enter_maintenance"}, ("mqtt", 0))
+            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
 
             response = app._handle_control_request(
                 {"command": "set_matrix_layout", "analog_pins": [1], "select_pins": [1]},
-                ("mqtt", 0),
+                ("tcp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -1028,7 +1057,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app = module.App(wifi_setup_requested=False)
             response = app._handle_control_request(
                 {"command": "set_logging", "enabled": False, "capacity": "extended"},
-                ("mqtt", 0),
+                ("tcp", 0),
             )
             status = app._status()
         finally:
@@ -1051,11 +1080,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         try:
             app = module.App(wifi_setup_requested=False)
             app.setup()
-            app._handle_control_request({"command": "enter_maintenance"}, ("mqtt", 0))
+            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
 
             response = app._handle_control_request(
                 {"command": "set_logging", "enabled": True, "capacity": "extended"},
-                ("mqtt", 0),
+                ("tcp", 0),
             )
         finally:
             for name, saved in saved_modules.items():

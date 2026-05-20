@@ -39,12 +39,9 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             TARGET_FPS=60,
             SEND_EVERY_N_FRAMES=1,
             MATRIX_SETTLE_US=20,
-            MQTT_TOPIC_NAMESPACE="newhorizons/v1",
-            MQTT_BROKER_HOST="127.0.0.1",
-            MQTT_BROKER_PORT=1883,
-            MQTT_TLS=False,
-            MQTT_USERNAME="",
-            MQTT_PASSWORD="",
+            DEFAULT_SERVER_HOST="127.0.0.1",
+            DEFAULT_TCP_CONTROL_PORT=22345,
+            DEFAULT_UDP_STREAM_PORT=13250,
             GITHUB_BASE_URL="https://example.com/device",
             RECOVERY_GITHUB_BASE_URL="https://example.com/base-device",
             GITHUB_RELEASE_URL="https://example.com/releases/latest.json",
@@ -62,7 +59,7 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             module.DEFAULT_RUNTIME["logging"],
             {"enabled": True, "capacity": "default", "serial": "status"},
         )
-        self.assertEqual(module.DEFAULT_RUNTIME["transport"]["mode"], "mqtt")
+        self.assertEqual(module.DEFAULT_RUNTIME["transport"]["mode"], "udp_tcp")
         self.assertEqual(module.DEFAULT_RUNTIME["update"]["release_url"], "https://example.com/releases/latest.json")
         self.assertEqual(module.DEFAULT_RUNTIME["update"]["source"], "github")
         self.assertEqual(sorted(module.DEFAULT_RUNTIME["update"]["sources"].keys()), ["github"])
@@ -88,12 +85,9 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             TARGET_FPS=60,
             SEND_EVERY_N_FRAMES=1,
             MATRIX_SETTLE_US=20,
-            MQTT_TOPIC_NAMESPACE="newhorizons/v1",
-            MQTT_BROKER_HOST="127.0.0.1",
-            MQTT_BROKER_PORT=1883,
-            MQTT_TLS=False,
-            MQTT_USERNAME="",
-            MQTT_PASSWORD="",
+            DEFAULT_SERVER_HOST="127.0.0.1",
+            DEFAULT_TCP_CONTROL_PORT=22345,
+            DEFAULT_UDP_STREAM_PORT=13250,
             GITHUB_BASE_URL="https://example.com/device",
             GITHUB_RELEASE_URL="https://example.com/releases/latest.json",
             DEFAULT_RELEASE_URL="https://example.com/releases/latest.json",
@@ -129,12 +123,9 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             DEFAULT_BUFFER_FRAMES=8,
             DEFAULT_NTP_SERVERS=["pool.ntp.org"],
             DEFAULT_TARGET_FPS=60,
-            DEFAULT_TOPIC_NAMESPACE="newhorizons/v1",
-            DEFAULT_MQTT_HOST="127.0.0.1",
-            DEFAULT_MQTT_PORT=1883,
-            DEFAULT_MQTT_TLS=False,
-            DEFAULT_MQTT_USERNAME="",
-            DEFAULT_MQTT_PASSWORD="",
+            DEFAULT_SERVER_HOST="127.0.0.1",
+            DEFAULT_TCP_CONTROL_PORT=22345,
+            DEFAULT_UDP_STREAM_PORT=13250,
             DEFAULT_MANIFESTS={"recovery": "recovery.json", "os": "os.json"},
             DEFAULT_RELEASE_URL="https://example.com/latest.json",
             DEVICE_STATE_DIR="device_state",
@@ -150,7 +141,7 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             module.DEFAULT_RUNTIME["logging"],
             {"enabled": True, "capacity": "default", "serial": "status"},
         )
-        self.assertEqual(module.DEFAULT_RUNTIME["transport"]["mode"], "mqtt")
+        self.assertEqual(module.DEFAULT_RUNTIME["transport"]["mode"], "udp_tcp")
         self.assertEqual(module.DEFAULT_RUNTIME["update"]["release_url"], "https://example.com/latest.json")
         self.assertEqual(module.DEFAULT_RUNTIME["update"]["source"], "github")
         self.assertEqual(sorted(module.DEFAULT_RUNTIME["update"]["sources"].keys()), ["github"])
@@ -169,12 +160,9 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             DEFAULT_BUFFER_FRAMES=8,
             DEFAULT_NTP_SERVERS=["pool.ntp.org"],
             DEFAULT_TARGET_FPS=60,
-            DEFAULT_TOPIC_NAMESPACE="newhorizons/v1",
-            DEFAULT_MQTT_HOST="127.0.0.1",
-            DEFAULT_MQTT_PORT=1883,
-            DEFAULT_MQTT_TLS=False,
-            DEFAULT_MQTT_USERNAME="",
-            DEFAULT_MQTT_PASSWORD="",
+            DEFAULT_SERVER_HOST="127.0.0.1",
+            DEFAULT_TCP_CONTROL_PORT=22345,
+            DEFAULT_UDP_STREAM_PORT=13250,
             DEFAULT_MANIFESTS={"recovery": "recovery.json", "os": "os.json"},
             DEFAULT_RELEASE_URL="https://example.com/latest.json",
             DEVICE_STATE_DIR="device_state",

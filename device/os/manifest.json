@@ -2,15 +2,15 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.27",
-  "version": "v0.2.27",
+  "firmware_version": "v0.2.28",
+  "version": "v0.2.28",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.27/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.28/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
-      "sha256": "62a279102a995bc7f99a81a4c9ddff0690f78350c8eaf288953c8103cf2e15cd",
-      "size": 25338,
+      "sha256": "6188003b6940ed239333c9078179768d26ae3dfe7c668d20ac4ef502c468d675",
+      "size": 25466,
       "kind": "code",
       "reboot_required": true
     },
@@ -44,8 +44,8 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "430263a5694b2d190db55232006d11fd21cdaa77802f558a713eccdfe240ed15",
-      "size": 2957,
+      "sha256": "d9b7d1d2b17891283f9af8ecc9e6a77053dc2929340a957a5494d528ff362fba",
+      "size": 2903,
       "kind": "code",
       "reboot_required": true
     },
@@ -148,13 +148,6 @@
       "reboot_required": true
     },
     {
-      "path": "mqtt_transport.mpy",
-      "sha256": "78bb8b65b2a3a7bbf87a259980c0dec4bef2825f7fb82de8bb5be42e394ea7b5",
-      "size": 3164,
-      "kind": "code",
-      "reboot_required": true
-    },
-    {
       "path": "packet.mpy",
       "sha256": "6653e9cd621df7932d53f124ca00949680d63ef13de75071b8f6a12143782b4c",
       "size": 2627,
@@ -170,8 +163,8 @@
     },
     {
       "path": "runtime_config.mpy",
-      "sha256": "29657e72b69c3ccdcefd681100912f58abac9646359bc4b5b8ef021cfa2c9a22",
-      "size": 3546,
+      "sha256": "81545f63adbe9aa56e78a9968f640aa3fe06bbbed5d80a7730a4971316900ec7",
+      "size": 3529,
       "kind": "code",
       "reboot_required": true
     },
@@ -197,6 +190,13 @@
       "reboot_required": true
     },
     {
+      "path": "tcp_control.mpy",
+      "sha256": "e00b8a57e7dc51919a93b078b635540a6090f0ae8876170e6047784f100dcd3c",
+      "size": 3006,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
       "path": "time_sync.mpy",
       "sha256": "c21119160be642adf654b8ec25fe336cba72e212b84beaa06fe429dbfd36fc2a",
       "size": 940,
@@ -204,23 +204,9 @@
       "reboot_required": true
     },
     {
-      "path": "umqtt/__init__.mpy",
-      "sha256": "33dc24fd99d8ecc225f4f5e64c99778072b1dd1a3943229deb0e7cbc0c80e86e",
-      "size": 101,
-      "kind": "code",
-      "reboot_required": true
-    },
-    {
-      "path": "umqtt/robust.mpy",
-      "sha256": "ab317a331ec12ced640d1d7ed652e56a3630aa59fd97ea1573c93fc4410c9704",
-      "size": 608,
-      "kind": "code",
-      "reboot_required": true
-    },
-    {
-      "path": "umqtt/simple.mpy",
-      "sha256": "a53b6833857103be554b3364c71c63b6c136243097d9c8acf7cecae491e20d35",
-      "size": 2215,
+      "path": "udp_stream.mpy",
+      "sha256": "5bb38fb8a7299000a3a78ed01e06170cf9c45a5c1ae73d5a6f0cd90985602f63",
+      "size": 877,
       "kind": "code",
       "reboot_required": true
     },
@@ -247,8 +233,8 @@
     },
     {
       "path": "wifi_manager.mpy",
-      "sha256": "426a32890e86f16c3b44653bca8df0dd25d70ace8cc344bf1e9c322daaa8cc5b",
-      "size": 7628,
+      "sha256": "c7216e3de80badaa13278578992322a842d714543e49a124f1eff28a791409ab",
+      "size": 7587,
       "kind": "code",
       "reboot_required": true
     }
@@ -274,6 +260,7 @@
     "micropython_bmi270/__init__.py",
     "micropython_bmi270/bmi270.py",
     "micropython_bmi270/i2c_helpers.py",
+    "mqtt_transport.mpy",
     "mqtt_transport.py",
     "packet.py",
     "packet_buffer.py",
@@ -281,13 +268,16 @@
     "secrets.py",
     "sk6812.py",
     "storage.py",
+    "tcp_control.py",
     "time_sync.py",
     "udp_control.mpy",
     "udp_control.py",
-    "udp_stream.mpy",
     "udp_stream.py",
+    "umqtt/__init__.mpy",
     "umqtt/__init__.py",
+    "umqtt/robust.mpy",
     "umqtt/robust.py",
+    "umqtt/simple.mpy",
     "umqtt/simple.py",
     "update_writer.py",
     "utils.py",

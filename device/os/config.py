@@ -3,10 +3,10 @@
 DEVICE_ID = 0x00000001
 DEVICE_NAME = "New Horizons OS"
 HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4"
-RUNTIME_VERSION = "v0.2.27"
-FIRMWARE_VERSION = "v0.2.27"
+RUNTIME_VERSION = "v0.2.28"
+FIRMWARE_VERSION = "v0.2.28"
 OS_VERSION = FIRMWARE_VERSION
-RECOVERY_VERSION = "v0.2.27"
+RECOVERY_VERSION = "v0.2.28"
 RECOVERY_FIRMWARE_VERSION = RECOVERY_VERSION
 SETUP_AP_SSID_PREFIX = "NewHorizonsOS"
 SETUP_AP_PASSWORD = "newhorizons"
@@ -49,28 +49,24 @@ BATTERY_RATE_HZ = 1
 LED_RATE_HZ = 20
 
 PRODUCTION_SERVER_HOST = "isensing-s1.u-aizu.ac.jp"
-MQTT_BROKER_HOST = "192.168.1.153"
-MQTT_BROKER_PORT = 1883
-MQTT_TLS = False
-PRODUCTION_MQTT_HOST = PRODUCTION_SERVER_HOST
-PRODUCTION_MQTT_PORT = 8883
-PRODUCTION_MQTT_TLS = True
+DEFAULT_SERVER_HOST = "192.168.1.153"
+DEFAULT_TCP_CONTROL_PORT = 22345
+DEFAULT_UDP_STREAM_PORT = 13250
+PRODUCTION_TCP_CONTROL_PORT = 22345
+PRODUCTION_UDP_STREAM_PORT = 13250
 DEFAULT_SERVER_PROFILE = "production"
 SERVER_PROFILES = {
     "manual": {
         "label": "Manual",
-        "mqtt": {"host": MQTT_BROKER_HOST, "port": MQTT_BROKER_PORT, "tls": MQTT_TLS},
+        "server": {"host": DEFAULT_SERVER_HOST, "tcp_port": DEFAULT_TCP_CONTROL_PORT, "udp_port": DEFAULT_UDP_STREAM_PORT},
     },
     "production": {
         "label": "Production",
-        "mqtt": {"host": PRODUCTION_MQTT_HOST, "port": PRODUCTION_MQTT_PORT, "tls": PRODUCTION_MQTT_TLS},
+        "server": {"host": PRODUCTION_SERVER_HOST, "tcp_port": PRODUCTION_TCP_CONTROL_PORT, "udp_port": PRODUCTION_UDP_STREAM_PORT},
     },
 }
-MQTT_TOPIC_NAMESPACE = "newhorizons/v1"
-MQTT_USERNAME = ""
-MQTT_PASSWORD = ""
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.27/device"
-RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.27/device"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.28/device"
+RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.28/device"
 GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
@@ -97,7 +93,7 @@ HMAC_LEN = 16
 USE_PACKET_BUFFER = True
 
 # Recommended 2~4. Larger buffers use more RAM.
-PACKET_BUFFER_SIZE = 3
+PACKET_BUFFER_SIZE = 2
 
 # True: if buffer is full, drop the oldest frame and keep the newest frame.
 # This is better for real-time sensor data.
@@ -106,12 +102,12 @@ PACKET_BUFFER_DROP_OLDEST = True
 # Maximum packets to send per main-loop iteration.
 SEND_MAX_PER_LOOP = 1
 
-# Stop hammering lwIP briefly after a failed MQTT send. Stale sensor packets are
+# Stop hammering lwIP briefly after a failed UDP send. Stale sensor packets are
 # not useful for realtime streaming, so the app drops them during this window.
 SEND_FAILURE_BACKOFF_MS = 100
 
 # Matrix layout changes are staged and only committed when the native scan core
-# can produce a packet while leaving enough heap headroom for MQTT/status work.
+# can produce a packet while leaving enough heap headroom for control/status work.
 SCAN_HEALTH_PROBE_MS = 2000
 SCAN_MIN_HEAP_FREE = 16384
 SCAN_MIN_LARGEST_FREE_BLOCK = 8192

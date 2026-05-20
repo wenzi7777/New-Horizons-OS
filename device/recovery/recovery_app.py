@@ -11,7 +11,7 @@ import immutable_config as iconfig
 from device_identity import get_device_id, get_device_name, get_device_uid
 from device_logging import DeviceLogger
 from filesystem_api import FilesystemAPI
-from mqtt_transport import MQTTTransport
+from tcp_control import TCPControlTransport
 from runtime_config import RuntimeConfigStore
 from wifi_manager import WiFiManager
 
@@ -40,7 +40,7 @@ class RecoveryApp:
             },
         )
         self.wifi = WiFiManager(self.config_store, self.logger)
-        self.mqtt_transport = MQTTTransport(lambda: self.runtime, self.device_uid, self.logger)
+        self.control_transport = TCPControlTransport(lambda: self.runtime, self.device_uid, self.logger, self._status_payload)
         self.os_writer = None
         self.update_state = self._default_update_state()
         self.last_connect_ms = 0
@@ -74,7 +74,7 @@ class RecoveryApp:
         while True:
             now = time.ticks_ms()
             self._service_wifi_setup_portal()
-            self.mqtt_transport.poll(self.wifi.is_connected(), self._handle_request)
+            self.control_transport.poll(self.wifi.is_connected(), self._handle_request)
 
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
@@ -120,14 +120,14 @@ class RecoveryApp:
         if runtime == self.runtime:
             return False
         old_transport = self.runtime.get("transport", {})
-        old_mqtt = self.runtime.get("mqtt", {})
+        old_server = self.runtime.get("server", {})
         self.runtime = runtime
         self._apply_logging_config(self.runtime.get("logging", {}))
-        if old_transport != self.runtime.get("transport", {}) or old_mqtt != self.runtime.get("mqtt", {}):
-            if hasattr(self.mqtt_transport, "reconfigure"):
-                self.mqtt_transport.reconfigure()
+        if old_transport != self.runtime.get("transport", {}) or old_server != self.runtime.get("server", {}):
+            if hasattr(self.control_transport, "reconfigure"):
+                self.control_transport.reconfigure()
             else:
-                self.mqtt_transport.close()
+                self.control_transport.close()
         if self.logger is not None:
             self.logger.info("runtime_config_reloaded source={}".format(source))
         return True
@@ -140,7 +140,14 @@ class RecoveryApp:
         if (not force
                 and time.ticks_diff(now, self.last_status_announce_ms) < iconfig.STATUS_ANNOUNCE_INTERVAL_MS):
             return False
-        payload = {
+        payload = self._status_payload()
+        ok = self.control_transport.publish_status(payload, self.wifi.is_connected())
+        if ok:
+            self.last_status_announce_ms = now
+        return ok
+
+    def _status_payload(self):
+        return {
             "status": "ok",
             "message": "status_announce",
             "device_id": "0x{:08X}".format(self.device_id),
@@ -156,10 +163,6 @@ class RecoveryApp:
             "recovery_error": self.recovery_error,
             "reboot_required": self.reboot_required,
         }
-        ok = self.mqtt_transport.publish_status(payload, self.wifi.is_connected())
-        if ok:
-            self.last_status_announce_ms = now
-        return ok
 
     def _reboot_due(self, now):
         if self.reboot_deadline_ms is None:
@@ -323,26 +326,26 @@ class RecoveryApp:
 
         if command == "set_servers":
             runtime_patch = {
-                "mqtt": request.get("mqtt", {}),
+                "server": request.get("server", {}),
             }
             if request.get("server_profile", ""):
                 runtime_patch["server_profile"] = request.get("server_profile", "")
             runtime = self.config_store.update_runtime(runtime_patch)
             self.runtime = runtime
+            self.control_transport.reconfigure()
             return {"status": "ok", "message": "servers_updated", "runtime": runtime, "reboot_required": False}
 
         if command == "set_transport":
             runtime = self.config_store.update_runtime({
                 "transport": {
-                    "mode": "mqtt",
-                    "topic_namespace": request.get("topic_namespace", iconfig.DEFAULT_TOPIC_NAMESPACE),
+                    "mode": "udp_tcp",
                 }
             })
             self.runtime = runtime
             return {"status": "ok", "message": "transport_updated", "runtime": runtime, "reboot_required": False}
 
         if command == "start_wifi_setup":
-            self.wifi.start_setup_portal("mqtt_command")
+            self.wifi.start_setup_portal("tcp_command")
             return {"status": "ok", "message": "wifi_setup_started", "wifi_setup": self.wifi.portal_status(), "reboot_required": False}
 
         if command == "stop_wifi_setup":
@@ -354,9 +357,9 @@ class RecoveryApp:
                 request.get("ssid", ""),
                 request.get("password", ""),
                 request.get("server_profile", ""),
-                request.get("mqtt_host", ""),
-                request.get("mqtt_port", ""),
-                request.get("mqtt_tls", ""),
+                request.get("server_host", ""),
+                request.get("tcp_port", ""),
+                request.get("udp_port", ""),
                 request.get("release_url", ""),
                 request.get("log_enabled", ""),
                 request.get("log_capacity", ""),

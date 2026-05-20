@@ -6,7 +6,7 @@
 
 - `firmware/`：MicroPython base firmware、`vdboard` native module、build/flash/upload/manifest 腳本。
 - `device/root/`：上傳到裝置 `/` 的啟動檔，包含 `boot.py`、`main.py`、`launcher.py`、`recovery.py`。
-- `device/recovery/`：Recovery Mode，保留 Wi-Fi、MQTT/WebUI command、OS writer。只有這裡可以執行 `write_os`。
+- `device/recovery/`：Recovery Mode，保留 Wi-Fi、TCP/WebUI command、OS writer。只有這裡可以執行 `write_os`。
 - `device/os/`：Normal OS source tree，會被 Recovery `write_os` 寫入裝置 `/nhos`。設備端不使用 `/os`，避免遮蔽 MicroPython 內建 `os` 模組。
 - `docs/os_file_architecture.md`：裝置 runtime filesystem 與安全規則。
 
@@ -47,7 +47,7 @@ python3 firmware/scripts/upload_filesystem.py --port /dev/cu.usbserial-210 --tar
 
 ## 本地開發測試上傳
 
-正式 OS 更新應該走 Recovery WebUI/MQTT 的 `write_os`，由 manifest 決定部分寫入。若只是本地開發，需要直接把目前 OS source 塞進板子，可用：
+正式 OS 更新應該走 Recovery WebUI/TCP 的 `write_os`，由 manifest 決定部分寫入。若只是本地開發，需要直接把目前 OS source 塞進板子，可用：
 
 ```bash
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
@@ -115,9 +115,9 @@ release JSON 格式：
 }
 ```
 
-Wi-Fi setup WebUI 只保留 Wi-Fi、本地 control/data/MQTT IP 與 port 的手動欄位；OS release 固定走 GitHub。若要做本地 OS 開發測試，請使用 `upload_filesystem.py --target os` 直接上傳，不走 release URL。
+Wi-Fi setup WebUI 只保留 Wi-Fi、New Horizons server host、TCP control port 與 UDP data port 的手動欄位；OS release 固定走 GitHub。若要做本地 OS 開發測試，請使用 `upload_filesystem.py --target os` 直接上傳，不走 release URL。
 
-## WebUI / MQTT
+## WebUI / UDP + TCP
 
 正式與本機 WebUI 都放在：
 

@@ -18,7 +18,8 @@
   recovery/
     recovery_app.py
     wifi_portal.py
-    mqtt_transport.py
+    tcp_control.py
+    udp_stream.py
     os_writer.py
     storage.py
     device_identity.py
@@ -27,7 +28,7 @@
     app.py
     config.py
     runtime_config.py
-    mqtt_transport.py
+    tcp_control.py
     calibration_store.py
     ...
   ota_stage/
@@ -64,7 +65,7 @@
 ```text
 device/
   root/        # boot.py, main.py, launcher.py, recovery.py，上傳到 /
-  recovery/    # Wi-Fi/MQTT/WebUI command receiver 與 OS writer，上傳到 /recovery
+  recovery/    # Wi-Fi/TCP/WebUI command receiver 與 OS writer，上傳到 /recovery
   os/          # normal OS source tree 與 OS manifest，由 Recovery write_os 寫入 /nhos
 ```
 

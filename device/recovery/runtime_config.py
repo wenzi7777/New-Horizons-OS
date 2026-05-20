@@ -19,29 +19,29 @@ def _default_server_profile_name():
 DEFAULT_SERVER_PROFILE = _default_server_profile_name()
 
 
-def _mqtt_defaults_for_profile(profile_name):
+def _server_defaults_for_profile(profile_name):
     profile = _server_profiles().get(profile_name, {})
-    mqtt_cfg = profile.get("mqtt", {})
-    if mqtt_cfg:
+    server_cfg = profile.get("server", {})
+    if server_cfg:
         return {
-            "host": mqtt_cfg.get("host", ""),
-            "port": int(mqtt_cfg.get("port", 8883)),
-            "tls": bool(mqtt_cfg.get("tls", True)),
+            "host": server_cfg.get("host", ""),
+            "tcp_port": int(server_cfg.get("tcp_port", 22345)),
+            "udp_port": int(server_cfg.get("udp_port", 13250)),
         }
     if profile_name == "production":
         return {
-            "host": getattr(iconfig, "PRODUCTION_MQTT_HOST", getattr(iconfig, "PRODUCTION_SERVER_HOST", "")),
-            "port": int(getattr(iconfig, "PRODUCTION_MQTT_PORT", 8883)),
-            "tls": bool(getattr(iconfig, "PRODUCTION_MQTT_TLS", True)),
+            "host": getattr(iconfig, "PRODUCTION_SERVER_HOST", ""),
+            "tcp_port": int(getattr(iconfig, "PRODUCTION_TCP_CONTROL_PORT", 22345)),
+            "udp_port": int(getattr(iconfig, "PRODUCTION_UDP_STREAM_PORT", 13250)),
         }
     return {
-        "host": iconfig.DEFAULT_MQTT_HOST,
-        "port": iconfig.DEFAULT_MQTT_PORT,
-        "tls": iconfig.DEFAULT_MQTT_TLS,
+        "host": getattr(iconfig, "DEFAULT_SERVER_HOST", "192.168.1.153"),
+        "tcp_port": int(getattr(iconfig, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+        "udp_port": int(getattr(iconfig, "DEFAULT_UDP_STREAM_PORT", 13250)),
     }
 
 
-DEFAULT_MQTT = _mqtt_defaults_for_profile(DEFAULT_SERVER_PROFILE)
+DEFAULT_SERVER = _server_defaults_for_profile(DEFAULT_SERVER_PROFILE)
 
 
 DEFAULT_RUNTIME = {
@@ -63,20 +63,17 @@ DEFAULT_RUNTIME = {
     "buffer_frames": iconfig.DEFAULT_BUFFER_FRAMES,
     "ntp_servers": list(iconfig.DEFAULT_NTP_SERVERS),
     "transport": {
-        "mode": "mqtt",
-        "topic_namespace": iconfig.DEFAULT_TOPIC_NAMESPACE,
+        "mode": "udp_tcp",
     },
     "logging": {
         "enabled": True,
         "capacity": "default",
         "serial": "status",
     },
-    "mqtt": {
-        "host": DEFAULT_MQTT["host"],
-        "port": DEFAULT_MQTT["port"],
-        "tls": DEFAULT_MQTT["tls"],
-        "username": iconfig.DEFAULT_MQTT_USERNAME,
-        "password": iconfig.DEFAULT_MQTT_PASSWORD,
+    "server": {
+        "host": DEFAULT_SERVER["host"],
+        "tcp_port": DEFAULT_SERVER["tcp_port"],
+        "udp_port": DEFAULT_SERVER["udp_port"],
     },
     "update": {
         "manifest_url": iconfig.DEFAULT_MANIFESTS["recovery"],

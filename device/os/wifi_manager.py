@@ -204,9 +204,9 @@ class WiFiManager:
         ssid,
         password,
         server_profile=None,
-        mqtt_host="",
-        mqtt_port="",
-        mqtt_tls="",
+        server_host="",
+        tcp_port="",
+        udp_port="",
         release_url="",
         log_enabled="",
         log_capacity="",
@@ -236,8 +236,9 @@ class WiFiManager:
             runtime_patch.update(
                 self._runtime_patch_for_transport(
                     selected_profile,
-                    mqtt_host,
-                    mqtt_port,
+                    server_host,
+                    tcp_port,
+                    udp_port,
                 )
             )
             runtime_patch.update(self._runtime_patch_for_logging(log_enabled, log_capacity))
@@ -305,7 +306,7 @@ class WiFiManager:
             "last_setup_result": self.last_setup_result,
             "server_profile": selected_profile,
             "server_profile_options": self._server_profile_options(),
-            "mqtt": dict(runtime_cfg.get("mqtt", {})),
+            "server": dict(runtime_cfg.get("server", {})),
             "transport": dict(runtime_cfg.get("transport", {})),
             "logging": dict(runtime_cfg.get("logging", {})),
         }
@@ -317,7 +318,7 @@ class WiFiManager:
             item = item or {}
             normalized[str(name)] = {
                 "label": str(item.get("label", name)),
-                "mqtt": dict(item.get("mqtt", {})),
+                "server": dict(item.get("server", {})),
             }
         return normalized
 
@@ -350,53 +351,52 @@ class WiFiManager:
         requested = str(runtime_cfg.get("server_profile", "") or "").strip()
         if requested in profiles:
             return requested
-        mqtt_cfg = runtime_cfg.get("mqtt", {})
+        server_cfg = runtime_cfg.get("server", {})
         for name, profile in profiles.items():
-            if self._mqtt_equals(mqtt_cfg, profile.get("mqtt", {})):
+            if self._server_equals(server_cfg, profile.get("server", {})):
                 return name
         return self._default_server_profile()
 
-    def _runtime_patch_for_transport(self, profile_name="", mqtt_host="", mqtt_port=""):
-        current_runtime = self.config_store.load_runtime() if self.config_store is not None else {}
-        current_transport = dict(current_runtime.get("transport", {}))
-        defaults = self._mqtt_defaults_for_profile(profile_name)
-        normalized_host = self._normalize_server_host(mqtt_host)
-        normalized_port = self._normalize_server_port(mqtt_port)
+    def _runtime_patch_for_transport(self, profile_name="", server_host="", tcp_port="", udp_port=""):
+        defaults = self._server_defaults_for_profile(profile_name)
+        normalized_host = self._normalize_server_host(server_host)
+        normalized_tcp_port = self._normalize_server_port(tcp_port)
+        normalized_udp_port = self._normalize_server_port(udp_port)
         if str(profile_name or "").strip() != "manual":
             normalized_host = ""
-            normalized_port = 0
+            normalized_tcp_port = 0
+            normalized_udp_port = 0
         return {
-            "mqtt": {
+            "server": {
                 "host": normalized_host or defaults["host"],
-                "port": normalized_port or defaults["port"],
-                "tls": defaults["tls"],
+                "tcp_port": normalized_tcp_port or defaults["tcp_port"],
+                "udp_port": normalized_udp_port or defaults["udp_port"],
             },
             "transport": {
-                "mode": "mqtt",
-                "topic_namespace": current_transport.get("topic_namespace", "newhorizons/v1"),
+                "mode": "udp_tcp",
             },
         }
 
-    def _mqtt_defaults_for_profile(self, profile_name):
+    def _server_defaults_for_profile(self, profile_name):
         profile_name = str(profile_name or "").strip()
         profile = self._server_profiles().get(profile_name, {})
-        mqtt_cfg = profile.get("mqtt", {})
-        if mqtt_cfg:
+        server_cfg = profile.get("server", {})
+        if server_cfg:
             return {
-                "host": str(mqtt_cfg.get("host", "")).strip(),
-                "port": int(mqtt_cfg.get("port", 8883)),
-                "tls": bool(mqtt_cfg.get("tls", True)),
+                "host": str(server_cfg.get("host", "")).strip(),
+                "tcp_port": int(server_cfg.get("tcp_port", 22345)),
+                "udp_port": int(server_cfg.get("udp_port", 13250)),
             }
         if profile_name == "production":
             return {
-                "host": getattr(config, "PRODUCTION_MQTT_HOST", getattr(config, "PRODUCTION_SERVER_HOST", "")),
-                "port": int(getattr(config, "PRODUCTION_MQTT_PORT", 8883)),
-                "tls": bool(getattr(config, "PRODUCTION_MQTT_TLS", True)),
+                "host": getattr(config, "PRODUCTION_SERVER_HOST", ""),
+                "tcp_port": int(getattr(config, "PRODUCTION_TCP_CONTROL_PORT", 22345)),
+                "udp_port": int(getattr(config, "PRODUCTION_UDP_STREAM_PORT", 13250)),
             }
         return {
-            "host": getattr(config, "MQTT_BROKER_HOST", "192.168.1.153"),
-            "port": int(getattr(config, "MQTT_BROKER_PORT", 1883)),
-            "tls": bool(getattr(config, "MQTT_TLS", False)),
+            "host": getattr(config, "DEFAULT_SERVER_HOST", "192.168.1.153"),
+            "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+            "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
         }
 
     def _runtime_patch_for_github_update(self):
@@ -441,19 +441,19 @@ class WiFiManager:
             options.append({
                 "value": name,
                 "label": profile.get("label", name),
-                "mqtt_host": profile.get("mqtt", {}).get("host", ""),
-                "mqtt_port": profile.get("mqtt", {}).get("port", ""),
-                "mqtt_tls": profile.get("mqtt", {}).get("tls", False),
+                "server_host": profile.get("server", {}).get("host", ""),
+                "tcp_port": profile.get("server", {}).get("tcp_port", ""),
+                "udp_port": profile.get("server", {}).get("udp_port", ""),
             })
         return options
 
-    def _mqtt_equals(self, lhs, rhs):
+    def _server_equals(self, lhs, rhs):
         lhs = lhs or {}
         rhs = rhs or {}
         return (
             str(lhs.get("host", "")) == str(rhs.get("host", ""))
-            and int(lhs.get("port", 0) or 0) == int(rhs.get("port", 0) or 0)
-            and bool(lhs.get("tls", False)) == bool(rhs.get("tls", False))
+            and int(lhs.get("tcp_port", 0) or 0) == int(rhs.get("tcp_port", 0) or 0)
+            and int(lhs.get("udp_port", 0) or 0) == int(rhs.get("udp_port", 0) or 0)
         )
 
     def _normalize_server_host(self, value):

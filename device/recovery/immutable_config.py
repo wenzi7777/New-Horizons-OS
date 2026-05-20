@@ -1,7 +1,7 @@
 FIRMWARE_NAME = "New Horizons OS"
 HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4"
-RUNTIME_VERSION = "v0.2.27"
-RECOVERY_VERSION = "v0.2.27"
+RUNTIME_VERSION = "v0.2.28"
+RECOVERY_VERSION = "v0.2.28"
 FIRMWARE_VERSION = RECOVERY_VERSION
 DEFAULT_MODE = "recovery"
 
@@ -28,33 +28,29 @@ LOG_PATH = DATA_LOG_DIR + "/device.log"
 
 PRODUCTION_SERVER_HOST = "isensing-s1.u-aizu.ac.jp"
 DEFAULT_SERVER_PROFILE = "production"
-DEFAULT_MQTT_HOST = "192.168.1.153"
-DEFAULT_MQTT_PORT = 1883
-DEFAULT_MQTT_TLS = False
-PRODUCTION_MQTT_HOST = PRODUCTION_SERVER_HOST
-PRODUCTION_MQTT_PORT = 8883
-PRODUCTION_MQTT_TLS = True
+DEFAULT_SERVER_HOST = "192.168.1.153"
+DEFAULT_TCP_CONTROL_PORT = 22345
+DEFAULT_UDP_STREAM_PORT = 13250
+PRODUCTION_TCP_CONTROL_PORT = 22345
+PRODUCTION_UDP_STREAM_PORT = 13250
 SERVER_PROFILES = {
     "manual": {
         "label": "Manual",
-        "mqtt": {"host": DEFAULT_MQTT_HOST, "port": DEFAULT_MQTT_PORT, "tls": DEFAULT_MQTT_TLS},
+        "server": {"host": DEFAULT_SERVER_HOST, "tcp_port": DEFAULT_TCP_CONTROL_PORT, "udp_port": DEFAULT_UDP_STREAM_PORT},
     },
     "production": {
         "label": "Production",
-        "mqtt": {"host": PRODUCTION_MQTT_HOST, "port": PRODUCTION_MQTT_PORT, "tls": PRODUCTION_MQTT_TLS},
+        "server": {"host": PRODUCTION_SERVER_HOST, "tcp_port": PRODUCTION_TCP_CONTROL_PORT, "udp_port": PRODUCTION_UDP_STREAM_PORT},
     },
 }
-DEFAULT_MQTT_USERNAME = ""
-DEFAULT_MQTT_PASSWORD = ""
-DEFAULT_TOPIC_NAMESPACE = "newhorizons/v1"
 DEFAULT_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 DEFAULT_NTP_SERVERS = ["pool.ntp.org", "time.nist.gov"]
-DEFAULT_BUFFER_FRAMES = 8
+DEFAULT_BUFFER_FRAMES = 2
 DEFAULT_TARGET_FPS = 60
 
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 DEFAULT_MANIFESTS = {
-    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.27/device/recovery/manifest.json",
-    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.27/device/os/manifest.json",
+    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.28/device/recovery/manifest.json",
+    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.28/device/os/manifest.json",
 }

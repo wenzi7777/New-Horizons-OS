@@ -37,20 +37,20 @@ class FakeManager:
                 {
                     "value": "manual",
                     "label": "Manual",
-                    "mqtt_host": "192.168.1.153",
-                    "mqtt_port": 1883,
-                    "mqtt_tls": False,
+                    "server_host": "192.168.1.153",
+                    "tcp_port": 22345,
+                    "udp_port": 13250,
                 },
                 {
                     "value": "production",
                     "label": "Production",
-                    "mqtt_host": "isensing-s1.u-aizu.ac.jp",
-                    "mqtt_port": 8883,
-                    "mqtt_tls": True,
+                    "server_host": "isensing-s1.u-aizu.ac.jp",
+                    "tcp_port": 22345,
+                    "udp_port": 13250,
                 },
             ],
-            "mqtt": {"host": "isensing-s1.u-aizu.ac.jp", "port": 8883, "tls": True},
-            "transport": {"mode": "mqtt"},
+            "server": {"host": "isensing-s1.u-aizu.ac.jp", "tcp_port": 22345, "udp_port": 13250},
+            "transport": {"mode": "udp_tcp"},
             "mode": "normal",
             "os_installed": True,
             "release_url": GITHUB_RELEASE_URL,
@@ -69,9 +69,9 @@ class FakeManager:
         ssid,
         password,
         server_profile=None,
-        mqtt_host="",
-        mqtt_port="",
-        mqtt_tls="",
+        server_host="",
+        tcp_port="",
+        udp_port="",
         release_url="",
         log_enabled="",
         log_capacity="",
@@ -81,9 +81,9 @@ class FakeManager:
                 ssid,
                 password,
                 server_profile,
-                mqtt_host,
-                mqtt_port,
-                mqtt_tls,
+                server_host,
+                tcp_port,
+                udp_port,
                 release_url,
                 log_enabled,
                 log_capacity,
@@ -142,8 +142,9 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         self.assertNotIn('name="master_port"', html)
         self.assertNotIn('name="data_host"', html)
         self.assertNotIn('name="data_port"', html)
-        self.assertIn('name="mqtt_host"', html)
-        self.assertIn('name="mqtt_port"', html)
+        self.assertIn('name="server_host"', html)
+        self.assertIn('name="tcp_port"', html)
+        self.assertIn('name="udp_port"', html)
         self.assertIn(GITHUB_RELEASE_URL, html)
         self.assertNotIn('name="release_url"', html)
         self.assertNotIn('id="release_url"', html)
@@ -179,7 +180,7 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         portal._read_request = lambda client: (
             "POST",
             "/connect",
-            "ssid=LabWiFi&password=secret&server_profile=manual&mqtt_host=192.168.1.153&mqtt_port=1883",
+            "ssid=LabWiFi&password=secret&server_profile=manual&server_host=192.168.1.153&tcp_port=22345&udp_port=13250",
         )
         portal._send_response = lambda client, status, content_type, body: (_ for _ in ()).throw(OSError("ECONNABORTED"))
 
@@ -207,7 +208,7 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         portal._read_request = lambda client: (
             "POST",
             "/connect",
-            "ssid=LabWiFi&password=secret&server_profile=manual&mqtt_host=192.168.1.153&mqtt_port=1883",
+            "ssid=LabWiFi&password=secret&server_profile=manual&server_host=192.168.1.153&tcp_port=22345&udp_port=13250",
         )
         portal._send_response = lambda client, status, content_type, body: None
 
@@ -222,8 +223,8 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
                     "secret",
                     "manual",
                     "192.168.1.153",
-                    "1883",
-                    "",
+                    "22345",
+                    "13250",
                     "",
                     "",
                     "",

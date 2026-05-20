@@ -19,29 +19,29 @@ def _default_server_profile_name():
 DEFAULT_SERVER_PROFILE = _default_server_profile_name()
 
 
-def _mqtt_defaults_for_profile(profile_name):
+def _server_defaults_for_profile(profile_name):
     profile = _server_profiles().get(profile_name, {})
-    mqtt_cfg = profile.get("mqtt", {})
-    if mqtt_cfg:
+    server_cfg = profile.get("server", {})
+    if server_cfg:
         return {
-            "host": mqtt_cfg.get("host", ""),
-            "port": int(mqtt_cfg.get("port", 8883)),
-            "tls": bool(mqtt_cfg.get("tls", True)),
+            "host": server_cfg.get("host", ""),
+            "tcp_port": int(server_cfg.get("tcp_port", 22345)),
+            "udp_port": int(server_cfg.get("udp_port", 13250)),
         }
     if profile_name == "production":
         return {
-            "host": getattr(config, "PRODUCTION_MQTT_HOST", getattr(config, "PRODUCTION_SERVER_HOST", "")),
-            "port": int(getattr(config, "PRODUCTION_MQTT_PORT", 8883)),
-            "tls": bool(getattr(config, "PRODUCTION_MQTT_TLS", True)),
+            "host": getattr(config, "PRODUCTION_SERVER_HOST", ""),
+            "tcp_port": int(getattr(config, "PRODUCTION_TCP_CONTROL_PORT", 22345)),
+            "udp_port": int(getattr(config, "PRODUCTION_UDP_STREAM_PORT", 13250)),
         }
     return {
-        "host": config.MQTT_BROKER_HOST,
-        "port": config.MQTT_BROKER_PORT,
-        "tls": config.MQTT_TLS,
+        "host": getattr(config, "DEFAULT_SERVER_HOST", "192.168.1.153"),
+        "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+        "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
     }
 
 
-DEFAULT_MQTT = _mqtt_defaults_for_profile(DEFAULT_SERVER_PROFILE)
+DEFAULT_SERVER = _server_defaults_for_profile(DEFAULT_SERVER_PROFILE)
 OS_GITHUB_BASE_URL = getattr(config, "GITHUB_BASE_URL", "")
 RECOVERY_GITHUB_BASE_URL = getattr(config, "RECOVERY_GITHUB_BASE_URL", OS_GITHUB_BASE_URL)
 
@@ -72,23 +72,20 @@ DEFAULT_RUNTIME = {
         "autostart_disabled": False,
         "last_error": "",
     },
-    "buffer_frames": 8,
+    "buffer_frames": 2,
     "ntp_servers": ["pool.ntp.org", "time.nist.gov"],
     "transport": {
-        "mode": "mqtt",
-        "topic_namespace": config.MQTT_TOPIC_NAMESPACE,
+        "mode": "udp_tcp",
     },
     "logging": {
         "enabled": True,
         "capacity": "default",
         "serial": "status",
     },
-    "mqtt": {
-        "host": DEFAULT_MQTT["host"],
-        "port": DEFAULT_MQTT["port"],
-        "tls": DEFAULT_MQTT["tls"],
-        "username": config.MQTT_USERNAME,
-        "password": config.MQTT_PASSWORD,
+    "server": {
+        "host": DEFAULT_SERVER["host"],
+        "tcp_port": DEFAULT_SERVER["tcp_port"],
+        "udp_port": DEFAULT_SERVER["udp_port"],
     },
     "update": {
         "manifest_url": "",

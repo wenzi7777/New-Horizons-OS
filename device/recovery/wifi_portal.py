@@ -262,9 +262,9 @@ class WiFiSetupPortal:
                     fields.get("ssid", ""),
                     fields.get("password", ""),
                     fields.get("server_profile", ""),
-                    fields.get("mqtt_host", ""),
-                    fields.get("mqtt_port", ""),
-                    "",
+                    fields.get("server_host", ""),
+                    fields.get("tcp_port", ""),
+                    fields.get("udp_port", ""),
                     "",
                     "",
                 )
@@ -409,7 +409,7 @@ class WiFiSetupPortal:
             else:
                 label = "{} ({})".format(
                     item.get("label", value),
-                    item.get("mqtt_host", ""),
+                    item.get("server_host", ""),
                 )
                 developer_attr = ""
             server_options.append(
@@ -432,14 +432,16 @@ class WiFiSetupPortal:
         portal_ip_url = _escape_html(status.get("portal_ip_url", "http://{}".format(self.config.SETUP_PORTAL_HOST)))
         portal_domain = _escape_html(status.get("portal_domain", ""))
         ap_ssid = _escape_html(status.get("ap_ssid", self.config.SETUP_AP_SSID_PREFIX))
-        mqtt_cfg = status.get("mqtt", {}) or {}
+        server_cfg = status.get("server", {}) or {}
         recovery_mode = status.get("mode") == "recovery" or not status.get("os_installed", True)
         release_url = status.get("release_url", "")
-        manual_mqtt_host = manual_option.get("mqtt_host", "192.168.1.153")
-        manual_mqtt_port = manual_option.get("mqtt_port", 1883)
+        manual_server_host = manual_option.get("server_host", "192.168.1.153")
+        manual_tcp_port = manual_option.get("tcp_port", 22345)
+        manual_udp_port = manual_option.get("udp_port", 13250)
         if selected_profile == "manual":
-            manual_mqtt_host = mqtt_cfg.get("host", manual_mqtt_host)
-            manual_mqtt_port = mqtt_cfg.get("port", manual_mqtt_port)
+            manual_server_host = server_cfg.get("host", manual_server_host)
+            manual_tcp_port = server_cfg.get("tcp_port", manual_tcp_port)
+            manual_udp_port = server_cfg.get("udp_port", manual_udp_port)
         recovery_notice = ""
         if recovery_mode:
             recovery_notice = (
@@ -475,10 +477,12 @@ class WiFiSetupPortal:
           {server_options}
         </select>
         <div id="manual_server_fields" style="display:{manual_fields_display}">
-          <label for="mqtt_host">MQTT Host</label>
-          <input id="mqtt_host" name="mqtt_host" value="{manual_mqtt_host}" placeholder="host">
-          <label for="mqtt_port">MQTT Port</label>
-          <input id="mqtt_port" name="mqtt_port" value="{manual_mqtt_port}" inputmode="numeric" placeholder="port">
+          <label for="server_host">New Horizons Server</label>
+          <input id="server_host" name="server_host" value="{manual_server_host}" placeholder="host">
+          <label for="tcp_port">TCP Control Port</label>
+          <input id="tcp_port" name="tcp_port" value="{manual_tcp_port}" inputmode="numeric" placeholder="port">
+          <label for="udp_port">UDP Data Port</label>
+          <input id="udp_port" name="udp_port" value="{manual_udp_port}" inputmode="numeric" placeholder="port">
         </div>
         <label for="ssid">Wi-Fi SSID</label>
         <input id="ssid" name="ssid" value="{ssid}" placeholder="ssid">
@@ -487,7 +491,7 @@ class WiFiSetupPortal:
         <button type="submit">{primary_button}</button>
       </form>
       <div class="meta">
-        <p class="muted">MQTT: {mqtt_host}:{mqtt_port}</p>
+        <p class="muted">Server: {server_host} TCP {tcp_port} / UDP {udp_port}</p>
         <p class="muted">Release: {release_url}</p>
         <p class="muted">State: {device_state}</p>
       </div>
@@ -538,7 +542,7 @@ class WiFiSetupPortal:
             style=INDEX_CSS,
             eyebrow="Recovery Mode" if recovery_mode else "Device Setup",
             headline="Write New Horizons OS" if recovery_mode else _escape_html(self.config.SETUP_PORTAL_TITLE),
-            lead="This device is in recovery mode. Connect Wi-Fi, then write OS from GitHub through WebUI or MQTT." if recovery_mode else "Join the device hotspot, then use this page to connect the board to Wi-Fi and choose the MQTT broker. Most phones should auto-open this portal after joining the hotspot.",
+            lead="This device is in recovery mode. Connect Wi-Fi, then write OS from GitHub through WebUI." if recovery_mode else "Join the device hotspot, then use this page to connect the board to Wi-Fi and choose the New Horizons server.",
             ip=ip_addr,
             notice=notice,
             recovery_notice=recovery_notice,
@@ -552,13 +556,14 @@ class WiFiSetupPortal:
             portal_url=portal_url,
             portal_domain=portal_domain or "(disabled)",
             manual_hint="" if not portal_domain else " Fallback: <strong>{}</strong>.".format(portal_ip_url),
-            manual_mqtt_host=_escape_html(manual_mqtt_host),
-            manual_mqtt_port=_escape_html(manual_mqtt_port),
-            mqtt_host=_escape_html(mqtt_cfg.get("host", "")),
-            mqtt_port=_escape_html(mqtt_cfg.get("port", "")),
+            manual_server_host=_escape_html(manual_server_host),
+            manual_tcp_port=_escape_html(manual_tcp_port),
+            manual_udp_port=_escape_html(manual_udp_port),
+            server_host=_escape_html(server_cfg.get("host", "")),
+            tcp_port=_escape_html(server_cfg.get("tcp_port", "")),
+            udp_port=_escape_html(server_cfg.get("udp_port", "")),
             release_url=_escape_html(release_url),
             primary_button="Save Recovery Settings" if recovery_mode else "Connect Wi-Fi",
-            mqtt_tls_label="TLS" if mqtt_cfg.get("tls", False) else "plain",
             manual_fields_display=manual_fields_display,
             developer_checked=developer_checked,
             developer_enabled="true" if selected_profile == "manual" else "false",

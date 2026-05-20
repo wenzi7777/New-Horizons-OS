@@ -17,10 +17,10 @@ class BuildMpyReleaseTests(unittest.TestCase):
             source = root / "device" / "os"
             output = root / "device" / "os_mpy"
             fake_cross = root / "mpy-cross"
-            (source / "umqtt").mkdir(parents=True)
+            (source / "transport").mkdir(parents=True)
             (source / "__pycache__").mkdir()
             (source / "app.py").write_text("print('app')\n", encoding="utf-8")
-            (source / "umqtt" / "simple.py").write_text("print('simple')\n", encoding="utf-8")
+            (source / "transport" / "tcp_control.py").write_text("print('tcp')\n", encoding="utf-8")
             (source / "micropython_bmi270").mkdir()
             (source / "micropython_bmi270" / "config_file.bin").write_bytes(b"asset")
             (source / "__pycache__" / "app.pyc").write_bytes(b"skip")
@@ -52,7 +52,7 @@ class BuildMpyReleaseTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((output / "app.mpy").exists())
-            self.assertTrue((output / "umqtt" / "simple.mpy").exists())
+            self.assertTrue((output / "transport" / "tcp_control.mpy").exists())
             self.assertFalse((output / "app.py").exists())
             self.assertEqual(list(output.rglob("*.py")), [])
             self.assertFalse((output / "__pycache__").exists())

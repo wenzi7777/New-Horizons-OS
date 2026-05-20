@@ -65,13 +65,14 @@ class GenerateManifestTests(unittest.TestCase):
             repo_root = Path(tmpdir)
             source_root = repo_root / "device" / "os_mpy"
             delete_root = repo_root / "device" / "os"
-            (source_root / "umqtt").mkdir(parents=True)
+            (source_root / "transport").mkdir(parents=True)
             (delete_root / "umqtt").mkdir(parents=True)
             (source_root / "app.mpy").write_bytes(b"mpy-app")
-            (source_root / "umqtt" / "simple.mpy").write_bytes(b"mpy-simple")
+            (source_root / "transport" / "tcp_control.mpy").write_bytes(b"mpy-tcp")
             (source_root / "micropython_bmi270" / "config_file.bin").parent.mkdir(parents=True)
             (source_root / "micropython_bmi270" / "config_file.bin").write_bytes(b"bin")
             (delete_root / "app.py").write_text("print('old')\n", encoding="utf-8")
+            (delete_root / "mqtt_transport.py").write_text("print('old')\n", encoding="utf-8")
             (delete_root / "umqtt" / "simple.py").write_text("print('old')\n", encoding="utf-8")
             (delete_root / "manifest.json").write_text("{}", encoding="utf-8")
 
@@ -94,6 +95,8 @@ class GenerateManifestTests(unittest.TestCase):
                 ".py",
                 "--delete-path",
                 "main.py",
+                "--delete-path",
+                "umqtt/__init__.py",
             ]
             try:
                 module.main()
@@ -108,27 +111,30 @@ class GenerateManifestTests(unittest.TestCase):
             )
             self.assertEqual(
                 [item["path"] for item in manifest["files"]],
-                ["app.mpy", "micropython_bmi270/config_file.bin", "umqtt/simple.mpy"],
+                ["app.mpy", "micropython_bmi270/config_file.bin", "transport/tcp_control.mpy"],
             )
-            self.assertEqual(manifest["delete"], ["app.py", "main.py", "umqtt/simple.py"])
+            self.assertEqual(manifest["delete"], ["app.py", "main.py", "mqtt_transport.py", "umqtt/__init__.py", "umqtt/simple.py"])
 
-    def test_recovery_manifest_does_not_publish_udp_control_and_deletes_old_file(self):
+    def test_recovery_manifest_publishes_tcp_control_and_deletes_mqtt_files(self):
         manifest_path = REPO_ROOT / "device" / "recovery" / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         paths = [item["path"] for item in manifest.get("files", [])]
+        deletes = set(manifest.get("delete", []))
 
-        self.assertNotIn("udp_control.py", paths)
-        self.assertIn("udp_control.py", manifest.get("delete", []))
+        self.assertIn("tcp_control.py", paths)
+        self.assertNotIn("mqtt_transport.py", paths)
+        self.assertTrue({"mqtt_transport.py", "umqtt/simple.py", "umqtt/robust.py", "umqtt/__init__.py"} <= deletes)
 
-    def test_os_manifest_does_not_publish_udp_modules_and_deletes_old_files(self):
+    def test_os_manifest_publishes_udp_tcp_modules_and_deletes_mqtt_files(self):
         manifest_path = REPO_ROOT / "device" / "os" / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         paths = [item["path"] for item in manifest.get("files", [])]
         deletes = set(manifest.get("delete", []))
 
-        self.assertNotIn("udp_control.mpy", paths)
-        self.assertNotIn("udp_stream.mpy", paths)
-        self.assertTrue({"udp_control.py", "udp_stream.py", "udp_control.mpy", "udp_stream.mpy"} <= deletes)
+        self.assertIn("tcp_control.mpy", paths)
+        self.assertIn("udp_stream.mpy", paths)
+        self.assertNotIn("mqtt_transport.mpy", paths)
+        self.assertTrue({"mqtt_transport.py", "umqtt/simple.py", "umqtt/robust.py", "umqtt/__init__.py"} <= deletes)
 
 
 if __name__ == "__main__":

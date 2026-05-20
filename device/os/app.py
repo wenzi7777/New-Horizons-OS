@@ -52,7 +52,8 @@ class App:
         self.imu = None
         self.battery = None
         self.led = None
-        self.mqtt_transport = None
+        self.control_transport = None
+        self.udp_stream = None
         self.recovery_writer = None
         self.update_state = self._default_update_state()
 
@@ -156,8 +157,8 @@ class App:
         while True:
             now = time.ticks_ms()
             self.wifi.service_setup_portal()
-            if self.mqtt_transport is not None:
-                self.mqtt_transport.poll(self.wifi.is_connected(), self._handle_control_request)
+            if self.control_transport is not None:
+                self.control_transport.poll(self.wifi.is_connected(), self._handle_control_request)
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
                 self._ensure_streaming_services()
@@ -234,9 +235,9 @@ class App:
         if getattr(self, "native_streaming", False) and hasattr(self.vdboard.scan, "pop_packet_into"):
             if self._transmit_backing_off(timestamp_ms):
                 return
-            if not self.wifi.is_connected() or self.mqtt_transport is None:
+            if not self.wifi.is_connected() or self.control_transport is None:
                 return
-            if hasattr(self.mqtt_transport, "is_connected") and not self.mqtt_transport.is_connected():
+            if hasattr(self.control_transport, "is_connected") and not self.control_transport.is_connected():
                 return
             packet = self._native_pop_packet()
             if packet is None:
@@ -277,7 +278,7 @@ class App:
         if not self.wifi.is_connected():
             self.tx_buffer.clear()
             return
-        if self.mqtt_transport is None:
+        if self.udp_stream is None:
             self.tx_buffer.clear()
             return
         if self._transmit_backing_off():
@@ -296,10 +297,10 @@ class App:
     def send_packet(self, packet):
         if self._in_maintenance():
             return False
-        if self.mqtt_transport is None:
+        if self.udp_stream is None:
             return False
 
-        ok = self.mqtt_transport.publish_raw(packet, self.wifi.is_connected())
+        ok = self.udp_stream.send(packet, self.wifi.is_connected())
         if ok:
             self.sent_packets += 1
             self.send_backoff_until_ms = 0
@@ -399,7 +400,7 @@ class App:
         return time.ticks_diff(now, self.reboot_deadline_ms) >= 0
 
     def _announce_status(self, now=None, force=False):
-        if self.mqtt_transport is None:
+        if self.control_transport is None:
             return False
         if not self.wifi.is_connected():
             return False
@@ -410,7 +411,7 @@ class App:
             return False
         payload = self._status()
         payload["message"] = "status_announce"
-        ok = self.mqtt_transport.publish_status(payload, self.wifi.is_connected())
+        ok = self.control_transport.publish_status(payload, self.wifi.is_connected())
         if ok:
             self.last_status_announce_ms = now
         return ok
@@ -423,7 +424,7 @@ class App:
         self.time_sync.servers = list(self.runtime.get("ntp_servers", []))
 
     def _authorized(self, addr):
-        return bool(addr and addr[0] == "mqtt")
+        return bool(addr and addr[0] == "tcp")
 
     def _handle_control_request(self, request, addr):
         self._ensure_streaming_services()
@@ -481,19 +482,22 @@ class App:
 
         if cmd == "set_servers":
             runtime_patch = {
-                "mqtt": request.get("mqtt", {}),
+                "server": request.get("server", {}),
             }
             if request.get("server_profile", ""):
                 runtime_patch["server_profile"] = request.get("server_profile", "")
             runtime = self.config_store.update_runtime(runtime_patch)
             self.runtime = runtime
+            if self.control_transport is not None:
+                self.control_transport.reconfigure()
+            if self.udp_stream is not None:
+                self.udp_stream.reconfigure()
             return self._ok("servers_updated", applied=True)
 
         if cmd == "set_transport":
             runtime = self.config_store.update_runtime({
                 "transport": {
-                    "mode": "mqtt",
-                    "topic_namespace": request.get("topic_namespace", "newhorizons/v1"),
+                    "mode": "udp_tcp",
                 },
             })
             self.runtime = runtime
@@ -650,7 +654,7 @@ class App:
             return self._ok("credentials_reset", applied=True)
 
         if cmd == "start_wifi_setup":
-            self.wifi.start_setup_portal("mqtt_command")
+            self.wifi.start_setup_portal("tcp_command")
             self.update_led_state()
             return {
                 "status": "ok",
@@ -678,9 +682,9 @@ class App:
                 request.get("ssid", ""),
                 request.get("password", ""),
                 request.get("server_profile", ""),
-                request.get("mqtt_host", ""),
-                request.get("mqtt_port", ""),
-                request.get("mqtt_tls", ""),
+                request.get("server_host", ""),
+                request.get("tcp_port", ""),
+                request.get("udp_port", ""),
                 "",
                 request.get("log_enabled", ""),
                 request.get("log_capacity", ""),
@@ -1633,13 +1637,15 @@ class App:
             self.vdboard.scan.update_battery_cache(self.latest_battery)
 
     def _ensure_streaming_services(self):
-        if self.mqtt_transport is not None:
+        if self.control_transport is not None and self.udp_stream is not None:
             return
-        from mqtt_transport import MQTTTransport
+        from tcp_control import TCPControlTransport
+        from udp_stream import UDPStreamTransport
         from time_sync import TimeSync
         from utils import RateCounter
 
-        self.mqtt_transport = MQTTTransport(lambda: self.runtime, self.device_uid, self.logger)
+        self.control_transport = TCPControlTransport(lambda: self.runtime, self.device_uid, self.logger, self._status)
+        self.udp_stream = UDPStreamTransport(lambda: self.runtime, self.logger)
         self.time_sync = TimeSync(self.runtime.get("ntp_servers", []))
         self.scan_rate = RateCounter(1000)
 

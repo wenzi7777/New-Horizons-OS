@@ -32,11 +32,13 @@ def load_recovery_app_module():
         get_device_name=lambda default: default,
     )
     fake_logger_mod = types.SimpleNamespace(DeviceLogger=lambda path: None)
-    fake_fs_mod = types.SimpleNamespace(FilesystemAPI=lambda root: None)
-    fake_mqtt_mod = types.SimpleNamespace(
-        MQTTTransport=lambda *args, **kwargs: types.SimpleNamespace(
+    fake_fs_mod = types.SimpleNamespace(FilesystemAPI=lambda *args, **kwargs: None)
+    fake_tcp_mod = types.SimpleNamespace(
+        TCPControlTransport=lambda *args, **kwargs: types.SimpleNamespace(
             poll=lambda *poll_args, **poll_kwargs: None,
             publish_status=lambda *status_args, **status_kwargs: True,
+            reconfigure=lambda: None,
+            close=lambda: None,
         )
     )
     fake_runtime_mod = types.SimpleNamespace(RuntimeConfigStore=lambda root: None)
@@ -70,7 +72,7 @@ def load_recovery_app_module():
         "device_identity": fake_identity,
         "device_logging": fake_logger_mod,
         "filesystem_api": fake_fs_mod,
-        "mqtt_transport": fake_mqtt_mod,
+        "tcp_control": fake_tcp_mod,
         "runtime_config": fake_runtime_mod,
         "udp_control": fake_udp_mod,
         "wifi_manager": fake_wifi_mod,
@@ -129,7 +131,7 @@ class FakeLogger:
         self.configured.append((enabled, capacity))
 
 
-class FakeMQTTTransport:
+class FakeTCPControlTransport:
     def __init__(self):
         self.reconfigure_calls = 0
         self.close_calls = 0
@@ -168,13 +170,13 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         app.device_name = "New Horizons OS"
         app.runtime = {
             "mode": "recovery",
-            "transport": {"mode": "mqtt", "topic_namespace": "newhorizons/v1"},
+            "transport": {"mode": "udp_tcp"},
         }
         app.wifi = type("FakeWiFi", (), {
             "is_connected": lambda self: True,
             "portal_status": lambda self: {"active": False},
         })()
-        app.mqtt_transport = FakeMQTTTransport()
+        app.control_transport = FakeTCPControlTransport()
         app.control = None
         app.recovery_error = ""
         app.reboot_required = False
@@ -198,8 +200,8 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         self.assertEqual(app.update_state["applied_files"], 3)
         self.assertEqual(app.update_state["downloaded_files"], 2)
         self.assertEqual(app.update_state["current_file"], "app.py")
-        self.assertEqual(len(app.mqtt_transport.status_payloads), 1)
-        published, wifi_connected = app.mqtt_transport.status_payloads[0]
+        self.assertEqual(len(app.control_transport.status_payloads), 1)
+        published, wifi_connected = app.control_transport.status_payloads[0]
         self.assertTrue(wifi_connected)
         self.assertEqual(published["update_state"]["applied_files"], 3)
 
@@ -315,33 +317,33 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
             "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
         )
 
-    def test_wifi_portal_post_reload_reconfigures_mqtt_runtime(self):
+    def test_wifi_portal_post_reload_reconfigures_server_runtime(self):
         module = load_recovery_app_module()
         app = module.RecoveryApp.__new__(module.RecoveryApp)
         app.runtime = {
             "server_profile": "production",
-            "transport": {"mode": "mqtt", "topic_namespace": "newhorizons/v1"},
-            "mqtt": {"host": "isensing-s1.u-aizu.ac.jp", "port": 8883, "tls": True},
+            "transport": {"mode": "udp_tcp"},
+            "server": {"host": "isensing-s1.u-aizu.ac.jp", "tcp_port": 22345, "udp_port": 13250},
             "logging": {"enabled": True, "capacity": "default"},
         }
         app.config_store = FakeConfigStore({
             "server_profile": "manual",
-            "transport": {"mode": "mqtt", "topic_namespace": "newhorizons/v1"},
-            "mqtt": {"host": "192.168.1.153", "port": 1883, "tls": False},
+            "transport": {"mode": "udp_tcp"},
+            "server": {"host": "192.168.1.153", "tcp_port": 22345, "udp_port": 13250},
             "logging": {"enabled": True, "capacity": "default"},
         })
         app.logger = FakeLogger()
-        app.mqtt_transport = FakeMQTTTransport()
+        app.control_transport = FakeTCPControlTransport()
         app.wifi = FakePortalWiFi(handled=True)
 
         handled = app._service_wifi_setup_portal()
 
         self.assertTrue(handled)
         self.assertEqual(app.runtime["server_profile"], "manual")
-        self.assertEqual(app.runtime["mqtt"]["host"], "192.168.1.153")
-        self.assertEqual(app.runtime["mqtt"]["port"], 1883)
-        self.assertFalse(app.runtime["mqtt"]["tls"])
-        self.assertEqual(app.mqtt_transport.reconfigure_calls, 1)
+        self.assertEqual(app.runtime["server"]["host"], "192.168.1.153")
+        self.assertEqual(app.runtime["server"]["tcp_port"], 22345)
+        self.assertEqual(app.runtime["server"]["udp_port"], 13250)
+        self.assertEqual(app.control_transport.reconfigure_calls, 1)
         self.assertIn("runtime_config_reloaded source=wifi_portal", app.logger.infos)
 
 
