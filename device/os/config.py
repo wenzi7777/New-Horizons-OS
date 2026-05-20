@@ -3,10 +3,10 @@
 DEVICE_ID = 0x00000001
 DEVICE_NAME = "New Horizons OS"
 HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4"
-RUNTIME_VERSION = "v0.2.19"
-FIRMWARE_VERSION = "v0.2.25"
+RUNTIME_VERSION = "v0.2.26"
+FIRMWARE_VERSION = "v0.2.26"
 OS_VERSION = FIRMWARE_VERSION
-RECOVERY_VERSION = "v0.2.25"
+RECOVERY_VERSION = "v0.2.26"
 RECOVERY_FIRMWARE_VERSION = RECOVERY_VERSION
 SETUP_AP_SSID_PREFIX = "NewHorizonsOS"
 SETUP_AP_PASSWORD = "newhorizons"
@@ -69,8 +69,8 @@ SERVER_PROFILES = {
 MQTT_TOPIC_NAMESPACE = "newhorizons/v1"
 MQTT_USERNAME = ""
 MQTT_PASSWORD = ""
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.25/device"
-RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.25/device"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.26/device"
+RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.26/device"
 GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
@@ -109,6 +109,12 @@ SEND_MAX_PER_LOOP = 1
 # Stop hammering lwIP briefly after a failed MQTT send. Stale sensor packets are
 # not useful for realtime streaming, so the app drops them during this window.
 SEND_FAILURE_BACKOFF_MS = 100
+
+# Matrix layout changes are staged and only committed when the native scan core
+# can produce a packet while leaving enough heap headroom for MQTT/status work.
+SCAN_HEALTH_PROBE_MS = 2000
+SCAN_MIN_HEAP_FREE = 16384
+SCAN_MIN_LARGEST_FREE_BLOCK = 8192
 
 # 1 = send every scanned frame.
 # 2 = scan at 60Hz, send at 30Hz.

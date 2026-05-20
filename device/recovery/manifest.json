@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "recovery",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.25",
-  "version": "v0.2.25",
+  "firmware_version": "v0.2.26",
+  "version": "v0.2.26",
   "target_root": "/recovery",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.25/device/recovery",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.26/device/recovery",
   "files": [
     {
       "path": "config.py",
@@ -37,7 +37,7 @@
     },
     {
       "path": "immutable_config.py",
-      "sha256": "0536fec9794236aefcaaf34d67ad025955169663130aa01ce6968ea24a78b594",
+      "sha256": "243072556aa7a36e02d1661495e2f0aafaf721bae708db9214025af96a303546",
       "size": 1974,
       "kind": "code",
       "reboot_required": true
@@ -121,6 +121,7 @@
     }
   ],
   "delete": [
-    "udp_control.py"
+    "udp_control.py",
+    "udp_stream.py"
   ]
 }

@@ -45,6 +45,9 @@ class App:
         self.vdboard = None
         self.decode_scan_frame = None
         self.native_streaming = False
+        self.scan_packet_buffer = None
+        self.last_scan_health = {}
+        self.last_matrix_start_failed = False
 
         self.imu = None
         self.battery = None
@@ -69,6 +72,28 @@ class App:
 
         self.sent_packets = 0
         self.failed_sends = 0
+
+        if self._has_pending_matrix_layout():
+            self.last_matrix_start_failed = True
+            self.logger.warn("matrix_layout_pending_recovered scan_disabled")
+            self.runtime = self.config_store.update_runtime({
+                "matrix_layout": {"active_rows": [], "active_cols": []},
+                "matrix_layout_state": {
+                    "pending": False,
+                    "committed": False,
+                    "last_error": "pending_layout_recovered_on_boot",
+                },
+            })
+        elif self._has_interrupted_scan_session():
+            self.last_matrix_start_failed = True
+            self.logger.warn("matrix_scan_interrupted autostart_disabled")
+            self.runtime = self.config_store.update_runtime({
+                "matrix_scan_state": {
+                    "active": False,
+                    "autostart_disabled": True,
+                    "last_error": "previous_scan_session_interrupted",
+                },
+            })
 
     def setup(self):
         self.logger.info("setup_start")
@@ -199,22 +224,25 @@ class App:
 
             if self.reboot_required and self._reboot_due(now):
                 self.logger.warn("reboot_required_restart")
+                self._stop_scan()
                 time.sleep_ms(250)
                 machine.reset()
 
             self._maybe_collect_garbage()
 
     def handle_scan(self, timestamp_ms):
-        if getattr(self, "native_streaming", False) and hasattr(self.vdboard.scan, "pop_packet"):
-            packet = self.vdboard.scan.pop_packet()
+        if getattr(self, "native_streaming", False) and hasattr(self.vdboard.scan, "pop_packet_into"):
+            if self._transmit_backing_off(timestamp_ms):
+                return
+            if not self.wifi.is_connected() or self.mqtt_transport is None:
+                return
+            if hasattr(self.mqtt_transport, "is_connected") and not self.mqtt_transport.is_connected():
+                return
+            packet = self._native_pop_packet()
             if packet is None:
                 return
 
-            stats = self.vdboard.scan.stats()
-            if len(stats) >= 5:
-                self.frame_id = int(stats[4])
-            else:
-                self.frame_id += 1
+            self.frame_id += 1
             fps = self.scan_rate.tick() if self.scan_rate is not None else None
             if config.PRINT_FPS and fps is not None:
                 self.logger.info(
@@ -232,51 +260,12 @@ class App:
             )
             if send_every > 1 and (self.frame_id % send_every != 0):
                 return
-            if self._transmit_backing_off(timestamp_ms):
-                return
             self.send_packet(packet)
             return
 
-        frame_view = self.vdboard.scan.pop_frame_mv()
-        if frame_view is None:
-            return
-        frame_info = self.decode_scan_frame(bytes(frame_view))
-        raw_matrix = frame_info["payload_mv"]
-        self.latest_frame = frame_info
-        self.latest_matrix = self._apply_sensor_pipeline(raw_matrix)
-
-        send_every = self.runtime.get("scan_timing", {}).get(
-            "send_every_n_frames",
-            config.SEND_EVERY_N_FRAMES
-        )
-        self.frame_id = int(frame_info["seq"])
-        fps = self.scan_rate.tick()
-        if config.PRINT_FPS and fps is not None:
-            self.logger.info(
-                "scan fps={} wifi={} sent={} fail={}".format(
-                    fps,
-                    self.wifi.is_connected(),
-                    self.sent_packets,
-                    self.failed_sends
-                )
-            )
-        if send_every > 1 and (self.frame_id % send_every != 0):
-            return
-        if self._transmit_backing_off(timestamp_ms):
-            return
-
-        packet = self.packet.build(
-            frame_id=self.frame_id,
-            timestamp_ms=int(frame_info["timestamp_ms"] if self.time_sync.status()["synced"] else timestamp_ms),
-            matrix=self.latest_matrix,
-            imu=self.latest_imu,
-            battery=self.latest_battery
-        )
-
-        if config.USE_PACKET_BUFFER and self.tx_buffer is not None:
-            self.tx_buffer.push(packet)
-        else:
-            self.send_packet(packet)
+        self.logger.warn("scan_native_stream_required")
+        self.last_matrix_start_failed = True
+        self._stop_scan()
 
     def handle_transmit(self):
         if self._in_maintenance():
@@ -538,17 +527,41 @@ class App:
                 "active_rows": list(old_layout.get("active_rows", [])),
                 "active_cols": list(old_layout.get("active_cols", [])),
             }
-            runtime = self.config_store.update_runtime({
-                "matrix_layout": {
-                    "active_rows": rows,
-                    "active_cols": cols,
+            self.runtime = self.config_store.update_runtime({
+                "matrix_layout_state": {
+                    "pending": True,
+                    "committed": False,
+                    "pending_rows": rows,
+                    "pending_cols": cols,
+                    "last_error": "",
+                },
+                "matrix_scan_state": {
+                    "active": False,
+                    "autostart_disabled": False,
+                    "last_error": "",
                 },
             })
-            self.runtime = runtime
             try:
-                self._apply_matrix_layout()
+                self._apply_matrix_layout_candidate(rows, cols)
+                if self.hardware_ready and not self._in_maintenance():
+                    ok, error = self._probe_scan_health()
+                    if not ok:
+                        raise RuntimeError(error or "scan_health_probe_failed")
             except Exception as exc:
-                rollback_runtime = self.config_store.update_runtime({"matrix_layout": rollback_layout})
+                self._stop_scan()
+                rollback_runtime = self.config_store.update_runtime({
+                    "matrix_layout": rollback_layout,
+                    "matrix_layout_state": {
+                        "pending": False,
+                        "committed": False,
+                        "last_error": str(exc),
+                    },
+                    "matrix_scan_state": {
+                        "active": False,
+                        "autostart_disabled": True,
+                        "last_error": str(exc),
+                    },
+                })
                 self.runtime = rollback_runtime
                 try:
                     self._apply_matrix_layout()
@@ -562,7 +575,25 @@ class App:
                     "reboot_required": False,
                     "applied": False,
                     "error": str(exc),
+                    "scan_memory": self._native_memory_stats(),
                 }
+            runtime = self.config_store.update_runtime({
+                "matrix_layout": {
+                    "active_rows": rows,
+                    "active_cols": cols,
+                },
+                "matrix_layout_state": {
+                    "pending": False,
+                    "committed": True,
+                    "last_error": "",
+                },
+                "matrix_scan_state": {
+                    "active": bool(self.scan_ready),
+                    "autostart_disabled": False,
+                    "last_error": "",
+                },
+            })
+            self.runtime = runtime
             return {
                 "status": "ok",
                 "message": "matrix_layout_updated",
@@ -799,7 +830,7 @@ class App:
         duration_ms = int(request.get("duration_ms", 1000))
         level = request.get("level", None)
         try:
-            self._start_scan_if_configured()
+            self._start_scan_if_configured(force=True, persist_state=False)
             avg_mv = self.vdboard.scan.sample_cell_mv(analog_pin, select_pin, duration_ms)
             if avg_mv is None:
                 return self._ok("calibration_no_samples", error="calibration_no_samples")
@@ -826,8 +857,9 @@ class App:
             return self._ok("matrix_layout_required", error="matrix_layout_required")
         level = float(request["level"])
         duration_ms = int(request.get("duration_ms", 3000))
-        self._start_scan_if_configured()
+        self._start_scan_if_configured(force=True, persist_state=False)
         try:
+            from frame_protocol import decode_scan_frame
             end_ms = time.ticks_add(time.ticks_ms(), max(1, duration_ms))
             active_rows = self._active_rows()
             active_cols = self._active_cols()
@@ -840,7 +872,7 @@ class App:
                 if frame_view is None:
                     time.sleep_ms(1)
                     continue
-                frame_info = self.decode_scan_frame(bytes(frame_view))
+                frame_info = decode_scan_frame(bytes(frame_view))
                 payload = frame_info["payload_mv"]
                 for idx, value in enumerate(payload[:sensor_count]):
                     sums[idx] += float(value)
@@ -1118,6 +1150,8 @@ class App:
             "active_cols": self._active_cols(),
             "matrix_configured": self._matrix_configured(),
             "matrix_shape": {"rows": len(self._active_rows()), "cols": len(self._active_cols())},
+            "last_matrix_start_failed": self.last_matrix_start_failed,
+            "last_scan_health": self.last_scan_health,
             "sent_packets": self.sent_packets,
             "failed_sends": self.failed_sends,
             "scan": self.vdboard.scan.stats() if self.vdboard is not None else (),
@@ -1230,7 +1264,7 @@ class App:
         if self.native_streaming:
             self._configure_native_stream()
         else:
-            self._ensure_fallback_scan_services()
+            raise RuntimeError("native_stream_required")
 
     def _ensure_runtime_hardware(self):
         if self.hardware_ready:
@@ -1279,6 +1313,22 @@ class App:
         layout = self._matrix_layout()
         return bool(layout["active_rows"] and layout["active_cols"])
 
+    def _has_pending_matrix_layout(self):
+        state = (self.runtime or {}).get("matrix_layout_state", {}) or {}
+        return bool(state.get("pending"))
+
+    def _has_committed_matrix_layout(self):
+        state = (self.runtime or {}).get("matrix_layout_state", {}) or {}
+        return bool(state.get("committed"))
+
+    def _has_interrupted_scan_session(self):
+        state = (self.runtime or {}).get("matrix_scan_state", {}) or {}
+        return bool(state.get("active"))
+
+    def _matrix_autostart_disabled(self):
+        state = (self.runtime or {}).get("matrix_scan_state", {}) or {}
+        return bool(state.get("autostart_disabled"))
+
     def _validate_matrix_layout(self, rows, cols):
         rows = self._normalize_pin_list(rows, config.AVAILABLE_ROWS, "active_rows")
         cols = self._normalize_pin_list(cols, config.AVAILABLE_COLS, "active_cols")
@@ -1311,23 +1361,39 @@ class App:
             self.tx_buffer = None
             self.native_streaming = True
             return
+        raise RuntimeError("native_stream_required")
 
-        from packet import PacketBuilder
-        from filter_engine import FilterChain
-
-        self.packet = PacketBuilder(active_rows=active_rows, active_cols=active_cols)
-        self.filter_chain = FilterChain(
-            sensor_count=len(active_rows) * len(active_cols),
-            enabled=self.filter_config.get("enabled", False),
-            median=self.filter_config.get("median", 3),
-            alpha=self.filter_config.get("alpha", 0.25),
-        )
-        self.native_streaming = False
-
-    def _start_scan_if_configured(self):
+    def _start_scan_if_configured(self, force=False, persist_state=True):
         if not self._matrix_configured():
             self.scan_ready = False
             self.logger.info("setup_scan_skipped_no_layout")
+            return
+        if not force and not self._has_committed_matrix_layout():
+            self.scan_ready = False
+            self.last_matrix_start_failed = True
+            self.logger.warn("setup_scan_skipped_uncommitted_layout")
+            try:
+                self.config_store.update_runtime(
+                    {
+                        "matrix_layout_state": {
+                            "pending": False,
+                            "committed": False,
+                            "last_error": "layout_requires_reapply",
+                        },
+                        "matrix_scan_state": {
+                            "active": False,
+                            "autostart_disabled": True,
+                            "last_error": "layout_requires_reapply",
+                        },
+                    }
+                )
+            except Exception as exc:
+                self.logger.warn("matrix_layout_state_reapply_mark_failed {}".format(exc))
+            return
+        if not force and self._matrix_autostart_disabled():
+            self.scan_ready = False
+            self.last_matrix_start_failed = True
+            self.logger.warn("setup_scan_autostart_disabled")
             return
         self.logger.info("setup_scan_backend_init_start")
         self._init_scan_backend()
@@ -1336,8 +1402,10 @@ class App:
         self.vdboard.scan.start()
         self.logger.info("setup_scan_start_done")
         self.scan_ready = True
+        if persist_state:
+            self._mark_scan_started()
 
-    def _stop_scan(self):
+    def _stop_scan(self, persist_state=True):
         if self.vdboard is not None:
             try:
                 self.vdboard.scan.stop()
@@ -1346,12 +1414,130 @@ class App:
         self.scan_ready = False
         self.latest_matrix = None
         self.latest_frame = None
+        self.scan_packet_buffer = None
         self._clear_tx_buffer()
+        if persist_state:
+            self._mark_scan_stopped()
 
-    def _apply_matrix_layout(self):
-        self._stop_scan()
+    def _apply_matrix_layout(self, force=False, persist_state=True):
+        self._stop_scan(persist_state=persist_state)
         if self.hardware_ready and not self._in_maintenance():
-            self._start_scan_if_configured()
+            self._start_scan_if_configured(force=force, persist_state=persist_state)
+
+    def _apply_matrix_layout_candidate(self, rows, cols):
+        old_runtime = self.runtime
+        candidate = dict(old_runtime or {})
+        candidate["matrix_layout"] = {
+            "active_rows": list(rows),
+            "active_cols": list(cols),
+        }
+        self.runtime = candidate
+        try:
+            self._apply_matrix_layout(force=True, persist_state=False)
+        except Exception:
+            self.runtime = old_runtime
+            raise
+
+    def _mark_scan_started(self):
+        try:
+            self.runtime = self.config_store.update_runtime({
+                "matrix_scan_state": {
+                    "active": True,
+                    "autostart_disabled": False,
+                    "last_error": "",
+                },
+            })
+        except Exception as exc:
+            self.logger.warn("matrix_scan_state_start_failed {}".format(exc))
+
+    def _mark_scan_stopped(self):
+        try:
+            state = (self.runtime or {}).get("matrix_scan_state", {}) or {}
+            if state.get("active"):
+                self.runtime = self.config_store.update_runtime({
+                    "matrix_scan_state": {
+                        "active": False,
+                        "last_error": state.get("last_error", ""),
+                    },
+                })
+        except Exception as exc:
+            self.logger.warn("matrix_scan_state_stop_failed {}".format(exc))
+
+    def _scan_stats_tuple(self):
+        if self.vdboard is None or not hasattr(self.vdboard.scan, "stats"):
+            return ()
+        try:
+            return self.vdboard.scan.stats()
+        except Exception:
+            return ()
+
+    def _native_memory_stats(self):
+        if self.vdboard is None or not hasattr(self.vdboard.scan, "memory_stats"):
+            return {}
+        try:
+            return self.vdboard.scan.memory_stats()
+        except Exception:
+            return {}
+
+    def _probe_scan_health(self):
+        if not self.scan_ready:
+            return False, "scan_not_started"
+        if not self._native_stream_available():
+            return False, "native_stream_required"
+        start_stats = self._scan_stats_tuple()
+        start_frames = int(start_stats[0]) if len(start_stats) > 0 else 0
+        deadline = time.ticks_add(time.ticks_ms(), int(getattr(config, "SCAN_HEALTH_PROBE_MS", 2000)))
+        while time.ticks_diff(deadline, time.ticks_ms()) > 0:
+            try:
+                self.vdboard.scan.service()
+            except Exception as exc:
+                return False, "scan_service_failed {}".format(exc)
+            stats = self._scan_stats_tuple()
+            produced = int(stats[0]) if len(stats) > 0 else 0
+            started = bool(int(stats[7])) if len(stats) > 7 else True
+            if started and produced > start_frames:
+                packet = self._native_pop_packet()
+                if packet is None:
+                    time.sleep_ms(50)
+                    continue
+                mem = self._native_memory_stats()
+                heap_free = int(mem.get("heap_free", 0) or 0)
+                largest = int(mem.get("heap_largest_free_block", 0) or 0)
+                min_free = int(getattr(config, "SCAN_MIN_HEAP_FREE", 16384))
+                min_largest = int(getattr(config, "SCAN_MIN_LARGEST_FREE_BLOCK", 8192))
+                if heap_free and heap_free < min_free:
+                    return False, "scan_heap_low free={} min={}".format(heap_free, min_free)
+                if largest and largest < min_largest:
+                    return False, "scan_largest_block_low largest={} min={}".format(largest, min_largest)
+                self.last_scan_health = {
+                    "produced_frames": produced,
+                    "heap_free": heap_free,
+                    "heap_largest_free_block": largest,
+                }
+                return True, ""
+            time.sleep_ms(50)
+        return False, "scan_no_frames"
+
+    def _native_packet_buffer_size(self):
+        stats = self._native_memory_stats()
+        size = int(stats.get("packet_scratch_bytes", 0) or 0)
+        return size if size > 0 else 1536
+
+    def _native_pop_packet(self):
+        scan = self.vdboard.scan
+        if hasattr(scan, "pop_packet_into"):
+            if self.scan_packet_buffer is None:
+                self.scan_packet_buffer = bytearray(self._native_packet_buffer_size())
+            length = scan.pop_packet_into(self.scan_packet_buffer)
+            if length is None:
+                return None
+            length = int(length)
+            if length <= 0:
+                return None
+            return memoryview(self.scan_packet_buffer)[:length]
+        self.logger.warn("native_stream_missing_pop_packet_into")
+        self._stop_scan()
+        return None
 
     def _ensure_led(self):
         if self.led is not None or not config.ENABLE_LED:
@@ -1367,7 +1553,7 @@ class App:
     def _native_stream_available(self):
         return bool(
             self.vdboard is not None
-            and hasattr(self.vdboard.scan, "pop_packet")
+            and hasattr(self.vdboard.scan, "pop_packet_into")
             and hasattr(self.vdboard.scan, "set_packet_options")
             and hasattr(self.vdboard.scan, "load_calibration")
         )
@@ -1375,7 +1561,6 @@ class App:
     def _configure_native_stream(self):
         if not self._native_stream_available():
             self.native_streaming = False
-            self._ensure_fallback_scan_services()
             return False
         try:
             import secrets
@@ -1394,7 +1579,6 @@ class App:
         except Exception as exc:
             self.logger.warn("native_stream_config_failed {}".format(exc))
             self.native_streaming = False
-            self._ensure_fallback_scan_services()
             return False
 
     def _configure_native_filter(self):
@@ -1432,7 +1616,7 @@ class App:
                     curve.append((float(sample_mv), float(level_key)))
                 curve.sort(key=lambda item: item[0])
                 table.append(curve)
-        if self.calibration is None:
+        if self.calibration is None and not getattr(config, "KEEP_CALIBRATION_MODULE_LOADED", False):
             try:
                 import sys
                 sys.modules.pop("calibration_store", None)
@@ -1494,37 +1678,8 @@ class App:
                 pass
         gc.collect()
 
-    def _ensure_fallback_scan_services(self):
-        if self.packet is not None and self.filter_chain is not None and self.decode_scan_frame is not None:
-            return
-        from calibration_store import CalibrationStore
-        from frame_protocol import decode_scan_frame
-        from packet import PacketBuilder
-        from packet_buffer import PacketBuffer
-        from filter_engine import FilterChain
-
-        active_rows = self._active_rows()
-        active_cols = self._active_cols()
-        if self.calibration is None:
-            self.calibration = CalibrationStore(config.CALIBRATION_DIR)
-            self.calibration.load()
-        self.packet = PacketBuilder(active_rows=active_rows, active_cols=active_cols)
-        self.filter_chain = FilterChain(
-            sensor_count=len(active_rows) * len(active_cols),
-            enabled=self.filter_config.get("enabled", False),
-            median=self.filter_config.get("median", 3),
-            alpha=self.filter_config.get("alpha", 0.25),
-        )
-        if config.USE_PACKET_BUFFER:
-            self.tx_buffer = PacketBuffer(
-                capacity=config.PACKET_BUFFER_SIZE,
-                drop_oldest=config.PACKET_BUFFER_DROP_OLDEST
-            )
-        self.decode_scan_frame = decode_scan_frame
-        self.native_streaming = False
-
     def _ensure_runtime_services(self):
         self._ensure_streaming_services()
         self._ensure_maintenance_services()
         if not self._native_stream_available():
-            self._ensure_fallback_scan_services()
+            raise RuntimeError("native_stream_required")

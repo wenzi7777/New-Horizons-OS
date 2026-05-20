@@ -13,6 +13,7 @@ class MQTTTransport:
         self.logger = logger
         self.client = None
         self.client_key = None
+        self.topic_cache = {}
         self.pending = []
         self.last_attempt_ms = 0
 
@@ -57,19 +58,22 @@ class MQTTTransport:
         return True
 
     def publish_raw(self, payload, wifi_connected):
-        if not self.ensure_connected(wifi_connected):
+        if not wifi_connected or self.client is None:
             return False
-        return self._publish_bytes(self._topic("raw"), payload)
+        return self._publish_bytes(self._topic_bytes("raw"), payload, qos=0)
 
     def publish_status(self, payload, wifi_connected):
         if not self.ensure_connected(wifi_connected):
             return False
-        return self._publish_json(self._topic("status"), payload)
+        return self._publish_json(self._topic_bytes("status"), payload, wifi_connected, qos=1)
 
     def publish_result(self, payload, wifi_connected):
         if not self.ensure_connected(wifi_connected):
             return False
-        return self._publish_json(self._topic("result"), payload)
+        return self._publish_json(self._topic_bytes("result"), payload, wifi_connected, qos=1)
+
+    def is_connected(self):
+        return self.client is not None
 
     def close(self):
         if self.client is not None:
@@ -79,6 +83,7 @@ class MQTTTransport:
                 pass
         self.client = None
         self.client_key = None
+        self.topic_cache = {}
 
     def reconfigure(self):
         self.last_attempt_ms = 0
@@ -123,6 +128,7 @@ class MQTTTransport:
             client.subscribe(self._topic("cmd", namespace=namespace), qos=1)
             self.client = client
             self.client_key = key
+            self.topic_cache = {}
             self._info("mqtt_connected host={} port={}".format(host, port))
             return True
         except Exception as exc:
@@ -138,9 +144,19 @@ class MQTTTransport:
             return "{}/raw/{}".format(base, self.device_uid)
         return "{}/device/{}/{}".format(base, self.device_uid, kind)
 
-    def _publish_json(self, topic, payload):
+    def _topic_bytes(self, kind):
+        cached = self.topic_cache.get(kind)
+        if cached is None:
+            cached = self._topic(kind).encode()
+            self.topic_cache[kind] = cached
+        return cached
+
+    def _publish_json(self, topic, payload, wifi_connected=True, qos=1):
+        if not wifi_connected:
+            return False
         try:
-            self.client.publish(topic.encode(), json.dumps(payload).encode(), qos=1)
+            topic_bytes = topic if isinstance(topic, bytes) else topic.encode()
+            self.client.publish(topic_bytes, json.dumps(payload).encode(), qos=qos)
             return True
         except Exception as exc:
             self._warn("mqtt_publish_json_failed {}".format(exc))
@@ -148,9 +164,10 @@ class MQTTTransport:
             self.last_attempt_ms = 0
             return False
 
-    def _publish_bytes(self, topic, payload):
+    def _publish_bytes(self, topic, payload, qos=0):
         try:
-            self.client.publish(topic.encode(), payload, qos=1)
+            topic_bytes = topic if isinstance(topic, bytes) else topic.encode()
+            self.client.publish(topic_bytes, payload, qos=qos)
             return True
         except Exception as exc:
             self._warn("mqtt_publish_raw_failed {}".format(exc))

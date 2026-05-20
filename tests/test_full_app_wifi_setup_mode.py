@@ -43,6 +43,52 @@ class FailingInitScan(FakeScan):
         raise MemoryError("stream buffer alloc failed")
 
 
+class NativePacketScan(FakeScan):
+    def __init__(self, events=None):
+        super().__init__(events)
+        self.pop_packet_calls = 0
+        self.packet = b"native-packet"
+
+    def set_packet_options(self, *args):
+        return True
+
+    def load_calibration(self, *args):
+        return True
+
+    def configure_filter(self, *args):
+        return True
+
+    def update_imu_cache(self, *args):
+        return True
+
+    def update_battery_cache(self, *args):
+        return True
+
+    def pop_packet(self):
+        self.pop_packet_calls += 1
+        return self.packet
+
+    def pop_packet_into(self, buffer):
+        self.pop_packet_calls += 1
+        if self.packet is None:
+            return None
+        buffer[:len(self.packet)] = self.packet
+        return len(self.packet)
+
+    def memory_stats(self):
+        return {
+            "heap_free": 65536,
+            "heap_largest_free_block": 32768,
+            "packet_scratch_bytes": 256,
+        }
+
+    def stream_stats(self):
+        return {"packet_frames": self.pop_packet_calls}
+
+    def stats(self):
+        return (1, 0, 0, 1, 0, 8, 1, 1, 1, 1)
+
+
 class FakeLogger:
     def __init__(self):
         self.infos = []
@@ -115,6 +161,8 @@ class FakeRuntimeConfigStore:
             "scan_timing": {"target_fps": 60, "settle_us": 20, "core_id": 1},
             "buffer_frames": 8,
             "matrix_layout": {"active_rows": [1], "active_cols": [1]},
+            "matrix_layout_state": {"pending": False, "committed": True, "last_error": ""},
+            "matrix_scan_state": {"active": False, "autostart_disabled": False, "last_error": ""},
             "mqtt": {"host": "127.0.0.1", "port": 1883, "tls": False},
             "transport": {"mode": "mqtt", "topic_namespace": "newhorizons/v1"},
             "logging": {"enabled": True, "capacity": "default", "serial": "status"},
@@ -210,7 +258,7 @@ class FakeBattery:
 
 def load_full_app_module(runtime_override=None, update_check=None, enable_led=False, enable_battery=False, wifi_connect_result=True):
     events = []
-    fake_scan = FakeScan(events)
+    fake_scan = NativePacketScan(events)
     fake_vdboard = types.SimpleNamespace(scan=fake_scan)
     saved_modules = {}
 
@@ -232,6 +280,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
             ENABLE_IMU=False,
             ENABLE_BATTERY=enable_battery,
             ENABLE_LED=enable_led,
+            KEEP_CALIBRATION_MODULE_LOADED=True,
             USE_PACKET_BUFFER=False,
             DEVICE_STATE_DIR="device_state",
             CALIBRATION_DIR="device_state/calibration",
@@ -492,9 +541,56 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
         self.assertIsNotNone(app.mqtt_transport)
         self.assertIsNotNone(app.time_sync)
-        self.assertIsNotNone(app.calibration)
-        self.assertIsNotNone(app.packet)
-        self.assertIsNotNone(app.filter_chain)
+        self.assertIsNone(app.calibration)
+        self.assertIsNone(app.packet)
+        self.assertIsNone(app.filter_chain)
+
+    def test_interrupted_scan_session_disables_boot_autostart(self):
+        module, fake_scan, events, saved_modules = load_full_app_module(
+            runtime_override={
+                "matrix_scan_state": {"active": True, "autostart_disabled": False},
+            }
+        )
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(events, ["wifi_connect"])
+        self.assertEqual(fake_scan.start_calls, 0)
+        self.assertFalse(app.scan_ready)
+        self.assertTrue(app.last_matrix_start_failed)
+        self.assertTrue(app.config_store.runtime["matrix_scan_state"]["autostart_disabled"])
+
+    def test_uncommitted_legacy_matrix_layout_does_not_autostart_scan(self):
+        module, fake_scan, events, saved_modules = load_full_app_module(
+            runtime_override={
+                "matrix_layout": {"active_rows": [1], "active_cols": [1]},
+                "matrix_layout_state": {"pending": False, "committed": False, "last_error": ""},
+                "matrix_scan_state": {"active": False, "autostart_disabled": False, "last_error": ""},
+            }
+        )
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(events, ["wifi_connect"])
+        self.assertEqual(fake_scan.start_calls, 0)
+        self.assertFalse(app.scan_ready)
+        self.assertTrue(app.last_matrix_start_failed)
+        self.assertTrue(app.config_store.runtime["matrix_scan_state"]["autostart_disabled"])
+        self.assertEqual(app.config_store.runtime["matrix_layout_state"]["last_error"], "layout_requires_reapply")
 
     def test_empty_matrix_layout_skips_scan_start(self):
         module, fake_scan, events, saved_modules = load_full_app_module(
@@ -599,17 +695,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(app.send_backoff_until_ms, 1100)
         self.assertEqual(app.tx_buffer.clear_calls, 1)
 
-    def test_scan_skips_packet_build_while_transmit_is_backing_off(self):
-        module, fake_scan, _events, saved_modules = load_full_app_module()
+    def test_non_native_scan_is_stopped_instead_of_using_python_packet_builder(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
         build_calls = []
+        fake_scan = FakeScan([])
         try:
-            fake_scan.pop_frame_mv = lambda: memoryview(b"frame")
-            module.decode_scan_frame = lambda payload: {
-                "payload_mv": [1],
-                "seq": 7,
-                "timestamp_ms": 700,
-            }
-
             app = module.App.__new__(module.App)
             app.runtime = {"scan_timing": {"send_every_n_frames": 1}}
             app.latest_frame = None
@@ -617,7 +707,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app.latest_imu = None
             app.latest_battery = None
             app.vdboard = types.SimpleNamespace(scan=fake_scan)
-            app.decode_scan_frame = module.decode_scan_frame
+            app.scan_ready = True
+            app.tx_buffer = None
+            app.logger = FakeLogger()
+            app.config_store = types.SimpleNamespace(update_runtime=lambda patch: app.runtime)
+            app.decode_scan_frame = lambda payload: (_ for _ in ()).throw(AssertionError("decode_scan_frame must not run"))
             app.frame_id = 0
             app.send_backoff_until_ms = 1100
             app.time_sync = types.SimpleNamespace(status=lambda: {"synced": False})
@@ -629,7 +723,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app.packet = types.SimpleNamespace(
                 build=lambda **kwargs: build_calls.append(kwargs) or b"packet"
             )
-            app._apply_sensor_pipeline = lambda matrix: [float(matrix[0])]
+            app._apply_sensor_pipeline = lambda matrix: (_ for _ in ()).throw(AssertionError("pipeline must not run"))
             module.config.SEND_EVERY_N_FRAMES = 1
             module.config.PRINT_FPS = False
             module.time.ticks_diff = lambda now, then: now - then
@@ -642,9 +736,39 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 else:
                     sys.modules[name] = saved
 
-        self.assertEqual(app.frame_id, 7)
-        self.assertEqual(app.latest_matrix, [1.0])
+        self.assertEqual(fake_scan.stop_calls, 1)
+        self.assertTrue(app.last_matrix_start_failed)
         self.assertEqual(build_calls, [])
+
+    def test_native_scan_skips_packet_pop_while_transmit_is_backing_off(self):
+        module, _fake_scan, events, saved_modules = load_full_app_module()
+        native_scan = NativePacketScan(events)
+        try:
+            app = module.App.__new__(module.App)
+            app.runtime = {"scan_timing": {"send_every_n_frames": 1}}
+            app.vdboard = types.SimpleNamespace(scan=native_scan)
+            app.native_streaming = True
+            app.frame_id = 0
+            app.send_backoff_until_ms = 1100
+            app.scan_rate = types.SimpleNamespace(tick=lambda: None)
+            app.mqtt_transport = types.SimpleNamespace(publish_raw=lambda payload, connected: True)
+            app.wifi = types.SimpleNamespace(is_connected=lambda: True)
+            app.sent_packets = 0
+            app.failed_sends = 0
+            module.config.SEND_EVERY_N_FRAMES = 1
+            module.config.PRINT_FPS = False
+            module.time.ticks_diff = lambda now, then: now - then
+
+            app.handle_scan(1000)
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(native_scan.pop_packet_calls, 0)
+        self.assertEqual(app.sent_packets, 0)
 
     def test_set_matrix_layout_persists_valid_pin_selection(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()
@@ -662,6 +786,33 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     sys.modules[name] = saved
 
         self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["runtime"]["matrix_layout"], {"active_rows": [1], "active_cols": [1]})
+
+    def test_set_matrix_layout_does_not_persist_when_health_probe_fails(self):
+        module, _fake_scan, events, saved_modules = load_full_app_module()
+        try:
+            module.config.AVAILABLE_ROWS = [1, 2]
+            module.config.AVAILABLE_COLS = [1, 2]
+            native_scan = NativePacketScan(events)
+            app = module.App(wifi_setup_requested=False)
+            app.hardware_ready = True
+            app.vdboard = types.SimpleNamespace(scan=native_scan)
+            app._probe_scan_health = lambda: (False, "scan_no_frames")
+
+            response = app._handle_control_request(
+                {"command": "set_matrix_layout", "analog_pins": [1, 2], "select_pins": [1, 2]},
+                ("mqtt", 0),
+            )
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "error")
+        self.assertEqual(response["message"], "matrix_layout_failed")
+        self.assertEqual(response["error"], "scan_no_frames")
         self.assertEqual(response["runtime"]["matrix_layout"], {"active_rows": [1], "active_cols": [1]})
 
     def test_set_matrix_layout_rolls_back_when_scan_alloc_fails(self):

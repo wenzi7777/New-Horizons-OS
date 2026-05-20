@@ -62,6 +62,16 @@ DEFAULT_RUNTIME = {
         "active_rows": [],
         "active_cols": [],
     },
+    "matrix_layout_state": {
+        "pending": False,
+        "committed": False,
+        "last_error": "",
+    },
+    "matrix_scan_state": {
+        "active": False,
+        "autostart_disabled": False,
+        "last_error": "",
+    },
     "buffer_frames": 8,
     "ntp_servers": ["pool.ntp.org", "time.nist.gov"],
     "transport": {
