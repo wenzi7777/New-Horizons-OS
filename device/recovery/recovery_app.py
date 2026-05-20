@@ -91,6 +91,11 @@ class RecoveryApp:
             self._announce_status(now)
             if self.reboot_required and self._reboot_due(now):
                 time.sleep_ms(250)
+                try:
+                    self.control_transport.close()
+                except Exception:
+                    pass
+                time.sleep_ms(50)
                 machine.reset()
             time.sleep_ms(50)
 

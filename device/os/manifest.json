@@ -2,15 +2,15 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.28",
-  "version": "v0.2.28",
+  "firmware_version": "v0.2.29",
+  "version": "v0.2.29",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.28/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.29/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
-      "sha256": "6188003b6940ed239333c9078179768d26ae3dfe7c668d20ac4ef502c468d675",
-      "size": 25466,
+      "sha256": "24a71d4d82748cfffad3dfdf9d92b04cbeaad8c15d5c0c39648b8acd9eee416d",
+      "size": 25921,
       "kind": "code",
       "reboot_required": true
     },
@@ -44,8 +44,8 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "d9b7d1d2b17891283f9af8ecc9e6a77053dc2929340a957a5494d528ff362fba",
-      "size": 2903,
+      "sha256": "9ffcf258c3b5d99cc23c94d92b2ba86d9248fff5b4050f08ace5157067321c3c",
+      "size": 2912,
       "kind": "code",
       "reboot_required": true
     },
@@ -191,8 +191,8 @@
     },
     {
       "path": "tcp_control.mpy",
-      "sha256": "e00b8a57e7dc51919a93b078b635540a6090f0ae8876170e6047784f100dcd3c",
-      "size": 3006,
+      "sha256": "c046cb1cb2c842bd615cb0bd70ef25f159850d777f3aa524180e2bf877e003b0",
+      "size": 3033,
       "kind": "code",
       "reboot_required": true
     },

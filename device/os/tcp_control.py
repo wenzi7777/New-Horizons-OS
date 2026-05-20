@@ -6,6 +6,7 @@ import time
 class TCPControlTransport:
     MAX_PENDING = 8
     RECONNECT_BACKOFF_MS = 2000
+    CONNECT_TIMEOUT_SEC = 1
     RECV_CHUNK = 512
 
     def __init__(self, runtime_getter, device_uid, logger=None, hello_getter=None):
@@ -107,7 +108,7 @@ class TCPControlTransport:
         try:
             addr = socket.getaddrinfo(host, port)[0][-1]
             sock = socket.socket()
-            sock.settimeout(2)
+            sock.settimeout(self.CONNECT_TIMEOUT_SEC)
             sock.connect(addr)
             sock.settimeout(0)
             self.sock = sock

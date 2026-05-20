@@ -227,6 +227,12 @@ class App:
                 self.logger.warn("reboot_required_restart")
                 self._stop_scan()
                 time.sleep_ms(250)
+                try:
+                    if self.control_transport is not None:
+                        self.control_transport.close()
+                except Exception:
+                    pass
+                time.sleep_ms(50)
                 machine.reset()
 
             self._maybe_collect_garbage()
@@ -409,7 +415,7 @@ class App:
         if (not force
                 and time.ticks_diff(now, self.last_status_announce_ms) < config.STATUS_ANNOUNCE_INTERVAL_MS):
             return False
-        payload = self._status()
+        payload = self._status_announce_payload()
         payload["message"] = "status_announce"
         ok = self.control_transport.publish_status(payload, self.wifi.is_connected())
         if ok:
@@ -1162,6 +1168,42 @@ class App:
             "stream": self.vdboard.scan.stream_stats() if (
                 self.vdboard is not None and hasattr(self.vdboard.scan, "stream_stats")
             ) else {},
+        }
+
+    def _status_announce_payload(self):
+        runtime = self.runtime if isinstance(self.runtime, dict) else {}
+        return {
+            "status": "ok",
+            "message": "status_announce",
+            "mode": self.mode,
+            "reboot_required": self.reboot_required,
+            "device_id": "0x{:08X}".format(self.device_id),
+            "device_uid": self.device_uid,
+            "device_name": self.device_name,
+            "system": self._system_status(),
+            "runtime": {
+                "mode": self.mode,
+                "transport": runtime.get("transport", {}),
+                "server": runtime.get("server", {}),
+                "server_profile": runtime.get("server_profile", ""),
+                "logging": runtime.get("logging", {}),
+                "matrix_layout": {
+                    "active_rows": self._active_rows(),
+                    "active_cols": self._active_cols(),
+                },
+                "matrix_layout_state": runtime.get("matrix_layout_state", {}),
+                "matrix_scan_state": runtime.get("matrix_scan_state", {}),
+                "system": runtime.get("system", {}),
+            },
+            "wifi_state": self.wifi.state,
+            "wifi_connected": self.wifi.is_connected(),
+            "logging": self._logging_status(),
+            "matrix_configured": self._matrix_configured(),
+            "matrix_shape": {"rows": len(self._active_rows()), "cols": len(self._active_cols())},
+            "last_matrix_start_failed": self.last_matrix_start_failed,
+            "update_state": self._current_update_state(),
+            "sent_packets": self.sent_packets,
+            "failed_sends": self.failed_sends,
         }
 
     def _maintenance_status(self):
