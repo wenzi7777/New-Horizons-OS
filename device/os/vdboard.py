@@ -8,6 +8,8 @@ try:
 except ImportError:  # pragma: no cover
     machine = None
 
+import struct
+
 import config
 from frame_protocol import encode_scan_frame, decode_scan_frame
 
@@ -98,6 +100,19 @@ class _ScanAPI:
         self.started = False
         self.last_capture_ms = 0
         self.buffer = _RingBuffer(self.buffer_frames)
+        self.device_id = int(getattr(config, "DEVICE_ID", 0))
+        self.use_hmac = bool(getattr(config, "USE_HMAC", False))
+        self.hmac_len = int(getattr(config, "HMAC_LEN", 0)) if self.use_hmac else 0
+        self.hmac_key = b""
+        self.filter_enabled = False
+        self.filter_median = 3
+        self.filter_alpha = 0.25
+        self.filter_windows = []
+        self.filter_state = []
+        self.calibration_table = []
+        self.imu_cache = None
+        self.battery_cache = None
+        self.packet_frames = 0
 
     def init(self, rows=None, cols=None, row_pins=None, col_pins=None, *, layout=None, fps=None, settle_us=None, buffer_frames=8, core_id=1):
         layout = layout or {}
@@ -125,6 +140,7 @@ class _ScanAPI:
         self.buffer = _RingBuffer(self.buffer_frames)
         self.seq = 0
         self.last_capture_ms = 0
+        self._reset_stream_state()
 
         scanner_impl = _load_scanner_impl()
         self.scanner = scanner_impl(
@@ -147,6 +163,71 @@ class _ScanAPI:
             buffer_frames=self.buffer_frames,
             core_id=self.core_id,
         )
+
+    def _reset_stream_state(self):
+        sensor_count = max(0, len(self.row_pins) * len(self.col_pins))
+        self.filter_windows = [[] for _ in range(sensor_count)]
+        self.filter_state = [None] * sensor_count
+        if len(self.calibration_table) != sensor_count:
+            self.calibration_table = [[] for _ in range(sensor_count)]
+        self.packet_frames = 0
+
+    def set_packet_options(self, device_id, use_hmac, hmac_len, hmac_key):
+        self.device_id = int(device_id) & 0xFFFFFFFF
+        self.use_hmac = bool(use_hmac)
+        self.hmac_len = int(hmac_len) if self.use_hmac else 0
+        if isinstance(hmac_key, str):
+            hmac_key = hmac_key.encode()
+        self.hmac_key = bytes(hmac_key or b"")
+        return True
+
+    def configure_filter(self, enabled, median, alpha):
+        median = int(median)
+        if median not in (1, 3, 5):
+            raise ValueError("median must be 1, 3, or 5")
+        alpha = float(alpha)
+        if alpha < 0.05 or alpha > 0.6:
+            raise ValueError("alpha out of range")
+        self.filter_enabled = bool(enabled)
+        self.filter_median = median
+        self.filter_alpha = alpha
+        self._reset_stream_state()
+        return True
+
+    def load_calibration(self, table):
+        sensor_count = max(0, len(self.row_pins) * len(self.col_pins))
+        normalized = []
+        table = table or []
+        for idx in range(sensor_count):
+            points = table[idx] if idx < len(table) and table[idx] is not None else []
+            curve = [(float(sample), float(level)) for sample, level in points]
+            curve.sort(key=lambda item: item[0])
+            normalized.append(curve)
+        self.calibration_table = normalized
+        return True
+
+    def update_imu_cache(self, values):
+        if values is None or len(values) < 6:
+            self.imu_cache = None
+            return True
+        payload = [float(values[idx]) for idx in range(6)]
+        try:
+            payload.append(float(values[6]))
+        except Exception:
+            payload.append(0.0)
+        self.imu_cache = tuple(payload)
+        return True
+
+    def update_battery_cache(self, values):
+        if values is None or len(values) < 3:
+            self.battery_cache = None
+            return True
+        self.battery_cache = (
+            int(values[0]) & 0xFF,
+            int(values[1]) & 0xFF,
+            int(values[2]) & 0xFFFF,
+        )
+        return True
 
     def start(self):
         if self.scanner is None:
@@ -180,6 +261,94 @@ class _ScanAPI:
             return None
         return memoryview(frame)
 
+    def pop_packet(self):
+        frame = self.buffer.pop()
+        if frame is None:
+            return None
+        decoded = decode_scan_frame(frame)
+        matrix = [
+            self._apply_calibration(idx, self._apply_filter(idx, float(value)))
+            for idx, value in enumerate(decoded["payload_mv"])
+        ]
+
+        imu_payload = b""
+        battery_payload = b""
+        flags = 0
+        if self.imu_cache is not None:
+            flags |= 0x01
+            imu_payload = struct.pack("<7f", *self.imu_cache)
+        if self.battery_cache is not None:
+            flags |= 0x02
+            battery_payload = struct.pack("<BBH", *self.battery_cache)
+        if self.use_hmac:
+            flags |= 0x80
+
+        matrix_payload = struct.pack("<" + ("f" * len(matrix)), *matrix) if matrix else b""
+        payload = matrix_payload + imu_payload + battery_payload
+        packet = bytearray(18 + len(payload) + (self.hmac_len if self.use_hmac else 0))
+        struct.pack_into(
+            "<HBBIIIH",
+            packet,
+            0,
+            int(getattr(config, "MAGIC", 0xA55A)),
+            int(getattr(config, "PACKET_VERSION", 1)),
+            flags,
+            self.device_id,
+            int(decoded["seq"]),
+            int(decoded["timestamp_ms"]),
+            len(payload),
+        )
+        packet[18:18 + len(payload)] = payload
+        if self.use_hmac and self.hmac_len:
+            try:
+                from crypto_hmac import hmac_sha256
+                body_len = 18 + len(payload)
+                packet[body_len:body_len + self.hmac_len] = hmac_sha256(self.hmac_key, packet[:body_len])[:self.hmac_len]
+            except Exception:
+                pass
+        self.packet_frames += 1
+        return bytes(packet)
+
+    def _apply_filter(self, sensor_index, value):
+        if not self.filter_enabled:
+            return value
+        if sensor_index < 0 or sensor_index >= len(self.filter_state):
+            return value
+        if self.filter_median > 1:
+            window = self.filter_windows[sensor_index]
+            window.append(value)
+            if len(window) > self.filter_median:
+                window.pop(0)
+            ordered = sorted(window)
+            value = ordered[len(ordered) // 2]
+        previous = self.filter_state[sensor_index]
+        if previous is None:
+            filtered = value
+        else:
+            filtered = (self.filter_alpha * value) + ((1.0 - self.filter_alpha) * previous)
+        self.filter_state[sensor_index] = filtered
+        return filtered
+
+    def _apply_calibration(self, sensor_index, raw_mv):
+        if sensor_index < 0 or sensor_index >= len(self.calibration_table):
+            return raw_mv
+        curve = self.calibration_table[sensor_index]
+        if len(curve) < 2:
+            return raw_mv
+        value = float(raw_mv)
+        if value <= curve[0][0]:
+            return curve[0][1]
+        if value >= curve[-1][0]:
+            return curve[-1][1]
+        for idx in range(len(curve) - 1):
+            mv0, level0 = curve[idx]
+            mv1, level1 = curve[idx + 1]
+            if mv0 <= value <= mv1:
+                if mv1 == mv0:
+                    return level1
+                return level0 + ((value - mv0) / (mv1 - mv0)) * (level1 - level0)
+        return value
+
     def peek_latest_mv(self):
         frame = self.buffer.peek_latest()
         if frame is None:
@@ -206,6 +375,35 @@ class _ScanAPI:
             self.rows,
             self.cols,
         )
+
+    def stream_stats(self):
+        stats = self.buffer.stats()
+        return {
+            "produced_frames": stats["produced_frames"],
+            "consumed_frames": stats["consumed_frames"],
+            "dropped_frames": stats["dropped_frames"],
+            "packet_frames": self.packet_frames,
+            "ring_count": stats["available"],
+            "buffer_frames": self.buffer_frames,
+            "point_count": self.rows * self.cols,
+            "filter_enabled": self.filter_enabled,
+            "filter_median": self.filter_median,
+            "filter_alpha": self.filter_alpha,
+            "imu_cached": self.imu_cache is not None,
+            "battery_cached": self.battery_cache is not None,
+        }
+
+    def memory_stats(self):
+        point_count = self.rows * self.cols
+        return {
+            "heap_free": 0,
+            "heap_largest_free_block": 0,
+            "frame_scratch_bytes": 16 + (point_count * 2),
+            "packet_scratch_bytes": 18 + (point_count * 4) + 28 + 4 + 32,
+            "filter_state_bytes": point_count,
+            "calibration_bytes": sum(len(points) for points in self.calibration_table) * 8,
+            "ring_bytes": self.buffer_frames * (16 + (point_count * 2)),
+        }
 
 
 class _SysAPI:

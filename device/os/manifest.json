@@ -2,15 +2,15 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.22",
-  "version": "v0.2.22",
+  "firmware_version": "v0.2.23",
+  "version": "v0.2.23",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.22/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.23/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
-      "sha256": "a00afcdb3db4f93197671aaef157ccf7a27ae1f97de89842f2ca6cc2cf33f73b",
-      "size": 20727,
+      "sha256": "5ec6677c736d71305b6dee3fb21f5f79457c00bb22f5701ace0cad5e43eba5fa",
+      "size": 22357,
       "kind": "code",
       "reboot_required": true
     },
@@ -44,7 +44,7 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "3fb5b7a9317abccea2412c56975998e4dd088d42e2110d7d1ae0d6addc4bd409",
+      "sha256": "c1d0dd1e2d89b1118fe062736b4a8a317ca68548d60b3ee9be29d5c712872930",
       "size": 2876,
       "kind": "code",
       "reboot_required": true
@@ -240,8 +240,8 @@
     },
     {
       "path": "vdboard.mpy",
-      "sha256": "bc59c2a9bffc4e6e23861b41f8a263f5e3467d87ed05f47edd08954b944b536b",
-      "size": 2932,
+      "sha256": "aa5ccad35ed4f681863a9306003badf56b43814ba4c6dd14606c287b9576c9e6",
+      "size": 5869,
       "kind": "code",
       "reboot_required": true
     },

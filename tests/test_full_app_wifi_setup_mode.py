@@ -795,6 +795,30 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertGreaterEqual(fake_scan.stop_calls, 2)
         self.assertEqual(gc_calls, ["collect"])
 
+    def test_legacy_calibration_flow_commands_are_removed(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            responses = [
+                app._handle_control_request({"command": command}, ("mqtt", 0))
+                for command in (
+                    "enter_calibration_mode",
+                    "start_calibration",
+                    "calibrate_all",
+                    "end_calibration",
+                )
+            ]
+            status = app._status()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual([response["message"] for response in responses], ["unknown_command"] * 4)
+        self.assertNotIn("calibration_mode", status)
+
     def test_maintenance_rejects_normal_runtime_commands(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()
         try:

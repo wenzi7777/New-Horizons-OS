@@ -1,9 +1,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "py/runtime.h"
 #include "py/binary.h"
 #include "py/mphal.h"
+#include "py/objstr.h"
 #include "adc.h"
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"
@@ -12,6 +14,7 @@
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "mbedtls/md.h"
 #include "vdboard.h"
 
 #define VDBOARD_SCAN_MAX_ROWS (32)
@@ -24,6 +27,54 @@
 #define VDBOARD_SCAN_DEFAULT_CORE (1)
 #define VDBOARD_SCAN_ACTIVE_LEVEL (0)
 #define VDBOARD_SCAN_IDLE_LEVEL (1)
+#define VDBOARD_PACKET_MAGIC (0xA55A)
+#define VDBOARD_PACKET_VERSION (1)
+#define VDBOARD_PACKET_HEADER_LEN (18)
+#define VDBOARD_PACKET_FLAG_IMU (0x01)
+#define VDBOARD_PACKET_FLAG_BATTERY (0x02)
+#define VDBOARD_PACKET_FLAG_HMAC (0x80)
+#define VDBOARD_STREAM_HMAC_MAX_LEN (32)
+#define VDBOARD_STREAM_HMAC_KEY_MAX_LEN (64)
+#define VDBOARD_STREAM_MAX_CAL_POINTS (16)
+#define VDBOARD_STREAM_MEDIAN_MAX (5)
+
+typedef struct _vdboard_stream_cal_point_t {
+    float sample_mv;
+    float level;
+} vdboard_stream_cal_point_t;
+
+typedef struct _vdboard_stream_filter_state_t {
+    bool initialized;
+    float lowpass;
+    uint8_t median_count;
+    uint8_t median_index;
+    float median_values[VDBOARD_STREAM_MEDIAN_MAX];
+} vdboard_stream_filter_state_t;
+
+typedef struct _vdboard_stream_context_t {
+    uint8_t *frame_scratch;
+    uint8_t *packet_scratch;
+    uint32_t packet_scratch_size;
+    vdboard_stream_filter_state_t *filter_states;
+    vdboard_stream_cal_point_t *calibration_points;
+    uint8_t *calibration_counts;
+    uint16_t capacity_points;
+    bool filter_enabled;
+    uint8_t filter_median;
+    float filter_alpha;
+    uint32_t device_id;
+    bool use_hmac;
+    uint8_t hmac_len;
+    uint8_t hmac_key_len;
+    uint8_t hmac_key[VDBOARD_STREAM_HMAC_KEY_MAX_LEN];
+    bool imu_valid;
+    float imu_values[7];
+    bool battery_valid;
+    uint8_t battery_status;
+    uint8_t battery_fault;
+    uint16_t battery_mv;
+    uint32_t packet_frames;
+} vdboard_stream_context_t;
 
 typedef struct _vdboard_scan_context_t {
     uint16_t row_pins[VDBOARD_SCAN_MAX_ROWS];
@@ -68,6 +119,205 @@ static vdboard_scan_context_t g_scan_ctx = {
     .count = 0,
     .stop_requested = false,
 };
+
+static vdboard_stream_context_t g_stream_ctx = {
+    .frame_scratch = NULL,
+    .packet_scratch = NULL,
+    .packet_scratch_size = 0,
+    .filter_states = NULL,
+    .calibration_points = NULL,
+    .calibration_counts = NULL,
+    .capacity_points = 0,
+    .filter_enabled = false,
+    .filter_median = 3,
+    .filter_alpha = 0.25f,
+    .device_id = 0,
+    .use_hmac = false,
+    .hmac_len = 0,
+    .hmac_key_len = 0,
+    .imu_valid = false,
+    .battery_valid = false,
+    .battery_status = 0,
+    .battery_fault = 0,
+    .battery_mv = 0,
+    .packet_frames = 0,
+};
+
+static inline void vdboard_put_u16_le(uint8_t *dest, uint16_t value) {
+    dest[0] = (uint8_t)(value & 0xff);
+    dest[1] = (uint8_t)((value >> 8) & 0xff);
+}
+
+static inline void vdboard_put_u32_le(uint8_t *dest, uint32_t value) {
+    dest[0] = (uint8_t)(value & 0xff);
+    dest[1] = (uint8_t)((value >> 8) & 0xff);
+    dest[2] = (uint8_t)((value >> 16) & 0xff);
+    dest[3] = (uint8_t)((value >> 24) & 0xff);
+}
+
+static inline void vdboard_put_f32_le(uint8_t *dest, float value) {
+    memcpy(dest, &value, sizeof(float));
+}
+
+static void vdboard_stream_release_buffers(void) {
+    free(g_stream_ctx.frame_scratch);
+    free(g_stream_ctx.packet_scratch);
+    free(g_stream_ctx.filter_states);
+    free(g_stream_ctx.calibration_points);
+    free(g_stream_ctx.calibration_counts);
+    g_stream_ctx.frame_scratch = NULL;
+    g_stream_ctx.packet_scratch = NULL;
+    g_stream_ctx.packet_scratch_size = 0;
+    g_stream_ctx.filter_states = NULL;
+    g_stream_ctx.calibration_points = NULL;
+    g_stream_ctx.calibration_counts = NULL;
+    g_stream_ctx.capacity_points = 0;
+    g_stream_ctx.packet_frames = 0;
+}
+
+static void vdboard_stream_reset_filter_states(void) {
+    if (g_stream_ctx.filter_states != NULL && g_stream_ctx.capacity_points > 0) {
+        memset(g_stream_ctx.filter_states, 0, g_stream_ctx.capacity_points * sizeof(vdboard_stream_filter_state_t));
+    }
+}
+
+static void vdboard_stream_prepare_buffers(void) {
+    vdboard_stream_release_buffers();
+    if (g_scan_state.point_count == 0 || g_scan_ctx.frame_size == 0) {
+        return;
+    }
+    g_stream_ctx.frame_scratch = malloc(g_scan_ctx.frame_size);
+    g_stream_ctx.packet_scratch_size = VDBOARD_PACKET_HEADER_LEN
+        + ((uint32_t)g_scan_state.point_count * sizeof(float))
+        + (7 * sizeof(float))
+        + 4
+        + VDBOARD_STREAM_HMAC_MAX_LEN;
+    g_stream_ctx.packet_scratch = malloc(g_stream_ctx.packet_scratch_size);
+    g_stream_ctx.filter_states = calloc(g_scan_state.point_count, sizeof(vdboard_stream_filter_state_t));
+    g_stream_ctx.calibration_points = calloc(
+        g_scan_state.point_count * VDBOARD_STREAM_MAX_CAL_POINTS,
+        sizeof(vdboard_stream_cal_point_t)
+    );
+    g_stream_ctx.calibration_counts = calloc(g_scan_state.point_count, sizeof(uint8_t));
+    if (g_stream_ctx.frame_scratch == NULL
+            || g_stream_ctx.packet_scratch == NULL
+            || g_stream_ctx.filter_states == NULL
+            || g_stream_ctx.calibration_points == NULL
+            || g_stream_ctx.calibration_counts == NULL) {
+        vdboard_stream_release_buffers();
+        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("stream buffer alloc failed"));
+    }
+    g_stream_ctx.capacity_points = g_scan_state.point_count;
+}
+
+static void vdboard_stream_sort_floats(float *values, uint8_t count) {
+    for (uint8_t i = 1; i < count; ++i) {
+        float value = values[i];
+        int j = (int)i - 1;
+        while (j >= 0 && values[j] > value) {
+            values[j + 1] = values[j];
+            --j;
+        }
+        values[j + 1] = value;
+    }
+}
+
+static void vdboard_stream_sort_cal_points(vdboard_stream_cal_point_t *points, uint8_t count) {
+    for (uint8_t i = 1; i < count; ++i) {
+        vdboard_stream_cal_point_t value = points[i];
+        int j = (int)i - 1;
+        while (j >= 0 && points[j].sample_mv > value.sample_mv) {
+            points[j + 1] = points[j];
+            --j;
+        }
+        points[j + 1] = value;
+    }
+}
+
+static float vdboard_stream_apply_filter(uint16_t sensor_index, float value) {
+    if (!g_stream_ctx.filter_enabled || g_stream_ctx.filter_states == NULL || sensor_index >= g_stream_ctx.capacity_points) {
+        return value;
+    }
+
+    vdboard_stream_filter_state_t *state = &g_stream_ctx.filter_states[sensor_index];
+    uint8_t median = g_stream_ctx.filter_median;
+    if (median > 1) {
+        if (state->median_count < median) {
+            state->median_count += 1;
+        }
+        state->median_values[state->median_index] = value;
+        state->median_index = (state->median_index + 1) % median;
+        float sorted[VDBOARD_STREAM_MEDIAN_MAX];
+        for (uint8_t i = 0; i < state->median_count; ++i) {
+            sorted[i] = state->median_values[i];
+        }
+        vdboard_stream_sort_floats(sorted, state->median_count);
+        value = sorted[state->median_count / 2];
+    }
+
+    if (!state->initialized) {
+        state->initialized = true;
+        state->lowpass = value;
+        return value;
+    }
+
+    state->lowpass = (g_stream_ctx.filter_alpha * value) + ((1.0f - g_stream_ctx.filter_alpha) * state->lowpass);
+    return state->lowpass;
+}
+
+static float vdboard_stream_apply_calibration(uint16_t sensor_index, float raw_mv) {
+    if (g_stream_ctx.calibration_counts == NULL || g_stream_ctx.calibration_points == NULL || sensor_index >= g_stream_ctx.capacity_points) {
+        return raw_mv;
+    }
+    uint8_t count = g_stream_ctx.calibration_counts[sensor_index];
+    if (count < 2) {
+        return raw_mv;
+    }
+
+    vdboard_stream_cal_point_t *points = &g_stream_ctx.calibration_points[sensor_index * VDBOARD_STREAM_MAX_CAL_POINTS];
+    if (raw_mv <= points[0].sample_mv) {
+        return points[0].level;
+    }
+    if (raw_mv >= points[count - 1].sample_mv) {
+        return points[count - 1].level;
+    }
+    for (uint8_t idx = 0; idx + 1 < count; ++idx) {
+        float mv0 = points[idx].sample_mv;
+        float mv1 = points[idx + 1].sample_mv;
+        if (raw_mv >= mv0 && raw_mv <= mv1) {
+            float level0 = points[idx].level;
+            float level1 = points[idx + 1].level;
+            if (mv1 == mv0) {
+                return level1;
+            }
+            return level0 + (((raw_mv - mv0) / (mv1 - mv0)) * (level1 - level0));
+        }
+    }
+    return raw_mv;
+}
+
+static void vdboard_stream_write_hmac(uint8_t *packet, size_t body_len, uint8_t *tag_dest) {
+    if (!g_stream_ctx.use_hmac || g_stream_ctx.hmac_len == 0) {
+        return;
+    }
+    const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (info == NULL) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("sha256 unavailable"));
+    }
+    uint8_t digest[VDBOARD_STREAM_HMAC_MAX_LEN];
+    int result = mbedtls_md_hmac(
+        info,
+        g_stream_ctx.hmac_key,
+        g_stream_ctx.hmac_key_len,
+        packet,
+        body_len,
+        digest
+    );
+    if (result != 0) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("hmac failed"));
+    }
+    memcpy(tag_dest, digest, g_stream_ctx.hmac_len);
+}
 
 static inline mp_obj_t vdboard_dict_get(mp_obj_t dict_obj, qstr key) {
     if (dict_obj == mp_const_none) {
@@ -207,6 +457,7 @@ static void vdboard_scan_release_storage(void) {
         free(g_scan_ctx.frame_storage);
         g_scan_ctx.frame_storage = NULL;
     }
+    vdboard_stream_release_buffers();
     g_scan_ctx.read_index = 0;
     g_scan_ctx.write_index = 0;
     g_scan_ctx.count = 0;
@@ -287,6 +538,7 @@ static void vdboard_scan_configure(mp_obj_t layout_obj, mp_obj_t rows_obj, mp_ob
     if (g_scan_ctx.frame_storage == NULL) {
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("ring buffer alloc failed"));
     }
+    vdboard_stream_prepare_buffers();
     if (g_scan_ctx.hw_mutex == NULL) {
         g_scan_ctx.hw_mutex = xSemaphoreCreateMutex();
         if (g_scan_ctx.hw_mutex == NULL) {
@@ -525,6 +777,259 @@ static mp_obj_t vdboard_scan_set_layout(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(vdboard_scan_set_layout_obj, 4, 4, vdboard_scan_set_layout);
 
+static mp_obj_t vdboard_stream_set_packet_options(size_t n_args, const mp_obj_t *args) {
+    if (n_args < 4) {
+        mp_raise_TypeError(MP_ERROR_TEXT("set_packet_options expects device_id, use_hmac, hmac_len, hmac_key"));
+    }
+    g_stream_ctx.device_id = (uint32_t)mp_obj_get_int(args[0]);
+    g_stream_ctx.use_hmac = mp_obj_is_true(args[1]);
+    mp_int_t hmac_len = mp_obj_get_int(args[2]);
+    if (hmac_len < 0 || hmac_len > VDBOARD_STREAM_HMAC_MAX_LEN) {
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid hmac_len"));
+    }
+    g_stream_ctx.hmac_len = (uint8_t)hmac_len;
+
+    size_t key_len = 0;
+    const char *key = mp_obj_str_get_data(args[3], &key_len);
+    if (key_len > VDBOARD_STREAM_HMAC_KEY_MAX_LEN) {
+        mp_raise_ValueError(MP_ERROR_TEXT("hmac key too long"));
+    }
+    memcpy(g_stream_ctx.hmac_key, key, key_len);
+    g_stream_ctx.hmac_key_len = (uint8_t)key_len;
+    if (g_stream_ctx.use_hmac && (g_stream_ctx.hmac_len == 0 || g_stream_ctx.hmac_key_len == 0)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("hmac key required"));
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(vdboard_stream_set_packet_options_obj, 4, 4, vdboard_stream_set_packet_options);
+
+static mp_obj_t vdboard_stream_configure_filter(mp_obj_t enabled_obj, mp_obj_t median_obj, mp_obj_t alpha_obj) {
+    mp_int_t median = mp_obj_get_int(median_obj);
+    if (!(median == 1 || median == 3 || median == 5)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("median must be 1, 3, or 5"));
+    }
+    mp_float_t alpha = mp_obj_get_float(alpha_obj);
+    if (alpha < 0.05 || alpha > 0.6) {
+        mp_raise_ValueError(MP_ERROR_TEXT("alpha out of range"));
+    }
+    g_stream_ctx.filter_enabled = mp_obj_is_true(enabled_obj);
+    g_stream_ctx.filter_median = (uint8_t)median;
+    g_stream_ctx.filter_alpha = (float)alpha;
+    vdboard_stream_reset_filter_states();
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(vdboard_stream_configure_filter_obj, vdboard_stream_configure_filter);
+
+static mp_obj_t vdboard_stream_load_calibration(mp_obj_t table_obj) {
+    if (g_stream_ctx.calibration_points == NULL || g_stream_ctx.calibration_counts == NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("scan not initialized"));
+    }
+    memset(
+        g_stream_ctx.calibration_points,
+        0,
+        g_stream_ctx.capacity_points * VDBOARD_STREAM_MAX_CAL_POINTS * sizeof(vdboard_stream_cal_point_t)
+    );
+    memset(g_stream_ctx.calibration_counts, 0, g_stream_ctx.capacity_points * sizeof(uint8_t));
+
+    if (table_obj == mp_const_none) {
+        return mp_const_true;
+    }
+    size_t sensor_len = 0;
+    mp_obj_t *sensor_items = NULL;
+    mp_obj_get_array(table_obj, &sensor_len, &sensor_items);
+    if (sensor_len > g_stream_ctx.capacity_points) {
+        mp_raise_ValueError(MP_ERROR_TEXT("calibration table too large"));
+    }
+
+    for (size_t sensor = 0; sensor < sensor_len; ++sensor) {
+        if (sensor_items[sensor] == mp_const_none) {
+            continue;
+        }
+        size_t point_len = 0;
+        mp_obj_t *point_items = NULL;
+        mp_obj_get_array(sensor_items[sensor], &point_len, &point_items);
+        if (point_len > VDBOARD_STREAM_MAX_CAL_POINTS) {
+            mp_raise_ValueError(MP_ERROR_TEXT("too many calibration points"));
+        }
+        vdboard_stream_cal_point_t *points = &g_stream_ctx.calibration_points[sensor * VDBOARD_STREAM_MAX_CAL_POINTS];
+        for (size_t idx = 0; idx < point_len; ++idx) {
+            size_t pair_len = 0;
+            mp_obj_t *pair_items = NULL;
+            mp_obj_get_array(point_items[idx], &pair_len, &pair_items);
+            if (pair_len != 2) {
+                mp_raise_ValueError(MP_ERROR_TEXT("calibration point must be pair"));
+            }
+            points[idx].sample_mv = (float)mp_obj_get_float(pair_items[0]);
+            points[idx].level = (float)mp_obj_get_float(pair_items[1]);
+        }
+        g_stream_ctx.calibration_counts[sensor] = (uint8_t)point_len;
+        vdboard_stream_sort_cal_points(points, (uint8_t)point_len);
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(vdboard_stream_load_calibration_obj, vdboard_stream_load_calibration);
+
+static mp_obj_t vdboard_stream_update_imu_cache(mp_obj_t values_obj) {
+    if (values_obj == mp_const_none) {
+        g_stream_ctx.imu_valid = false;
+        return mp_const_true;
+    }
+    size_t len = 0;
+    mp_obj_t *items = NULL;
+    mp_obj_get_array(values_obj, &len, &items);
+    if (len < 6) {
+        g_stream_ctx.imu_valid = false;
+        return mp_const_true;
+    }
+    for (size_t idx = 0; idx < 6; ++idx) {
+        g_stream_ctx.imu_values[idx] = (float)mp_obj_get_float(items[idx]);
+    }
+    g_stream_ctx.imu_values[6] = 0.0f;
+    if (len >= 7 && items[6] != mp_const_none) {
+        if (mp_obj_is_float(items[6]) || mp_obj_is_int(items[6])) {
+            g_stream_ctx.imu_values[6] = (float)mp_obj_get_float(items[6]);
+        }
+    }
+    g_stream_ctx.imu_valid = true;
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(vdboard_stream_update_imu_cache_obj, vdboard_stream_update_imu_cache);
+
+static mp_obj_t vdboard_stream_update_battery_cache(mp_obj_t values_obj) {
+    if (values_obj == mp_const_none) {
+        g_stream_ctx.battery_valid = false;
+        return mp_const_true;
+    }
+    size_t len = 0;
+    mp_obj_t *items = NULL;
+    mp_obj_get_array(values_obj, &len, &items);
+    if (len < 3) {
+        g_stream_ctx.battery_valid = false;
+        return mp_const_true;
+    }
+    g_stream_ctx.battery_status = (uint8_t)(mp_obj_get_int(items[0]) & 0xff);
+    g_stream_ctx.battery_fault = (uint8_t)(mp_obj_get_int(items[1]) & 0xff);
+    g_stream_ctx.battery_mv = (uint16_t)(mp_obj_get_int(items[2]) & 0xffff);
+    g_stream_ctx.battery_valid = true;
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(vdboard_stream_update_battery_cache_obj, vdboard_stream_update_battery_cache);
+
+static mp_obj_t vdboard_stream_pop_packet(void) {
+    if (g_scan_ctx.frame_storage == NULL || g_scan_ctx.count == 0 || g_stream_ctx.frame_scratch == NULL || g_stream_ctx.packet_scratch == NULL) {
+        return mp_const_none;
+    }
+
+    portENTER_CRITICAL(&g_scan_ctx.ring_lock);
+    if (g_scan_ctx.count == 0) {
+        portEXIT_CRITICAL(&g_scan_ctx.ring_lock);
+        return mp_const_none;
+    }
+    uint8_t *slot = g_scan_ctx.frame_storage + (g_scan_ctx.read_index * g_scan_ctx.frame_size);
+    memcpy(g_stream_ctx.frame_scratch, slot, g_scan_ctx.frame_size);
+    g_scan_ctx.read_index = (g_scan_ctx.read_index + 1) % g_scan_state.buffer_frames;
+    g_scan_ctx.count -= 1;
+    g_scan_state.consumed_frames += 1;
+    g_scan_state.last_read_seq = ((vdboard_frame_header_t *)g_stream_ctx.frame_scratch)->seq;
+    portEXIT_CRITICAL(&g_scan_ctx.ring_lock);
+
+    vdboard_frame_header_t *header = (vdboard_frame_header_t *)g_stream_ctx.frame_scratch;
+    uint16_t point_count = header->point_count;
+    if (point_count > g_stream_ctx.capacity_points) {
+        mp_raise_ValueError(MP_ERROR_TEXT("frame point count too large"));
+    }
+    size_t matrix_len = ((size_t)point_count) * sizeof(float);
+    size_t imu_len = g_stream_ctx.imu_valid ? (7 * sizeof(float)) : 0;
+    size_t battery_len = g_stream_ctx.battery_valid ? 4 : 0;
+    size_t payload_len = matrix_len + imu_len + battery_len;
+    size_t hmac_len = (g_stream_ctx.use_hmac ? g_stream_ctx.hmac_len : 0);
+    size_t total_len = VDBOARD_PACKET_HEADER_LEN + payload_len + hmac_len;
+    if (total_len > g_stream_ctx.packet_scratch_size || payload_len > 0xffff) {
+        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("packet too large"));
+    }
+
+    uint8_t flags = 0;
+    if (imu_len) {
+        flags |= VDBOARD_PACKET_FLAG_IMU;
+    }
+    if (battery_len) {
+        flags |= VDBOARD_PACKET_FLAG_BATTERY;
+    }
+    if (hmac_len) {
+        flags |= VDBOARD_PACKET_FLAG_HMAC;
+    }
+
+    uint8_t *packet = g_stream_ctx.packet_scratch;
+    vdboard_put_u16_le(packet, VDBOARD_PACKET_MAGIC);
+    packet[2] = VDBOARD_PACKET_VERSION;
+    packet[3] = flags;
+    vdboard_put_u32_le(packet + 4, g_stream_ctx.device_id);
+    vdboard_put_u32_le(packet + 8, header->seq);
+    vdboard_put_u32_le(packet + 12, header->timestamp_ms);
+    vdboard_put_u16_le(packet + 16, (uint16_t)payload_len);
+
+    uint8_t *cursor = packet + VDBOARD_PACKET_HEADER_LEN;
+    const uint16_t *payload_mv = (const uint16_t *)(g_stream_ctx.frame_scratch + sizeof(vdboard_frame_header_t));
+    for (uint16_t idx = 0; idx < point_count; ++idx) {
+        float value = (float)payload_mv[idx];
+        value = vdboard_stream_apply_filter(idx, value);
+        value = vdboard_stream_apply_calibration(idx, value);
+        vdboard_put_f32_le(cursor, value);
+        cursor += sizeof(float);
+    }
+
+    if (imu_len) {
+        for (uint8_t idx = 0; idx < 7; ++idx) {
+            vdboard_put_f32_le(cursor, g_stream_ctx.imu_values[idx]);
+            cursor += sizeof(float);
+        }
+    }
+    if (battery_len) {
+        cursor[0] = g_stream_ctx.battery_status;
+        cursor[1] = g_stream_ctx.battery_fault;
+        vdboard_put_u16_le(cursor + 2, g_stream_ctx.battery_mv);
+        cursor += 4;
+    }
+    if (hmac_len) {
+        vdboard_stream_write_hmac(packet, VDBOARD_PACKET_HEADER_LEN + payload_len, cursor);
+    }
+
+    g_stream_ctx.packet_frames += 1;
+    return mp_obj_new_bytes(packet, total_len);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(vdboard_stream_pop_packet_obj, vdboard_stream_pop_packet);
+
+static mp_obj_t vdboard_stream_stats(void) {
+    mp_obj_t dict = mp_obj_new_dict(12);
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_produced_frames), mp_obj_new_int_from_uint(g_scan_state.produced_frames));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_consumed_frames), mp_obj_new_int_from_uint(g_scan_state.consumed_frames));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_dropped_frames), mp_obj_new_int_from_uint(g_scan_state.dropped_frames));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_packet_frames), mp_obj_new_int_from_uint(g_stream_ctx.packet_frames));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_ring_count), mp_obj_new_int(g_scan_ctx.count));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_buffer_frames), mp_obj_new_int(g_scan_state.buffer_frames));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_point_count), mp_obj_new_int(g_scan_state.point_count));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_filter_enabled), mp_obj_new_bool(g_stream_ctx.filter_enabled));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_filter_median), mp_obj_new_int(g_stream_ctx.filter_median));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_filter_alpha), mp_obj_new_float(g_stream_ctx.filter_alpha));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_imu_cached), mp_obj_new_bool(g_stream_ctx.imu_valid));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_battery_cached), mp_obj_new_bool(g_stream_ctx.battery_valid));
+    return dict;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(vdboard_stream_stats_obj, vdboard_stream_stats);
+
+static mp_obj_t vdboard_stream_memory_stats(void) {
+    mp_obj_t dict = mp_obj_new_dict(7);
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_heap_free), mp_obj_new_int_from_uint(heap_caps_get_free_size(MALLOC_CAP_8BIT)));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_heap_largest_free_block), mp_obj_new_int_from_uint(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_frame_scratch_bytes), mp_obj_new_int(g_scan_ctx.frame_size));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_packet_scratch_bytes), mp_obj_new_int(g_stream_ctx.packet_scratch_size));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_filter_state_bytes), mp_obj_new_int(g_stream_ctx.capacity_points * sizeof(vdboard_stream_filter_state_t)));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_calibration_bytes), mp_obj_new_int(g_stream_ctx.capacity_points * VDBOARD_STREAM_MAX_CAL_POINTS * sizeof(vdboard_stream_cal_point_t)));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_ring_bytes), mp_obj_new_int(g_scan_state.buffer_frames * g_scan_ctx.frame_size));
+    return dict;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(vdboard_stream_memory_stats_obj, vdboard_stream_memory_stats);
+
 static const mp_rom_map_elem_t vdboard_scan_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_scan) },
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&vdboard_scan_init_obj) },
@@ -536,6 +1041,14 @@ static const mp_rom_map_elem_t vdboard_scan_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_peek_latest_mv), MP_ROM_PTR(&vdboard_scan_peek_latest_mv_obj) },
     { MP_ROM_QSTR(MP_QSTR_sample_cell_mv), MP_ROM_PTR(&vdboard_scan_sample_cell_mv_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_layout), MP_ROM_PTR(&vdboard_scan_set_layout_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_packet_options), MP_ROM_PTR(&vdboard_stream_set_packet_options_obj) },
+    { MP_ROM_QSTR(MP_QSTR_configure_filter), MP_ROM_PTR(&vdboard_stream_configure_filter_obj) },
+    { MP_ROM_QSTR(MP_QSTR_load_calibration), MP_ROM_PTR(&vdboard_stream_load_calibration_obj) },
+    { MP_ROM_QSTR(MP_QSTR_update_imu_cache), MP_ROM_PTR(&vdboard_stream_update_imu_cache_obj) },
+    { MP_ROM_QSTR(MP_QSTR_update_battery_cache), MP_ROM_PTR(&vdboard_stream_update_battery_cache_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pop_packet), MP_ROM_PTR(&vdboard_stream_pop_packet_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stream_stats), MP_ROM_PTR(&vdboard_stream_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_memory_stats), MP_ROM_PTR(&vdboard_stream_memory_stats_obj) },
 };
 
 static MP_DEFINE_CONST_DICT(vdboard_scan_globals, vdboard_scan_globals_table);

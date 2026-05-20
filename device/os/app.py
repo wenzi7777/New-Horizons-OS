@@ -20,7 +20,6 @@ class App:
         self.device_uid = get_device_uid()
         self.device_name = get_device_name(config.DEVICE_NAME)
         self.reboot_required = False
-        self.calibration_mode = False
         self.mode = "normal"
         self.maintenance_reason = ""
         self.last_connect_ms = 0
@@ -45,6 +44,7 @@ class App:
         self.scan_rate = None
         self.vdboard = None
         self.decode_scan_frame = None
+        self.native_streaming = False
 
         self.imu = None
         self.battery = None
@@ -104,7 +104,7 @@ class App:
                 self.led.set_wifi_setup()
 
         if wifi_ok:
-            self._ensure_runtime_services()
+            self._ensure_streaming_services()
 
         if wifi_ok:
             self.logger.info("setup_ntp_sync_start")
@@ -135,7 +135,7 @@ class App:
                 self.mqtt_transport.poll(self.wifi.is_connected(), self._handle_control_request)
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
-                self._ensure_runtime_services()
+                self._ensure_streaming_services()
                 self._sync_time()
                 self._announce_status(now, force=True)
                 self.update_led_state()
@@ -153,6 +153,7 @@ class App:
                     and time.ticks_diff(now, self.last_imu_ms) >= imu_interval):
                 self.last_imu_ms = now
                 self.latest_imu = self.imu.read()
+                self._update_native_imu_cache()
 
             if (not self._in_maintenance()
                     and self.hardware_ready
@@ -160,8 +161,9 @@ class App:
                     and time.ticks_diff(now, self.last_battery_ms) >= battery_interval):
                 self.last_battery_ms = now
                 self._service_battery_status()
+                self._update_native_battery_cache()
 
-            if self.scan_ready and not self.calibration_mode and not self._in_maintenance():
+            if self.scan_ready and not self._in_maintenance():
                 self.vdboard.scan.service()
                 self.handle_scan(now)
 
@@ -203,6 +205,38 @@ class App:
             self._maybe_collect_garbage()
 
     def handle_scan(self, timestamp_ms):
+        if getattr(self, "native_streaming", False) and hasattr(self.vdboard.scan, "pop_packet"):
+            packet = self.vdboard.scan.pop_packet()
+            if packet is None:
+                return
+
+            stats = self.vdboard.scan.stats()
+            if len(stats) >= 5:
+                self.frame_id = int(stats[4])
+            else:
+                self.frame_id += 1
+            fps = self.scan_rate.tick() if self.scan_rate is not None else None
+            if config.PRINT_FPS and fps is not None:
+                self.logger.info(
+                    "scan fps={} wifi={} sent={} fail={}".format(
+                        fps,
+                        self.wifi.is_connected(),
+                        self.sent_packets,
+                        self.failed_sends
+                    )
+                )
+
+            send_every = self.runtime.get("scan_timing", {}).get(
+                "send_every_n_frames",
+                config.SEND_EVERY_N_FRAMES
+            )
+            if send_every > 1 and (self.frame_id % send_every != 0):
+                return
+            if self._transmit_backing_off(timestamp_ms):
+                return
+            self.send_packet(packet)
+            return
+
         frame_view = self.vdboard.scan.pop_frame_mv()
         if frame_view is None:
             return
@@ -318,9 +352,6 @@ class App:
         if self._in_maintenance() and hasattr(self.led, "set_maintenance"):
             self.led.set_maintenance()
             return
-        if self.calibration_mode:
-            self.led.set_calibration()
-            return
         if self.wifi.setup_active():
             self.led.set_wifi_setup()
             return
@@ -406,7 +437,7 @@ class App:
         return bool(addr and addr[0] == "mqtt")
 
     def _handle_control_request(self, request, addr):
-        self._ensure_runtime_services()
+        self._ensure_streaming_services()
         if not self._authorized(addr):
             self.logger.warn("control_unauthorized from={}:{}".format(addr[0], addr[1]))
             return None
@@ -444,6 +475,11 @@ class App:
         if self._in_maintenance() and cmd not in self._maintenance_allowed_commands():
             return self._ok("maintenance_command_disabled", error="maintenance_command_disabled")
 
+        if cmd in self._maintenance_service_commands():
+            if not self._in_maintenance():
+                return self._ok("maintenance_required", error="maintenance_required")
+            self._ensure_maintenance_services()
+
         if cmd == "check_recovery_release":
             return self._check_recovery_release(request)
 
@@ -479,11 +515,14 @@ class App:
 
         if cmd == "set_filter":
             filter_data = self.config_store.update_filter(request.get("filter", {}))
-            self.filter_chain.apply_config(
-                filter_data.get("enabled", False),
-                filter_data.get("median", 3),
-                filter_data.get("alpha", 0.25),
-            )
+            self.filter_config = filter_data
+            self._configure_native_filter()
+            if self.filter_chain is not None:
+                self.filter_chain.apply_config(
+                    filter_data.get("enabled", False),
+                    filter_data.get("median", 3),
+                    filter_data.get("alpha", 0.25),
+                )
             return self._ok("filter_updated", applied=True)
 
         if cmd == "set_matrix_layout":
@@ -510,15 +549,6 @@ class App:
                 "applied": True,
             }
 
-        if cmd == "enter_calibration_mode":
-            self.calibration_mode = bool(request.get("enabled", True))
-            if self.calibration_mode:
-                self._stop_scan()
-            elif not self._in_maintenance() and self.hardware_ready:
-                self._start_scan_if_configured()
-            self.update_led_state()
-            return self._ok("calibration_mode_updated", applied=True)
-
         if cmd == "calibration_sample_cell":
             return self._maintenance_sample_cell(request)
 
@@ -528,84 +558,7 @@ class App:
         if cmd == "calibration_save":
             if self.calibration is not None:
                 self.calibration.save()
-            return self._ok("calibration_saved", applied=True)
-
-        if cmd == "start_calibration":
-            if not self.scan_ready:
-                return self._ok("matrix_layout_required", error="matrix_layout_required")
-            if not self.calibration_mode:
-                return self._ok("calibration_mode_required", error="calibration_mode_required")
-            analog_pin = int(request["analog_pin"])
-            select_pin = int(request["select_pin"])
-            level = float(request["level"])
-            start_delay = int(request.get("start_delay_ms", 0))
-            duration_ms = int(request.get("duration_ms", 1000))
-            if start_delay > 0:
-                time.sleep_ms(start_delay)
-            avg_mv = self.vdboard.scan.sample_cell_mv(analog_pin, select_pin, duration_ms)
-            if avg_mv is None:
-                return self._ok("calibration_no_samples", error="calibration_no_samples")
-            self.calibration.set_point(analog_pin, select_pin, level, avg_mv)
-            self.calibration.save()
-            return {
-                "status": "ok",
-                "message": "calibration_sampled",
-                "avg_mv": avg_mv,
-                "reboot_required": False,
-                "applied": True,
-            }
-
-        if cmd == "calibrate_all":
-            if not self.scan_ready:
-                return self._ok("matrix_layout_required", error="matrix_layout_required")
-            if not self.calibration_mode:
-                return self._ok("calibration_mode_required", error="calibration_mode_required")
-            level = float(request["level"])
-            start_delay = int(request.get("start_delay_ms", 0))
-            duration_ms = int(request.get("duration_ms", 5000))
-            if start_delay > 0:
-                time.sleep_ms(start_delay)
-            end_ms = time.ticks_add(time.ticks_ms(), max(1, duration_ms))
-            active_rows = self._active_rows()
-            active_cols = self._active_cols()
-            sensor_count = len(active_rows) * len(active_cols)
-            sums = [0.0] * sensor_count
-            counts = [0] * sensor_count
-            while time.ticks_diff(end_ms, time.ticks_ms()) > 0:
-                self.vdboard.scan.service()
-                frame_view = self.vdboard.scan.pop_frame_mv()
-                if frame_view is None:
-                    time.sleep_ms(1)
-                    continue
-                frame_info = self.decode_scan_frame(bytes(frame_view))
-                payload = frame_info["payload_mv"]
-                for idx, value in enumerate(payload[:sensor_count]):
-                    sums[idx] += float(value)
-                    counts[idx] += 1
-            if not counts or min(counts) == 0:
-                return self._ok("calibration_no_samples", error="calibration_no_samples")
-            idx = 0
-            for analog_pin in active_rows:
-                for select_pin in active_cols:
-                    avg_mv = sums[idx] / float(counts[idx])
-                    self.calibration.set_point(analog_pin, select_pin, level, avg_mv)
-                    idx += 1
-            self.calibration.save()
-            return {
-                "status": "ok",
-                "message": "calibration_all_sampled",
-                "level": "{:.3f}".format(level),
-                "samples_min": min(counts),
-                "samples_max": max(counts),
-                "cells": sensor_count,
-                "reboot_required": False,
-                "applied": True,
-            }
-
-        if cmd == "end_calibration":
-            self.calibration_mode = False
-            self.calibration.save()
-            self.update_led_state()
+            self._reload_native_calibration()
             return self._ok("calibration_saved", applied=True)
 
         if cmd == "dump_calibration":
@@ -630,6 +583,7 @@ class App:
         if cmd == "delete_calibration_level":
             self.calibration.delete_level(request["level"])
             self.calibration.save()
+            self._reload_native_calibration()
             return self._ok("calibration_level_deleted", applied=True)
 
         if cmd == "reboot":
@@ -781,11 +735,11 @@ class App:
         return self._ok("unknown_command", error="unknown_command")
 
     def _enter_maintenance(self, reason=""):
-        self._ensure_runtime_services()
+        self._ensure_streaming_services()
         self.mode = "maintenance"
         self.maintenance_reason = str(reason or "")
-        self.calibration_mode = False
         self._stop_scan()
+        self._ensure_maintenance_services()
         self.latest_imu = None
         self.latest_battery = None
         self.update_led_state()
@@ -801,7 +755,7 @@ class App:
     def _exit_maintenance(self):
         self.mode = "normal"
         self.maintenance_reason = ""
-        self.calibration_mode = False
+        self._release_maintenance_services()
         if self.hardware_ready:
             self._start_scan_if_configured()
         self.update_led_state()
@@ -1104,6 +1058,9 @@ class App:
             "heap_allocated": allocated,
             "heap_total": total,
             "heap_used_percent": int((allocated * 100) // total) if total else 0,
+            "native": self.vdboard.scan.memory_stats() if (
+                self.vdboard is not None and hasattr(self.vdboard.scan, "memory_stats")
+            ) else {},
         }
 
     def _file_call(self, fn, *args):
@@ -1132,7 +1089,6 @@ class App:
             "runtime": self.config_store.load_runtime(),
             "logging": self._logging_status(),
             "update_state": self._current_update_state(),
-            "calibration_mode": self.calibration_mode,
             "calibration_levels": self.calibration.list_levels() if self.calibration is not None else [],
             "available_rows": list(config.AVAILABLE_ROWS),
             "available_cols": list(config.AVAILABLE_COLS),
@@ -1143,6 +1099,9 @@ class App:
             "sent_packets": self.sent_packets,
             "failed_sends": self.failed_sends,
             "scan": self.vdboard.scan.stats() if self.vdboard is not None else (),
+            "stream": self.vdboard.scan.stream_stats() if (
+                self.vdboard is not None and hasattr(self.vdboard.scan, "stream_stats")
+            ) else {},
         }
 
     def _maintenance_status(self):
@@ -1183,7 +1142,30 @@ class App:
             "file_download_begin",
             "file_download_chunk",
             "file_delete",
+            "fs_list",
+            "fs_read",
             "set_logging",
+            "log_tail",
+            "log_read_tail",
+            "log_clear",
+        )
+
+    def _maintenance_service_commands(self):
+        return (
+            "calibration_sample_cell",
+            "calibration_sample_all",
+            "calibration_save",
+            "dump_calibration",
+            "delete_calibration_level",
+            "file_list",
+            "file_upload_begin",
+            "file_upload_chunk",
+            "file_upload_finish",
+            "file_download_begin",
+            "file_download_chunk",
+            "file_delete",
+            "fs_list",
+            "fs_read",
             "log_tail",
             "log_read_tail",
             "log_clear",
@@ -1222,11 +1204,16 @@ class App:
             buffer_frames=self.runtime.get("buffer_frames", 8),
             core_id=scan_timing.get("core_id", 1),
         )
+        self.native_streaming = self._native_stream_available()
+        if self.native_streaming:
+            self._configure_native_stream()
+        else:
+            self._ensure_fallback_scan_services()
 
     def _ensure_runtime_hardware(self):
         if self.hardware_ready:
             return
-        self._ensure_runtime_services()
+        self._ensure_streaming_services()
 
         self._start_scan_if_configured()
 
@@ -1294,11 +1281,18 @@ class App:
         return normalized
 
     def _rebuild_matrix_pipeline(self):
+        active_rows = self._active_rows()
+        active_cols = self._active_cols()
+        if self._native_stream_available():
+            self.packet = None
+            self.filter_chain = None
+            self.tx_buffer = None
+            self.native_streaming = True
+            return
+
         from packet import PacketBuilder
         from filter_engine import FilterChain
 
-        active_rows = self._active_rows()
-        active_cols = self._active_cols()
         self.packet = PacketBuilder(active_rows=active_rows, active_cols=active_cols)
         self.filter_chain = FilterChain(
             sensor_count=len(active_rows) * len(active_cols),
@@ -1306,6 +1300,7 @@ class App:
             median=self.filter_config.get("median", 3),
             alpha=self.filter_config.get("alpha", 0.25),
         )
+        self.native_streaming = False
 
     def _start_scan_if_configured(self):
         if not self._matrix_configured():
@@ -1333,7 +1328,6 @@ class App:
 
     def _apply_matrix_layout(self):
         self._stop_scan()
-        self._rebuild_matrix_pipeline()
         if self.hardware_ready and not self._in_maintenance():
             self._start_scan_if_configured()
 
@@ -1348,38 +1342,100 @@ class App:
             import vdboard
             self.vdboard = vdboard
 
-    def _ensure_runtime_services(self):
+    def _native_stream_available(self):
+        return bool(
+            self.vdboard is not None
+            and hasattr(self.vdboard.scan, "pop_packet")
+            and hasattr(self.vdboard.scan, "set_packet_options")
+            and hasattr(self.vdboard.scan, "load_calibration")
+        )
+
+    def _configure_native_stream(self):
+        if not self._native_stream_available():
+            self.native_streaming = False
+            self._ensure_fallback_scan_services()
+            return False
+        try:
+            import secrets
+            self.vdboard.scan.set_packet_options(
+                self.device_id,
+                bool(getattr(config, "USE_HMAC", False)),
+                int(getattr(config, "HMAC_LEN", 0)),
+                getattr(secrets, "HMAC_KEY", b""),
+            )
+            self._configure_native_filter()
+            self._reload_native_calibration()
+            self._update_native_imu_cache()
+            self._update_native_battery_cache()
+            self.native_streaming = True
+            return True
+        except Exception as exc:
+            self.logger.warn("native_stream_config_failed {}".format(exc))
+            self.native_streaming = False
+            self._ensure_fallback_scan_services()
+            return False
+
+    def _configure_native_filter(self):
+        if not self._native_stream_available() or not hasattr(self.vdboard.scan, "configure_filter"):
+            return False
+        self.vdboard.scan.configure_filter(
+            self.filter_config.get("enabled", False),
+            self.filter_config.get("median", 3),
+            self.filter_config.get("alpha", 0.25),
+        )
+        return True
+
+    def _reload_native_calibration(self):
+        if not self._native_stream_available():
+            return False
+        table = self._native_calibration_table()
+        self.vdboard.scan.load_calibration(table)
+        return True
+
+    def _native_calibration_table(self):
+        active_rows = self._active_rows()
+        active_cols = self._active_cols()
+        if not active_rows or not active_cols:
+            return []
+        from calibration_store import CalibrationStore
+        store = CalibrationStore(config.CALIBRATION_DIR)
+        points = store.load() or {}
+        table = []
+        for analog_pin in active_rows:
+            for select_pin in active_cols:
+                sensor_key = "{}:{}".format(int(analog_pin), int(select_pin))
+                sensor_points = points.get(sensor_key, {})
+                curve = []
+                for level_key, sample_mv in sensor_points.items():
+                    curve.append((float(sample_mv), float(level_key)))
+                curve.sort(key=lambda item: item[0])
+                table.append(curve)
+        if self.calibration is None:
+            try:
+                import sys
+                sys.modules.pop("calibration_store", None)
+            except Exception:
+                pass
+        return table
+
+    def _update_native_imu_cache(self):
+        if self._native_stream_available() and hasattr(self.vdboard.scan, "update_imu_cache"):
+            self.vdboard.scan.update_imu_cache(self.latest_imu)
+
+    def _update_native_battery_cache(self):
+        if self._native_stream_available() and hasattr(self.vdboard.scan, "update_battery_cache"):
+            self.vdboard.scan.update_battery_cache(self.latest_battery)
+
+    def _ensure_streaming_services(self):
         if self.mqtt_transport is not None:
             return
-        from calibration_store import CalibrationStore
-        from filesystem_api import FilesystemAPI
-        from frame_protocol import decode_scan_frame
         from mqtt_transport import MQTTTransport
-        from packet_buffer import PacketBuffer
         from time_sync import TimeSync
         from utils import RateCounter
 
-        self.filesystem = FilesystemAPI(
-            getattr(config, "DATA_FILES_DIR", "data/files"),
-            getattr(config, "DATA_TMP_DIR", "data/tmp"),
-            {
-                "user": getattr(config, "DATA_FILES_DIR", "data/files"),
-                "logs": getattr(config, "DATA_LOG_DIR", "data/logs"),
-                "calibration": getattr(config, "CALIBRATION_DIR", "device_state/calibration"),
-            },
-        )
         self.mqtt_transport = MQTTTransport(lambda: self.runtime, self.device_uid, self.logger)
         self.time_sync = TimeSync(self.runtime.get("ntp_servers", []))
-        self.calibration = CalibrationStore(config.CALIBRATION_DIR)
-        self.calibration.load()
-        if config.USE_PACKET_BUFFER:
-            self.tx_buffer = PacketBuffer(
-                capacity=config.PACKET_BUFFER_SIZE,
-                drop_oldest=config.PACKET_BUFFER_DROP_OLDEST
-            )
-        self.decode_scan_frame = decode_scan_frame
         self.scan_rate = RateCounter(1000)
-        self._rebuild_matrix_pipeline()
 
         if config.ENABLE_IMU:
             from bmi270 import BMI270
@@ -1387,3 +1443,66 @@ class App:
         if config.ENABLE_BATTERY:
             from bq25180 import BQ25180
             self.battery = BQ25180()
+
+    def _ensure_maintenance_services(self):
+        if self.filesystem is None:
+            from filesystem_api import FilesystemAPI
+            self.filesystem = FilesystemAPI(
+                getattr(config, "DATA_FILES_DIR", "data/files"),
+                getattr(config, "DATA_TMP_DIR", "data/tmp"),
+                {
+                    "user": getattr(config, "DATA_FILES_DIR", "data/files"),
+                    "logs": getattr(config, "DATA_LOG_DIR", "data/logs"),
+                    "calibration": getattr(config, "CALIBRATION_DIR", "device_state/calibration"),
+                },
+            )
+        if self.calibration is None:
+            from calibration_store import CalibrationStore
+            self.calibration = CalibrationStore(config.CALIBRATION_DIR)
+            self.calibration.load()
+
+    def _release_maintenance_services(self):
+        self.filesystem = None
+        self.calibration = None
+        for module_name in ("filesystem_api", "calibration_store"):
+            try:
+                import sys
+                sys.modules.pop(module_name, None)
+            except Exception:
+                pass
+        gc.collect()
+
+    def _ensure_fallback_scan_services(self):
+        if self.packet is not None and self.filter_chain is not None and self.decode_scan_frame is not None:
+            return
+        from calibration_store import CalibrationStore
+        from frame_protocol import decode_scan_frame
+        from packet import PacketBuilder
+        from packet_buffer import PacketBuffer
+        from filter_engine import FilterChain
+
+        active_rows = self._active_rows()
+        active_cols = self._active_cols()
+        if self.calibration is None:
+            self.calibration = CalibrationStore(config.CALIBRATION_DIR)
+            self.calibration.load()
+        self.packet = PacketBuilder(active_rows=active_rows, active_cols=active_cols)
+        self.filter_chain = FilterChain(
+            sensor_count=len(active_rows) * len(active_cols),
+            enabled=self.filter_config.get("enabled", False),
+            median=self.filter_config.get("median", 3),
+            alpha=self.filter_config.get("alpha", 0.25),
+        )
+        if config.USE_PACKET_BUFFER:
+            self.tx_buffer = PacketBuffer(
+                capacity=config.PACKET_BUFFER_SIZE,
+                drop_oldest=config.PACKET_BUFFER_DROP_OLDEST
+            )
+        self.decode_scan_frame = decode_scan_frame
+        self.native_streaming = False
+
+    def _ensure_runtime_services(self):
+        self._ensure_streaming_services()
+        self._ensure_maintenance_services()
+        if not self._native_stream_available():
+            self._ensure_fallback_scan_services()
