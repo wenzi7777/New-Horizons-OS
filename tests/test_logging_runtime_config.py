@@ -35,7 +35,7 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
         fake_config = types.SimpleNamespace(
             SERVER_PROFILES={},
             DEFAULT_SERVER_PROFILE="",
-            PACKET_VERSION=1,
+            PACKET_VERSION=2,
             TARGET_FPS=60,
             SEND_EVERY_N_FRAMES=1,
             MATRIX_SETTLE_US=20,
@@ -81,7 +81,7 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
         fake_config = types.SimpleNamespace(
             SERVER_PROFILES={},
             DEFAULT_SERVER_PROFILE="",
-            PACKET_VERSION=1,
+            PACKET_VERSION=2,
             TARGET_FPS=60,
             SEND_EVERY_N_FRAMES=1,
             MATRIX_SETTLE_US=20,

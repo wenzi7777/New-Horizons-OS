@@ -2,22 +2,22 @@
   "manifest_version": 1,
   "type": "recovery",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.29",
-  "version": "v0.2.29",
+  "firmware_version": "v0.3.0",
+  "version": "v0.3.0",
   "target_root": "/recovery",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.29/device/recovery",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.3.0/device/recovery",
   "files": [
     {
       "path": "config.py",
-      "sha256": "6683c0702f47a8f8db6189306f6045afcc9e3faa3faec5feb2032e0cccb480cb",
+      "sha256": "9271b12e0d659a525b2a5b03fb0ed95d6294b34bb655e9face0b21ae8e9c7d24",
       "size": 1390,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "device_identity.py",
-      "sha256": "8b163550b6dded4c9d4b8c43478b8d6adba41bcc697d155935b66537fe5eaebc",
-      "size": 2134,
+      "sha256": "c1a4180092304ab26c50a1f645a31946f748ace3ba8e4ae52224860780c1bfea",
+      "size": 2069,
       "kind": "code",
       "reboot_required": true
     },
@@ -37,8 +37,8 @@
     },
     {
       "path": "immutable_config.py",
-      "sha256": "289fcd01c1e1642aa368df69ff321a49c970bd476a798edcb09e60e34dd2b95c",
-      "size": 1918,
+      "sha256": "55f666c3d7d6e2e6d3020a919397a8c503f65aee7e8b1350d900c4d4c2f10234",
+      "size": 1914,
       "kind": "code",
       "reboot_required": true
     },
@@ -51,14 +51,14 @@
     },
     {
       "path": "recovery_app.py",
-      "sha256": "2f1982382745f138d343499a5c4902dbcbfc1cc0dbdc649af2cf9180532a8610",
-      "size": 23285,
+      "sha256": "ac5650df7bbf8b9de11f106381b2092dc3ac7555406a8bea5412bb402dfbd251",
+      "size": 23245,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "runtime_config.py",
-      "sha256": "160ac5d6114f880df23c9708d8c0af230af729a1f5d05833bb4f5b08494d99f3",
+      "sha256": "12be2eb41d9ab76d48aed314b179b62b2b1b687fd6be1dcba6565779335cb641",
       "size": 5488,
       "kind": "code",
       "reboot_required": true

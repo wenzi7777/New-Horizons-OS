@@ -57,20 +57,19 @@ def mac_hex(value=None):
 
 
 def derive_device_id(value=None):
-    data = mac_bytes(value)
-    if not data:
-        return 0xA55A0001
+    uid = mac_hex(value)
+    if uid:
+        return uid
+    return "A55A00000001"
 
-    if len(data) >= 4:
-        value = int.from_bytes(data[-4:], "big") & 0xFFFFFFFF
-    else:
-        value = 0
-        for byte in data:
-            value = ((value << 8) | byte) & 0xFFFFFFFF
-    if value in (0, 0x00000001):
-        value ^= 0xA55A5A5A
-        value &= 0xFFFFFFFF
-    return value
+
+def get_packet_device_uid_bytes(value=None):
+    data = mac_bytes(value)
+    if len(data) >= 6:
+        return data[-6:]
+    if data:
+        return (b"\x00" * (6 - len(data))) + data
+    return b"\xA5\x5A\x00\x00\x00\x01"
 
 
 def get_device_id():

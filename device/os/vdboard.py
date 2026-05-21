@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover
 import struct
 
 import config
+from device_identity import get_packet_device_uid_bytes
 from frame_protocol import encode_scan_frame, decode_scan_frame
 
 
@@ -28,6 +29,26 @@ def _ticks_diff(now, then):
     if hasattr(time, "ticks_diff"):
         return time.ticks_diff(now, then)
     return now - then
+
+
+def _packet_uid_bytes(value=None):
+    if value is None:
+        return get_packet_device_uid_bytes()
+    if isinstance(value, bytes):
+        data = value
+    elif isinstance(value, bytearray):
+        data = bytes(value)
+    elif isinstance(value, str):
+        text = value.replace(":", "").replace("-", "").replace(" ", "")
+        try:
+            data = bytes.fromhex(text)
+        except Exception:
+            data = value.encode()
+    else:
+        data = bytes(value)
+    if len(data) >= 6:
+        return data[-6:]
+    return (b"\x00" * (6 - len(data))) + data
 
 
 class _RingBuffer:
@@ -100,7 +121,7 @@ class _ScanAPI:
         self.started = False
         self.last_capture_ms = 0
         self.buffer = _RingBuffer(self.buffer_frames)
-        self.device_id = int(getattr(config, "DEVICE_ID", 0))
+        self.device_uid = get_packet_device_uid_bytes()
         self.use_hmac = bool(getattr(config, "USE_HMAC", False))
         self.hmac_len = int(getattr(config, "HMAC_LEN", 0)) if self.use_hmac else 0
         self.hmac_key = b""
@@ -173,7 +194,7 @@ class _ScanAPI:
         self.packet_frames = 0
 
     def set_packet_options(self, device_id, use_hmac, hmac_len, hmac_key):
-        self.device_id = int(device_id) & 0xFFFFFFFF
+        self.device_uid = _packet_uid_bytes(device_id)
         self.use_hmac = bool(use_hmac)
         self.hmac_len = int(hmac_len) if self.use_hmac else 0
         if isinstance(hmac_key, str):
@@ -285,24 +306,30 @@ class _ScanAPI:
 
         matrix_payload = struct.pack("<" + ("f" * len(matrix)), *matrix) if matrix else b""
         payload = matrix_payload + imu_payload + battery_payload
-        packet = bytearray(18 + len(payload) + (self.hmac_len if self.use_hmac else 0))
+        header_len = 20
+        packet = bytearray(header_len + len(payload) + (self.hmac_len if self.use_hmac else 0))
         struct.pack_into(
-            "<HBBIIIH",
+            "<HBB",
             packet,
             0,
             int(getattr(config, "MAGIC", 0xA55A)),
-            int(getattr(config, "PACKET_VERSION", 1)),
+            int(getattr(config, "PACKET_VERSION", 2)),
             flags,
-            self.device_id,
+        )
+        packet[4:10] = self.device_uid
+        struct.pack_into(
+            "<IIH",
+            packet,
+            10,
             int(decoded["seq"]),
             int(decoded["timestamp_ms"]),
             len(payload),
         )
-        packet[18:18 + len(payload)] = payload
+        packet[header_len:header_len + len(payload)] = payload
         if self.use_hmac and self.hmac_len:
             try:
                 from crypto_hmac import hmac_sha256
-                body_len = 18 + len(payload)
+                body_len = header_len + len(payload)
                 packet[body_len:body_len + self.hmac_len] = hmac_sha256(self.hmac_key, packet[:body_len])[:self.hmac_len]
             except Exception:
                 pass
@@ -399,7 +426,7 @@ class _ScanAPI:
             "heap_free": 0,
             "heap_largest_free_block": 0,
             "frame_scratch_bytes": 16 + (point_count * 2),
-            "packet_scratch_bytes": 18 + (point_count * 4) + 28 + 4 + 32,
+            "packet_scratch_bytes": 20 + (point_count * 4) + 28 + 4 + 32,
             "filter_state_bytes": point_count,
             "calibration_bytes": sum(len(points) for points in self.calibration_table) * 8,
             "ring_bytes": self.buffer_frames * (16 + (point_count * 2)),

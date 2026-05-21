@@ -6,7 +6,7 @@ import gc
 import config
 import board_pins
 
-from device_identity import get_device_id, get_device_name, get_device_uid
+from device_identity import get_device_id, get_device_name, get_device_uid, get_packet_device_uid_bytes
 from device_logging import DeviceLogger
 from runtime_config import RuntimeConfigStore
 from wifi_manager import WiFiManager
@@ -18,6 +18,7 @@ class App:
         self.frame_id = 0
         self.device_id = get_device_id()
         self.device_uid = get_device_uid()
+        self.packet_device_uid = get_packet_device_uid_bytes()
         self.device_name = get_device_name(config.DEVICE_NAME)
         self.reboot_required = False
         self.mode = "normal"
@@ -1362,7 +1363,7 @@ class App:
             "maintenance_reason": self.maintenance_reason,
             "reboot_required": self.reboot_required,
             "applied": False,
-            "device_id": "0x{:08X}".format(self.device_id),
+            "device_id": self.device_uid,
             "device_uid": self.device_uid,
             "device_name": self.device_name,
             "system": self._system_status(),
@@ -1400,7 +1401,7 @@ class App:
             "message": "status_announce",
             "mode": self.mode,
             "reboot_required": self.reboot_required,
-            "device_id": "0x{:08X}".format(self.device_id),
+            "device_id": self.device_uid,
             "device_uid": self.device_uid,
             "device_name": self.device_name,
             "system": self._system_status(),
@@ -1528,7 +1529,7 @@ class App:
         self.logger.info(
             "boot mode=normal device={} id={} version={} matrix={}x{} active={}x{} wifi_setup={}".format(
                 self.device_name,
-                hex(self.device_id),
+                self.device_uid,
                 getattr(config, "FIRMWARE_VERSION", "unknown"),
                 config.ROWS,
                 config.COLS,
@@ -1937,7 +1938,7 @@ class App:
         try:
             import secrets
             self.vdboard.scan.set_packet_options(
-                self.device_id,
+                self.packet_device_uid,
                 bool(getattr(config, "USE_HMAC", False)),
                 int(getattr(config, "HMAC_LEN", 0)),
                 getattr(secrets, "HMAC_KEY", b""),

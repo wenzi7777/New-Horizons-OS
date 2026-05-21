@@ -2,15 +2,15 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.2.32",
-  "version": "v0.2.32",
+  "firmware_version": "v0.3.0",
+  "version": "v0.3.0",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.32/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.3.0/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
-      "sha256": "ec8f7a11af74181b2a156b5f05146ccddfb72691c9a0cfcbbac7f6079235acc6",
-      "size": 30787,
+      "sha256": "89d6a5f6cc3ee8ad301a0eda8ebfbf67014c5e0720b40f06f8a200f8cbaf6994",
+      "size": 30826,
       "kind": "code",
       "reboot_required": true
     },
@@ -44,8 +44,8 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "b769984b5223cfcdfa49445d27a4b5cb7f6757a12851bfa6bec758e88ebe6bc6",
-      "size": 3482,
+      "sha256": "6422fe59002c37bf0fc45338b66c11e37a66133781b88c4cffc702fa23fee94d",
+      "size": 3384,
       "kind": "code",
       "reboot_required": true
     },
@@ -58,8 +58,8 @@
     },
     {
       "path": "device_identity.mpy",
-      "sha256": "c254e6c68e702250f491be13e74427fb37aed3c82ee708104d5f7a15fa52dcbf",
-      "size": 1003,
+      "sha256": "4e9c92798b31ca6ca113a176ab621f2384107ea658a7c160485cc18894b3ce0f",
+      "size": 1001,
       "kind": "code",
       "reboot_required": true
     },
@@ -163,8 +163,8 @@
     },
     {
       "path": "packet.mpy",
-      "sha256": "6653e9cd621df7932d53f124ca00949680d63ef13de75071b8f6a12143782b4c",
-      "size": 2627,
+      "sha256": "b48e8cd226b0befeb8f259d7761456f0223562cc3a75cf7c8f3847c053954f17",
+      "size": 2698,
       "kind": "code",
       "reboot_required": true
     },
@@ -240,8 +240,8 @@
     },
     {
       "path": "vdboard.mpy",
-      "sha256": "aa5ccad35ed4f681863a9306003badf56b43814ba4c6dd14606c287b9576c9e6",
-      "size": 5869,
+      "sha256": "4869b5392efa2635a3eb30caa7099d39181989c5854b529c855bb8af2556202b",
+      "size": 6207,
       "kind": "code",
       "reboot_required": true
     },
@@ -268,7 +268,6 @@
     "frame_protocol.py",
     "fs_core.py",
     "i2c_bus.py",
-    "main.py",
     "manifest_update.py",
     "matrix_scan.py",
     "matrix_scan_mock.py",

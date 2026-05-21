@@ -387,8 +387,9 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         "vdboard": fake_vdboard,
         "calibration_store": types.SimpleNamespace(CalibrationStore=fake_calibration_store),
         "device_identity": types.SimpleNamespace(
-            get_device_id=lambda: 0x12345678,
+            get_device_id=lambda: "AABBCCDDEEFF",
             get_device_uid=lambda: "UID123",
+            get_packet_device_uid_bytes=lambda: b"\xaa\xbb\xcc\xdd\xee\xff",
             get_device_name=lambda default: default,
         ),
         "device_logging": types.SimpleNamespace(DeviceLogger=lambda *args, **kwargs: FakeLogger()),

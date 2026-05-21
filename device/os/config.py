@@ -3,10 +3,10 @@
 DEVICE_ID = 0x00000001
 DEVICE_NAME = "New Horizons OS"
 HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4"
-RUNTIME_VERSION = "v0.2.28"
-FIRMWARE_VERSION = "v0.2.32"
+RUNTIME_VERSION = "v0.3.0"
+FIRMWARE_VERSION = "v0.3.0"
 OS_VERSION = FIRMWARE_VERSION
-RECOVERY_VERSION = "v0.2.29"
+RECOVERY_VERSION = "v0.3.0"
 RECOVERY_FIRMWARE_VERSION = RECOVERY_VERSION
 SETUP_AP_SSID_PREFIX = "NewHorizonsOS"
 SETUP_AP_PASSWORD = "newhorizons"
@@ -66,8 +66,8 @@ SERVER_PROFILES = {
         "server": {"host": PRODUCTION_SERVER_HOST, "tcp_port": PRODUCTION_TCP_CONTROL_PORT, "udp_port": PRODUCTION_UDP_STREAM_PORT},
     },
 }
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.32/device"
-RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.29/device"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.3.0/device"
+RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.3.0/device"
 GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
@@ -140,7 +140,7 @@ LOG_PATH = DATA_LOG_DIR + "/device.log"
 USE_MATRIX_MOCK = False
 
 MAGIC = 0xA55A
-PACKET_VERSION = 1
+PACKET_VERSION = 2
 
 # Matrix scanner
 COL_ACTIVE_LEVEL = 1

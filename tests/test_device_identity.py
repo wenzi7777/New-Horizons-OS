@@ -38,17 +38,16 @@ def restore_modules(saved_modules):
 
 
 class DeviceIdentityTests(unittest.TestCase):
-    def test_device_id_is_derived_from_mac_bytes(self):
+    def test_device_id_is_full_mac_hex(self):
         module, saved_modules = load_device_identity()
         self.addCleanup(restore_modules, saved_modules)
 
         device_id = module.derive_device_id(b"\xaa\xbb\xcc\xdd\xee\xff")
 
-        self.assertIsInstance(device_id, int)
-        self.assertNotEqual(device_id, 0)
-        self.assertNotEqual(device_id, 0x00000001)
+        self.assertIsInstance(device_id, str)
         self.assertEqual(device_id, module.derive_device_id(b"\xaa\xbb\xcc\xdd\xee\xff"))
-        self.assertEqual(device_id, 0xCCDDEEFF)
+        self.assertEqual(device_id, "AABBCCDDEEFF")
+        self.assertEqual(module.get_packet_device_uid_bytes(b"\xaa\xbb\xcc\xdd\xee\xff"), b"\xaa\xbb\xcc\xdd\xee\xff")
 
     def test_device_uid_is_uppercase_hex(self):
         module, saved_modules = load_device_identity()
@@ -75,7 +74,8 @@ class DeviceIdentityTests(unittest.TestCase):
                 self.addCleanup(restore_modules, saved_modules)
 
                 self.assertEqual(module.get_device_uid(), "AABBCCDDEEFF")
-                self.assertEqual(module.get_device_id(), 0xCCDDEEFF)
+                self.assertEqual(module.get_device_id(), "AABBCCDDEEFF")
+                self.assertEqual(module.get_packet_device_uid_bytes(), b"\xaa\xbb\xcc\xdd\xee\xff")
                 self.assertEqual(wlan_calls, [])
 
 

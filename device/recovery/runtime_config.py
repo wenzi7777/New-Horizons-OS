@@ -48,7 +48,7 @@ DEFAULT_RUNTIME = {
     "firmware_name": iconfig.FIRMWARE_NAME,
     "mode": iconfig.DEFAULT_MODE,
     "server_profile": DEFAULT_SERVER_PROFILE,
-    "packet_format_version": 1,
+    "packet_format_version": 2,
     "sensor_precision": "float32",
     "scan_timing": {
         "target_fps": iconfig.DEFAULT_TARGET_FPS,

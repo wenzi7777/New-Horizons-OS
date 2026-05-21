@@ -27,8 +27,9 @@ def load_recovery_app_module():
         DEFAULT_RELEASE_URL="https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
     )
     fake_identity = types.SimpleNamespace(
-        get_device_id=lambda: 0x12345678,
+        get_device_id=lambda: "AABBCCDDEEFF",
         get_device_uid=lambda: "UID123",
+        get_packet_device_uid_bytes=lambda: b"\xaa\xbb\xcc\xdd\xee\xff",
         get_device_name=lambda default: default,
     )
     fake_logger_mod = types.SimpleNamespace(DeviceLogger=lambda path: None)
@@ -165,7 +166,7 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
     def test_os_write_progress_updates_state_and_publishes_status(self):
         module = load_recovery_app_module()
         app = module.RecoveryApp.__new__(module.RecoveryApp)
-        app.device_id = 0x12345678
+        app.device_id = "UID123"
         app.device_uid = "UID123"
         app.device_name = "New Horizons OS"
         app.runtime = {
@@ -226,7 +227,7 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         app = module.RecoveryApp.__new__(module.RecoveryApp)
         module.gc.mem_free = lambda: 120000
         module.gc.mem_alloc = lambda: 56000
-        app.device_id = 0x12345678
+        app.device_id = "UID123"
         app.device_uid = "UID123"
         app.device_name = "New Horizons OS"
         app.runtime = {

@@ -52,7 +52,7 @@ class RecoveryApp:
         self.logger.info(
             "boot mode=recovery device={} id={} version={} os_installed={} wifi_setup={}".format(
                 self.device_name,
-                hex(self.device_id),
+                self.device_uid,
                 getattr(iconfig, "FIRMWARE_VERSION", "unknown"),
                 self._os_installed(),
                 bool(self.wifi_setup_requested),
@@ -155,7 +155,7 @@ class RecoveryApp:
         return {
             "status": "ok",
             "message": "status_announce",
-            "device_id": "0x{:08X}".format(self.device_id),
+            "device_id": self.device_uid,
             "device_uid": self.device_uid,
             "device_name": self.device_name,
             "system": self._system_status(self.runtime),
@@ -182,7 +182,7 @@ class RecoveryApp:
             return {
                 "status": "ok",
                 "message": "recovery_status",
-                "device_id": "0x{:08X}".format(self.device_id),
+                "device_id": self.device_uid,
                 "device_uid": self.device_uid,
                 "device_name": self.device_name,
                 "system": self._system_status(runtime),

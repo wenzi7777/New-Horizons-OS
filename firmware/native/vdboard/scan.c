@@ -28,8 +28,8 @@
 #define VDBOARD_SCAN_ACTIVE_LEVEL (0)
 #define VDBOARD_SCAN_IDLE_LEVEL (1)
 #define VDBOARD_PACKET_MAGIC (0xA55A)
-#define VDBOARD_PACKET_VERSION (1)
-#define VDBOARD_PACKET_HEADER_LEN (18)
+#define VDBOARD_PACKET_VERSION (2)
+#define VDBOARD_PACKET_HEADER_LEN (20)
 #define VDBOARD_PACKET_FLAG_IMU (0x01)
 #define VDBOARD_PACKET_FLAG_BATTERY (0x02)
 #define VDBOARD_PACKET_FLAG_HMAC (0x80)
@@ -66,7 +66,7 @@ typedef struct _vdboard_stream_context_t {
     bool filter_enabled;
     uint8_t filter_median;
     float filter_alpha;
-    uint32_t device_id;
+    uint8_t device_uid[6];
     bool use_hmac;
     uint8_t hmac_len;
     uint8_t hmac_key_len;
@@ -151,7 +151,7 @@ static vdboard_stream_context_t g_stream_ctx = {
     .filter_enabled = false,
     .filter_median = 3,
     .filter_alpha = 0.25f,
-    .device_id = 0,
+    .device_uid = {0xA5, 0x5A, 0x00, 0x00, 0x00, 0x01},
     .use_hmac = false,
     .hmac_len = 0,
     .hmac_key_len = 0,
@@ -794,11 +794,47 @@ static mp_obj_t vdboard_scan_set_layout(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(vdboard_scan_set_layout_obj, 4, 4, vdboard_scan_set_layout);
 
+static int vdboard_hex_nibble(char value) {
+    if (value >= '0' && value <= '9') {
+        return value - '0';
+    }
+    if (value >= 'a' && value <= 'f') {
+        return value - 'a' + 10;
+    }
+    if (value >= 'A' && value <= 'F') {
+        return value - 'A' + 10;
+    }
+    return -1;
+}
+
+static void vdboard_stream_set_device_uid(mp_obj_t obj) {
+    mp_buffer_info_t bufinfo;
+    if (mp_get_buffer(obj, &bufinfo, MP_BUFFER_READ)) {
+        const char *data = (const char *)bufinfo.buf;
+        if (bufinfo.len == 6) {
+            memcpy(g_stream_ctx.device_uid, data, 6);
+            return;
+        }
+        if (bufinfo.len == 12) {
+            for (size_t idx = 0; idx < 6; ++idx) {
+                int high = vdboard_hex_nibble(data[idx * 2]);
+                int low = vdboard_hex_nibble(data[(idx * 2) + 1]);
+                if (high < 0 || low < 0) {
+                    mp_raise_ValueError(MP_ERROR_TEXT("device_uid must be 6 bytes or 12 hex chars"));
+                }
+                g_stream_ctx.device_uid[idx] = (uint8_t)((high << 4) | low);
+            }
+            return;
+        }
+    }
+    mp_raise_ValueError(MP_ERROR_TEXT("device_uid must be 6 bytes or 12 hex chars"));
+}
+
 static mp_obj_t vdboard_stream_set_packet_options(size_t n_args, const mp_obj_t *args) {
     if (n_args < 4) {
-        mp_raise_TypeError(MP_ERROR_TEXT("set_packet_options expects device_id, use_hmac, hmac_len, hmac_key"));
+        mp_raise_TypeError(MP_ERROR_TEXT("set_packet_options expects device_uid, use_hmac, hmac_len, hmac_key"));
     }
-    g_stream_ctx.device_id = (uint32_t)mp_obj_get_int(args[0]);
+    vdboard_stream_set_device_uid(args[0]);
     g_stream_ctx.use_hmac = mp_obj_is_true(args[1]);
     mp_int_t hmac_len = mp_obj_get_int(args[2]);
     if (hmac_len < 0 || hmac_len > VDBOARD_STREAM_HMAC_MAX_LEN) {
@@ -1031,10 +1067,10 @@ static bool vdboard_stream_build_packet(size_t *total_len_out) {
     vdboard_put_u16_le(packet, VDBOARD_PACKET_MAGIC);
     packet[2] = VDBOARD_PACKET_VERSION;
     packet[3] = flags;
-    vdboard_put_u32_le(packet + 4, g_stream_ctx.device_id);
-    vdboard_put_u32_le(packet + 8, header->seq);
-    vdboard_put_u32_le(packet + 12, header->timestamp_ms);
-    vdboard_put_u16_le(packet + 16, (uint16_t)payload_len);
+    memcpy(packet + 4, g_stream_ctx.device_uid, 6);
+    vdboard_put_u32_le(packet + 10, header->seq);
+    vdboard_put_u32_le(packet + 14, header->timestamp_ms);
+    vdboard_put_u16_le(packet + 18, (uint16_t)payload_len);
 
     uint8_t *cursor = packet + VDBOARD_PACKET_HEADER_LEN;
     const uint16_t *payload_mv = (const uint16_t *)(g_stream_ctx.frame_scratch + sizeof(vdboard_frame_header_t));
