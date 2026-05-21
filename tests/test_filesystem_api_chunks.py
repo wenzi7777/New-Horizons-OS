@@ -106,6 +106,16 @@ class FilesystemAPIChunkTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 api.list_files(scope="system")
 
+            with self.assertRaises(ValueError):
+                api.upload_begin("device.log", 2, "", scope="logs")
+
+            api.scope_roots["offline"] = str(root / "offline")
+            (root / "offline").mkdir()
+            (root / "offline" / "offline_000001.nhr").write_bytes(b"raw")
+            self.assertEqual(api.download_begin("offline_000001.nhr", scope="offline")["scope"], "offline")
+            with self.assertRaises(ValueError):
+                api.upload_begin("offline_000002.nhr", 3, "", scope="offline")
+
     def test_usage_reports_scoped_storage_bytes(self):
         for module_path, module_name in self.MODULES:
             with self.subTest(module=module_name), tempfile.TemporaryDirectory() as tmpdir:

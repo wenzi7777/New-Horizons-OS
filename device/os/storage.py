@@ -5,6 +5,8 @@ try:
 except ImportError:  # pragma: no cover - CPython fallback
     import os
 
+import fs_core
+
 try:
     import hashlib
 except ImportError:  # pragma: no cover - MicroPython fallback
@@ -17,43 +19,19 @@ except ImportError:
 
 
 def _norm(path):
-    if not path:
-        return "."
-    return path.replace("\\", "/")
+    return fs_core._norm(path)
 
 
 def dirname(path):
-    path = _norm(path)
-    if "/" not in path:
-        return ""
-    return path.rsplit("/", 1)[0]
+    return fs_core.dirname(path)
 
 
 def ensure_dir(path):
-    path = _norm(path)
-    if not path or path == ".":
-        return
-
-    parts = [part for part in path.split("/") if part]
-    current = "/" if path.startswith("/") else ""
-
-    for part in parts:
-        if current in ("", "/"):
-            current = current + part if current == "/" else part
-        else:
-            current = current + "/" + part
-        try:
-            os.mkdir(current)
-        except OSError:
-            pass
+    return fs_core.ensure_dir(path)
 
 
 def exists(path):
-    try:
-        os.stat(path)
-        return True
-    except OSError:
-        return False
+    return fs_core.exists(path)
 
 
 def load_json(path, default=None):
@@ -96,10 +74,7 @@ def read_bytes(path, default=None):
 
 
 def file_size(path):
-    try:
-        return int(os.stat(path)[6])
-    except OSError:
-        return None
+    return fs_core.file_size(path)
 
 
 def read_chunk(path, offset=0, length=1024):
@@ -134,11 +109,7 @@ def write_bytes(path, data):
 
 
 def remove(path):
-    try:
-        os.remove(path)
-        return True
-    except OSError:
-        return False
+    return fs_core.remove(path)
 
 
 def list_tree(root):
@@ -183,22 +154,7 @@ def tree_size(root):
 
 
 def fs_usage(path="/"):
-    try:
-        stats = os.statvfs(path)
-        block_size = int(stats[0] or stats[1] or 1)
-        total = int(stats[2]) * block_size
-        free = int(stats[3]) * block_size
-        used = max(0, total - free)
-    except (AttributeError, OSError, TypeError, ValueError):
-        total = 0
-        free = 0
-        used = 0
-    return {
-        "total_bytes": total,
-        "used_bytes": used,
-        "free_bytes": free,
-        "percent_used": int((used * 100) // total) if total else 0,
-    }
+    return fs_core.fs_usage(path)
 
 
 def sha256_hex_bytes(data):

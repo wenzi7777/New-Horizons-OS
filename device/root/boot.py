@@ -20,6 +20,7 @@ _CONFIG_DEFAULTS = {
     "DATA_FILES_DIR": "data/files",
     "DATA_LOG_DIR": "data/logs",
     "DATA_TMP_DIR": "data/tmp",
+    "OFFLINE_RECORD_DIR": "data/offline",
 }
 
 
@@ -53,5 +54,6 @@ for path in (
     iconfig.DATA_FILES_DIR,
     iconfig.DATA_LOG_DIR,
     iconfig.DATA_TMP_DIR,
+    iconfig.OFFLINE_RECORD_DIR,
 ):
     _ensure_dir(path)

@@ -6,12 +6,15 @@ except ImportError:
 
 
 class FilesystemAPI:
-    def __init__(self, root="data/files", tmp_root="data/tmp", scope_roots=None):
+    def __init__(self, root="data/files", tmp_root="data/tmp", scope_roots=None, writable_scopes=None):
         self.root = root
         self.tmp_root = tmp_root
         self.scope_roots = {"user": root}
         if scope_roots:
             self.scope_roots.update(scope_roots)
+        self.writable_scopes = {"user": True}
+        if writable_scopes is not None:
+            self.writable_scopes = {str(scope): True for scope in writable_scopes}
 
     def _safe_scope(self, scope):
         name = str(scope or "user")
@@ -28,6 +31,12 @@ class FilesystemAPI:
 
     def _root(self, scope="user"):
         return self.scope_roots[self._safe_scope(scope)]
+
+    def _ensure_writable_scope(self, scope="user"):
+        scope = self._safe_scope(scope)
+        if scope not in self.writable_scopes:
+            raise ValueError("scope_read_only")
+        return scope
 
     def _path(self, relative_path, scope="user"):
         return self._root(scope).rstrip("/") + "/" + self._safe_rel(relative_path)
@@ -75,7 +84,7 @@ class FilesystemAPI:
         return storage.remove(self._path(relative_path, scope))
 
     def upload_begin(self, relative_path, size, sha256="", scope="user"):
-        scope = self._safe_scope(scope)
+        scope = self._ensure_writable_scope(scope)
         rel = self._safe_rel(relative_path)
         tmp_path = self._tmp_path(rel, scope)
         meta_path = self._meta_path(rel, scope)
@@ -94,7 +103,7 @@ class FilesystemAPI:
         return {"status": "ok", "message": "upload_started", "scope": scope, "path": rel, "size": int(size)}
 
     def upload_chunk(self, relative_path, offset, data_hex, scope="user"):
-        scope = self._safe_scope(scope)
+        scope = self._ensure_writable_scope(scope)
         rel = self._safe_rel(relative_path)
         tmp_path = self._tmp_path(rel, scope)
         meta_path = self._meta_path(rel, scope)
@@ -116,7 +125,7 @@ class FilesystemAPI:
         return {"status": "ok", "message": "upload_chunk_written", "scope": scope, "path": rel, "written": written}
 
     def upload_finish(self, relative_path, scope="user"):
-        scope = self._safe_scope(scope)
+        scope = self._ensure_writable_scope(scope)
         rel = self._safe_rel(relative_path)
         tmp_path = self._tmp_path(rel, scope)
         meta_path = self._meta_path(rel, scope)

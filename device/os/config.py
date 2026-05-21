@@ -4,7 +4,7 @@ DEVICE_ID = 0x00000001
 DEVICE_NAME = "New Horizons OS"
 HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4"
 RUNTIME_VERSION = "v0.2.28"
-FIRMWARE_VERSION = "v0.2.29"
+FIRMWARE_VERSION = "v0.2.30"
 OS_VERSION = FIRMWARE_VERSION
 RECOVERY_VERSION = "v0.2.29"
 RECOVERY_FIRMWARE_VERSION = RECOVERY_VERSION
@@ -65,7 +65,7 @@ SERVER_PROFILES = {
         "server": {"host": PRODUCTION_SERVER_HOST, "tcp_port": PRODUCTION_TCP_CONTROL_PORT, "udp_port": PRODUCTION_UDP_STREAM_PORT},
     },
 }
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.29/device"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.30/device"
 RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.29/device"
 GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
@@ -133,6 +133,7 @@ CALIBRATION_DIR = DEVICE_STATE_DIR + "/calibration"
 DATA_FILES_DIR = "data/files"
 DATA_LOG_DIR = "data/logs"
 DATA_TMP_DIR = "data/tmp"
+OFFLINE_RECORD_DIR = "data/offline"
 LOG_PATH = DATA_LOG_DIR + "/device.log"
 
 USE_MATRIX_MOCK = False
@@ -166,6 +167,20 @@ BMI270_TEMP_DECIMALS = 2
 
 # LED behavior
 CHARGING_LED_ENABLE = True
+
+# Emergency offline recording. Offline record stores the same binary packets as
+# UDP streaming. Keep these values conservative on the no-PSRAM board.
+ACTION_BUTTON_LONG_PRESS_MS = 3000
+OFFLINE_CONTROL_OFFLINE_MS = 10000
+OFFLINE_RECONNECT_STABLE_MS = 10000
+OFFLINE_RECORD_SEGMENT_BYTES = 262144
+OFFLINE_RECORD_RESERVE_BYTES = 1048576
+OFFLINE_RECORD_RESERVE_PERCENT = 10
+OFFLINE_RECORD_MIN_USABLE_BYTES = 524288
+OFFLINE_RECORD_ESTIMATE_INTERVAL_MS = 5000
+OFFLINE_RECORD_FLUSH_INTERVAL_MS = 1000
+OFFLINE_RECORD_WRITE_BUDGET_MS = 8
+OFFLINE_RECORD_WRITE_BACKOFF_MS = 50
 
 PRINT_FPS = False
 PRINT_WIFI_STATUS = False

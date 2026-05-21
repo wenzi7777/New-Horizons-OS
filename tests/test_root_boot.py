@@ -47,6 +47,7 @@ class RootBootTests(unittest.TestCase):
             self.assertIn("data/files", ensured)
             self.assertIn("data/logs", ensured)
             self.assertIn("data/tmp", ensured)
+            self.assertIn("data/offline", ensured)
         finally:
             for name, saved in saved_modules.items():
                 if saved is None:

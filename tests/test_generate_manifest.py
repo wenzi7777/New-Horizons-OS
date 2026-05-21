@@ -133,8 +133,17 @@ class GenerateManifestTests(unittest.TestCase):
 
         self.assertIn("tcp_control.mpy", paths)
         self.assertIn("udp_stream.mpy", paths)
+        self.assertIn("fs_core.mpy", paths)
+        self.assertIn("offline_recorder.mpy", paths)
         self.assertNotIn("mqtt_transport.mpy", paths)
-        self.assertTrue({"mqtt_transport.py", "umqtt/simple.py", "umqtt/robust.py", "umqtt/__init__.py"} <= deletes)
+        self.assertTrue({
+            "fs_core.py",
+            "offline_recorder.py",
+            "mqtt_transport.py",
+            "umqtt/simple.py",
+            "umqtt/robust.py",
+            "umqtt/__init__.py",
+        } <= deletes)
 
 
 if __name__ == "__main__":

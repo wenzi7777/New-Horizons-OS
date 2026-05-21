@@ -66,6 +66,36 @@ class SK6812Status:
                 "colors": ((57, 197, 187), (0, 0, 0)),
                 "brightness": 0.20,
             },
+            "offline_record_ok": {
+                "intervals": (140, 1860),
+                "colors": ((120, 0, 255), (0, 0, 0)),
+                "brightness": 0.25,
+            },
+            "offline_record_low": {
+                "intervals": (140, 1860),
+                "colors": ((255, 200, 0), (0, 0, 0)),
+                "brightness": 0.30,
+            },
+            "offline_record_critical": {
+                "intervals": (120, 120, 120, 1640),
+                "colors": ((255, 110, 0), (0, 0, 0), (200, 70, 0), (0, 0, 0)),
+                "brightness": 0.35,
+            },
+            "offline_record_urgent": {
+                "intervals": (90, 90, 90, 90, 90, 1550),
+                "colors": ((255, 40, 0), (0, 0, 0), (220, 70, 0), (0, 0, 0), (180, 0, 0), (0, 0, 0)),
+                "brightness": 0.45,
+            },
+            "offline_record_rolling": {
+                "intervals": (120, 120, 120, 1640),
+                "colors": ((255, 0, 180), (0, 0, 0), (0, 180, 180), (0, 0, 0)),
+                "brightness": 0.35,
+            },
+            "offline_record_unavailable": {
+                "intervals": (80, 80, 80, 760),
+                "colors": ((255, 0, 0), (0, 0, 0), (80, 0, 0), (0, 0, 0)),
+                "brightness": 0.35,
+            },
             "off": {
                 "intervals": (1000,),
                 "colors": ((0, 0, 0),),
@@ -128,6 +158,17 @@ class SK6812Status:
 
     def set_charge_done(self):
         self._set_state("charge_done")
+
+    def set_offline_recording(self, bucket="ok"):
+        if bucket not in ("ok", "low", "critical", "urgent", "rolling", "error"):
+            bucket = "ok"
+        if bucket == "error":
+            self.set_error()
+            return
+        self._set_state("offline_record_" + bucket)
+
+    def set_offline_unavailable(self):
+        self._set_state("offline_record_unavailable")
 
     def set_error(self):
         self._set_state("error")

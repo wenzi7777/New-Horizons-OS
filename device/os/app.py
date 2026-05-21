@@ -54,6 +54,13 @@ class App:
         self.led = None
         self.control_transport = None
         self.udp_stream = None
+        self.offline_recorder = None
+        self.action_button = None
+        self.action_button_down_since_ms = None
+        self.action_button_handled = False
+        self.control_disconnected_since_ms = 0
+        self.control_connected_since_ms = 0
+        self.offline_led_unavailable_until_ms = 0
         self.recovery_writer = None
         self.update_state = self._default_update_state()
 
@@ -119,6 +126,7 @@ class App:
                 self.logger.warn("setup_wifi_connect_failed_offline")
 
         self._ensure_led()
+        self._ensure_action_button()
         if self.led:
             self.logger.info("setup_led_begin_start")
             self.led.begin()
@@ -159,6 +167,8 @@ class App:
             self.wifi.service_setup_portal()
             if self.control_transport is not None:
                 self.control_transport.poll(self.wifi.is_connected(), self._handle_control_request)
+            self._service_offline_state(now)
+            self._service_action_button(now)
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
                 self._ensure_streaming_services()
@@ -212,6 +222,8 @@ class App:
 
             if self.led and time.ticks_diff(now, self.last_led_ms) >= led_interval:
                 self.last_led_ms = now
+                if self._offline_recording_active():
+                    self.update_led_state()
                 self.led.update()
 
             if (self.time_sync is not None
@@ -239,11 +251,11 @@ class App:
 
     def handle_scan(self, timestamp_ms):
         if getattr(self, "native_streaming", False) and hasattr(self.vdboard.scan, "pop_packet_into"):
-            if self._transmit_backing_off(timestamp_ms):
-                return
-            if not self.wifi.is_connected() or self.control_transport is None:
-                return
-            if hasattr(self.control_transport, "is_connected") and not self.control_transport.is_connected():
+            online = self._stream_online()
+            offline_active = self._offline_recording_active()
+            if online and self._transmit_backing_off(timestamp_ms):
+                online = False
+            if not online and not offline_active:
                 return
             packet = self._native_pop_packet()
             if packet is None:
@@ -267,7 +279,10 @@ class App:
             )
             if send_every > 1 and (self.frame_id % send_every != 0):
                 return
-            self.send_packet(packet)
+            if offline_active:
+                self.offline_recorder.write_packet(packet, timestamp_ms)
+            if online:
+                self.send_packet(packet)
             return
 
         self.logger.warn("scan_native_stream_required")
@@ -339,6 +354,12 @@ class App:
     def update_led_state(self):
         if not self.led:
             return
+        if self.offline_led_unavailable_until_ms and time.ticks_diff(time.ticks_ms(), self.offline_led_unavailable_until_ms) < 0:
+            if hasattr(self.led, "set_offline_unavailable"):
+                self.led.set_offline_unavailable()
+            else:
+                self.led.set_error()
+            return
         if self.reboot_required:
             if hasattr(self.led, "set_reboot_required"):
                 self.led.set_reboot_required()
@@ -350,6 +371,9 @@ class App:
             return
         if self.wifi.setup_active():
             self.led.set_wifi_setup()
+            return
+        if self._offline_recording_active() and hasattr(self.led, "set_offline_recording"):
+            self.led.set_offline_recording(self.offline_recorder.led_bucket())
             return
         if self.battery:
             if self.latest_battery is None:
@@ -375,6 +399,128 @@ class App:
         if changed:
             self.update_led_state()
         return changed
+
+    def _ensure_action_button(self):
+        if self.action_button is not None:
+            return
+        try:
+            self.action_button = machine.Pin(board_pins.ACTION_BUTTON_PIN, machine.Pin.IN, machine.Pin.PULL_UP)
+        except Exception as exc:
+            self.logger.warn("action_button_init_failed {}".format(exc))
+            self.action_button = None
+
+    def _button_pressed(self):
+        if self.action_button is None:
+            return False
+        try:
+            return int(self.action_button.value()) == 0
+        except Exception:
+            return False
+
+    def _service_action_button(self, now):
+        if self.action_button is None:
+            return
+        if self._button_pressed():
+            if self.action_button_down_since_ms is None:
+                self.action_button_down_since_ms = now
+                self.action_button_handled = False
+                return
+            if (not self.action_button_handled
+                    and time.ticks_diff(now, self.action_button_down_since_ms) >= int(getattr(config, "ACTION_BUTTON_LONG_PRESS_MS", 3000))):
+                self.action_button_handled = True
+                self._toggle_offline_recording(now)
+            return
+        self.action_button_down_since_ms = None
+        self.action_button_handled = False
+
+    def _stream_online(self):
+        if not self.wifi.is_connected() or self.control_transport is None:
+            return False
+        if hasattr(self.control_transport, "is_connected") and not self.control_transport.is_connected():
+            return False
+        return True
+
+    def _offline_recording_active(self):
+        recorder = getattr(self, "offline_recorder", None)
+        return recorder is not None and bool(recorder.active)
+
+    def _offline_recording_eligible(self, now=None):
+        if self.wifi.setup_active() or self._in_maintenance() or self.reboot_required:
+            return False
+        if not self.wifi.is_connected():
+            return True
+        if self.control_transport is None or not self.control_transport.is_connected():
+            now = time.ticks_ms() if now is None else now
+            if not self.control_disconnected_since_ms:
+                return False
+            return time.ticks_diff(now, self.control_disconnected_since_ms) >= int(getattr(config, "OFFLINE_CONTROL_OFFLINE_MS", 10000))
+        return False
+
+    def _ensure_offline_recorder(self):
+        if self.offline_recorder is not None:
+            return self.offline_recorder
+        from offline_recorder import OfflineRecorder
+        self.offline_recorder = OfflineRecorder(getattr(config, "OFFLINE_RECORD_DIR", "data/offline"), self.logger)
+        return self.offline_recorder
+
+    def _service_offline_state(self, now):
+        connected = self._stream_online()
+        if connected:
+            self.control_disconnected_since_ms = 0
+            if not self.control_connected_since_ms:
+                self.control_connected_since_ms = now
+        else:
+            self.control_connected_since_ms = 0
+            if not self.control_disconnected_since_ms:
+                self.control_disconnected_since_ms = now
+
+        if self.offline_recorder is not None:
+            self.offline_recorder.set_eligible(self._offline_recording_eligible(now))
+            if (self.offline_recorder.active
+                    and connected
+                    and self.control_connected_since_ms
+                    and time.ticks_diff(now, self.control_connected_since_ms) >= int(getattr(config, "OFFLINE_RECONNECT_STABLE_MS", 10000))):
+                self.offline_recorder.stop("server_reconnected")
+                self.update_led_state()
+
+        if self.offline_led_unavailable_until_ms and time.ticks_diff(now, self.offline_led_unavailable_until_ms) >= 0:
+            self.offline_led_unavailable_until_ms = 0
+            self.update_led_state()
+
+    def _toggle_offline_recording(self, now):
+        recorder = self._ensure_offline_recorder()
+        if recorder.active:
+            recorder.stop("button_stop")
+            self.update_led_state()
+            return
+        if not self._offline_recording_eligible(now):
+            self.offline_led_unavailable_until_ms = time.ticks_add(now, 1200) if hasattr(time, "ticks_add") else now + 1200
+            self.update_led_state()
+            return
+        if not self._prepare_offline_scan():
+            self.offline_led_unavailable_until_ms = time.ticks_add(now, 1200) if hasattr(time, "ticks_add") else now + 1200
+            self.update_led_state()
+            return
+        ok, message = recorder.begin(now)
+        recorder.set_eligible(True)
+        if not ok:
+            self.logger.warn("offline_recording_start_failed {}".format(message))
+            self.offline_led_unavailable_until_ms = time.ticks_add(now, 1200) if hasattr(time, "ticks_add") else now + 1200
+        self.update_led_state()
+
+    def _prepare_offline_scan(self):
+        if self.scan_ready and self.hardware_ready:
+            return True
+        if not self._matrix_configured():
+            self.logger.warn("offline_recording_no_layout")
+            return False
+        try:
+            self._ensure_streaming_services()
+            self._ensure_runtime_hardware()
+            return bool(self.scan_ready)
+        except Exception as exc:
+            self.logger.warn("offline_recording_scan_prepare_failed {}".format(exc))
+            return False
 
     def _apply_sensor_pipeline(self, matrix):
         processed = []
@@ -1134,6 +1280,7 @@ class App:
             return self._ok(str(exc), error=str(exc))
 
     def _status(self):
+        recorder_status = self._offline_recording_status()
         return {
             "status": "ok",
             "message": "status",
@@ -1168,10 +1315,12 @@ class App:
             "stream": self.vdboard.scan.stream_stats() if (
                 self.vdboard is not None and hasattr(self.vdboard.scan, "stream_stats")
             ) else {},
+            "offline_recording": recorder_status,
         }
 
     def _status_announce_payload(self):
         runtime = self.runtime if isinstance(self.runtime, dict) else {}
+        recorder_status = self._offline_recording_status()
         return {
             "status": "ok",
             "message": "status_announce",
@@ -1204,6 +1353,7 @@ class App:
             "update_state": self._current_update_state(),
             "sent_packets": self.sent_packets,
             "failed_sends": self.failed_sends,
+            "offline_recording": recorder_status,
         }
 
     def _maintenance_status(self):
@@ -1211,6 +1361,23 @@ class App:
         status["message"] = "maintenance_status"
         status["scan_stopped"] = not self.scan_ready
         return status
+
+    def _offline_recording_status(self):
+        if self.offline_recorder is None:
+            return {
+                "eligible": self._offline_recording_eligible(),
+                "active": False,
+                "rolling": False,
+                "bytes_used": 0,
+                "bytes_limit": 0,
+                "estimated_seconds_until_rollover": 0,
+                "segment_count": 0,
+                "dropped_frames": 0,
+                "stop_reason": "",
+                "error": "",
+            }
+        self.offline_recorder.set_eligible(self._offline_recording_eligible())
+        return self.offline_recorder.status()
 
     def _ok(self, message, applied=False, reboot_required=False, error=""):
         return {
@@ -1452,6 +1619,11 @@ class App:
             self._mark_scan_started()
 
     def _stop_scan(self, persist_state=True):
+        if self._offline_recording_active():
+            try:
+                self.offline_recorder.stop("scan_stopped")
+            except Exception as exc:
+                self.logger.warn("offline_recording_stop_failed {}".format(exc))
         if self.vdboard is not None:
             try:
                 self.vdboard.scan.stop()
@@ -1708,7 +1880,9 @@ class App:
                     "user": getattr(config, "DATA_FILES_DIR", "data/files"),
                     "logs": getattr(config, "DATA_LOG_DIR", "data/logs"),
                     "calibration": getattr(config, "CALIBRATION_DIR", "device_state/calibration"),
+                    "offline": getattr(config, "OFFLINE_RECORD_DIR", "data/offline"),
                 },
+                writable_scopes=("user",),
             )
         if self.calibration is None:
             from calibration_store import CalibrationStore
@@ -1718,7 +1892,7 @@ class App:
     def _release_maintenance_services(self):
         self.filesystem = None
         self.calibration = None
-        for module_name in ("filesystem_api", "calibration_store"):
+        for module_name in ("filesystem_api", "calibration_store", "storage"):
             try:
                 import sys
                 sys.modules.pop(module_name, None)
