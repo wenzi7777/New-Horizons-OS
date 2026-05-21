@@ -617,10 +617,17 @@ class App:
         if self._in_maintenance() and cmd not in self._maintenance_allowed_commands():
             return self._ok("maintenance_command_disabled", error="maintenance_command_disabled")
 
-        if cmd in self._maintenance_service_commands():
+        if cmd in self._calibration_service_commands():
             if not self._in_maintenance():
                 return self._ok("maintenance_required", error="maintenance_required")
-            self._ensure_maintenance_services()
+            self._ensure_calibration_services()
+        elif cmd in self._file_service_commands():
+            if not self._in_maintenance():
+                return self._ok("maintenance_required", error="maintenance_required")
+            self._ensure_file_services()
+        elif cmd in self._maintenance_service_commands():
+            if not self._in_maintenance():
+                return self._ok("maintenance_required", error="maintenance_required")
 
         if cmd == "check_recovery_release":
             return self._check_recovery_release(request)
@@ -948,9 +955,9 @@ class App:
         self.mode = "maintenance"
         self.maintenance_reason = str(reason or "")
         self._stop_scan()
-        self._ensure_maintenance_services()
         self.latest_imu = None
         self.latest_battery = None
+        gc.collect()
         self.update_led_state()
         return {
             "status": "ok",
@@ -1006,6 +1013,63 @@ class App:
             self._stop_scan()
             gc.collect()
 
+    def _maintenance_scan_preflight(self, sensor_count):
+        gc.collect()
+        try:
+            heap_free = int(gc.mem_free())
+        except Exception:
+            heap_free = 0
+        native = self._native_memory_stats()
+        try:
+            largest = int(native.get("heap_largest_free_block", 0) or 0)
+        except Exception:
+            largest = 0
+        min_free = int(getattr(config, "CALIBRATION_MIN_HEAP_FREE", getattr(config, "SCAN_MIN_HEAP_FREE", 16384)))
+        min_largest = int(getattr(config, "CALIBRATION_MIN_LARGEST_FREE_BLOCK", getattr(config, "SCAN_MIN_LARGEST_FREE_BLOCK", 8192)))
+        if heap_free and heap_free < min_free:
+            return {
+                "status": "error",
+                "message": "calibration_heap_low",
+                "error": "calibration_heap_low",
+                "heap_free": heap_free,
+                "min_heap_free": min_free,
+                "cells": sensor_count,
+                "scan_memory": native,
+                "reboot_required": False,
+                "applied": False,
+            }
+        if largest and largest < min_largest:
+            return {
+                "status": "error",
+                "message": "calibration_largest_block_low",
+                "error": "calibration_largest_block_low",
+                "heap_largest_free_block": largest,
+                "min_largest_free_block": min_largest,
+                "cells": sensor_count,
+                "scan_memory": native,
+                "reboot_required": False,
+                "applied": False,
+            }
+        return None
+
+    def _frame_u16(self, view, offset):
+        return int(view[offset]) | (int(view[offset + 1]) << 8)
+
+    def _scan_frame_payload_view(self, frame_view, sensor_count):
+        view = memoryview(frame_view)
+        header_size = 16
+        payload_type_mv_u16 = 1
+        expected_len = header_size + (sensor_count * 2)
+        if len(view) < expected_len:
+            raise ValueError("scan_frame_short")
+        point_count = self._frame_u16(view, 12)
+        payload_type = self._frame_u16(view, 14)
+        if payload_type != payload_type_mv_u16:
+            raise ValueError("scan_frame_payload_type")
+        if point_count < sensor_count:
+            raise ValueError("scan_frame_point_count")
+        return view, header_size
+
     def _maintenance_sample_all(self, request):
         if not self._in_maintenance():
             return self._ok("maintenance_required", error="maintenance_required")
@@ -1013,13 +1077,17 @@ class App:
             return self._ok("matrix_layout_required", error="matrix_layout_required")
         level = float(request["level"])
         duration_ms = int(request.get("duration_ms", 3000))
-        self._start_scan_if_configured(force=True, persist_state=False)
+        active_rows = self._active_rows()
+        active_cols = self._active_cols()
+        sensor_count = len(active_rows) * len(active_cols)
+        preflight = self._maintenance_scan_preflight(sensor_count)
+        if preflight is not None:
+            return preflight
+        sums = None
+        counts = None
         try:
-            from frame_protocol import decode_scan_frame
+            self._start_scan_if_configured(force=True, persist_state=False)
             end_ms = time.ticks_add(time.ticks_ms(), max(1, duration_ms))
-            active_rows = self._active_rows()
-            active_cols = self._active_cols()
-            sensor_count = len(active_rows) * len(active_cols)
             sums = [0.0] * sensor_count
             counts = [0] * sensor_count
             while time.ticks_diff(end_ms, time.ticks_ms()) > 0:
@@ -1028,9 +1096,10 @@ class App:
                 if frame_view is None:
                     time.sleep_ms(1)
                     continue
-                frame_info = decode_scan_frame(bytes(frame_view))
-                payload = frame_info["payload_mv"]
-                for idx, value in enumerate(payload[:sensor_count]):
+                payload_view, payload_offset = self._scan_frame_payload_view(frame_view, sensor_count)
+                for idx in range(sensor_count):
+                    offset = payload_offset + (idx * 2)
+                    value = self._frame_u16(payload_view, offset)
                     sums[idx] += float(value)
                     counts[idx] += 1
             if not counts or min(counts) == 0:
@@ -1053,6 +1122,8 @@ class App:
             }
         finally:
             self._stop_scan()
+            sums = None
+            counts = None
             gc.collect()
 
     def _log_tail(self, request):
@@ -1420,12 +1491,23 @@ class App:
         )
 
     def _maintenance_service_commands(self):
+        return self._calibration_service_commands() + self._file_service_commands() + (
+            "log_tail",
+            "log_read_tail",
+            "log_clear",
+        )
+
+    def _calibration_service_commands(self):
         return (
             "calibration_sample_cell",
             "calibration_sample_all",
             "calibration_save",
             "dump_calibration",
             "delete_calibration_level",
+        )
+
+    def _file_service_commands(self):
+        return (
             "file_list",
             "file_upload_begin",
             "file_upload_chunk",
@@ -1435,9 +1517,6 @@ class App:
             "file_delete",
             "fs_list",
             "fs_read",
-            "log_tail",
-            "log_read_tail",
-            "log_clear",
         )
 
     def _print_setup(self):
@@ -1870,7 +1949,7 @@ class App:
             from bq25180 import BQ25180
             self.battery = BQ25180()
 
-    def _ensure_maintenance_services(self):
+    def _ensure_file_services(self):
         if self.filesystem is None:
             from filesystem_api import FilesystemAPI
             self.filesystem = FilesystemAPI(
@@ -1884,10 +1963,16 @@ class App:
                 },
                 writable_scopes=("user",),
             )
+
+    def _ensure_calibration_services(self):
         if self.calibration is None:
             from calibration_store import CalibrationStore
             self.calibration = CalibrationStore(config.CALIBRATION_DIR)
             self.calibration.load()
+
+    def _ensure_maintenance_services(self):
+        self._ensure_file_services()
+        self._ensure_calibration_services()
 
     def _release_maintenance_services(self):
         self.filesystem = None
@@ -1902,6 +1987,5 @@ class App:
 
     def _ensure_runtime_services(self):
         self._ensure_streaming_services()
-        self._ensure_maintenance_services()
         if not self._native_stream_available():
             raise RuntimeError("native_stream_required")

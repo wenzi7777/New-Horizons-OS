@@ -1,4 +1,5 @@
 import importlib.util
+import struct
 import sys
 import types
 import unittest
@@ -87,6 +88,18 @@ class NativePacketScan(FakeScan):
 
     def stats(self):
         return (1, 0, 0, 1, 0, 8, 1, 1, 1, 1)
+
+
+class FrameSampleScan(NativePacketScan):
+    def __init__(self, frame, events=None):
+        super().__init__(events)
+        self.frame = frame
+
+    def service(self):
+        return True
+
+    def pop_frame_mv(self):
+        return self.frame
 
 
 class FakeLogger:
@@ -297,6 +310,37 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         def reconfigure(self):
             self.reconfigure_calls += 1
 
+    def fake_calibration_store(root):
+        def set_point(*args):
+            events.append(("calibration_set_point", args))
+
+        events.append("calibration_store_load")
+        return types.SimpleNamespace(
+            load=lambda: None,
+            apply=lambda *args: 0.0,
+            list_levels=lambda: [],
+            set_point=set_point,
+            save=lambda: None,
+            dump=lambda: {},
+            dump_level=lambda *args: {},
+            delete_level=lambda *args: None,
+        )
+
+    def fake_filesystem_api(*args, **kwargs):
+        events.append("filesystem_api_load")
+        return types.SimpleNamespace(
+            list_files=lambda scope="user": [],
+            usage=lambda: {},
+            upload_begin=lambda *args: {"ok": True},
+            upload_chunk=lambda *args: {"ok": True},
+            upload_finish=lambda *args: {"ok": True},
+            download_begin=lambda *args: {"ok": True},
+            download_chunk=lambda *args: {"ok": True},
+            delete_file=lambda *args: True,
+            list_tree=lambda *args: [],
+            read_file=lambda *args: None,
+        )
+
     injected = {
         "machine": types.SimpleNamespace(reset=lambda: None),
         "immutable_config": types.SimpleNamespace(
@@ -340,22 +384,14 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         ),
         "board_pins": types.SimpleNamespace(validate_pins=lambda: {}),
         "vdboard": fake_vdboard,
-        "calibration_store": types.SimpleNamespace(
-            CalibrationStore=lambda root: types.SimpleNamespace(
-                load=lambda: None,
-                apply=lambda *args: 0.0,
-                list_levels=lambda: [],
-                set_point=lambda *args: None,
-                save=lambda: None,
-            )
-        ),
+        "calibration_store": types.SimpleNamespace(CalibrationStore=fake_calibration_store),
         "device_identity": types.SimpleNamespace(
             get_device_id=lambda: 0x12345678,
             get_device_uid=lambda: "UID123",
             get_device_name=lambda default: default,
         ),
         "device_logging": types.SimpleNamespace(DeviceLogger=lambda *args, **kwargs: FakeLogger()),
-        "filesystem_api": types.SimpleNamespace(FilesystemAPI=lambda *args, **kwargs: None),
+        "filesystem_api": types.SimpleNamespace(FilesystemAPI=fake_filesystem_api),
         "filter_engine": types.SimpleNamespace(FilterChain=lambda **kwargs: types.SimpleNamespace(process=lambda idx, value: value, apply_config=lambda *args: None)),
         "frame_protocol": types.SimpleNamespace(decode_scan_frame=lambda payload: {}),
         "mqtt_transport": ForbiddenMqttModule("mqtt_transport"),
@@ -408,7 +444,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
 
 class FullAppWifiSetupModeTests(unittest.TestCase):
     def test_wifi_setup_mode_starts_portal_before_scan_hardware_init(self):
-        module, fake_scan, _events, saved_modules = load_full_app_module()
+        module, fake_scan, events, saved_modules = load_full_app_module()
         try:
             app = module.App(wifi_setup_requested=True)
             app.setup()
@@ -435,7 +471,8 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 else:
                     sys.modules[name] = saved
 
-        self.assertEqual(events[:2], ["wifi_connect", "scan_start"])
+        boot_order = [event for event in events if event in ("wifi_connect", "scan_start")]
+        self.assertEqual(boot_order[:2], ["wifi_connect", "scan_start"])
 
     def test_normal_boot_connects_wifi_before_led_initialization(self):
         module, _fake_scan, events, saved_modules = load_full_app_module(enable_led=True)
@@ -870,10 +907,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(response["runtime"]["matrix_layout"], {"active_rows": [1], "active_cols": [1]})
 
     def test_enter_maintenance_stops_scan_and_rejects_os_writer(self):
-        module, fake_scan, _events, saved_modules = load_full_app_module()
+        module, fake_scan, events, saved_modules = load_full_app_module()
         try:
             app = module.App(wifi_setup_requested=False)
             app.setup()
+            events.clear()
 
             response = app._handle_control_request(
                 {"command": "enter_maintenance", "reason": "calibration"},
@@ -891,10 +929,58 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(response["message"], "maintenance_entered")
         self.assertEqual(app.mode, "maintenance")
         self.assertFalse(app.scan_ready)
+        self.assertIsNone(app.filesystem)
+        self.assertIsNone(app.calibration)
+        self.assertNotIn("filesystem_api_load", events)
+        self.assertNotIn("calibration_store_load", events)
         self.assertGreaterEqual(fake_scan.stop_calls, 1)
         self.assertEqual(denied["status"], "error")
         self.assertEqual(denied["message"], "requires_recovery")
         self.assertEqual(denied["next_command"], "reboot_to_recovery")
+
+    def test_maintenance_status_does_not_load_file_or_calibration_services(self):
+        module, _fake_scan, events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            events.clear()
+            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
+
+            response = app._handle_control_request({"command": "maintenance_status"}, ("tcp", 0))
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "ok")
+        self.assertIsNone(app.filesystem)
+        self.assertIsNone(app.calibration)
+        self.assertNotIn("filesystem_api_load", events)
+        self.assertNotIn("calibration_store_load", events)
+
+    def test_maintenance_file_command_loads_only_filesystem_service(self):
+        module, _fake_scan, events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            events.clear()
+            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
+
+            response = app._handle_control_request({"command": "file_list", "scope": "user"}, ("tcp", 0))
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "ok")
+        self.assertIsNotNone(app.filesystem)
+        self.assertIsNone(app.calibration)
+        self.assertIn("filesystem_api_load", events)
+        self.assertNotIn("calibration_store_load", events)
 
     def test_recovery_update_commands_use_release_writer_in_normal_mode(self):
         writer_calls = []
@@ -971,10 +1057,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         )
 
     def test_maintenance_sample_cell_runs_bounded_scan_and_stops_afterwards(self):
-        module, fake_scan, _events, saved_modules = load_full_app_module()
+        module, fake_scan, events, saved_modules = load_full_app_module()
         try:
             app = module.App(wifi_setup_requested=False)
             app.setup()
+            events.clear()
             app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
             fake_scan.sample_cell_mv = lambda analog_pin, select_pin, duration_ms: 123.5
             gc_calls = []
@@ -1005,6 +1092,91 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertGreaterEqual(fake_scan.start_calls, 2)
         self.assertGreaterEqual(fake_scan.stop_calls, 2)
         self.assertEqual(gc_calls, ["collect"])
+        self.assertIn("calibration_store_load", events)
+        self.assertNotIn("filesystem_api_load", events)
+
+    def test_maintenance_sample_all_reads_native_frame_without_frame_protocol_decoder(self):
+        frame = struct.pack(
+            "<IIHHHH4H",
+            1,
+            100,
+            2,
+            2,
+            4,
+            1,
+            100,
+            200,
+            300,
+            400,
+        )
+        module, _fake_scan, events, saved_modules = load_full_app_module(
+            runtime_override={"matrix_layout": {"active_rows": [1, 2], "active_cols": [3, 4]}}
+        )
+        try:
+            module.config.AVAILABLE_ROWS = [1, 2]
+            module.config.AVAILABLE_COLS = [3, 4]
+            clock = [0]
+            module.time.ticks_ms = lambda: clock.__setitem__(0, clock[0] + 1) or clock[0]
+            module.time.ticks_add = lambda now, delta: now + delta
+            module.time.ticks_diff = lambda future, now: future - now
+            module.time.sleep_ms = lambda _ms: None
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            app.vdboard = types.SimpleNamespace(scan=FrameSampleScan(frame, events))
+            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
+
+            response = app._handle_control_request(
+                {"command": "calibration_sample_all", "level": 1.25, "duration_ms": 3},
+                ("tcp", 0),
+            )
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["message"], "calibration_all_sampled")
+        self.assertEqual(response["cells"], 4)
+        self.assertIn("calibration_store_load", events)
+        self.assertNotIn("filesystem_api_load", events)
+        calibration_points = [item for item in events if isinstance(item, tuple) and item[0] == "calibration_set_point"]
+        self.assertEqual(len(calibration_points), 4)
+        self.assertEqual(calibration_points[0][1], (1, 3, 1.25, 100.0))
+        self.assertEqual(calibration_points[-1][1], (2, 4, 1.25, 400.0))
+
+    def test_maintenance_sample_all_rejects_low_heap_before_starting_scan(self):
+        module, _fake_scan, events, saved_modules = load_full_app_module()
+        had_mem_free = hasattr(module.gc, "mem_free")
+        old_mem_free = getattr(module.gc, "mem_free", None)
+        try:
+            module.gc.mem_free = lambda: 1024
+            module.config.CALIBRATION_MIN_HEAP_FREE = 4096
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            events.clear()
+            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
+
+            response = app._handle_control_request(
+                {"command": "calibration_sample_all", "level": 1.0, "duration_ms": 3000},
+                ("tcp", 0),
+            )
+        finally:
+            if had_mem_free:
+                module.gc.mem_free = old_mem_free
+            elif hasattr(module.gc, "mem_free"):
+                delattr(module.gc, "mem_free")
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "error")
+        self.assertEqual(response["message"], "calibration_heap_low")
+        self.assertEqual(response["heap_free"], 1024)
+        self.assertNotIn("scan_start", events)
 
     def test_legacy_calibration_flow_commands_are_removed(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()
