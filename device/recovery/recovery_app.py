@@ -46,6 +46,7 @@ class RecoveryApp:
         self.last_connect_ms = 0
         self.boot_network_initialized = False
         self.last_status_announce_ms = 0
+        self.last_gateway_discovery_ms = 0
         self.reboot_deadline_ms = None
 
     def setup(self):
@@ -66,6 +67,7 @@ class RecoveryApp:
             if not wifi_ok:
                 self.wifi.start_setup_portal("connect_failed")
         if wifi_ok:
+            self._discover_gateway("boot")
             self._announce_status(force=True)
         self.boot_network_initialized = wifi_ok
 
@@ -78,14 +80,18 @@ class RecoveryApp:
 
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
+                self._discover_gateway("wifi_connected")
                 self._announce_status(now, force=True)
+            self._service_gateway_discovery(now)
 
             if (not self.wifi.is_connected()
                     and not self.wifi.setup_active()
                     and self._has_network_hint()
                     and time.ticks_diff(now, self.last_connect_ms) >= 10000):
                 self.last_connect_ms = now
-                if not self.wifi.connect():
+                if self.wifi.connect():
+                    self._discover_gateway("wifi_reconnect")
+                else:
                     self.wifi.start_setup_portal("reconnect_failed")
 
             self._announce_status(now)
@@ -135,6 +141,27 @@ class RecoveryApp:
                 self.control_transport.close()
         if self.logger is not None:
             self.logger.info("runtime_config_reloaded source={}".format(source))
+        return True
+
+    def _discover_gateway(self, reason="manual"):
+        if not self.wifi.is_connected():
+            return {"ok": False, "error": "wifi_not_connected"}
+        self.last_gateway_discovery_ms = time.ticks_ms()
+        result = self.wifi.discover_gateway(reason=reason)
+        self.runtime = self.config_store.load_runtime()
+        if result.get("ok"):
+            self.control_transport.reconfigure()
+        return result
+
+    def _service_gateway_discovery(self, now):
+        if not self.wifi.is_connected() or self.wifi.setup_active():
+            return False
+        if self.control_transport.is_connected():
+            return False
+        retry_ms = int(getattr(iconfig, "GATEWAY_DISCOVERY_RETRY_MS", 5000))
+        if time.ticks_diff(now, self.last_gateway_discovery_ms) < retry_ms:
+            return False
+        self._discover_gateway("retry")
         return True
 
     def _announce_status(self, now=None, force=False):
@@ -329,16 +356,24 @@ class RecoveryApp:
                 "reboot_required": False,
             }
 
-        if command == "set_servers":
-            runtime_patch = {
-                "server": request.get("server", {}),
+        if command == "discover_gateway":
+            result = self._discover_gateway("command")
+            if result.get("ok"):
+                return {
+                    "status": "ok",
+                    "message": "gateway_discovered",
+                    "gateway_discovery": result,
+                    "runtime": self.runtime,
+                    "reboot_required": False,
+                }
+            return {
+                "status": "error",
+                "message": "gateway_discovery_failed",
+                "gateway_discovery": result,
+                "error": result.get("error", "no_gateway"),
+                "runtime": self.runtime,
+                "reboot_required": False,
             }
-            if request.get("server_profile", ""):
-                runtime_patch["server_profile"] = request.get("server_profile", "")
-            runtime = self.config_store.update_runtime(runtime_patch)
-            self.runtime = runtime
-            self.control_transport.reconfigure()
-            return {"status": "ok", "message": "servers_updated", "runtime": runtime, "reboot_required": False}
 
         if command == "set_transport":
             runtime = self.config_store.update_runtime({
@@ -361,10 +396,6 @@ class RecoveryApp:
             result = self.wifi.apply_credentials(
                 request.get("ssid", ""),
                 request.get("password", ""),
-                request.get("server_profile", ""),
-                request.get("server_host", ""),
-                request.get("tcp_port", ""),
-                request.get("udp_port", ""),
                 request.get("release_url", ""),
                 request.get("log_enabled", ""),
                 request.get("log_capacity", ""),
@@ -376,7 +407,7 @@ class RecoveryApp:
                 "message": result.get("message", ""),
                 "wifi_setup": self.wifi.portal_status(),
                 "reboot_required": False,
-                "error": "" if result.get("ok") else "wifi_connect_failed",
+                "error": "" if result.get("ok") else ("gateway_discovery_failed" if result.get("wifi_connected") else "wifi_connect_failed"),
             }
 
         if command == "reset_credentials":

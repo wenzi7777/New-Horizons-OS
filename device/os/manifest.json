@@ -2,15 +2,15 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.3.1",
-  "version": "v0.3.1",
+  "firmware_version": "v0.4.0",
+  "version": "v0.4.0",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.3.1/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.0/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
-      "sha256": "e356de02967ae3d404d285c5a855d27aca3c5838c34fae537870d4862c4419c3",
-      "size": 31246,
+      "sha256": "b3a2e0b2e575e785a456d07a700b6e3f998975e4345b03ee47f808d343a866cb",
+      "size": 34668,
       "kind": "code",
       "reboot_required": true
     },
@@ -23,8 +23,8 @@
     },
     {
       "path": "board_pins.mpy",
-      "sha256": "7074d8ad7f6dae01e066e5cdf4d7819841789d519e538ece5994780aa9be5488",
-      "size": 462,
+      "sha256": "3c366bf822d4a87af703d9c41a5ad98f2fe82ad888b99f67e77720a2d297a336",
+      "size": 603,
       "kind": "code",
       "reboot_required": true
     },
@@ -44,8 +44,8 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "e19551c6a73cadf771c39969c6f7016252df210d7a29ec3715136580d1fecd99",
-      "size": 3392,
+      "sha256": "cfccfac7554669caf74b500c8da79a86df2cc241cb7835426e9a56088f94857b",
+      "size": 3374,
       "kind": "code",
       "reboot_required": true
     },
@@ -95,6 +95,13 @@
       "path": "fs_core.mpy",
       "sha256": "ca0cc59b36de10f08a18b1a889ed27c4f12fc9d46694fc6fcd159e80e47adb66",
       "size": 1305,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
+      "path": "gateway_discovery.mpy",
+      "sha256": "60a0bdf2e4176394a43b8fcecb7736e472cdf98745c38c19d59c8a41b8a6fd86",
+      "size": 1719,
       "kind": "code",
       "reboot_required": true
     },
@@ -177,8 +184,8 @@
     },
     {
       "path": "runtime_config.mpy",
-      "sha256": "81545f63adbe9aa56e78a9968f640aa3fe06bbbed5d80a7730a4971316900ec7",
-      "size": 3529,
+      "sha256": "5792ac65b64a7ea95e65594101ddffd276865dac21e49edff7aad9a21c879570",
+      "size": 3618,
       "kind": "code",
       "reboot_required": true
     },
@@ -191,8 +198,8 @@
     },
     {
       "path": "sk6812.mpy",
-      "sha256": "1aea4647c8d218156f65bc93665563529770245562a27405f75eeba75298134d",
-      "size": 3325,
+      "sha256": "e10e9b5c6300287c134545f7d775d9744a38dbabedf8a8f6716cfeca5c9fce49",
+      "size": 10159,
       "kind": "code",
       "reboot_required": true
     },
@@ -247,8 +254,8 @@
     },
     {
       "path": "wifi_manager.mpy",
-      "sha256": "c7216e3de80badaa13278578992322a842d714543e49a124f1eff28a791409ab",
-      "size": 7587,
+      "sha256": "911c76b02c868e07cd5621f1cf0900b9de055fa33c1c50fd1c546b0fa4524e0f",
+      "size": 7326,
       "kind": "code",
       "reboot_required": true
     }
@@ -267,6 +274,7 @@
     "filter_engine.py",
     "frame_protocol.py",
     "fs_core.py",
+    "gateway_discovery.py",
     "i2c_bus.py",
     "main.py",
     "manifest_update.py",

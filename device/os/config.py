@@ -4,9 +4,9 @@ DEVICE_ID = 0x00000001
 DEVICE_NAME = "New Horizons OS"
 HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4"
 RUNTIME_VERSION = "v0.3.0"
-FIRMWARE_VERSION = "v0.3.1"
+FIRMWARE_VERSION = "v0.4.0"
 OS_VERSION = FIRMWARE_VERSION
-RECOVERY_VERSION = "v0.3.1"
+RECOVERY_VERSION = "v0.4.0"
 RECOVERY_FIRMWARE_VERSION = RECOVERY_VERSION
 SETUP_AP_SSID_PREFIX = "NewHorizonsOS"
 SETUP_AP_PASSWORD = "newhorizons"
@@ -49,25 +49,15 @@ IMU_RATE_HZ = 30
 BATTERY_RATE_HZ = 1
 LED_RATE_HZ = 20
 
-PRODUCTION_SERVER_HOST = "isensing-s1.u-aizu.ac.jp"
-DEFAULT_SERVER_HOST = "192.168.1.153"
+DEFAULT_SERVER_HOST = ""
 DEFAULT_TCP_CONTROL_PORT = 22345
 DEFAULT_UDP_STREAM_PORT = 13250
-PRODUCTION_TCP_CONTROL_PORT = 22345
-PRODUCTION_UDP_STREAM_PORT = 13250
-DEFAULT_SERVER_PROFILE = "production"
-SERVER_PROFILES = {
-    "manual": {
-        "label": "Manual",
-        "server": {"host": DEFAULT_SERVER_HOST, "tcp_port": DEFAULT_TCP_CONTROL_PORT, "udp_port": DEFAULT_UDP_STREAM_PORT},
-    },
-    "production": {
-        "label": "Production",
-        "server": {"host": PRODUCTION_SERVER_HOST, "tcp_port": PRODUCTION_TCP_CONTROL_PORT, "udp_port": PRODUCTION_UDP_STREAM_PORT},
-    },
-}
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.3.1/device"
-RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.3.1/device"
+DEFAULT_GATEWAY_DISCOVERY_PORT = 22346
+GATEWAY_DISCOVERY_TIMEOUT_MS = 1500
+GATEWAY_DISCOVERY_ATTEMPTS = 2
+GATEWAY_DISCOVERY_RETRY_MS = 5000
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.0/device"
+RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.0/device"
 GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
@@ -168,6 +158,12 @@ BMI270_TEMP_DECIMALS = 2
 
 # LED behavior
 CHARGING_LED_ENABLE = True
+ENABLE_EXTERNAL_LED = True
+EXTERNAL_LED_DEFAULT_BRIGHTNESS = 0.35
+ENABLE_OLED = True
+OLED_DEFAULT_PAGE = "live_status"
+OLED_DEFAULT_UPDATE_HZ = 1
+OLED_DEFAULT_CONTRAST = 128
 
 # Emergency offline recording. Offline record stores the same binary packets as
 # UDP streaming. Keep these values conservative on the no-PSRAM board.

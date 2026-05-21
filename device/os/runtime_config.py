@@ -2,46 +2,13 @@ import config
 import storage
 
 
-def _server_profiles():
-    return getattr(config, "SERVER_PROFILES", {}) or {}
-
-
-def _default_server_profile_name():
-    default_name = getattr(config, "DEFAULT_SERVER_PROFILE", "")
-    profiles = _server_profiles()
-    if default_name in profiles:
-        return default_name
-    for name in profiles:
-        return name
-    return ""
-
-
-DEFAULT_SERVER_PROFILE = _default_server_profile_name()
-
-
-def _server_defaults_for_profile(profile_name):
-    profile = _server_profiles().get(profile_name, {})
-    server_cfg = profile.get("server", {})
-    if server_cfg:
-        return {
-            "host": server_cfg.get("host", ""),
-            "tcp_port": int(server_cfg.get("tcp_port", 22345)),
-            "udp_port": int(server_cfg.get("udp_port", 13250)),
-        }
-    if profile_name == "production":
-        return {
-            "host": getattr(config, "PRODUCTION_SERVER_HOST", ""),
-            "tcp_port": int(getattr(config, "PRODUCTION_TCP_CONTROL_PORT", 22345)),
-            "udp_port": int(getattr(config, "PRODUCTION_UDP_STREAM_PORT", 13250)),
-        }
-    return {
-        "host": getattr(config, "DEFAULT_SERVER_HOST", "192.168.1.153"),
-        "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
-        "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
-    }
-
-
-DEFAULT_SERVER = _server_defaults_for_profile(DEFAULT_SERVER_PROFILE)
+DEFAULT_SERVER = {
+    "host": getattr(config, "DEFAULT_SERVER_HOST", ""),
+    "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+    "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
+    "source": "discovery",
+    "gateway_id": "",
+}
 OS_GITHUB_BASE_URL = getattr(config, "GITHUB_BASE_URL", "")
 RECOVERY_GITHUB_BASE_URL = getattr(config, "RECOVERY_GITHUB_BASE_URL", OS_GITHUB_BASE_URL)
 
@@ -49,7 +16,6 @@ RECOVERY_GITHUB_BASE_URL = getattr(config, "RECOVERY_GITHUB_BASE_URL", OS_GITHUB
 DEFAULT_RUNTIME = {
     "firmware_name": "New Horizons OS",
     "mode": "normal",
-    "server_profile": DEFAULT_SERVER_PROFILE,
     "packet_format_version": config.PACKET_VERSION,
     "sensor_precision": "float32",
     "scan_timing": {
@@ -77,6 +43,20 @@ DEFAULT_RUNTIME = {
     "transport": {
         "mode": "udp_tcp",
     },
+    "indicators": {
+        "external_led": {
+            "enabled": bool(getattr(config, "ENABLE_EXTERNAL_LED", True)),
+            "mode": "auto",
+            "manual_preset": "stream_health",
+            "brightness": float(getattr(config, "EXTERNAL_LED_DEFAULT_BRIGHTNESS", 0.35)),
+        },
+        "oled": {
+            "enabled": bool(getattr(config, "ENABLE_OLED", True)),
+            "page": getattr(config, "OLED_DEFAULT_PAGE", "live_status"),
+            "update_hz": int(getattr(config, "OLED_DEFAULT_UPDATE_HZ", 1)),
+            "contrast": int(getattr(config, "OLED_DEFAULT_CONTRAST", 128)),
+        },
+    },
     "logging": {
         "enabled": True,
         "capacity": "default",
@@ -86,6 +66,19 @@ DEFAULT_RUNTIME = {
         "host": DEFAULT_SERVER["host"],
         "tcp_port": DEFAULT_SERVER["tcp_port"],
         "udp_port": DEFAULT_SERVER["udp_port"],
+        "source": DEFAULT_SERVER["source"],
+        "gateway_id": DEFAULT_SERVER["gateway_id"],
+    },
+    "gateway_discovery": {
+        "enabled": True,
+        "port": int(getattr(config, "DEFAULT_GATEWAY_DISCOVERY_PORT", 22346)),
+        "gateway_id": "",
+        "host": "",
+        "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+        "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
+        "last_success_ms": 0,
+        "last_error": "",
+        "source": "discovery",
     },
     "update": {
         "manifest_url": "",

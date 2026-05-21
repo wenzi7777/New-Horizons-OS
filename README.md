@@ -120,17 +120,17 @@ release JSON 格式：
 }
 ```
 
-Wi-Fi setup WebUI 只保留 Wi-Fi、New Horizons server host、TCP control port 與 UDP data port 的手動欄位；OS release 固定走 GitHub。若要做本地 OS 開發測試，請使用 `upload_filesystem.py --target os` 直接上傳，不走 release URL。
+Wi-Fi setup WebUI 只保留 Wi-Fi 欄位；設備連上 LAN 後會透過 UDP `22346` 自動發現 New Horizons Gateway，並使用 Gateway 回覆的 TCP control / UDP data port。OS release 固定走 GitHub。若要做本地 OS 開發測試，請使用 `upload_filesystem.py --target os` 直接上傳，不走 release URL。
 
 ## WebUI / UDP + TCP
 
 正式與本機 WebUI 都放在：
 
 ```text
-/Users/nickxu/Documents/vd-ctl-r-os-lts/server_sample/mqtt_test/newhorizons
+/Users/nickxu/Documents/vd-ctl-r-os-lts/apps/newhorizons
 ```
 
-這個 firmware repo 不再保留另一套 Host WebUI，避免和實驗室伺服器上的 `mqtt_test` 混用。
+New Horizons WebUI/backend 已經從 `mqtt_test` 拆出。本地請用 `apps/newhorizons` 的 Docker 啟動；之後要部署到實驗室伺服器時，再把獨立 app mount 到 `/newhorizons`。
 
 ## 命令邊界
 

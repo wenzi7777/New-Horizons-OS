@@ -97,9 +97,19 @@ class FakeConfigStore:
             "last_ssid": "",
         }
         self.runtime = {
-            "server_profile": "manual",
-            "server": {"host": "192.168.1.153", "tcp_port": 22345, "udp_port": 13250},
+            "server": {"host": "", "tcp_port": 22345, "udp_port": 13250, "source": "discovery", "gateway_id": ""},
             "transport": {"mode": "udp_tcp"},
+            "gateway_discovery": {
+                "enabled": True,
+                "port": 22346,
+                "gateway_id": "",
+                "host": "",
+                "tcp_port": 22345,
+                "udp_port": 13250,
+                "last_success_ms": 0,
+                "last_error": "",
+                "source": "discovery",
+            },
             "update": {
                 "release_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
                 "source": "github",
@@ -118,10 +128,11 @@ class FakeConfigStore:
 
     def load_runtime(self):
         return {
-            "server_profile": self.runtime.get("server_profile", "manual"),
             "server": dict(self.runtime.get("server", {})),
             "transport": dict(self.runtime.get("transport", {})),
+            "gateway_discovery": dict(self.runtime.get("gateway_discovery", {})),
             "update": dict(self.runtime.get("update", {})),
+            "mode": self.runtime.get("mode", "recovery"),
         }
 
     def update_runtime(self, patch):
@@ -147,24 +158,14 @@ def load_wifi_manager(channel, include_os_dir=True):
         SETUP_PORTAL_HOST="192.168.4.1",
         SETUP_PORTAL_PORT=80,
         PRINT_WIFI_STATUS=True,
-        DEFAULT_SERVER_HOST="192.168.1.153",
+        DEFAULT_SERVER_HOST="",
         DEFAULT_TCP_CONTROL_PORT=22345,
         DEFAULT_UDP_STREAM_PORT=13250,
-        PRODUCTION_SERVER_HOST="isensing-s1.u-aizu.ac.jp",
-        PRODUCTION_TCP_CONTROL_PORT=22345,
-        PRODUCTION_UDP_STREAM_PORT=13250,
+        DEFAULT_GATEWAY_DISCOVERY_PORT=22346,
+        GATEWAY_DISCOVERY_TIMEOUT_MS=1500,
+        GATEWAY_DISCOVERY_ATTEMPTS=2,
+        GATEWAY_DISCOVERY_RETRY_MS=5000,
         DEFAULT_RELEASE_URL="https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
-        DEFAULT_SERVER_PROFILE="manual",
-        SERVER_PROFILES={
-            "manual": {
-                "label": "Manual",
-                "server": {"host": "192.168.1.153", "tcp_port": 22345, "udp_port": 13250},
-            },
-            "production": {
-                "label": "Production",
-                "server": {"host": "isensing-s1.u-aizu.ac.jp", "tcp_port": 22345, "udp_port": 13250},
-            },
-        },
     )
     if include_os_dir:
         config_values["OS_DIR"] = "nhos"
@@ -178,10 +179,25 @@ def load_wifi_manager(channel, include_os_dir=True):
             portal_instances.append(self)
 
     fake_portal = types.SimpleNamespace(WiFiSetupPortal=CountingPortal)
-    fake_identity = types.SimpleNamespace(get_device_suffix=lambda: "010203040506")
+    fake_identity = types.SimpleNamespace(
+        get_device_suffix=lambda: "010203040506",
+        get_device_uid=lambda: "AABBCC010203",
+    )
     fake_time = types.SimpleNamespace(sleep_ms=lambda _ms: None, sleep=lambda _s: None)
     fake_gc = types.SimpleNamespace(collect=lambda: None, mem_free=lambda: 65536)
     fake_storage = types.SimpleNamespace(exists=lambda _path: False)
+    fake_gateway_discovery = types.SimpleNamespace(
+        discover_gateway=lambda _device_uid, _mode: {
+            "ok": True,
+            "host": "192.168.1.200",
+            "tcp_port": 22345,
+            "udp_port": 13250,
+            "gateway_id": "test-gateway",
+            "priority": 100,
+            "source": "discovery",
+            "discovered_at_ms": 1234,
+        }
+    )
 
     saved_modules = {}
     for name, module in {
@@ -190,6 +206,7 @@ def load_wifi_manager(channel, include_os_dir=True):
         "secrets": fake_secrets,
         "wifi_portal": fake_portal,
         "device_identity": fake_identity,
+        "gateway_discovery": fake_gateway_discovery,
         "time": fake_time,
         "gc": fake_gc,
         "storage": fake_storage,
@@ -335,113 +352,100 @@ class WiFiManagerApStartTests(unittest.TestCase):
         self.assertIn(("active", False), fake_network.ap.calls)
         self.assertFalse(fake_network.ap.enabled)
 
-    def test_apply_credentials_with_production_profile_updates_runtime_endpoints(self):
+    def test_apply_credentials_discovers_gateway_and_updates_runtime_endpoints(self):
         module, _fake_network = load_wifi_manager("minimal")
         store = FakeConfigStore()
         manager = module.WiFiManager(config_store=store)
         manager.start_setup_portal()
 
-        result = manager.apply_credentials(
-            "CampusWiFi",
-            "pw",
-            "production",
-            server_host="192.168.1.153",
-            tcp_port="22345",
-            udp_port="13250",
-        )
+        result = manager.apply_credentials("CampusWiFi", "pw")
 
         self.assertTrue(result["ok"])
-        self.assertEqual(store.runtime["server_profile"], "production")
-        self.assertEqual(store.runtime["server"], {"host": "isensing-s1.u-aizu.ac.jp", "tcp_port": 22345, "udp_port": 13250})
+        self.assertEqual(
+            store.runtime["server"],
+            {
+                "host": "192.168.1.200",
+                "tcp_port": 22345,
+                "udp_port": 13250,
+                "source": "discovery",
+                "gateway_id": "test-gateway",
+            },
+        )
+        self.assertEqual(store.runtime["gateway_discovery"]["gateway_id"], "test-gateway")
+        self.assertEqual(store.runtime["gateway_discovery"]["last_error"], "")
         self.assertEqual(store.runtime["transport"]["mode"], "udp_tcp")
 
-    def test_apply_credentials_with_manual_profile_updates_runtime_endpoints(self):
+    def test_apply_credentials_keeps_portal_open_when_gateway_missing(self):
         module, _fake_network = load_wifi_manager("minimal")
+        module.gateway_discovery.discover_gateway = lambda _device_uid, _mode: {
+            "ok": False,
+            "error": "timeout",
+        }
         store = FakeConfigStore()
         manager = module.WiFiManager(config_store=store)
         manager.start_setup_portal()
 
-        result = manager.apply_credentials(
-            "CampusWiFi",
-            "pw",
-            "manual",
-            server_host="192.168.1.153",
-            tcp_port="22345",
-            udp_port="13250",
-        )
+        result = manager.apply_credentials("CampusWiFi", "pw")
 
-        self.assertTrue(result["ok"])
-        self.assertEqual(store.runtime["server_profile"], "manual")
-        self.assertEqual(store.runtime["server"], {"host": "192.168.1.153", "tcp_port": 22345, "udp_port": 13250})
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["wifi_connected"])
+        self.assertEqual(result["message"], "Wi-Fi connected, but no New Horizons Gateway was discovered.")
+        self.assertEqual(manager.last_setup_result, "gateway_discovery_failed")
+        self.assertEqual(store.runtime["server"]["host"], "")
+        self.assertEqual(store.runtime["gateway_discovery"]["last_error"], "timeout")
         self.assertEqual(store.runtime["transport"]["mode"], "udp_tcp")
+        self.assertTrue(manager.setup_active())
 
-    def test_manual_profile_without_server_fields_uses_local_defaults(self):
+    def test_apply_credentials_resets_manual_server_before_discovery(self):
         module, _fake_network = load_wifi_manager("minimal")
         store = FakeConfigStore()
+        store.runtime["server"] = {"host": "old.example", "tcp_port": 1, "udp_port": 2}
         manager = module.WiFiManager(config_store=store)
         manager.start_setup_portal()
 
-        result = manager.apply_credentials(
-            "CampusWiFi",
-            "pw",
-            "manual",
-        )
+        result = manager.apply_credentials("CampusWiFi", "pw")
 
         self.assertTrue(result["ok"])
-        self.assertEqual(store.runtime["server"], {"host": "192.168.1.153", "tcp_port": 22345, "udp_port": 13250})
+        self.assertEqual(store.runtime["server"]["host"], "192.168.1.200")
         self.assertEqual(store.runtime["transport"]["mode"], "udp_tcp")
 
-    def test_full_channel_manual_profile_updates_runtime_ports(self):
+    def test_full_channel_discovers_gateway(self):
         module, _fake_network = load_wifi_manager("full")
         store = FakeConfigStore()
         manager = module.WiFiManager(config_store=store)
         manager.start_setup_portal()
 
-        result = manager.apply_credentials(
-            "CampusWiFi",
-            "pw",
-            "manual",
-            server_host="192.168.1.154",
-            tcp_port="22346",
-            udp_port="13251",
-        )
+        result = manager.apply_credentials("CampusWiFi", "pw")
 
         self.assertTrue(result["ok"])
-        self.assertEqual(store.runtime["server_profile"], "manual")
-        self.assertEqual(store.runtime["server"], {"host": "192.168.1.154", "tcp_port": 22346, "udp_port": 13251})
+        self.assertEqual(store.runtime["server"]["gateway_id"], "test-gateway")
         self.assertEqual(store.runtime["transport"]["mode"], "udp_tcp")
 
-    def test_portal_status_reports_selected_server_profile(self):
+    def test_portal_status_reports_gateway_discovery(self):
         module, _fake_network = load_wifi_manager("minimal")
         store = FakeConfigStore()
         store.update_runtime({
-            "server_profile": "production",
-            "server": {"host": "isensing-s1.u-aizu.ac.jp", "tcp_port": 22345, "udp_port": 13250},
+            "server": {"host": "192.168.1.200", "tcp_port": 22345, "udp_port": 13250, "source": "discovery", "gateway_id": "gw"},
+            "gateway_discovery": {
+                "enabled": True,
+                "port": 22346,
+                "gateway_id": "gw",
+                "host": "192.168.1.200",
+                "tcp_port": 22345,
+                "udp_port": 13250,
+                "last_success_ms": 42,
+                "last_error": "",
+                "source": "discovery",
+            },
         })
 
         manager = module.WiFiManager(config_store=store)
         status = manager.portal_status()
 
-        self.assertEqual(status["server_profile"], "production")
-        self.assertEqual(
-            status["server_profile_options"],
-            [
-                {
-                    "value": "manual",
-                    "label": "Manual",
-                    "server_host": "192.168.1.153",
-                    "tcp_port": 22345,
-                    "udp_port": 13250,
-                },
-                {
-                    "value": "production",
-                    "label": "Production",
-                    "server_host": "isensing-s1.u-aizu.ac.jp",
-                    "tcp_port": 22345,
-                    "udp_port": 13250,
-                },
-            ],
-        )
+        self.assertEqual(status["server"]["host"], "192.168.1.200")
+        self.assertEqual(status["gateway_discovery"]["gateway_id"], "gw")
+        self.assertNotIn("server_profile", status)
+        self.assertNotIn("server_profile_options", status)
 
     def test_recovery_portal_status_defaults_missing_os_dir_to_nhos(self):
         module, _fake_network = load_wifi_manager("minimal", include_os_dir=False)

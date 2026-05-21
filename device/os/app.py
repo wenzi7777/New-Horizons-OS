@@ -75,6 +75,7 @@ class App:
         self.last_led_ms = 0
         self.last_ntp_retry_ms = 0
         self.last_status_announce_ms = 0
+        self.last_gateway_discovery_ms = 0
         self.reboot_deadline_ms = None
         self.send_backoff_until_ms = 0
         self.last_gc_frame_id = 0
@@ -131,6 +132,8 @@ class App:
         if self.led:
             self.logger.info("setup_led_begin_start")
             self.led.begin()
+            if hasattr(self.led, "configure"):
+                self.led.configure(self.runtime.get("indicators", {}))
             self.logger.info("setup_led_begin_done")
             self.logger.info("setup_led_boot_window_start")
             self.led.set_boot_window()
@@ -139,6 +142,7 @@ class App:
                 self.led.set_wifi_setup()
 
         if wifi_ok:
+            self._discover_gateway("boot")
             self._ensure_streaming_services()
 
         if wifi_ok:
@@ -172,10 +176,12 @@ class App:
             self._service_action_button(now)
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
+                self._discover_gateway("wifi_connected")
                 self._ensure_streaming_services()
                 self._sync_time()
                 self._announce_status(now, force=True)
                 self.update_led_state()
+            self._service_gateway_discovery(now)
 
             if (self.boot_network_initialized
                     and not self.hardware_ready
@@ -216,6 +222,7 @@ class App:
                 self.last_connect_ms = now
                 wifi_ok = self.wifi.connect()
                 if wifi_ok:
+                    self._discover_gateway("wifi_reconnect")
                     self.update_led_state()
                 else:
                     self.logger.warn("wifi_reconnect_failed_offline")
@@ -223,8 +230,7 @@ class App:
 
             if self.led and time.ticks_diff(now, self.last_led_ms) >= led_interval:
                 self.last_led_ms = now
-                if self._offline_recording_active():
-                    self.update_led_state()
+                self.update_led_state()
                 self.led.update()
 
             if (self.time_sync is not None
@@ -355,6 +361,8 @@ class App:
     def update_led_state(self):
         if not self.led:
             return
+        if hasattr(self.led, "set_context"):
+            self.led.set_context(self._indicator_context())
         if self.offline_led_unavailable_until_ms and time.ticks_diff(time.ticks_ms(), self.offline_led_unavailable_until_ms) < 0:
             if hasattr(self.led, "set_offline_unavailable"):
                 self.led.set_offline_unavailable()
@@ -369,6 +377,9 @@ class App:
             return
         if self._in_maintenance() and hasattr(self.led, "set_maintenance"):
             self.led.set_maintenance()
+            return
+        if self._gateway_discovery_failed() and hasattr(self.led, "set_gateway_discovery_failed"):
+            self.led.set_gateway_discovery_failed()
             return
         if self.wifi.setup_active():
             self.led.set_wifi_setup()
@@ -438,6 +449,71 @@ class App:
             "fault": fault,
             "vbat_mv": vbat_mv,
         }
+
+    def _indicator_context(self):
+        runtime = self.runtime if isinstance(self.runtime, dict) else {}
+        scan_timing = runtime.get("scan_timing", {}) or {}
+        stream = {}
+        if self.vdboard is not None and hasattr(self.vdboard.scan, "stream_stats"):
+            try:
+                stream = self.vdboard.scan.stream_stats() or {}
+            except Exception:
+                stream = {}
+        offline_status = self._offline_recording_status()
+        current_fps = 0
+        if self.scan_rate is not None:
+            current_fps = getattr(self.scan_rate, "rate", 0)
+        latest_imu = self.latest_imu or (0, 0, 0, 0, 0, 0, 0, 0, 0)
+        imu_motion = 0
+        try:
+            imu_motion = abs(float(latest_imu[3])) + abs(float(latest_imu[4])) + abs(float(latest_imu[5]))
+            imu_motion = min(1.0, imu_motion / 200.0)
+        except Exception:
+            imu_motion = 0
+        pressure_max = 0
+        if self.latest_matrix:
+            try:
+                pressure_max = max(self.latest_matrix)
+            except Exception:
+                pressure_max = 0
+        return {
+            "mode": self.mode,
+            "rows": len(self._active_rows()),
+            "cols": len(self._active_cols()),
+            "scan_active": bool(self.scan_ready and not self._in_maintenance()),
+            "scan_ready": bool(self.scan_ready),
+            "streaming": bool(self.scan_ready and self._stream_online()),
+            "target_fps": int(scan_timing.get("target_fps", getattr(config, "TARGET_FPS", 60))),
+            "current_fps": current_fps,
+            "control_connected": bool(self.control_transport is not None and self.control_transport.is_connected()),
+            "gateway_discovery_failed": self._gateway_discovery_failed(),
+            "failed_sends": int(self.failed_sends),
+            "dropped_frames": int(stream.get("dropped", stream.get("dropped_frames", 0)) or 0),
+            "offline_recording": offline_status,
+            "online_recording": runtime.get("online_recording", {}) or {},
+            "calibration_active": bool(self._in_maintenance() and "calibration" in str(self.maintenance_reason or "")),
+            "heap_free": int(gc.mem_free()) if hasattr(gc, "mem_free") else 0,
+            "pressure_max": pressure_max,
+            "cop_activity": 0,
+            "imu_motion": imu_motion,
+        }
+
+    def _gateway_discovery_failed(self):
+        runtime = self.runtime if isinstance(self.runtime, dict) else {}
+        discovery = runtime.get("gateway_discovery", {}) or {}
+        if not self.wifi.is_connected():
+            return False
+        if self.control_transport is not None and self.control_transport.is_connected():
+            return False
+        return bool(discovery.get("last_error"))
+
+    def _indicator_status(self):
+        if self.led is None or not hasattr(self.led, "status"):
+            return {}
+        try:
+            return self.led.status()
+        except Exception as exc:
+            return {"error": str(exc)}
 
     def _ensure_action_button(self):
         if self.action_button is not None:
@@ -585,6 +661,31 @@ class App:
         else:
             self.logger.warn("ntp_sync_failed error={}".format(self.time_sync.last_error))
 
+    def _discover_gateway(self, reason="manual"):
+        if not self.wifi.is_connected():
+            return {"ok": False, "error": "wifi_not_connected"}
+        self.last_gateway_discovery_ms = time.ticks_ms()
+        result = self.wifi.discover_gateway(reason=reason)
+        self.runtime = self.config_store.load_runtime()
+        if result.get("ok"):
+            if self.control_transport is not None:
+                self.control_transport.reconfigure()
+            if self.udp_stream is not None:
+                self.udp_stream.reconfigure()
+        self.update_led_state()
+        return result
+
+    def _service_gateway_discovery(self, now):
+        if not self.wifi.is_connected() or self.wifi.setup_active():
+            return False
+        if self.control_transport is not None and self.control_transport.is_connected():
+            return False
+        retry_ms = int(getattr(config, "GATEWAY_DISCOVERY_RETRY_MS", 5000))
+        if time.ticks_diff(now, self.last_gateway_discovery_ms) < retry_ms:
+            return False
+        self._discover_gateway("retry")
+        return True
+
     def _reboot_due(self, now):
         if self.reboot_deadline_ms is None:
             return True
@@ -678,19 +779,11 @@ class App:
             self._apply_runtime_reload()
             return self._ok("config_reloaded", applied=True)
 
-        if cmd == "set_servers":
-            runtime_patch = {
-                "server": request.get("server", {}),
-            }
-            if request.get("server_profile", ""):
-                runtime_patch["server_profile"] = request.get("server_profile", "")
-            runtime = self.config_store.update_runtime(runtime_patch)
-            self.runtime = runtime
-            if self.control_transport is not None:
-                self.control_transport.reconfigure()
-            if self.udp_stream is not None:
-                self.udp_stream.reconfigure()
-            return self._ok("servers_updated", applied=True)
+        if cmd == "discover_gateway":
+            result = self._discover_gateway("command")
+            if result.get("ok"):
+                return self._ok("gateway_discovered", applied=True, gateway_discovery=result)
+            return self._ok("gateway_discovery_failed", error=result.get("error", "no_gateway"), gateway_discovery=result)
 
         if cmd == "set_transport":
             runtime = self.config_store.update_runtime({
@@ -706,6 +799,9 @@ class App:
 
         if cmd == "set_scan_timing":
             return self._set_scan_timing(request)
+
+        if cmd == "set_indicators":
+            return self._set_indicators(request)
 
         if cmd == "set_filter":
             filter_data = self.config_store.update_filter(request.get("filter", {}))
@@ -882,10 +978,6 @@ class App:
             result = self.wifi.apply_credentials(
                 request.get("ssid", ""),
                 request.get("password", ""),
-                request.get("server_profile", ""),
-                request.get("server_host", ""),
-                request.get("tcp_port", ""),
-                request.get("udp_port", ""),
                 "",
                 request.get("log_enabled", ""),
                 request.get("log_capacity", ""),
@@ -899,7 +991,7 @@ class App:
                 "reboot_required": False,
                 "applied": bool(result.get("ok")),
                 "wifi_setup": self.wifi.portal_status(),
-                "error": "" if result.get("ok") else "wifi_connect_failed",
+                "error": "" if result.get("ok") else ("gateway_discovery_failed" if result.get("wifi_connected") else "wifi_connect_failed"),
             }
 
         if cmd == "log_read_tail":
@@ -1413,6 +1505,7 @@ class App:
             "runtime": self.config_store.load_runtime(),
             "logging": self._logging_status(),
             "battery": self._battery_status(refresh=True),
+            "indicators": self._indicator_status(),
             "update_state": self._current_update_state(),
             "calibration_levels": self.calibration.list_levels() if self.calibration is not None else [],
             "available_rows": list(config.AVAILABLE_ROWS),
@@ -1448,7 +1541,7 @@ class App:
                 "mode": self.mode,
                 "transport": runtime.get("transport", {}),
                 "server": runtime.get("server", {}),
-                "server_profile": runtime.get("server_profile", ""),
+                "gateway_discovery": runtime.get("gateway_discovery", {}),
                 "logging": runtime.get("logging", {}),
                 "scan_timing": runtime.get("scan_timing", {}),
                 "matrix_layout": {
@@ -1457,12 +1550,14 @@ class App:
                 },
                 "matrix_layout_state": runtime.get("matrix_layout_state", {}),
                 "matrix_scan_state": runtime.get("matrix_scan_state", {}),
+                "indicators": runtime.get("indicators", {}),
                 "system": runtime.get("system", {}),
             },
             "wifi_state": self.wifi.state,
             "wifi_connected": self.wifi.is_connected(),
             "logging": self._logging_status(),
             "battery": self._battery_status(refresh=False),
+            "indicators": self._indicator_status(),
             "matrix_configured": self._matrix_configured(),
             "matrix_shape": {"rows": len(self._active_rows()), "cols": len(self._active_cols())},
             "last_matrix_start_failed": self.last_matrix_start_failed,
@@ -1531,6 +1626,7 @@ class App:
             "fs_read",
             "set_logging",
             "set_scan_timing",
+            "set_indicators",
             "log_tail",
             "log_read_tail",
             "log_clear",
@@ -1756,6 +1852,103 @@ class App:
             "status": "ok",
             "message": "scan_timing_updated",
             "runtime": runtime,
+            "reboot_required": False,
+            "applied": True,
+        }
+
+    def _set_indicators(self, request):
+        runtime = self.runtime if isinstance(self.runtime, dict) else {}
+        current = runtime.get("indicators", {}) or {}
+        current_external = dict(current.get("external_led", {}) or {})
+        current_oled = dict(current.get("oled", {}) or {})
+
+        external_request = request.get("external_led", {})
+        if not isinstance(external_request, dict):
+            external_request = {}
+        oled_request = request.get("oled", {})
+        if not isinstance(oled_request, dict):
+            oled_request = {}
+
+        if "external_led_enabled" in request:
+            external_request["enabled"] = request.get("external_led_enabled")
+        if "external_led_mode" in request:
+            external_request["mode"] = request.get("external_led_mode")
+        if "manual_preset" in request:
+            external_request["manual_preset"] = request.get("manual_preset")
+        if "external_led_brightness" in request:
+            external_request["brightness"] = request.get("external_led_brightness")
+        if "oled_enabled" in request:
+            oled_request["enabled"] = request.get("oled_enabled")
+        if "oled_page" in request:
+            oled_request["page"] = request.get("oled_page")
+        if "oled_update_hz" in request:
+            oled_request["update_hz"] = request.get("oled_update_hz")
+        if "oled_contrast" in request:
+            oled_request["contrast"] = request.get("oled_contrast")
+
+        if external_request:
+            if "enabled" in external_request:
+                current_external["enabled"] = bool(external_request.get("enabled"))
+            mode = external_request.get("mode")
+            if mode is not None:
+                if mode not in ("auto", "manual"):
+                    return self._ok("indicators_invalid", error="external_led_mode_invalid")
+                current_external["mode"] = mode
+            preset = external_request.get("manual_preset")
+            if preset is not None:
+                if preset not in ("stream_health", "pressure_activity", "recording_focus", "calibration_focus"):
+                    return self._ok("indicators_invalid", error="external_led_preset_invalid")
+                current_external["manual_preset"] = preset
+            if "brightness" in external_request:
+                try:
+                    brightness = float(external_request.get("brightness"))
+                except Exception:
+                    return self._ok("indicators_invalid", error="external_led_brightness_invalid")
+                current_external["brightness"] = max(0.10, min(0.50, brightness))
+
+        oled_requested = bool(oled_request)
+        if oled_requested:
+            if "enabled" in oled_request:
+                current_oled["enabled"] = bool(oled_request.get("enabled"))
+            page = oled_request.get("page")
+            if page is not None:
+                if page not in ("live_status", "sensor_snapshot", "recording_status"):
+                    return self._ok("indicators_invalid", error="oled_page_invalid")
+                current_oled["page"] = page
+            if "update_hz" in oled_request:
+                try:
+                    current_oled["update_hz"] = max(1, min(5, int(oled_request.get("update_hz"))))
+                except Exception:
+                    return self._ok("indicators_invalid", error="oled_update_hz_invalid")
+            if "contrast" in oled_request:
+                try:
+                    current_oled["contrast"] = max(0, min(255, int(oled_request.get("contrast"))))
+                except Exception:
+                    return self._ok("indicators_invalid", error="oled_contrast_invalid")
+
+        self._ensure_led()
+        if self.led:
+            # Probe optional OLED only when the requested config would actively use it.
+            oled_wants_enabled = bool(current_oled.get("enabled", True))
+            if oled_requested and oled_wants_enabled:
+                if not hasattr(self.led, "detect_oled") or not self.led.detect_oled():
+                    return self._ok("oled_not_detected", error="oled_not_detected")
+
+        indicators = {
+            "external_led": current_external,
+            "oled": current_oled,
+        }
+        runtime = self.config_store.update_runtime({"indicators": indicators})
+        self.runtime = runtime
+        if self.led:
+            self.led.configure(indicators)
+            if hasattr(self.led, "set_context"):
+                self.led.set_context(self._indicator_context())
+        return {
+            "status": "ok",
+            "message": "indicators_updated",
+            "runtime": runtime,
+            "indicators": self._indicator_status(),
             "reboot_required": False,
             "applied": True,
         }

@@ -5,7 +5,8 @@ import network
 
 import config
 import secrets
-from device_identity import get_device_suffix
+from device_identity import get_device_suffix, get_device_uid
+import gateway_discovery
 import storage
 
 
@@ -32,7 +33,7 @@ class WiFiManager:
             return self.start_setup_portal("config_ap_mode")
         return self.connect_sta()
 
-    def connect_sta(self, ssid=None, password=None):
+    def connect_sta(self, ssid=None, password=None, keep_setup_portal=False):
         gc.collect()
         self.state = "normal_boot"
         self.last_error = ""
@@ -72,8 +73,9 @@ class WiFiManager:
                 for _ in range(20):
                     if sta.isconnected():
                         self._log_info("wifi_sta_connected ip={}".format(sta.ifconfig()[0]))
-                        self.stop_setup_portal()
-                        self._disable_ap()
+                        if not keep_setup_portal:
+                            self.stop_setup_portal()
+                            self._disable_ap()
                         self.state = "wifi_connected"
                         return True
 
@@ -203,10 +205,6 @@ class WiFiManager:
         self,
         ssid,
         password,
-        server_profile=None,
-        server_host="",
-        tcp_port="",
-        udp_port="",
         release_url="",
         log_enabled="",
         log_capacity="",
@@ -226,33 +224,28 @@ class WiFiManager:
                 "setup_method": "softap_webui",
                 "last_ssid": ssid,
             })
-            runtime_patch = self._runtime_patch_for_server_profile(
-                server_profile,
-            )
-            runtime_patch = runtime_patch or {}
-            selected_profile = runtime_patch.get("server_profile", "") or str(server_profile or "").strip()
-            if not selected_profile:
-                selected_profile = self._selected_server_profile(self.config_store.load_runtime())
-            runtime_patch.update(
-                self._runtime_patch_for_transport(
-                    selected_profile,
-                    server_host,
-                    tcp_port,
-                    udp_port,
-                )
-            )
+            runtime_patch = self._runtime_patch_for_gateway_reset()
             runtime_patch.update(self._runtime_patch_for_logging(log_enabled, log_capacity))
             runtime_patch.update(self._runtime_patch_for_github_update())
             if runtime_patch:
                 self.config_store.update_runtime(runtime_patch)
 
-        ok = self.connect_sta(ssid, password)
-        if ok:
-            self.last_setup_result = "connected"
+        ok = self.connect_sta(ssid, password, keep_setup_portal=True)
+        if ok and self.discover_gateway(reason="wifi_setup").get("ok"):
+            self.last_setup_result = "connected_gateway_discovered"
             self.stop_setup_portal()
             return {
                 "ok": True,
-                "message": "Connected to {}".format(ssid),
+                "message": "Connected to {} and discovered gateway".format(ssid),
+                "ifconfig": self._ensure_sta().ifconfig(),
+            }
+
+        if ok:
+            self.last_setup_result = "gateway_discovery_failed"
+            return {
+                "ok": False,
+                "wifi_connected": True,
+                "message": "Wi-Fi connected, but no New Horizons Gateway was discovered.",
                 "ifconfig": self._ensure_sta().ifconfig(),
             }
 
@@ -280,7 +273,6 @@ class WiFiManager:
     def portal_status(self):
         network_cfg = self.config_store.load_network() if self.config_store is not None else {}
         runtime_cfg = self.config_store.load_runtime() if self.config_store is not None else {}
-        selected_profile = self._selected_server_profile(runtime_cfg)
         portal_ip = config.SETUP_PORTAL_HOST
         portal_domain = getattr(config, "SETUP_PORTAL_DOMAIN", "")
         ap_ssid = self.ap_ssid()
@@ -304,100 +296,108 @@ class WiFiManager:
             "saved_ssid": network_cfg.get("ssid", ""),
             "last_error": self.last_error,
             "last_setup_result": self.last_setup_result,
-            "server_profile": selected_profile,
-            "server_profile_options": self._server_profile_options(),
             "server": dict(runtime_cfg.get("server", {})),
+            "gateway_discovery": dict(runtime_cfg.get("gateway_discovery", {})),
             "transport": dict(runtime_cfg.get("transport", {})),
             "logging": dict(runtime_cfg.get("logging", {})),
         }
 
-    def _server_profiles(self):
-        profiles = getattr(config, "SERVER_PROFILES", {}) or {}
-        normalized = {}
-        for name, item in profiles.items():
-            item = item or {}
-            normalized[str(name)] = {
-                "label": str(item.get("label", name)),
-                "server": dict(item.get("server", {})),
-            }
-        return normalized
+    def discover_gateway(self, reason="manual"):
+        if not self.is_connected():
+            result = {"ok": False, "error": "wifi_not_connected"}
+            self._save_gateway_result(result, reason)
+            self.last_error = "gateway_discovery_failed"
+            return result
+        try:
+            result = gateway_discovery.discover_gateway(get_device_uid(), self._runtime_mode())
+        except Exception as exc:
+            result = {"ok": False, "error": str(exc)}
+        self._save_gateway_result(result, reason)
+        if result.get("ok"):
+            self.last_error = ""
+            self._log_info(
+                "gateway_discovery_ok host={} tcp={} udp={} id={}".format(
+                    result.get("host", ""),
+                    result.get("tcp_port", ""),
+                    result.get("udp_port", ""),
+                    result.get("gateway_id", ""),
+                )
+            )
+        else:
+            self.last_error = "gateway_discovery_failed"
+            self._log_warn("gateway_discovery_failed error={}".format(result.get("error", "unknown")))
+        return result
 
-    def _default_server_profile(self):
-        profiles = self._server_profiles()
-        default_name = getattr(config, "DEFAULT_SERVER_PROFILE", "")
-        if default_name in profiles:
-            return default_name
-        for name in profiles:
-            return name
-        return ""
+    def _runtime_mode(self):
+        if self.config_store is None:
+            return "normal"
+        return self.config_store.load_runtime().get("mode", "normal")
 
-    def _runtime_patch_for_server_profile(
-        self,
-        profile_name,
-    ):
-        profile_name = str(profile_name or "").strip()
-        profiles = self._server_profiles()
-        if not profiles:
-            return None
-        if not profile_name:
-            return None
-        if profile_name not in profiles:
-            profile_name = self._default_server_profile()
-        return {"server_profile": profile_name}
-
-    def _selected_server_profile(self, runtime_cfg):
-        runtime_cfg = runtime_cfg or {}
-        profiles = self._server_profiles()
-        requested = str(runtime_cfg.get("server_profile", "") or "").strip()
-        if requested in profiles:
-            return requested
-        server_cfg = runtime_cfg.get("server", {})
-        for name, profile in profiles.items():
-            if self._server_equals(server_cfg, profile.get("server", {})):
-                return name
-        return self._default_server_profile()
-
-    def _runtime_patch_for_transport(self, profile_name="", server_host="", tcp_port="", udp_port=""):
-        defaults = self._server_defaults_for_profile(profile_name)
-        normalized_host = self._normalize_server_host(server_host)
-        normalized_tcp_port = self._normalize_server_port(tcp_port)
-        normalized_udp_port = self._normalize_server_port(udp_port)
-        if str(profile_name or "").strip() != "manual":
-            normalized_host = ""
-            normalized_tcp_port = 0
-            normalized_udp_port = 0
+    def _runtime_patch_for_gateway_reset(self):
         return {
             "server": {
-                "host": normalized_host or defaults["host"],
-                "tcp_port": normalized_tcp_port or defaults["tcp_port"],
-                "udp_port": normalized_udp_port or defaults["udp_port"],
+                "host": "",
+                "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+                "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
+                "source": "discovery",
+                "gateway_id": "",
             },
-            "transport": {
-                "mode": "udp_tcp",
+            "transport": {"mode": "udp_tcp"},
+            "gateway_discovery": {
+                "enabled": True,
+                "port": int(getattr(config, "DEFAULT_GATEWAY_DISCOVERY_PORT", 22346)),
+                "gateway_id": "",
+                "host": "",
+                "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+                "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
+                "last_success_ms": 0,
+                "last_error": "",
+                "source": "discovery",
+                "reason": "reset",
             },
         }
 
-    def _server_defaults_for_profile(self, profile_name):
-        profile_name = str(profile_name or "").strip()
-        profile = self._server_profiles().get(profile_name, {})
-        server_cfg = profile.get("server", {})
-        if server_cfg:
-            return {
-                "host": str(server_cfg.get("host", "")).strip(),
-                "tcp_port": int(server_cfg.get("tcp_port", 22345)),
-                "udp_port": int(server_cfg.get("udp_port", 13250)),
+    def _save_gateway_result(self, result, reason):
+        if self.config_store is None:
+            return
+        runtime = self.config_store.load_runtime()
+        current_server = dict(runtime.get("server", {}))
+        discovery = dict(runtime.get("gateway_discovery", {}))
+        discovery.update({
+            "enabled": True,
+            "port": int(getattr(config, "DEFAULT_GATEWAY_DISCOVERY_PORT", 22346)),
+            "source": "discovery",
+            "reason": reason,
+        })
+        if result.get("ok"):
+            server = {
+                "host": result.get("host", ""),
+                "tcp_port": int(result.get("tcp_port") or getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+                "udp_port": int(result.get("udp_port") or getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
+                "source": "discovery",
+                "gateway_id": result.get("gateway_id", ""),
             }
-        if profile_name == "production":
-            return {
-                "host": getattr(config, "PRODUCTION_SERVER_HOST", ""),
-                "tcp_port": int(getattr(config, "PRODUCTION_TCP_CONTROL_PORT", 22345)),
-                "udp_port": int(getattr(config, "PRODUCTION_UDP_STREAM_PORT", 13250)),
-            }
-        return {
-            "host": getattr(config, "DEFAULT_SERVER_HOST", "192.168.1.153"),
-            "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
-            "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
-        }
+            discovery.update({
+                "gateway_id": server["gateway_id"],
+                "host": server["host"],
+                "tcp_port": server["tcp_port"],
+                "udp_port": server["udp_port"],
+                "last_success_ms": int(result.get("discovered_at_ms") or 0),
+                "last_error": "",
+                "priority": int(result.get("priority") or 0),
+            })
+            self.config_store.update_runtime({
+                "server": server,
+                "gateway_discovery": discovery,
+                "transport": {"mode": "udp_tcp"},
+            })
+            return
+        discovery["last_error"] = str(result.get("error") or "no_gateway")
+        self.config_store.update_runtime({
+            "server": current_server,
+            "gateway_discovery": discovery,
+            "transport": {"mode": "udp_tcp"},
+        })
 
     def _runtime_patch_for_github_update(self):
         release_url = self._github_release_url()
@@ -434,37 +434,6 @@ class WiFiManager:
                 "serial": "status",
             }
         return patch
-
-    def _server_profile_options(self):
-        options = []
-        for name, profile in self._server_profiles().items():
-            options.append({
-                "value": name,
-                "label": profile.get("label", name),
-                "server_host": profile.get("server", {}).get("host", ""),
-                "tcp_port": profile.get("server", {}).get("tcp_port", ""),
-                "udp_port": profile.get("server", {}).get("udp_port", ""),
-            })
-        return options
-
-    def _server_equals(self, lhs, rhs):
-        lhs = lhs or {}
-        rhs = rhs or {}
-        return (
-            str(lhs.get("host", "")) == str(rhs.get("host", ""))
-            and int(lhs.get("tcp_port", 0) or 0) == int(rhs.get("tcp_port", 0) or 0)
-            and int(lhs.get("udp_port", 0) or 0) == int(rhs.get("udp_port", 0) or 0)
-        )
-
-    def _normalize_server_host(self, value):
-        return str(value or "").strip()
-
-    def _normalize_server_port(self, value):
-        try:
-            port = int(str(value or "").strip())
-        except (TypeError, ValueError):
-            return 0
-        return port if 0 < port <= 65535 else 0
 
     def _normalize_bool(self, value):
         normalized = str(value or "").strip().lower()

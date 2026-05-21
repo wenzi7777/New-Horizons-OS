@@ -32,24 +32,18 @@ class FakeManager:
             "state": "wifi_setup_active",
             "last_error": "",
             "last_setup_result": "",
-            "server_profile": "",
-            "server_profile_options": [
-                {
-                    "value": "manual",
-                    "label": "Manual",
-                    "server_host": "192.168.1.153",
-                    "tcp_port": 22345,
-                    "udp_port": 13250,
-                },
-                {
-                    "value": "production",
-                    "label": "Production",
-                    "server_host": "isensing-s1.u-aizu.ac.jp",
-                    "tcp_port": 22345,
-                    "udp_port": 13250,
-                },
-            ],
-            "server": {"host": "isensing-s1.u-aizu.ac.jp", "tcp_port": 22345, "udp_port": 13250},
+            "server": {"host": "", "tcp_port": 22345, "udp_port": 13250, "source": "discovery", "gateway_id": ""},
+            "gateway_discovery": {
+                "enabled": True,
+                "port": 22346,
+                "gateway_id": "",
+                "host": "",
+                "tcp_port": 22345,
+                "udp_port": 13250,
+                "last_success_ms": 0,
+                "last_error": "",
+                "source": "discovery",
+            },
             "transport": {"mode": "udp_tcp"},
             "mode": "normal",
             "os_installed": True,
@@ -64,31 +58,8 @@ class FakeManager:
     def scan_networks(self):
         return [{"ssid": "LabWiFi", "security": "wpa2-psk", "rssi": -45}]
 
-    def apply_credentials(
-        self,
-        ssid,
-        password,
-        server_profile=None,
-        server_host="",
-        tcp_port="",
-        udp_port="",
-        release_url="",
-        log_enabled="",
-        log_capacity="",
-    ):
-        self.calls.append(
-            (
-                ssid,
-                password,
-                server_profile,
-                server_host,
-                tcp_port,
-                udp_port,
-                release_url,
-                log_enabled,
-                log_capacity,
-            )
-        )
+    def apply_credentials(self, ssid, password, release_url="", log_enabled="", log_capacity=""):
+        self.calls.append((ssid, password, release_url, log_enabled, log_capacity))
         return {"ok": True, "message": "Connected"}
 
 
@@ -119,44 +90,36 @@ class FakeServer:
         return self.client, ("127.0.0.1", 54321)
 
 
-class WiFiPortalServerProfileTests(unittest.TestCase):
+class WiFiPortalGatewayDiscoveryTests(unittest.TestCase):
     def _style_block(self, html):
         match = re.search(r"<style>(.*?)</style>", html, re.S)
         self.assertIsNotNone(match)
         return match.group(1)
 
-    def test_index_page_renders_server_profile_selector(self):
+    def test_index_page_only_renders_wifi_setup_and_gateway_status(self):
         module = load_portal_module()
         portal = module.WiFiSetupPortal(FakeManager(), FakeConfig(), None)
 
         html = portal._render_index_page()
 
-        self.assertIn('name="server_profile"', html)
-        self.assertIn('value="production" selected', html)
-        self.assertIn("Production (isensing-s1.u-aizu.ac.jp)", html)
-        self.assertIn('id="developer_options"', html)
-        self.assertIn('data-developer="1"', html)
-        self.assertIn(">Manual</option>", html)
-        self.assertNotIn("Manual (192.168.1.153)", html)
-        self.assertNotIn('name="master_host"', html)
-        self.assertNotIn('name="master_port"', html)
-        self.assertNotIn('name="data_host"', html)
-        self.assertNotIn('name="data_port"', html)
-        self.assertIn('name="server_host"', html)
-        self.assertIn('name="tcp_port"', html)
-        self.assertIn('name="udp_port"', html)
-        self.assertIn(GITHUB_RELEASE_URL, html)
+        self.assertIn('name="ssid"', html)
+        self.assertIn('name="password"', html)
+        self.assertIn("Gateway: auto discovery on this LAN", html)
+        self.assertIn("Discovery:", html)
+        self.assertNotIn('name="server_profile"', html)
+        self.assertNotIn('id="developer_options"', html)
+        self.assertNotIn('data-developer="1"', html)
+        self.assertNotIn(">Manual</option>", html)
+        self.assertNotIn("isensing-s1.u-aizu.ac.jp", html)
+        self.assertNotIn('name="server_host"', html)
+        self.assertNotIn('name="tcp_port"', html)
+        self.assertNotIn('name="udp_port"', html)
         self.assertNotIn('name="release_url"', html)
         self.assertNotIn('id="release_url"', html)
         self.assertNotIn('name="mqtt_tls"', html)
         self.assertNotIn('name="log_enabled"', html)
         self.assertNotIn('name="log_capacity"', html)
         self.assertNotIn('name="transport_mode"', html)
-        self.assertNotIn(">UDP<", html)
-        self.assertNotIn("Production uses", html)
-        self.assertNotIn("Transport: MQTT", html)
-        self.assertNotIn("placeholder=\"e.g. 192.168.1.153\"", html)
-        self.assertIn("isensing-s1.u-aizu.ac.jp", html)
 
     def test_connect_form_shows_apply_overlay_on_submit(self):
         module = load_portal_module()
@@ -177,60 +140,27 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
         portal = module.WiFiSetupPortal(manager, FakeConfig(), None)
         portal.active = True
         portal.server = FakeServer(FakeClient())
-        portal._read_request = lambda client: (
-            "POST",
-            "/connect",
-            "ssid=LabWiFi&password=secret&server_profile=manual&server_host=192.168.1.153&tcp_port=22345&udp_port=13250",
-        )
+        portal._read_request = lambda client: ("POST", "/connect", "ssid=LabWiFi&password=secret")
         portal._send_response = lambda client, status, content_type, body: (_ for _ in ()).throw(OSError("ECONNABORTED"))
 
         handled = portal.service()
 
         self.assertTrue(handled)
-        self.assertEqual(manager.calls[0][2], "manual")
-        self.assertEqual(manager.calls[0][3], "192.168.1.153")
+        self.assertEqual(manager.calls[0][:2], ("LabWiFi", "secret"))
 
-    def test_production_page_keeps_manual_defaults_out_of_option_label(self):
-        module = load_portal_module()
-        portal = module.WiFiSetupPortal(FakeManager(), FakeConfig(), None)
-
-        html = portal._render_index_page()
-
-        self.assertIn('value="192.168.1.153"', html)
-        self.assertNotIn("Manual (192.168.1.153)", html)
-
-    def test_connect_post_forwards_server_profile_to_manager(self):
+    def test_connect_post_forwards_wifi_only_to_manager(self):
         module = load_portal_module()
         manager = FakeManager()
         portal = module.WiFiSetupPortal(manager, FakeConfig(), None)
         portal.active = True
         portal.server = FakeServer(FakeClient())
-        portal._read_request = lambda client: (
-            "POST",
-            "/connect",
-            "ssid=LabWiFi&password=secret&server_profile=manual&server_host=192.168.1.153&tcp_port=22345&udp_port=13250",
-        )
+        portal._read_request = lambda client: ("POST", "/connect", "ssid=LabWiFi&password=secret")
         portal._send_response = lambda client, status, content_type, body: None
 
         handled = portal.service()
 
         self.assertTrue(handled)
-        self.assertEqual(
-            manager.calls,
-            [
-                (
-                    "LabWiFi",
-                    "secret",
-                    "manual",
-                    "192.168.1.153",
-                    "22345",
-                    "13250",
-                    "",
-                    "",
-                    "",
-                )
-            ],
-        )
+        self.assertEqual(manager.calls, [("LabWiFi", "secret", "", "", "")])
 
     def test_recovery_page_prompts_os_write(self):
         module = load_portal_module()
@@ -277,6 +207,19 @@ class WiFiPortalServerProfileTests(unittest.TestCase):
 
         self.assertLess(len(css), 700)
         self.assertNotIn("box-shadow", css)
+
+    def test_gateway_missing_result_has_clear_title(self):
+        module = load_portal_module()
+        portal = module.WiFiSetupPortal(FakeManager(), FakeConfig(), None)
+
+        html = portal._render_result_page({
+            "ok": False,
+            "wifi_connected": True,
+            "message": "Wi-Fi connected, but no New Horizons Gateway was discovered.",
+        })
+
+        self.assertIn("Gateway not discovered", html)
+        self.assertIn("Wi-Fi connected, but no New Horizons Gateway was discovered.", html)
 
 
 if __name__ == "__main__":

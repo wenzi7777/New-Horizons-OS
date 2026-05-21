@@ -261,10 +261,6 @@ class WiFiSetupPortal:
                 result = self.manager.apply_credentials(
                     fields.get("ssid", ""),
                     fields.get("password", ""),
-                    fields.get("server_profile", ""),
-                    fields.get("server_host", ""),
-                    fields.get("tcp_port", ""),
-                    fields.get("udp_port", ""),
                     "",
                     "",
                 )
@@ -368,13 +364,6 @@ class WiFiSetupPortal:
         status = self.manager.portal_status()
         networks = self.manager.scan_networks()
         selected_ssid = status.get("saved_ssid", "")
-        selected_profile = status.get("server_profile", "")
-        server_profile_options = status.get("server_profile_options", [])
-        if not selected_profile:
-            for item in server_profile_options:
-                if item.get("value") == "production":
-                    selected_profile = "production"
-                    break
 
         options = ['<option value="">Manual input</option>']
         for item in networks:
@@ -395,32 +384,6 @@ class WiFiSetupPortal:
                 )
             )
 
-        server_options = []
-        manual_option = {}
-        for item in server_profile_options:
-            value = item.get("value", "")
-            if not value:
-                continue
-            selected = " selected" if value == selected_profile else ""
-            if value == "manual":
-                manual_option = item
-                label = item.get("label", value)
-                developer_attr = ' data-developer="1"'
-            else:
-                label = "{} ({})".format(
-                    item.get("label", value),
-                    item.get("server_host", ""),
-                )
-                developer_attr = ""
-            server_options.append(
-                '<option value="{value}"{selected}{developer_attr}>{label}</option>'.format(
-                    value=_escape_html(value),
-                    selected=selected,
-                    developer_attr=developer_attr,
-                    label=_escape_html(label),
-                )
-            )
-
         notice = ""
         if status.get("last_error"):
             notice = '<p class="msg error">Last error: {}</p>'.format(_escape_html(status["last_error"]))
@@ -432,24 +395,16 @@ class WiFiSetupPortal:
         portal_ip_url = _escape_html(status.get("portal_ip_url", "http://{}".format(self.config.SETUP_PORTAL_HOST)))
         portal_domain = _escape_html(status.get("portal_domain", ""))
         ap_ssid = _escape_html(status.get("ap_ssid", self.config.SETUP_AP_SSID_PREFIX))
-        server_cfg = status.get("server", {}) or {}
         recovery_mode = status.get("mode") == "recovery" or not status.get("os_installed", True)
         release_url = status.get("release_url", "")
-        manual_server_host = manual_option.get("server_host", "192.168.1.153")
-        manual_tcp_port = manual_option.get("tcp_port", 22345)
-        manual_udp_port = manual_option.get("udp_port", 13250)
-        if selected_profile == "manual":
-            manual_server_host = server_cfg.get("host", manual_server_host)
-            manual_tcp_port = server_cfg.get("tcp_port", manual_tcp_port)
-            manual_udp_port = server_cfg.get("udp_port", manual_udp_port)
+        discovery = status.get("gateway_discovery", {}) or {}
+        discovery_text = discovery.get("last_error") or discovery.get("host") or "pending"
         recovery_notice = ""
         if recovery_mode:
             recovery_notice = (
                 '<p class="msg error">This device is in recovery mode. '
                 'New Horizons OS must be written.</p>'
             )
-        manual_fields_display = "block" if selected_profile == "manual" else "none"
-        developer_checked = " checked" if selected_profile == "manual" else ""
         return """<!doctype html>
 <html>
 <head>
@@ -471,19 +426,6 @@ class WiFiSetupPortal:
         <select id="ssid_select" onchange="document.getElementById('ssid').value = this.value;">
           {options}
         </select>
-        <label class="check"><input id="developer_options" type="checkbox"{developer_checked} onchange="toggleDeveloperOptions(this.checked);"> Developer options</label>
-        <label for="server_profile">Server</label>
-        <select id="server_profile" name="server_profile" onchange="toggleManualServerFields(this.value);">
-          {server_options}
-        </select>
-        <div id="manual_server_fields" style="display:{manual_fields_display}">
-          <label for="server_host">New Horizons Server</label>
-          <input id="server_host" name="server_host" value="{manual_server_host}" placeholder="host">
-          <label for="tcp_port">TCP Control Port</label>
-          <input id="tcp_port" name="tcp_port" value="{manual_tcp_port}" inputmode="numeric" placeholder="port">
-          <label for="udp_port">UDP Data Port</label>
-          <input id="udp_port" name="udp_port" value="{manual_udp_port}" inputmode="numeric" placeholder="port">
-        </div>
         <label for="ssid">Wi-Fi SSID</label>
         <input id="ssid" name="ssid" value="{ssid}" placeholder="ssid">
         <label for="password">Password</label>
@@ -491,7 +433,8 @@ class WiFiSetupPortal:
         <button type="submit">{primary_button}</button>
       </form>
       <div class="meta">
-        <p class="muted">Server: {server_host} TCP {tcp_port} / UDP {udp_port}</p>
+        <p class="muted">Gateway: auto discovery on this LAN</p>
+        <p class="muted">Discovery: {discovery_text}</p>
         <p class="muted">Release: {release_url}</p>
         <p class="muted">State: {device_state}</p>
       </div>
@@ -509,31 +452,6 @@ class WiFiSetupPortal:
         overlay.className = "overlay on";
       }}
     }}
-    function toggleManualServerFields(value) {{
-      var section = document.getElementById("manual_server_fields");
-      if (!section) {{
-        return;
-      }}
-      section.style.display = value === "manual" ? "block" : "none";
-    }}
-    function toggleDeveloperOptions(enabled) {{
-      var select = document.getElementById("server_profile");
-      if (!select) {{
-        return;
-      }}
-      for (var i = 0; i < select.options.length; i++) {{
-        var option = select.options[i];
-        if (option.getAttribute("data-developer") === "1") {{
-          option.disabled = !enabled;
-        }}
-      }}
-      if (!enabled && select.value === "manual") {{
-        select.value = "production";
-      }}
-      toggleManualServerFields(select.value);
-    }}
-    toggleDeveloperOptions({developer_enabled});
-    toggleManualServerFields("{selected_profile}");
   </script>
 </body>
 </html>
@@ -542,36 +460,31 @@ class WiFiSetupPortal:
             style=INDEX_CSS,
             eyebrow="Recovery Mode" if recovery_mode else "Device Setup",
             headline="Write New Horizons OS" if recovery_mode else _escape_html(self.config.SETUP_PORTAL_TITLE),
-            lead="This device is in recovery mode. Connect Wi-Fi, then write OS from GitHub through WebUI." if recovery_mode else "Join the device hotspot, then use this page to connect the board to Wi-Fi and choose the New Horizons server.",
+            lead="This device is in recovery mode. Connect Wi-Fi, then write OS from GitHub through WebUI." if recovery_mode else "Join the device hotspot, then connect the board to Wi-Fi. The New Horizons Gateway is discovered automatically.",
             ip=ip_addr,
             notice=notice,
             recovery_notice=recovery_notice,
             options="".join(options),
-            server_options="".join(server_options),
             ssid=_escape_html(selected_ssid),
-            selected_profile=_escape_html(selected_profile),
             ap_ssid=ap_ssid,
             saved_ssid=_escape_html(selected_ssid or "(none)"),
             device_state=_escape_html(status.get("state", "idle")),
             portal_url=portal_url,
             portal_domain=portal_domain or "(disabled)",
             manual_hint="" if not portal_domain else " Fallback: <strong>{}</strong>.".format(portal_ip_url),
-            manual_server_host=_escape_html(manual_server_host),
-            manual_tcp_port=_escape_html(manual_tcp_port),
-            manual_udp_port=_escape_html(manual_udp_port),
-            server_host=_escape_html(server_cfg.get("host", "")),
-            tcp_port=_escape_html(server_cfg.get("tcp_port", "")),
-            udp_port=_escape_html(server_cfg.get("udp_port", "")),
+            discovery_text=_escape_html(discovery_text),
             release_url=_escape_html(release_url),
             primary_button="Save Recovery Settings" if recovery_mode else "Connect Wi-Fi",
-            manual_fields_display=manual_fields_display,
-            developer_checked=developer_checked,
-            developer_enabled="true" if selected_profile == "manual" else "false",
         )
 
     def _render_result_page(self, result):
         ok = bool(result.get("ok"))
-        title = "Wi-Fi connected" if ok else "Wi-Fi connection failed"
+        if ok:
+            title = "Wi-Fi connected"
+        elif result.get("wifi_connected"):
+            title = "Gateway not discovered"
+        else:
+            title = "Wi-Fi connection failed"
         cls = "ok" if ok else "error"
         message = result.get("message", "")
         ifconfig = result.get("ifconfig", ())

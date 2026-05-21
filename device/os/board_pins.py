@@ -18,6 +18,14 @@ I2C_SDA = 45
 # LED
 SK6812_PIN = 11
 SK6812_COUNT = 1
+WS2812B_PIN = 12
+WS2812B_COUNT = 3
+
+# Optional SSD1306 128x32 display on the shared I2C bus.
+SSD1306_WIDTH = 128
+SSD1306_HEIGHT = 32
+SSD1306_ADDR_PRIMARY = 0x3C
+SSD1306_ADDR_FALLBACK = 0x3D
 
 # Button
 ACTION_BUTTON_PIN = 46
@@ -37,6 +45,7 @@ def validate_pins():
     add("I2C_SCL", I2C_SCL)
     add("I2C_SDA", I2C_SDA)
     add("SK6812_PIN", SK6812_PIN)
+    add("WS2812B_PIN", WS2812B_PIN)
     add("ACTION_BUTTON_PIN", ACTION_BUTTON_PIN)
 
     conflicts = {}
