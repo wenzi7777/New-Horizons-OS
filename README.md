@@ -73,9 +73,14 @@ python3 firmware/scripts/upload_filesystem.py --port /dev/cu.usbserial-210 --tar
 ```bash
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
 python3 firmware/scripts/build_mpy_release.py --repo-root . --source device/os --output device/os_mpy
-python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version v0.2.15 \
+python3 firmware/scripts/generate_manifest.py --repo-root . --target os --version vX.Y.Z \
   --source-root device/os_mpy --base-url-path device/os_mpy \
-  --delete-source-root device/os --delete-suffix .py --delete-path main.py
+  --delete-source-root device/os --delete-suffix .py \
+  --delete-path main.py \
+  --delete-path mqtt_transport.py \
+  --delete-path umqtt/simple.py \
+  --delete-path umqtt/robust.py \
+  --delete-path umqtt/__init__.py
 ```
 
 產物是：

@@ -362,6 +362,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
             LOG_PATH="device_state/logs/device.log",
             STATUS_ANNOUNCE_INTERVAL_MS=2000,
             TARGET_FPS=60,
+            MAX_FPS=90,
             MATRIX_SETTLE_US=20,
             IMU_RATE_HZ=60,
             BATTERY_RATE_HZ=2,
@@ -905,6 +906,73 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(response["status"], "error")
         self.assertEqual(response["message"], "matrix_layout_failed")
         self.assertEqual(response["runtime"]["matrix_layout"], {"active_rows": [1], "active_cols": [1]})
+
+    def test_set_scan_timing_accepts_arbitrary_positive_fps_and_settle_us(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+
+            response = app._handle_control_request(
+                {"command": "set_scan_timing", "target_fps": 75, "settle_us": 18},
+                ("tcp", 0),
+            )
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["message"], "scan_timing_updated")
+        self.assertEqual(response["runtime"]["scan_timing"]["target_fps"], 75)
+        self.assertEqual(response["runtime"]["scan_timing"]["settle_us"], 18)
+
+    def test_set_scan_timing_rejects_non_positive_fps(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+
+            response = app._handle_control_request(
+                {"command": "set_scan_timing", "target_fps": 0},
+                ("tcp", 0),
+            )
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "error")
+        self.assertEqual(response["message"], "scan_timing_invalid")
+        self.assertEqual(response["error"], "target_fps_must_be_positive")
+
+    def test_set_scan_timing_restarts_active_scan_with_health_probe(self):
+        module, _fake_scan, events, saved_modules = load_full_app_module()
+        try:
+            native_scan = NativePacketScan(events)
+            app = module.App(wifi_setup_requested=False)
+            app.hardware_ready = True
+            app.scan_ready = True
+            app.vdboard = types.SimpleNamespace(scan=native_scan)
+            app._probe_scan_health = lambda: (True, "")
+
+            response = app._handle_control_request(
+                {"command": "set_scan_timing", "target_fps": 90},
+                ("tcp", 0),
+            )
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(native_scan.init_calls[-1]["fps"], 90)
+        self.assertIn("scan_stop", events)
+        self.assertIn("scan_start", events)
 
     def test_enter_maintenance_stops_scan_and_rejects_os_writer(self):
         module, fake_scan, events, saved_modules = load_full_app_module()

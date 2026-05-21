@@ -665,6 +665,9 @@ class App:
         if cmd == "set_logging":
             return self._set_logging(request)
 
+        if cmd == "set_scan_timing":
+            return self._set_scan_timing(request)
+
         if cmd == "set_filter":
             filter_data = self.config_store.update_filter(request.get("filter", {}))
             self.filter_config = filter_data
@@ -1407,6 +1410,7 @@ class App:
                 "server": runtime.get("server", {}),
                 "server_profile": runtime.get("server_profile", ""),
                 "logging": runtime.get("logging", {}),
+                "scan_timing": runtime.get("scan_timing", {}),
                 "matrix_layout": {
                     "active_rows": self._active_rows(),
                     "active_cols": self._active_cols(),
@@ -1485,6 +1489,7 @@ class App:
             "fs_list",
             "fs_read",
             "set_logging",
+            "set_scan_timing",
             "log_tail",
             "log_read_tail",
             "log_clear",
@@ -1643,6 +1648,76 @@ class App:
             normalized.append(pin)
             seen[pin] = True
         return normalized
+
+    def _set_scan_timing(self, request):
+        old_timing = dict((self.runtime or {}).get("scan_timing", {}) or {})
+        new_timing = dict(old_timing)
+        if "target_fps" in request:
+            try:
+                target_fps = int(request.get("target_fps"))
+            except Exception:
+                return self._ok("scan_timing_invalid", error="target_fps_must_be_positive")
+            if target_fps <= 0:
+                return self._ok("scan_timing_invalid", error="target_fps_must_be_positive")
+            if target_fps > 65535:
+                return self._ok("scan_timing_invalid", error="target_fps_too_large")
+            new_timing["target_fps"] = target_fps
+        if "settle_us" in request:
+            try:
+                settle_us = int(request.get("settle_us"))
+            except Exception:
+                return self._ok("scan_timing_invalid", error="settle_us_must_be_non_negative")
+            if settle_us < 0:
+                return self._ok("scan_timing_invalid", error="settle_us_must_be_non_negative")
+            if settle_us > 65535:
+                return self._ok("scan_timing_invalid", error="settle_us_too_large")
+            new_timing["settle_us"] = settle_us
+        if new_timing == old_timing:
+            return {
+                "status": "ok",
+                "message": "scan_timing_updated",
+                "runtime": self.runtime,
+                "reboot_required": False,
+                "applied": True,
+            }
+        scan_was_ready = bool(self.scan_ready)
+
+        runtime = self.config_store.update_runtime({"scan_timing": new_timing})
+        self.runtime = runtime
+        try:
+            if scan_was_ready and self.hardware_ready and not self._in_maintenance():
+                self._apply_matrix_layout(force=True)
+                ok, error = self._probe_scan_health()
+                if not ok:
+                    raise RuntimeError(error or "scan_health_probe_failed")
+        except Exception as exc:
+            rollback_runtime = self.config_store.update_runtime({"scan_timing": old_timing})
+            self.runtime = rollback_runtime
+            try:
+                if scan_was_ready and self.hardware_ready and not self._in_maintenance():
+                    self._apply_matrix_layout(force=True)
+                else:
+                    self._stop_scan()
+            except Exception as rollback_exc:
+                self._stop_scan()
+                self.logger.warn("scan_timing_rollback_failed {}".format(rollback_exc))
+            return {
+                "status": "error",
+                "message": "scan_timing_failed",
+                "runtime": rollback_runtime,
+                "reboot_required": False,
+                "applied": False,
+                "error": str(exc),
+                "scan_memory": self._native_memory_stats(),
+            }
+
+        return {
+            "status": "ok",
+            "message": "scan_timing_updated",
+            "runtime": runtime,
+            "reboot_required": False,
+            "applied": True,
+        }
 
     def _rebuild_matrix_pipeline(self):
         active_rows = self._active_rows()

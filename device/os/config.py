@@ -4,7 +4,7 @@ DEVICE_ID = 0x00000001
 DEVICE_NAME = "New Horizons OS"
 HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4"
 RUNTIME_VERSION = "v0.2.28"
-FIRMWARE_VERSION = "v0.2.31"
+FIRMWARE_VERSION = "v0.2.32"
 OS_VERSION = FIRMWARE_VERSION
 RECOVERY_VERSION = "v0.2.29"
 RECOVERY_FIRMWARE_VERSION = RECOVERY_VERSION
@@ -42,7 +42,8 @@ ACTIVE_COLS = [
 ACTIVE_SENSOR_COUNT = None
 
 TARGET_FPS = 60
-MAX_FPS = 60
+EXTENDED_TARGET_FPS = 90
+MAX_FPS = 90
 
 IMU_RATE_HZ = 30
 BATTERY_RATE_HZ = 1
@@ -65,7 +66,7 @@ SERVER_PROFILES = {
         "server": {"host": PRODUCTION_SERVER_HOST, "tcp_port": PRODUCTION_TCP_CONTROL_PORT, "udp_port": PRODUCTION_UDP_STREAM_PORT},
     },
 }
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.31/device"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.32/device"
 RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.2.29/device"
 GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
