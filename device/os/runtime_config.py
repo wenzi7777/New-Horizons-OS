@@ -6,7 +6,7 @@ DEFAULT_SERVER = {
     "host": getattr(config, "DEFAULT_SERVER_HOST", ""),
     "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
     "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
-    "source": "discovery",
+    "source": "findme",
     "gateway_id": "",
 }
 OS_GITHUB_BASE_URL = getattr(config, "GITHUB_BASE_URL", "")
@@ -66,19 +66,26 @@ DEFAULT_RUNTIME = {
         "host": DEFAULT_SERVER["host"],
         "tcp_port": DEFAULT_SERVER["tcp_port"],
         "udp_port": DEFAULT_SERVER["udp_port"],
-        "source": DEFAULT_SERVER["source"],
+        "source": "findme",
         "gateway_id": DEFAULT_SERVER["gateway_id"],
     },
-    "gateway_discovery": {
+    "findme": {
         "enabled": True,
         "port": int(getattr(config, "DEFAULT_GATEWAY_DISCOVERY_PORT", 22346)),
+        "state": "idle",
         "gateway_id": "",
+        "gateway_name": "",
         "host": "",
         "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
         "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
         "last_success_ms": 0,
         "last_error": "",
-        "source": "discovery",
+        "source": "findme",
+        "rejected_gateways": [],
+        "preferred_gateway_id": "",
+        "claim_id": "",
+        "claim_expires_at_ms": 0,
+        "last_claim_error": "",
     },
     "update": {
         "manifest_url": "",

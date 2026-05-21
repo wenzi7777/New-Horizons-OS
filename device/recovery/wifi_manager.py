@@ -9,8 +9,8 @@ except ImportError:  # pragma: no cover - CPython fallback
 
 import config
 import secrets
-from device_identity import get_device_suffix, get_device_uid
-import gateway_discovery
+from device_identity import get_device_name, get_device_suffix, get_device_uid
+import findme
 import storage
 
 
@@ -251,17 +251,17 @@ class WiFiManager:
                 self.config_store.update_runtime(runtime_patch)
 
         ok = self.connect_sta(ssid, password, keep_setup_portal=True)
-        if ok and self.discover_gateway(reason="wifi_setup").get("ok"):
-            self.last_setup_result = "connected_gateway_discovered"
+        if ok and self.run_findme(reason="wifi_setup").get("ok"):
+            self.last_setup_result = "connected_findme_attached"
             self.release_setup_portal()
             return {
                 "ok": True,
-                "message": "Connected to {} and discovered gateway".format(ssid),
+                "message": "Connected to {} and attached with FindMe".format(ssid),
                 "ifconfig": self._ensure_sta().ifconfig(),
             }
 
         if ok:
-            self.last_setup_result = "gateway_discovery_failed"
+            self.last_setup_result = "findme_no_gateway"
             return {
                 "ok": False,
                 "wifi_connected": True,
@@ -316,27 +316,36 @@ class WiFiManager:
             "saved_ssid": network_cfg.get("ssid", ""),
             "last_error": self.last_error,
             "last_setup_result": self.last_setup_result,
-            "server": dict(runtime_cfg.get("server", {})),
-            "gateway_discovery": dict(runtime_cfg.get("gateway_discovery", {})),
+            "findme": dict(runtime_cfg.get("findme", {})),
             "transport": dict(runtime_cfg.get("transport", {})),
             "logging": dict(runtime_cfg.get("logging", {})),
         }
 
-    def discover_gateway(self, reason="manual"):
+    def run_findme(self, reason="manual"):
         if not self.is_connected():
             result = {"ok": False, "error": "wifi_not_connected"}
             self._save_gateway_result(result, reason)
-            self.last_error = "gateway_discovery_failed"
+            self.last_error = "findme_no_gateway"
             return result
         try:
-            result = gateway_discovery.discover_gateway(get_device_uid(), self._runtime_mode())
+            result = findme.discover(
+                get_device_uid(),
+                self._runtime_mode(),
+                device_name=get_device_name(getattr(config, "DEVICE_NAME", "New Horizons OS")),
+                versions=self._findme_versions(),
+                wifi_rssi=self._wifi_rssi(),
+                rejected_gateways=self._rejected_gateway_ids(),
+                preferred_gateway_id=self._findme_claim_field("preferred_gateway_id"),
+                claim_id=self._findme_claim_field("claim_id"),
+                claim_expires_at_ms=self._findme_claim_field("claim_expires_at_ms"),
+            )
         except Exception as exc:
             result = {"ok": False, "error": str(exc)}
         self._save_gateway_result(result, reason)
         if result.get("ok"):
             self.last_error = ""
             self._log_info(
-                "gateway_discovery_ok host={} tcp={} udp={} id={}".format(
+                "findme_offer_selected host={} tcp={} udp={} id={}".format(
                     result.get("host", ""),
                     result.get("tcp_port", ""),
                     result.get("udp_port", ""),
@@ -344,8 +353,8 @@ class WiFiManager:
                 )
             )
         else:
-            self.last_error = "gateway_discovery_failed"
-            self._log_warn("gateway_discovery_failed error={}".format(result.get("error", "unknown")))
+            self.last_error = str(result.get("error", "findme_no_gateway"))
+            self._log_warn("findme_failed error={}".format(result.get("error", "unknown")))
         return result
 
     def _runtime_mode(self):
@@ -359,21 +368,28 @@ class WiFiManager:
                 "host": "",
                 "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                 "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
-                "source": "discovery",
+                "source": "findme",
                 "gateway_id": "",
             },
             "transport": {"mode": "udp_tcp"},
-            "gateway_discovery": {
+            "findme": {
                 "enabled": True,
                 "port": int(getattr(config, "DEFAULT_GATEWAY_DISCOVERY_PORT", 22346)),
+                "state": "idle",
                 "gateway_id": "",
+                "gateway_name": "",
                 "host": "",
                 "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                 "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
                 "last_success_ms": 0,
                 "last_error": "",
-                "source": "discovery",
+                "source": "findme",
                 "reason": "reset",
+                "rejected_gateways": [],
+                "preferred_gateway_id": "",
+                "claim_id": "",
+                "claim_expires_at_ms": 0,
+                "last_claim_error": "",
             },
         }
 
@@ -382,11 +398,11 @@ class WiFiManager:
             return
         runtime = self.config_store.load_runtime()
         current_server = dict(runtime.get("server", {}))
-        discovery = dict(runtime.get("gateway_discovery", {}))
-        discovery.update({
+        findme_state = dict(runtime.get("findme", {}))
+        findme_state.update({
             "enabled": True,
             "port": int(getattr(config, "DEFAULT_GATEWAY_DISCOVERY_PORT", 22346)),
-            "source": "discovery",
+            "source": "findme",
             "reason": reason,
         })
         if result.get("ok"):
@@ -394,30 +410,82 @@ class WiFiManager:
                 "host": result.get("host", ""),
                 "tcp_port": int(result.get("tcp_port") or getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                 "udp_port": int(result.get("udp_port") or getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
-                "source": "discovery",
+                "source": "findme",
                 "gateway_id": result.get("gateway_id", ""),
             }
-            discovery.update({
+            findme_state.update({
+                "state": "discovered",
                 "gateway_id": server["gateway_id"],
+                "gateway_name": result.get("gateway_name", "New Horizons Gateway"),
                 "host": server["host"],
                 "tcp_port": server["tcp_port"],
                 "udp_port": server["udp_port"],
                 "last_success_ms": int(result.get("discovered_at_ms") or 0),
                 "last_error": "",
                 "priority": int(result.get("priority") or 0),
+                "upstream_status": result.get("upstream_status", ""),
+                "latency_ms": int(result.get("latency_ms") or 0),
+                "rejected_gateways": result.get("rejected_gateways", []),
+                "claim_id": result.get("claim_id", findme_state.get("claim_id", "")),
+                "preferred_gateway_id": findme_state.get("preferred_gateway_id", ""),
+                "claim_expires_at_ms": int(findme_state.get("claim_expires_at_ms") or 0),
+                "last_claim_error": "",
             })
             self.config_store.update_runtime({
                 "server": server,
-                "gateway_discovery": discovery,
+                "findme": findme_state,
                 "transport": {"mode": "udp_tcp"},
             })
             return
-        discovery["last_error"] = str(result.get("error") or "no_gateway")
+        findme_state["state"] = "rejected" if result.get("error") == "findme_rejected" else "no_gateway"
+        findme_state["last_error"] = str(result.get("error") or "findme_no_gateway")
+        findme_state["rejected_gateways"] = result.get("rejected_gateways", [])
+        if result.get("error") == "findme_claim_timeout":
+            findme_state["last_claim_error"] = "claim_timeout"
         self.config_store.update_runtime({
             "server": current_server,
-            "gateway_discovery": discovery,
+            "findme": findme_state,
             "transport": {"mode": "udp_tcp"},
         })
+
+    def _findme_versions(self):
+        runtime = self.config_store.load_runtime() if self.config_store is not None else {}
+        system = runtime.get("system", {}) if isinstance(runtime, dict) else {}
+        return {
+            "runtime_version": getattr(config, "RUNTIME_VERSION", getattr(config, "FIRMWARE_VERSION", "")),
+            "recovery_version": system.get("recovery_version", getattr(config, "RECOVERY_VERSION", "")),
+            "os_version": system.get("os_version", getattr(config, "OS_VERSION", "")),
+        }
+
+    def _wifi_rssi(self):
+        try:
+            return int(self._ensure_sta().status("rssi"))
+        except Exception:
+            return None
+
+    def _rejected_gateway_ids(self):
+        if self.config_store is None:
+            return []
+        runtime = self.config_store.load_runtime()
+        state = runtime.get("findme", {}) if isinstance(runtime, dict) else {}
+        rejected = state.get("rejected_gateways", []) if isinstance(state, dict) else []
+        ids = []
+        if isinstance(rejected, list):
+            for item in rejected:
+                if isinstance(item, dict) and item.get("gateway_id"):
+                    ids.append(str(item.get("gateway_id")))
+                elif item:
+                    ids.append(str(item))
+        return ids
+
+    def _findme_claim_field(self, key):
+        if self.config_store is None:
+            return ""
+        runtime = self.config_store.load_runtime()
+        state = runtime.get("findme", {}) if isinstance(runtime, dict) else {}
+        if not isinstance(state, dict):
+            return ""
+        return state.get(key, "")
 
     def _runtime_patch_for_github_update(self):
         release_url = self._github_release_url()

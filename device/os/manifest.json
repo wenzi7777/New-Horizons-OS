@@ -2,15 +2,15 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.4.0",
-  "version": "v0.4.0",
+  "firmware_version": "v0.4.1",
+  "version": "v0.4.1",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.0/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.1/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
-      "sha256": "b3a2e0b2e575e785a456d07a700b6e3f998975e4345b03ee47f808d343a866cb",
-      "size": 34668,
+      "sha256": "5c2f940b4b8f11eb467330106782e2517681e5c57db98cb3f731af71756c2987",
+      "size": 37020,
       "kind": "code",
       "reboot_required": true
     },
@@ -44,8 +44,8 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "cfccfac7554669caf74b500c8da79a86df2cc241cb7835426e9a56088f94857b",
-      "size": 3374,
+      "sha256": "021ede52a3aa0e8f12bbbe4c9b63dc1de437a2ff7bd1e92a38ed6bb3d3915307",
+      "size": 3353,
       "kind": "code",
       "reboot_required": true
     },
@@ -85,6 +85,13 @@
       "reboot_required": true
     },
     {
+      "path": "findme.mpy",
+      "sha256": "47627249ea88683f78e47c76af975e0e0bf3933a58f1d9ccfdcd9f358873dc6a",
+      "size": 2921,
+      "kind": "code",
+      "reboot_required": true
+    },
+    {
       "path": "frame_protocol.mpy",
       "sha256": "64fd23b44646d3b1532c1df7674fb77851e131baafc25e56849c660a25964e3c",
       "size": 769,
@@ -95,13 +102,6 @@
       "path": "fs_core.mpy",
       "sha256": "ca0cc59b36de10f08a18b1a889ed27c4f12fc9d46694fc6fcd159e80e47adb66",
       "size": 1305,
-      "kind": "code",
-      "reboot_required": true
-    },
-    {
-      "path": "gateway_discovery.mpy",
-      "sha256": "60a0bdf2e4176394a43b8fcecb7736e472cdf98745c38c19d59c8a41b8a6fd86",
-      "size": 1719,
       "kind": "code",
       "reboot_required": true
     },
@@ -123,13 +123,6 @@
       "path": "matrix_scan.mpy",
       "sha256": "6bf1dc08a2c3434556f8c90db8938c7dcb96b8fe6e3ae4086239d489f0b9e56f",
       "size": 3154,
-      "kind": "code",
-      "reboot_required": true
-    },
-    {
-      "path": "matrix_scan_mock.mpy",
-      "sha256": "14ab78749ff625946cbc8ba30960b2c0866babbf4015be1e0e3be9910872a7ac",
-      "size": 2262,
       "kind": "code",
       "reboot_required": true
     },
@@ -184,8 +177,8 @@
     },
     {
       "path": "runtime_config.mpy",
-      "sha256": "5792ac65b64a7ea95e65594101ddffd276865dac21e49edff7aad9a21c879570",
-      "size": 3618,
+      "sha256": "58d632d72a34247720ef03b98efb445b2711fc8de3f2c49ffe5af17f0fa94ac8",
+      "size": 3742,
       "kind": "code",
       "reboot_required": true
     },
@@ -198,8 +191,8 @@
     },
     {
       "path": "sk6812.mpy",
-      "sha256": "e10e9b5c6300287c134545f7d775d9744a38dbabedf8a8f6716cfeca5c9fce49",
-      "size": 10159,
+      "sha256": "f026e48d042f160e40c19d245d9f6152884b3cfffaac980b0880e2d735471b89",
+      "size": 10696,
       "kind": "code",
       "reboot_required": true
     },
@@ -212,8 +205,8 @@
     },
     {
       "path": "tcp_control.mpy",
-      "sha256": "c046cb1cb2c842bd615cb0bd70ef25f159850d777f3aa524180e2bf877e003b0",
-      "size": 3033,
+      "sha256": "c040df92f3986cf8f5cab27acbb9cad90d7b7355bf95986525d86b5d69210680",
+      "size": 3810,
       "kind": "code",
       "reboot_required": true
     },
@@ -247,15 +240,15 @@
     },
     {
       "path": "vdboard.mpy",
-      "sha256": "4869b5392efa2635a3eb30caa7099d39181989c5854b529c855bb8af2556202b",
-      "size": 6207,
+      "sha256": "7427909acba54f7d4d0c11c56521716a3251f02dd848d30611d8327725abb469",
+      "size": 6137,
       "kind": "code",
       "reboot_required": true
     },
     {
       "path": "wifi_manager.mpy",
-      "sha256": "911c76b02c868e07cd5621f1cf0900b9de055fa33c1c50fd1c546b0fa4524e0f",
-      "size": 7326,
+      "sha256": "2e2c6a506c3a40d101c4882fc009357d09cc440127bd13c163b4e8f1222dce4c",
+      "size": 8608,
       "kind": "code",
       "reboot_required": true
     }
@@ -272,13 +265,16 @@
     "device_logging.py",
     "filesystem_api.py",
     "filter_engine.py",
+    "findme.py",
     "frame_protocol.py",
     "fs_core.py",
+    "gateway_discovery.mpy",
     "gateway_discovery.py",
     "i2c_bus.py",
     "main.py",
     "manifest_update.py",
     "matrix_scan.py",
+    "matrix_scan_mock.mpy",
     "matrix_scan_mock.py",
     "micropython_bmi270/__init__.py",
     "micropython_bmi270/bmi270.py",

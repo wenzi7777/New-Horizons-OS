@@ -453,9 +453,5 @@ sys = _SysAPI()
 
 
 def _load_scanner_impl():
-    if config.USE_MATRIX_MOCK or machine is None:
-        from matrix_scan_mock import MatrixScanner as scanner_impl
-        return scanner_impl
-
     from matrix_scan import MatrixScanner as scanner_impl
     return scanner_impl

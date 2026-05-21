@@ -397,7 +397,7 @@ class WiFiSetupPortal:
         ap_ssid = _escape_html(status.get("ap_ssid", self.config.SETUP_AP_SSID_PREFIX))
         recovery_mode = status.get("mode") == "recovery" or not status.get("os_installed", True)
         release_url = status.get("release_url", "")
-        discovery = status.get("gateway_discovery", {}) or {}
+        discovery = status.get("findme", {}) or {}
         discovery_text = discovery.get("last_error") or discovery.get("host") or "pending"
         recovery_notice = ""
         if recovery_mode:

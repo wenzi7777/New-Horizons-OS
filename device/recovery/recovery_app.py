@@ -40,13 +40,19 @@ class RecoveryApp:
             },
         )
         self.wifi = WiFiManager(self.config_store, self.logger)
-        self.control_transport = TCPControlTransport(lambda: self.runtime, self.device_uid, self.logger, self._status_payload)
+        self.control_transport = TCPControlTransport(
+            lambda: self.runtime,
+            self.device_uid,
+            self.logger,
+            self._status_payload,
+            self._handle_findme_event,
+        )
         self.os_writer = None
         self.update_state = self._default_update_state()
         self.last_connect_ms = 0
         self.boot_network_initialized = False
         self.last_status_announce_ms = 0
-        self.last_gateway_discovery_ms = 0
+        self.last_findme_ms = 0
         self.reboot_deadline_ms = None
 
     def setup(self):
@@ -67,7 +73,7 @@ class RecoveryApp:
             if not wifi_ok:
                 self.wifi.start_setup_portal("connect_failed")
         if wifi_ok:
-            self._discover_gateway("boot")
+            self._run_findme("boot")
             self._announce_status(force=True)
         self.boot_network_initialized = wifi_ok
 
@@ -80,9 +86,9 @@ class RecoveryApp:
 
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
-                self._discover_gateway("wifi_connected")
+                self._run_findme("wifi_connected")
                 self._announce_status(now, force=True)
-            self._service_gateway_discovery(now)
+            self._service_findme(now)
 
             if (not self.wifi.is_connected()
                     and not self.wifi.setup_active()
@@ -90,7 +96,7 @@ class RecoveryApp:
                     and time.ticks_diff(now, self.last_connect_ms) >= 10000):
                 self.last_connect_ms = now
                 if self.wifi.connect():
-                    self._discover_gateway("wifi_reconnect")
+                    self._run_findme("wifi_reconnect")
                 else:
                     self.wifi.start_setup_portal("reconnect_failed")
 
@@ -143,26 +149,128 @@ class RecoveryApp:
             self.logger.info("runtime_config_reloaded source={}".format(source))
         return True
 
-    def _discover_gateway(self, reason="manual"):
+    def _run_findme(self, reason="manual"):
         if not self.wifi.is_connected():
             return {"ok": False, "error": "wifi_not_connected"}
-        self.last_gateway_discovery_ms = time.ticks_ms()
-        result = self.wifi.discover_gateway(reason=reason)
+        self.last_findme_ms = time.ticks_ms()
+        result = self.wifi.run_findme(reason=reason)
         self.runtime = self.config_store.load_runtime()
         if result.get("ok"):
             self.control_transport.reconfigure()
         return result
 
-    def _service_gateway_discovery(self, now):
+    def _handle_findme_switch_gateway(self, request):
+        preferred_gateway_id = str(request.get("preferred_gateway_id") or request.get("gateway_id") or "").strip()
+        claim_id = str(request.get("claim_id") or "").strip()
+        ttl_ms = int(request.get("ttl_ms") or 30000)
+        if not preferred_gateway_id:
+            return {"status": "error", "message": "findme_switch_failed", "error": "preferred_gateway_id_required", "reboot_required": False}
+        if not claim_id:
+            return {"status": "error", "message": "findme_switch_failed", "error": "claim_id_required", "reboot_required": False}
+        now = time.ticks_ms()
+        expires_at = time.ticks_add(now, ttl_ms) if hasattr(time, "ticks_add") else now + ttl_ms
+        self.runtime = self.config_store.update_runtime({
+            "server": {
+                "host": "",
+                "tcp_port": int(getattr(iconfig, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+                "udp_port": int(getattr(iconfig, "DEFAULT_UDP_STREAM_PORT", 13250)),
+                "source": "findme",
+                "gateway_id": "",
+            },
+            "findme": {
+                "state": "switching",
+                "gateway_id": "",
+                "gateway_name": "",
+                "host": "",
+                "tcp_port": int(getattr(iconfig, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+                "udp_port": int(getattr(iconfig, "DEFAULT_UDP_STREAM_PORT", 13250)),
+                "last_error": "",
+                "preferred_gateway_id": preferred_gateway_id,
+                "claim_id": claim_id,
+                "claim_expires_at_ms": int(expires_at),
+                "last_claim_error": "",
+            },
+            "transport": {"mode": "udp_tcp"},
+        })
+        if self.control_transport is not None:
+            self.control_transport.close()
+        result = self._run_findme("claim")
+        if result.get("ok"):
+            return {"status": "ok", "message": "findme_switch_complete", "applied": True, "findme": result, "runtime": self.runtime, "reboot_required": False}
+        return {
+            "status": "ok",
+            "message": "findme_switch_started",
+            "applied": True,
+            "findme": result,
+            "error": result.get("error", "findme_no_gateway"),
+            "runtime": self.runtime,
+            "reboot_required": False,
+        }
+
+    def _service_findme(self, now):
         if not self.wifi.is_connected() or self.wifi.setup_active():
             return False
         if self.control_transport.is_connected():
             return False
         retry_ms = int(getattr(iconfig, "GATEWAY_DISCOVERY_RETRY_MS", 5000))
-        if time.ticks_diff(now, self.last_gateway_discovery_ms) < retry_ms:
+        if time.ticks_diff(now, self.last_findme_ms) < retry_ms:
             return False
-        self._discover_gateway("retry")
+        self._run_findme("retry")
         return True
+
+    def _findme_status(self):
+        runtime = self.runtime if isinstance(self.runtime, dict) else {}
+        status = dict(runtime.get("findme", {}) or {})
+        control_transport = getattr(self, "control_transport", None)
+        if control_transport is not None and hasattr(control_transport, "findme_status"):
+            transport_status = control_transport.findme_status()
+            for key, value in transport_status.items():
+                if value not in ("", None, False):
+                    status[key] = value
+        return status
+
+    def _handle_findme_event(self, event):
+        if not isinstance(event, dict):
+            return
+        runtime = self.config_store.load_runtime()
+        state = dict(runtime.get("findme", {}) or {})
+        event_type = event.get("type")
+        gateway_id = str(event.get("gateway_id") or state.get("gateway_id", ""))
+        if event_type == "nh_findme_accept":
+            state.update({
+                "state": "attached",
+                "gateway_id": gateway_id,
+                "session_id": str(event.get("session_id") or ""),
+                "last_error": "",
+                "attached_at_ms": time.ticks_ms(),
+            })
+            self.runtime = self.config_store.update_runtime({"findme": state})
+            return
+        if event_type == "nh_findme_reject":
+            rejected = list(state.get("rejected_gateways", []) or [])
+            rejected.append({
+                "gateway_id": gateway_id,
+                "reason": str(event.get("reason") or "device_rejected"),
+                "cooldown_ms": int(event.get("cooldown_ms") or 30000),
+                "rejected_at_ms": time.ticks_ms(),
+            })
+            state.update({
+                "state": "rejected",
+                "gateway_id": gateway_id,
+                "last_error": str(event.get("reason") or "device_rejected"),
+                "rejected_gateways": rejected[-6:],
+            })
+            self.runtime = self.config_store.update_runtime({
+                "findme": state,
+                "server": {
+                    "host": "",
+                    "tcp_port": int(getattr(iconfig, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+                    "udp_port": int(getattr(iconfig, "DEFAULT_UDP_STREAM_PORT", 13250)),
+                    "source": "findme",
+                    "gateway_id": "",
+                },
+            })
+            self.last_findme_ms = 0
 
     def _announce_status(self, now=None, force=False):
         if not self.wifi.is_connected():
@@ -189,6 +297,7 @@ class RecoveryApp:
             "mode": "recovery",
             "manifest_url": self.runtime.get("update", {}).get("manifest_url", ""),
             "runtime": self.runtime,
+            "findme": self._findme_status(),
             "wifi_connected": self.wifi.is_connected(),
             "wifi_setup": self.wifi.portal_status(),
             "update_state": self._current_update_state(),
@@ -217,6 +326,7 @@ class RecoveryApp:
                 "mode": "recovery",
                 "manifest_url": runtime.get("update", {}).get("manifest_url", ""),
                 "runtime": runtime,
+                "findme": self._findme_status(),
                 "logging": self._logging_status(),
                 "wifi_connected": self.wifi.is_connected(),
                 "wifi_setup": self.wifi.portal_status(),
@@ -356,24 +466,27 @@ class RecoveryApp:
                 "reboot_required": False,
             }
 
-        if command == "discover_gateway":
-            result = self._discover_gateway("command")
+        if command == "findme_discover":
+            result = self._run_findme("command")
             if result.get("ok"):
                 return {
                     "status": "ok",
-                    "message": "gateway_discovered",
-                    "gateway_discovery": result,
+                    "message": "findme_discovered",
+                    "findme": result,
                     "runtime": self.runtime,
                     "reboot_required": False,
                 }
             return {
                 "status": "error",
-                "message": "gateway_discovery_failed",
-                "gateway_discovery": result,
+                "message": "findme_failed",
+                "findme": result,
                 "error": result.get("error", "no_gateway"),
                 "runtime": self.runtime,
                 "reboot_required": False,
             }
+
+        if command == "findme_switch_gateway":
+            return self._handle_findme_switch_gateway(request)
 
         if command == "set_transport":
             runtime = self.config_store.update_runtime({
@@ -407,7 +520,7 @@ class RecoveryApp:
                 "message": result.get("message", ""),
                 "wifi_setup": self.wifi.portal_status(),
                 "reboot_required": False,
-                "error": "" if result.get("ok") else ("gateway_discovery_failed" if result.get("wifi_connected") else "wifi_connect_failed"),
+                "error": "" if result.get("ok") else ("findme_no_gateway" if result.get("wifi_connected") else "wifi_connect_failed"),
             }
 
         if command == "reset_credentials":

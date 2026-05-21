@@ -75,7 +75,7 @@ class App:
         self.last_led_ms = 0
         self.last_ntp_retry_ms = 0
         self.last_status_announce_ms = 0
-        self.last_gateway_discovery_ms = 0
+        self.last_findme_ms = 0
         self.reboot_deadline_ms = None
         self.send_backoff_until_ms = 0
         self.last_gc_frame_id = 0
@@ -142,7 +142,7 @@ class App:
                 self.led.set_wifi_setup()
 
         if wifi_ok:
-            self._discover_gateway("boot")
+            self._run_findme("boot")
             self._ensure_streaming_services()
 
         if wifi_ok:
@@ -176,12 +176,12 @@ class App:
             self._service_action_button(now)
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
-                self._discover_gateway("wifi_connected")
+                self._run_findme("wifi_connected")
                 self._ensure_streaming_services()
                 self._sync_time()
                 self._announce_status(now, force=True)
                 self.update_led_state()
-            self._service_gateway_discovery(now)
+            self._service_findme(now)
 
             if (self.boot_network_initialized
                     and not self.hardware_ready
@@ -222,7 +222,7 @@ class App:
                 self.last_connect_ms = now
                 wifi_ok = self.wifi.connect()
                 if wifi_ok:
-                    self._discover_gateway("wifi_reconnect")
+                    self._run_findme("wifi_reconnect")
                     self.update_led_state()
                 else:
                     self.logger.warn("wifi_reconnect_failed_offline")
@@ -378,8 +378,14 @@ class App:
         if self._in_maintenance() and hasattr(self.led, "set_maintenance"):
             self.led.set_maintenance()
             return
-        if self._gateway_discovery_failed() and hasattr(self.led, "set_gateway_discovery_failed"):
-            self.led.set_gateway_discovery_failed()
+        if self._findme_rejected() and hasattr(self.led, "set_findme_rejected"):
+            self.led.set_findme_rejected()
+            return
+        if self._findme_gateway_lost() and hasattr(self.led, "set_findme_gateway_lost"):
+            self.led.set_findme_gateway_lost()
+            return
+        if self._findme_no_gateway() and hasattr(self.led, "set_findme_no_gateway"):
+            self.led.set_findme_no_gateway()
             return
         if self.wifi.setup_active():
             self.led.set_wifi_setup()
@@ -486,7 +492,10 @@ class App:
             "target_fps": int(scan_timing.get("target_fps", getattr(config, "TARGET_FPS", 60))),
             "current_fps": current_fps,
             "control_connected": bool(self.control_transport is not None and self.control_transport.is_connected()),
-            "gateway_discovery_failed": self._gateway_discovery_failed(),
+            "findme": self._findme_status(),
+            "findme_no_gateway": self._findme_no_gateway(),
+            "findme_gateway_lost": self._findme_gateway_lost(),
+            "findme_rejected": self._findme_rejected(),
             "failed_sends": int(self.failed_sends),
             "dropped_frames": int(stream.get("dropped", stream.get("dropped_frames", 0)) or 0),
             "offline_recording": offline_status,
@@ -498,14 +507,41 @@ class App:
             "imu_motion": imu_motion,
         }
 
-    def _gateway_discovery_failed(self):
+    def _findme_status(self):
         runtime = self.runtime if isinstance(self.runtime, dict) else {}
-        discovery = runtime.get("gateway_discovery", {}) or {}
+        state = dict(runtime.get("findme", {}) or {})
+        control_transport = getattr(self, "control_transport", None)
+        if control_transport is not None and hasattr(control_transport, "findme_status"):
+            transport = control_transport.findme_status()
+            if transport.get("state") in ("attached", "rejected", "gateway_lost", "attaching"):
+                state["state"] = transport.get("state")
+            if transport.get("gateway_id"):
+                state["gateway_id"] = transport.get("gateway_id")
+            state["session_id"] = transport.get("session_id", state.get("session_id", ""))
+            if transport.get("last_error"):
+                state["last_error"] = transport.get("last_error")
+            state["connected"] = bool(transport.get("connected"))
+        return state
+
+    def _findme_no_gateway(self):
+        state = self._findme_status()
         if not self.wifi.is_connected():
             return False
         if self.control_transport is not None and self.control_transport.is_connected():
             return False
-        return bool(discovery.get("last_error"))
+        return bool(state.get("last_error")) and state.get("state") in ("no_gateway", "idle", "discovered", "")
+
+    def _findme_gateway_lost(self):
+        state = self._findme_status()
+        if not self.wifi.is_connected():
+            return False
+        if self.control_transport is not None and self.control_transport.is_connected():
+            return False
+        return state.get("state") == "gateway_lost" or bool(state.get("last_success_ms") and state.get("host"))
+
+    def _findme_rejected(self):
+        state = self._findme_status()
+        return state.get("state") == "rejected" or state.get("last_error") == "device_rejected"
 
     def _indicator_status(self):
         if self.led is None or not hasattr(self.led, "status"):
@@ -661,11 +697,11 @@ class App:
         else:
             self.logger.warn("ntp_sync_failed error={}".format(self.time_sync.last_error))
 
-    def _discover_gateway(self, reason="manual"):
+    def _run_findme(self, reason="manual"):
         if not self.wifi.is_connected():
             return {"ok": False, "error": "wifi_not_connected"}
-        self.last_gateway_discovery_ms = time.ticks_ms()
-        result = self.wifi.discover_gateway(reason=reason)
+        self.last_findme_ms = time.ticks_ms()
+        result = self.wifi.run_findme(reason=reason)
         self.runtime = self.config_store.load_runtime()
         if result.get("ok"):
             if self.control_transport is not None:
@@ -675,16 +711,102 @@ class App:
         self.update_led_state()
         return result
 
-    def _service_gateway_discovery(self, now):
+    def _handle_findme_switch_gateway(self, request):
+        preferred_gateway_id = str(request.get("preferred_gateway_id") or request.get("gateway_id") or "").strip()
+        claim_id = str(request.get("claim_id") or "").strip()
+        ttl_ms = int(request.get("ttl_ms") or 30000)
+        if not preferred_gateway_id:
+            return self._ok("findme_switch_failed", error="preferred_gateway_id_required", applied=False)
+        if not claim_id:
+            return self._ok("findme_switch_failed", error="claim_id_required", applied=False)
+        now = time.ticks_ms()
+        expires_at = time.ticks_add(now, ttl_ms) if hasattr(time, "ticks_add") else now + ttl_ms
+        self.runtime = self.config_store.update_runtime({
+            "server": {
+                "host": "",
+                "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+                "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
+                "source": "findme",
+                "gateway_id": "",
+            },
+            "findme": {
+                "state": "switching",
+                "gateway_id": "",
+                "gateway_name": "",
+                "host": "",
+                "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+                "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
+                "last_error": "",
+                "preferred_gateway_id": preferred_gateway_id,
+                "claim_id": claim_id,
+                "claim_expires_at_ms": int(expires_at),
+                "last_claim_error": "",
+            },
+            "transport": {"mode": "udp_tcp"},
+        })
+        if self.control_transport is not None:
+            self.control_transport.close()
+        if self.udp_stream is not None:
+            self.udp_stream.reconfigure()
+        result = self._run_findme("claim")
+        if result.get("ok"):
+            return self._ok("findme_switch_complete", applied=True, findme=result)
+        return self._ok("findme_switch_started", applied=True, findme=result, error=result.get("error", "findme_no_gateway"))
+
+    def _service_findme(self, now):
         if not self.wifi.is_connected() or self.wifi.setup_active():
             return False
         if self.control_transport is not None and self.control_transport.is_connected():
             return False
         retry_ms = int(getattr(config, "GATEWAY_DISCOVERY_RETRY_MS", 5000))
-        if time.ticks_diff(now, self.last_gateway_discovery_ms) < retry_ms:
+        if time.ticks_diff(now, self.last_findme_ms) < retry_ms:
             return False
-        self._discover_gateway("retry")
+        self._run_findme("retry")
         return True
+
+    def _handle_findme_event(self, event):
+        if not isinstance(event, dict):
+            return
+        runtime = self.config_store.load_runtime()
+        state = dict(runtime.get("findme", {}) or {})
+        event_type = event.get("type")
+        gateway_id = str(event.get("gateway_id") or state.get("gateway_id", ""))
+        if event_type == "nh_findme_accept":
+            state.update({
+                "state": "attached",
+                "gateway_id": gateway_id,
+                "session_id": str(event.get("session_id") or ""),
+                "last_error": "",
+                "attached_at_ms": time.ticks_ms(),
+            })
+            self.runtime = self.config_store.update_runtime({"findme": state})
+            return
+        if event_type == "nh_findme_reject":
+            rejected = list(state.get("rejected_gateways", []) or [])
+            rejected.append({
+                "gateway_id": gateway_id,
+                "reason": str(event.get("reason") or "device_rejected"),
+                "cooldown_ms": int(event.get("cooldown_ms") or 30000),
+                "rejected_at_ms": time.ticks_ms(),
+            })
+            state.update({
+                "state": "rejected",
+                "gateway_id": gateway_id,
+                "last_error": str(event.get("reason") or "device_rejected"),
+                "rejected_gateways": rejected[-6:],
+            })
+            self.runtime = self.config_store.update_runtime({
+                "findme": state,
+                "server": {
+                    "host": "",
+                    "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
+                    "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
+                    "source": "findme",
+                    "gateway_id": "",
+                },
+            })
+            self.last_findme_ms = 0
+            self.update_led_state()
 
     def _reboot_due(self, now):
         if self.reboot_deadline_ms is None:
@@ -779,11 +901,14 @@ class App:
             self._apply_runtime_reload()
             return self._ok("config_reloaded", applied=True)
 
-        if cmd == "discover_gateway":
-            result = self._discover_gateway("command")
+        if cmd == "findme_discover":
+            result = self._run_findme("command")
             if result.get("ok"):
-                return self._ok("gateway_discovered", applied=True, gateway_discovery=result)
-            return self._ok("gateway_discovery_failed", error=result.get("error", "no_gateway"), gateway_discovery=result)
+                return self._ok("findme_discovered", applied=True, findme=result)
+            return self._ok("findme_failed", error=result.get("error", "findme_no_gateway"), findme=result)
+
+        if cmd == "findme_switch_gateway":
+            return self._handle_findme_switch_gateway(request)
 
         if cmd == "set_transport":
             runtime = self.config_store.update_runtime({
@@ -991,7 +1116,7 @@ class App:
                 "reboot_required": False,
                 "applied": bool(result.get("ok")),
                 "wifi_setup": self.wifi.portal_status(),
-                "error": "" if result.get("ok") else ("gateway_discovery_failed" if result.get("wifi_connected") else "wifi_connect_failed"),
+                "error": "" if result.get("ok") else ("findme_no_gateway" if result.get("wifi_connected") else "wifi_connect_failed"),
             }
 
         if cmd == "log_read_tail":
@@ -1503,6 +1628,7 @@ class App:
             "ntp": self.time_sync.status() if self.time_sync is not None else {},
             "filter": self.config_store.load_filter(),
             "runtime": self.config_store.load_runtime(),
+            "findme": self._findme_status(),
             "logging": self._logging_status(),
             "battery": self._battery_status(refresh=True),
             "indicators": self._indicator_status(),
@@ -1541,7 +1667,7 @@ class App:
                 "mode": self.mode,
                 "transport": runtime.get("transport", {}),
                 "server": runtime.get("server", {}),
-                "gateway_discovery": runtime.get("gateway_discovery", {}),
+                "findme": self._findme_status(),
                 "logging": runtime.get("logging", {}),
                 "scan_timing": runtime.get("scan_timing", {}),
                 "matrix_layout": {
@@ -1555,6 +1681,7 @@ class App:
             },
             "wifi_state": self.wifi.state,
             "wifi_connected": self.wifi.is_connected(),
+            "findme": self._findme_status(),
             "logging": self._logging_status(),
             "battery": self._battery_status(refresh=False),
             "indicators": self._indicator_status(),
@@ -2246,7 +2373,13 @@ class App:
         from time_sync import TimeSync
         from utils import RateCounter
 
-        self.control_transport = TCPControlTransport(lambda: self.runtime, self.device_uid, self.logger, self._status)
+        self.control_transport = TCPControlTransport(
+            lambda: self.runtime,
+            self.device_uid,
+            self.logger,
+            self._status,
+            self._handle_findme_event,
+        )
         self.udp_stream = UDPStreamTransport(lambda: self.runtime, self.logger)
         self.time_sync = TimeSync(self.runtime.get("ntp_servers", []))
         self.scan_rate = RateCounter(1000)

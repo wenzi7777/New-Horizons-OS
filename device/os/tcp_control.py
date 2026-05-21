@@ -9,17 +9,22 @@ class TCPControlTransport:
     CONNECT_TIMEOUT_SEC = 1
     RECV_CHUNK = 512
 
-    def __init__(self, runtime_getter, device_uid, logger=None, hello_getter=None):
+    def __init__(self, runtime_getter, device_uid, logger=None, hello_getter=None, findme_handler=None):
         self.runtime_getter = runtime_getter
         self.device_uid = device_uid
         self.logger = logger
         self.hello_getter = hello_getter
+        self.findme_handler = findme_handler
         self.sock = None
         self.sock_key = None
         self.rx = b""
         self.pending = []
         self.last_attempt_ms = 0
         self.hello_sent = False
+        self.findme_state = "idle"
+        self.findme_gateway_id = ""
+        self.findme_session_id = ""
+        self.findme_last_error = ""
 
     def poll(self, wifi_connected, handler=None):
         if not self.ensure_connected(wifi_connected):
@@ -80,6 +85,8 @@ class TCPControlTransport:
         self.sock_key = None
         self.rx = b""
         self.hello_sent = False
+        if self.findme_state == "attached":
+            self.findme_state = "gateway_lost"
 
     def reconfigure(self):
         self.last_attempt_ms = 0
@@ -113,7 +120,9 @@ class TCPControlTransport:
             sock.settimeout(0)
             self.sock = sock
             self.sock_key = key
-            self._info("tcp_control_connected host={} port={}".format(host, port))
+            self.findme_state = "attaching"
+            self.findme_last_error = ""
+            self._info("findme_attach_start host={} port={}".format(host, port))
             self._send_hello()
             return True
         except Exception as exc:
@@ -174,6 +183,30 @@ class TCPControlTransport:
             return
         if not isinstance(data, dict):
             return
+        if data.get("type") == "nh_findme_accept":
+            self.findme_state = "attached"
+            self.findme_gateway_id = str(data.get("gateway_id") or "")
+            self.findme_session_id = str(data.get("session_id") or "")
+            self.findme_last_error = ""
+            self._info("findme_attach_ok gateway_id={}".format(self.findme_gateway_id))
+            if self.findme_handler is not None:
+                try:
+                    self.findme_handler(dict(data))
+                except Exception as exc:
+                    self._warn("findme_handler_failed {}".format(exc))
+            return
+        if data.get("type") == "nh_findme_reject":
+            self.findme_state = "rejected"
+            self.findme_gateway_id = str(data.get("gateway_id") or "")
+            self.findme_last_error = str(data.get("reason") or "device_rejected")
+            self._warn("findme_attach_rejected gateway_id={} reason={}".format(self.findme_gateway_id, self.findme_last_error))
+            if self.findme_handler is not None:
+                try:
+                    self.findme_handler(dict(data))
+                except Exception as exc:
+                    self._warn("findme_handler_failed {}".format(exc))
+            self.close()
+            return
         if data.get("type") == "command" and isinstance(data.get("payload"), dict):
             request = dict(data.get("payload"))
             if data.get("request_id") and "request_id" not in request:
@@ -181,6 +214,15 @@ class TCPControlTransport:
             if len(self.pending) >= self.MAX_PENDING:
                 self.pending.pop(0)
             self.pending.append(request)
+
+    def findme_status(self):
+        return {
+            "state": self.findme_state,
+            "gateway_id": self.findme_gateway_id,
+            "session_id": self.findme_session_id,
+            "last_error": self.findme_last_error,
+            "connected": self.is_connected(),
+        }
 
     def _command_name(self, request):
         if not isinstance(request, dict):

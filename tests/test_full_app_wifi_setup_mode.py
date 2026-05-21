@@ -167,7 +167,7 @@ class FakeWiFi:
     def portal_status(self):
         return {"active": self.portal_active}
 
-    def discover_gateway(self, reason="manual"):
+    def run_findme(self, reason="manual"):
         return {
             "ok": True,
             "host": "127.0.0.1",
@@ -185,8 +185,8 @@ class FakeRuntimeConfigStore:
             "matrix_layout": {"active_rows": [1], "active_cols": [1]},
             "matrix_layout_state": {"pending": False, "committed": True, "last_error": ""},
             "matrix_scan_state": {"active": False, "autostart_disabled": False, "last_error": ""},
-            "server": {"host": "127.0.0.1", "tcp_port": 22345, "udp_port": 13250, "source": "discovery", "gateway_id": "test-gateway"},
-            "gateway_discovery": {"host": "127.0.0.1", "gateway_id": "test-gateway", "last_error": ""},
+            "server": {"host": "127.0.0.1", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": "test-gateway"},
+            "findme": {"host": "127.0.0.1", "gateway_id": "test-gateway", "last_error": ""},
             "transport": {"mode": "udp_tcp"},
             "logging": {"enabled": True, "capacity": "default", "serial": "status"},
         }
@@ -250,8 +250,14 @@ class FakeLED:
     def set_error(self):
         self.states.append("error")
 
-    def set_gateway_discovery_failed(self):
-        self.states.append("gateway_discovery_failed")
+    def set_findme_no_gateway(self):
+        self.states.append("findme_no_gateway")
+
+    def set_findme_gateway_lost(self):
+        self.states.append("findme_gateway_lost")
+
+    def set_findme_rejected(self):
+        self.states.append("findme_rejected")
 
 
 class FakeBattery:

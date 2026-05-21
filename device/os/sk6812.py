@@ -76,9 +76,19 @@ class SK6812Status:
                 "colors": ((0, 180, 180), (0, 0, 0)),
                 "brightness": 0.20,
             },
-            "gateway_discovery_failed": {
+            "findme_no_gateway": {
                 "intervals": (90, 90, 90, 720),
                 "colors": ((255, 90, 0), (0, 0, 0), (200, 0, 0), (0, 0, 0)),
+                "brightness": 0.35,
+            },
+            "findme_gateway_lost": {
+                "intervals": (120, 120, 120, 120, 120, 900),
+                "colors": ((255, 160, 0), (0, 0, 0), (255, 60, 0), (0, 0, 0), (120, 0, 0), (0, 0, 0)),
+                "brightness": 0.35,
+            },
+            "findme_rejected": {
+                "intervals": (100, 100, 100, 900),
+                "colors": ((180, 0, 255), (0, 0, 0), (255, 0, 0), (0, 0, 0)),
                 "brightness": 0.35,
             },
             "normal": {
@@ -343,8 +353,14 @@ class SK6812Status:
     def set_wifi_setup(self):
         self._set_state("wifi_setup")
 
-    def set_gateway_discovery_failed(self):
-        self._set_state("gateway_discovery_failed")
+    def set_findme_no_gateway(self):
+        self._set_state("findme_no_gateway")
+
+    def set_findme_gateway_lost(self):
+        self._set_state("findme_gateway_lost")
+
+    def set_findme_rejected(self):
+        self._set_state("findme_rejected")
 
     def set_updating(self):
         self._set_state("updating")
@@ -446,7 +462,19 @@ class SK6812Status:
             led2 = self._scale_external((120, 0, 255), min(1.0, 0.25 + motion))
             return (led0, led1, led2)
         if preset == "stream_health_idle":
-            if ctx.get("gateway_discovery_failed"):
+            if ctx.get("findme_rejected"):
+                return (
+                    self._scale_external((0, 80, 120), self._pulse(now, 2400, 0.20, 0.55)),
+                    self._scale_external((180, 0, 255), self._pulse(now, 420, 0.35, 1.0)),
+                    self._scale_external((255, 0, 0), self._pulse(now, 420, 0.35, 1.0)),
+                )
+            if ctx.get("findme_gateway_lost"):
+                return (
+                    self._scale_external((0, 80, 120), self._pulse(now, 2400, 0.20, 0.55)),
+                    self._scale_external((255, 160, 0), self._pulse(now, 650, 0.35, 1.0)),
+                    self._scale_external((220, 0, 0), self._pulse(now, 650, 0.35, 1.0)),
+                )
+            if ctx.get("findme_no_gateway"):
                 return (
                     self._scale_external((0, 80, 120), self._pulse(now, 2400, 0.20, 0.55)),
                     self._scale_external((255, 90, 0), self._pulse(now, 500, 0.35, 1.0)),

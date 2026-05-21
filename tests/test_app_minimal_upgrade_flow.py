@@ -323,14 +323,14 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         app = module.RecoveryApp.__new__(module.RecoveryApp)
         app.runtime = {
             "transport": {"mode": "udp_tcp"},
-            "server": {"host": "", "tcp_port": 22345, "udp_port": 13250, "source": "discovery", "gateway_id": ""},
-            "gateway_discovery": {"host": "", "gateway_id": "", "last_error": "no_gateway"},
+            "server": {"host": "", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": ""},
+            "findme": {"host": "", "gateway_id": "", "last_error": "findme_no_gateway"},
             "logging": {"enabled": True, "capacity": "default"},
         }
         app.config_store = FakeConfigStore({
             "transport": {"mode": "udp_tcp"},
-            "server": {"host": "192.168.1.200", "tcp_port": 22345, "udp_port": 13250, "source": "discovery", "gateway_id": "gw"},
-            "gateway_discovery": {"host": "192.168.1.200", "gateway_id": "gw", "last_error": ""},
+            "server": {"host": "192.168.1.200", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": "gw"},
+            "findme": {"host": "192.168.1.200", "gateway_id": "gw", "last_error": ""},
             "logging": {"enabled": True, "capacity": "default"},
         })
         app.logger = FakeLogger()
@@ -344,7 +344,7 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         self.assertEqual(app.runtime["server"]["tcp_port"], 22345)
         self.assertEqual(app.runtime["server"]["udp_port"], 13250)
         self.assertEqual(app.runtime["server"]["gateway_id"], "gw")
-        self.assertEqual(app.runtime["gateway_discovery"]["last_error"], "")
+        self.assertEqual(app.runtime["findme"]["last_error"], "")
         self.assertEqual(app.control_transport.reconfigure_calls, 1)
         self.assertIn("runtime_config_reloaded source=wifi_portal", app.logger.infos)
 

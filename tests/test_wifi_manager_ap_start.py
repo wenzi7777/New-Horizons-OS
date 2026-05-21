@@ -97,18 +97,19 @@ class FakeConfigStore:
             "last_ssid": "",
         }
         self.runtime = {
-            "server": {"host": "", "tcp_port": 22345, "udp_port": 13250, "source": "discovery", "gateway_id": ""},
+            "server": {"host": "", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": ""},
             "transport": {"mode": "udp_tcp"},
-            "gateway_discovery": {
+            "findme": {
                 "enabled": True,
                 "port": 22346,
+                "state": "idle",
                 "gateway_id": "",
                 "host": "",
                 "tcp_port": 22345,
                 "udp_port": 13250,
                 "last_success_ms": 0,
                 "last_error": "",
-                "source": "discovery",
+                "source": "findme",
             },
             "update": {
                 "release_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
@@ -130,7 +131,7 @@ class FakeConfigStore:
         return {
             "server": dict(self.runtime.get("server", {})),
             "transport": dict(self.runtime.get("transport", {})),
-            "gateway_discovery": dict(self.runtime.get("gateway_discovery", {})),
+            "findme": dict(self.runtime.get("findme", {})),
             "update": dict(self.runtime.get("update", {})),
             "mode": self.runtime.get("mode", "recovery"),
         }
@@ -180,21 +181,23 @@ def load_wifi_manager(channel, include_os_dir=True):
 
     fake_portal = types.SimpleNamespace(WiFiSetupPortal=CountingPortal)
     fake_identity = types.SimpleNamespace(
+        get_device_name=lambda _prefix="New Horizons OS": "New Horizons OS-AABBCC010203",
         get_device_suffix=lambda: "010203040506",
         get_device_uid=lambda: "AABBCC010203",
     )
     fake_time = types.SimpleNamespace(sleep_ms=lambda _ms: None, sleep=lambda _s: None)
     fake_gc = types.SimpleNamespace(collect=lambda: None, mem_free=lambda: 65536)
     fake_storage = types.SimpleNamespace(exists=lambda _path: False)
-    fake_gateway_discovery = types.SimpleNamespace(
-        discover_gateway=lambda _device_uid, _mode: {
+    fake_findme = types.SimpleNamespace(
+        discover=lambda *_args, **_kwargs: {
             "ok": True,
             "host": "192.168.1.200",
             "tcp_port": 22345,
             "udp_port": 13250,
             "gateway_id": "test-gateway",
+            "gateway_name": "New Horizons Gateway",
             "priority": 100,
-            "source": "discovery",
+            "source": "findme",
             "discovered_at_ms": 1234,
         }
     )
@@ -206,7 +209,7 @@ def load_wifi_manager(channel, include_os_dir=True):
         "secrets": fake_secrets,
         "wifi_portal": fake_portal,
         "device_identity": fake_identity,
-        "gateway_discovery": fake_gateway_discovery,
+        "findme": fake_findme,
         "time": fake_time,
         "gc": fake_gc,
         "storage": fake_storage,
@@ -367,17 +370,17 @@ class WiFiManagerApStartTests(unittest.TestCase):
                 "host": "192.168.1.200",
                 "tcp_port": 22345,
                 "udp_port": 13250,
-                "source": "discovery",
+                "source": "findme",
                 "gateway_id": "test-gateway",
             },
         )
-        self.assertEqual(store.runtime["gateway_discovery"]["gateway_id"], "test-gateway")
-        self.assertEqual(store.runtime["gateway_discovery"]["last_error"], "")
+        self.assertEqual(store.runtime["findme"]["gateway_id"], "test-gateway")
+        self.assertEqual(store.runtime["findme"]["last_error"], "")
         self.assertEqual(store.runtime["transport"]["mode"], "udp_tcp")
 
     def test_apply_credentials_keeps_portal_open_when_gateway_missing(self):
         module, _fake_network = load_wifi_manager("minimal")
-        module.gateway_discovery.discover_gateway = lambda _device_uid, _mode: {
+        module.findme.discover = lambda *_args, **_kwargs: {
             "ok": False,
             "error": "timeout",
         }
@@ -390,9 +393,9 @@ class WiFiManagerApStartTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertTrue(result["wifi_connected"])
         self.assertEqual(result["message"], "Wi-Fi connected, but no New Horizons Gateway was discovered.")
-        self.assertEqual(manager.last_setup_result, "gateway_discovery_failed")
+        self.assertEqual(manager.last_setup_result, "findme_no_gateway")
         self.assertEqual(store.runtime["server"]["host"], "")
-        self.assertEqual(store.runtime["gateway_discovery"]["last_error"], "timeout")
+        self.assertEqual(store.runtime["findme"]["last_error"], "timeout")
         self.assertEqual(store.runtime["transport"]["mode"], "udp_tcp")
         self.assertTrue(manager.setup_active())
 
@@ -421,29 +424,31 @@ class WiFiManagerApStartTests(unittest.TestCase):
         self.assertEqual(store.runtime["server"]["gateway_id"], "test-gateway")
         self.assertEqual(store.runtime["transport"]["mode"], "udp_tcp")
 
-    def test_portal_status_reports_gateway_discovery(self):
+    def test_portal_status_reports_findme(self):
         module, _fake_network = load_wifi_manager("minimal")
         store = FakeConfigStore()
         store.update_runtime({
-            "server": {"host": "192.168.1.200", "tcp_port": 22345, "udp_port": 13250, "source": "discovery", "gateway_id": "gw"},
-            "gateway_discovery": {
+            "server": {"host": "192.168.1.200", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": "gw"},
+            "findme": {
                 "enabled": True,
                 "port": 22346,
+                "state": "attached",
                 "gateway_id": "gw",
                 "host": "192.168.1.200",
                 "tcp_port": 22345,
                 "udp_port": 13250,
                 "last_success_ms": 42,
                 "last_error": "",
-                "source": "discovery",
+                "source": "findme",
             },
         })
 
         manager = module.WiFiManager(config_store=store)
         status = manager.portal_status()
 
-        self.assertEqual(status["server"]["host"], "192.168.1.200")
-        self.assertEqual(status["gateway_discovery"]["gateway_id"], "gw")
+        self.assertEqual(status["findme"]["gateway_id"], "gw")
+        self.assertEqual(status["findme"]["host"], "192.168.1.200")
+        self.assertNotIn("server", status)
         self.assertNotIn("server_profile", status)
         self.assertNotIn("server_profile_options", status)
 
