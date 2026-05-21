@@ -8,6 +8,9 @@ class TCPControlTransport:
     RECONNECT_BACKOFF_MS = 2000
     CONNECT_TIMEOUT_SEC = 1
     RECV_CHUNK = 512
+    SEND_TIMEOUT_MS = 300
+    SEND_RETRY_MS = 10
+    WOULD_BLOCK_ERRNOS = (11, 115)
 
     def __init__(self, runtime_getter, device_uid, logger=None, hello_getter=None, findme_handler=None):
         self.runtime_getter = runtime_getter
@@ -105,7 +108,7 @@ class TCPControlTransport:
         key = (host, port, self.device_uid)
         if self.sock is not None and self.sock_key == key:
             if not self.hello_sent:
-                self._send_hello()
+                return self._send_hello()
             return True
         now = self._ticks_ms()
         if self._ticks_diff(now, self.last_attempt_ms) < self.RECONNECT_BACKOFF_MS:
@@ -123,8 +126,7 @@ class TCPControlTransport:
             self.findme_state = "attaching"
             self.findme_last_error = ""
             self._info("findme_attach_start host={} port={}".format(host, port))
-            self._send_hello()
-            return True
+            return self._send_hello()
         except Exception as exc:
             self._warn("tcp_control_connect_failed {}".format(exc))
             self.close()
@@ -149,13 +151,52 @@ class TCPControlTransport:
             "device_uid": self.device_uid,
             "payload": payload or {},
         }
-        try:
-            self.sock.send((json.dumps(body) + "\n").encode())
-            return True
-        except Exception as exc:
-            self._warn("tcp_control_send_failed {}".format(exc))
-            self.close()
+        data = (json.dumps(body) + "\n").encode()
+        return self._send_bytes(data)
+
+    def _send_bytes(self, data):
+        if self.sock is None:
             return False
+        deadline = self._ticks_add(self._ticks_ms(), self.SEND_TIMEOUT_MS)
+        total = len(data)
+        sent = 0
+        view = memoryview(data)
+        while sent < total:
+            try:
+                written = self.sock.send(view[sent:])
+            except Exception as exc:
+                if self._is_would_block(exc) and self._ticks_diff(deadline, self._ticks_ms()) > 0:
+                    self._sleep_ms(self.SEND_RETRY_MS)
+                    continue
+                self.findme_last_error = "send_failed:{}".format(exc)
+                self._warn("tcp_control_send_failed {}".format(exc))
+                self.close()
+                return False
+            if written is None:
+                return True
+            if written <= 0:
+                if self._ticks_diff(deadline, self._ticks_ms()) > 0:
+                    self._sleep_ms(self.SEND_RETRY_MS)
+                    continue
+                self.findme_last_error = "send_failed:zero_write"
+                self._warn("tcp_control_send_failed zero_write")
+                self.close()
+                return False
+            sent += int(written)
+        return True
+
+    def _is_would_block(self, exc):
+        try:
+            code = exc.args[0]
+        except Exception:
+            code = None
+        return code in self.WOULD_BLOCK_ERRNOS
+
+    def _sleep_ms(self, delay_ms):
+        try:
+            time.sleep_ms(delay_ms)
+        except AttributeError:
+            time.sleep(delay_ms / 1000.0)
 
     def _read_available(self):
         if self.sock is None:
@@ -163,7 +204,11 @@ class TCPControlTransport:
         while True:
             try:
                 data = self.sock.recv(self.RECV_CHUNK)
-            except Exception:
+            except Exception as exc:
+                if not self._is_would_block(exc):
+                    self.findme_last_error = "recv_failed:{}".format(exc)
+                    self._warn("tcp_control_recv_failed {}".format(exc))
+                    self.close()
                 return
             if not data:
                 self.close()
@@ -248,6 +293,9 @@ class TCPControlTransport:
 
     def _ticks_ms(self):
         return time.ticks_ms() if hasattr(time, "ticks_ms") else int(time.time() * 1000)
+
+    def _ticks_add(self, now, delta):
+        return time.ticks_add(now, delta) if hasattr(time, "ticks_add") else now + delta
 
     def _ticks_diff(self, now, then):
         return time.ticks_diff(now, then) if hasattr(time, "ticks_diff") else now - then

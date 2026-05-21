@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "recovery",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.4.1",
-  "version": "v0.4.1",
+  "firmware_version": "v0.4.2",
+  "version": "v0.4.2",
   "target_root": "/recovery",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.1/device/recovery",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.2/device/recovery",
   "files": [
     {
       "path": "config.py",
@@ -44,7 +44,7 @@
     },
     {
       "path": "immutable_config.py",
-      "sha256": "212df0a64ddb5e3bdb151d9ea2113ba4fa1bbcb04556e7a8d18f86d869ce7460",
+      "sha256": "6a13c2690bf5553d41a84126f2e3f2bd6e0ceb44cf3ee6d0c66e461f6c522ae5",
       "size": 1493,
       "kind": "code",
       "reboot_required": true
@@ -86,8 +86,8 @@
     },
     {
       "path": "tcp_control.py",
-      "sha256": "957f055049bd020c5a338eab88c342f068e7158b9df1e167e4bd80afe8bb97f7",
-      "size": 9664,
+      "sha256": "f2e41e1ebed1bf657422198ad2af73ac042dc9f04741c97efbdd2fa66078120e",
+      "size": 11518,
       "kind": "code",
       "reboot_required": true
     },

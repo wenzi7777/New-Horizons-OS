@@ -2,10 +2,10 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.4.1",
-  "version": "v0.4.1",
+  "firmware_version": "v0.4.2",
+  "version": "v0.4.2",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.1/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.2/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
@@ -44,7 +44,7 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "021ede52a3aa0e8f12bbbe4c9b63dc1de437a2ff7bd1e92a38ed6bb3d3915307",
+      "sha256": "c4e08b0295cdaeece37a1005d5c499d6e52fdbcbf6b90b89ed9ac6f0f5e44fab",
       "size": 3353,
       "kind": "code",
       "reboot_required": true
@@ -205,8 +205,8 @@
     },
     {
       "path": "tcp_control.mpy",
-      "sha256": "c040df92f3986cf8f5cab27acbb9cad90d7b7355bf95986525d86b5d69210680",
-      "size": 3810,
+      "sha256": "a608fe1eafa71f612a5051143629bd38645d024fa56d5178090c3de5ceb61242",
+      "size": 4543,
       "kind": "code",
       "reboot_required": true
     },
@@ -268,14 +268,10 @@
     "findme.py",
     "frame_protocol.py",
     "fs_core.py",
-    "gateway_discovery.mpy",
-    "gateway_discovery.py",
     "i2c_bus.py",
     "main.py",
     "manifest_update.py",
     "matrix_scan.py",
-    "matrix_scan_mock.mpy",
-    "matrix_scan_mock.py",
     "micropython_bmi270/__init__.py",
     "micropython_bmi270/bmi270.py",
     "micropython_bmi270/i2c_helpers.py",
