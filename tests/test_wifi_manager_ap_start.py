@@ -178,7 +178,7 @@ def load_wifi_manager(channel, include_os_dir=True):
             portal_instances.append(self)
 
     fake_portal = types.SimpleNamespace(WiFiSetupPortal=CountingPortal)
-    fake_identity = types.SimpleNamespace(get_device_suffix=lambda: "010203")
+    fake_identity = types.SimpleNamespace(get_device_suffix=lambda: "010203040506")
     fake_time = types.SimpleNamespace(sleep_ms=lambda _ms: None, sleep=lambda _s: None)
     fake_gc = types.SimpleNamespace(collect=lambda: None, mem_free=lambda: 65536)
     fake_storage = types.SimpleNamespace(exists=lambda _path: False)

@@ -84,7 +84,7 @@ def get_device_suffix():
     uid = get_device_uid()
     if not uid:
         return ""
-    return uid[-6:]
+    return uid
 
 
 def get_device_name(base_name):

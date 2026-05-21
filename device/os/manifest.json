@@ -2,15 +2,15 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.3.0",
-  "version": "v0.3.0",
+  "firmware_version": "v0.3.1",
+  "version": "v0.3.1",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.3.0/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.3.1/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
-      "sha256": "89d6a5f6cc3ee8ad301a0eda8ebfbf67014c5e0720b40f06f8a200f8cbaf6994",
-      "size": 30826,
+      "sha256": "e356de02967ae3d404d285c5a855d27aca3c5838c34fae537870d4862c4419c3",
+      "size": 31246,
       "kind": "code",
       "reboot_required": true
     },
@@ -44,8 +44,8 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "6422fe59002c37bf0fc45338b66c11e37a66133781b88c4cffc702fa23fee94d",
-      "size": 3384,
+      "sha256": "e19551c6a73cadf771c39969c6f7016252df210d7a29ec3715136580d1fecd99",
+      "size": 3392,
       "kind": "code",
       "reboot_required": true
     },
@@ -58,8 +58,8 @@
     },
     {
       "path": "device_identity.mpy",
-      "sha256": "4e9c92798b31ca6ca113a176ab621f2384107ea658a7c160485cc18894b3ce0f",
-      "size": 1001,
+      "sha256": "ac7df986317c1c882b09c31379b924de05f51b6b58e9069db45b56e2f68c023a",
+      "size": 996,
       "kind": "code",
       "reboot_required": true
     },
@@ -268,6 +268,7 @@
     "frame_protocol.py",
     "fs_core.py",
     "i2c_bus.py",
+    "main.py",
     "manifest_update.py",
     "matrix_scan.py",
     "matrix_scan_mock.py",

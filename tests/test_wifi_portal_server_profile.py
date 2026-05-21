@@ -27,7 +27,7 @@ class FakeManager:
             "portal_url": "http://newhorizons.os",
             "portal_ip_url": "http://192.168.4.1",
             "portal_domain": "newhorizons.os",
-            "ap_ssid": "NewHorizonsOS-010203",
+            "ap_ssid": "NewHorizonsOS-010203040506",
             "saved_ssid": "LabWiFi",
             "state": "wifi_setup_active",
             "last_error": "",

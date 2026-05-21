@@ -540,6 +540,27 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
         self.assertTrue(changed)
         self.assertEqual(app.led.states[-1], "charging")
+        self.assertEqual(app._status()["battery"]["state"], "charging")
+        self.assertEqual(app._status_announce_payload()["battery"]["state"], "charging")
+
+    def test_status_reports_charge_done_state(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module(enable_led=True, enable_battery=True)
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+
+            app.battery.next_status_code = app.battery.STATUS_DONE
+            app._service_battery_status()
+            status = app._status()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(status["battery"]["state"], "charge_done")
+        self.assertTrue(status["battery"]["charge_done"])
 
     def test_reboot_required_led_overrides_battery_charging(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module(enable_led=True, enable_battery=True)

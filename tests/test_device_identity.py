@@ -75,6 +75,8 @@ class DeviceIdentityTests(unittest.TestCase):
 
                 self.assertEqual(module.get_device_uid(), "AABBCCDDEEFF")
                 self.assertEqual(module.get_device_id(), "AABBCCDDEEFF")
+                self.assertEqual(module.get_device_suffix(), "AABBCCDDEEFF")
+                self.assertEqual(module.get_device_name("New Horizons OS"), "New Horizons OS-AABBCCDDEEFF")
                 self.assertEqual(module.get_packet_device_uid_bytes(), b"\xaa\xbb\xcc\xdd\xee\xff")
                 self.assertEqual(wlan_calls, [])
 

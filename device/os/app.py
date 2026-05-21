@@ -401,6 +401,44 @@ class App:
             self.update_led_state()
         return changed
 
+    def _battery_status(self, refresh=False):
+        if not self.battery:
+            return {}
+        if refresh and self.latest_battery is None:
+            self.latest_battery = self.battery.read_status()
+
+        values = self.latest_battery
+        status_code = getattr(self.battery, "last_status_code", 0)
+        fault = 0
+        vbat_mv = 0
+        if values:
+            try:
+                status_code, fault, vbat_mv = values
+            except Exception:
+                pass
+
+        status_name = self.battery.status_name() if hasattr(self.battery, "status_name") else "unknown"
+        charging = self.battery.is_charging() if hasattr(self.battery, "is_charging") else False
+        charge_done = self.battery.is_charge_done() if hasattr(self.battery, "is_charge_done") else False
+        if charging:
+            state = "charging"
+        elif charge_done:
+            state = "charge_done"
+        elif status_name == "not_charging":
+            state = "not_charging"
+        else:
+            state = "unknown"
+
+        return {
+            "state": state,
+            "status": status_name,
+            "status_code": status_code,
+            "charging": charging,
+            "charge_done": charge_done,
+            "fault": fault,
+            "vbat_mv": vbat_mv,
+        }
+
     def _ensure_action_button(self):
         if self.action_button is not None:
             return
@@ -1374,6 +1412,7 @@ class App:
             "filter": self.config_store.load_filter(),
             "runtime": self.config_store.load_runtime(),
             "logging": self._logging_status(),
+            "battery": self._battery_status(refresh=True),
             "update_state": self._current_update_state(),
             "calibration_levels": self.calibration.list_levels() if self.calibration is not None else [],
             "available_rows": list(config.AVAILABLE_ROWS),
@@ -1423,6 +1462,7 @@ class App:
             "wifi_state": self.wifi.state,
             "wifi_connected": self.wifi.is_connected(),
             "logging": self._logging_status(),
+            "battery": self._battery_status(refresh=False),
             "matrix_configured": self._matrix_configured(),
             "matrix_shape": {"rows": len(self._active_rows()), "cols": len(self._active_cols())},
             "last_matrix_start_failed": self.last_matrix_start_failed,
