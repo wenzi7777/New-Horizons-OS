@@ -337,14 +337,78 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         self.assertEqual(result["message"], "unknown_command")
         self.assertEqual(result["error"], "upgrade_to_full")
 
-    def test_write_os_runs_in_recovery_and_uses_github_release_url(self):
+    def test_recovery_rejects_expired_boot_command_without_rebooting(self):
         module = load_recovery_app_module()
+        module.time.time = lambda: 1779450002
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.runtime = {"mode": "recovery"}
+        app.config_store = FakeConfigStore(app.runtime)
+        app.reboot_required = False
+        app.reboot_deadline_ms = None
+        app.logger = FakeLogger()
+
+        result = app._handle_request(
+            {
+                "command": "reboot_to_os",
+                "target_mode": "recovery",
+                "expires_at_ms": 1779450001000,
+            },
+            None,
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "command_expired")
+        self.assertFalse(result["reboot_required"])
+        self.assertFalse(app.reboot_required)
+
+    def test_recovery_reboot_to_recovery_is_wrong_mode(self):
+        module = load_recovery_app_module()
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.runtime = {"mode": "recovery"}
+        app.config_store = FakeConfigStore(app.runtime)
+        app.reboot_required = False
+        app.reboot_deadline_ms = None
+        app.logger = FakeLogger()
+
+        result = app._handle_request(
+            {"command": "reboot_to_recovery", "target_mode": "normal"},
+            None,
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "wrong_mode")
+        self.assertFalse(result["reboot_required"])
+        self.assertFalse(app.reboot_required)
+
+    def test_recovery_reboot_to_os_requires_recovery_target_mode(self):
+        module = load_recovery_app_module()
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.runtime = {"mode": "recovery"}
+        app.config_store = FakeConfigStore(app.runtime)
+        app.reboot_required = False
+        app.reboot_deadline_ms = None
+        app.logger = FakeLogger()
+
+        result = app._handle_request(
+            {"command": "reboot_to_os", "target_mode": "normal"},
+            None,
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "wrong_mode")
+        self.assertFalse(result["reboot_required"])
+        self.assertFalse(app.reboot_required)
+
+    def test_write_os_uses_request_release_url_in_recovery(self):
+        module = load_recovery_app_module()
+        writer_calls = []
 
         class FakeOSWriter:
             def __init__(self, *args, **kwargs):
                 pass
 
             def write_os(self, release_url):
+                writer_calls.append(release_url)
                 return {
                     "status": "ok",
                     "message": "os_write_complete",
@@ -375,7 +439,82 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         self.assertEqual(result["message"], "os_write_complete")
         self.assertEqual(
             result["release_url"],
+            "http://192.168.1.2:8000/latest.json",
+        )
+        self.assertEqual(writer_calls, ["http://192.168.1.2:8000/latest.json"])
+
+    def test_write_os_uses_runtime_release_url_when_request_omits_it(self):
+        module = load_recovery_app_module()
+        writer_calls = []
+
+        class FakeOSWriter:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def write_os(self, release_url):
+                writer_calls.append(release_url)
+                return {
+                    "status": "ok",
+                    "message": "os_write_complete",
+                    "downloaded_files": 1,
+                    "skipped_files": 0,
+                    "reboot_required": True,
+                }
+
+        module.OSWriter = FakeOSWriter
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.runtime = {
+            "mode": "recovery",
+            "update": {
+                "release_url": "https://example.com/runtime-latest.json",
+                "enabled": True,
+            },
+        }
+        app.config_store = FakeConfigStore(app.runtime)
+        app.os_writer = None
+        app.logger = None
+
+        result = app._handle_request({"command": "write_os"}, None)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["release_url"], "https://example.com/runtime-latest.json")
+        self.assertEqual(writer_calls, ["https://example.com/runtime-latest.json"])
+
+    def test_write_os_falls_back_to_default_release_url(self):
+        module = load_recovery_app_module()
+        writer_calls = []
+
+        class FakeOSWriter:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def write_os(self, release_url):
+                writer_calls.append(release_url)
+                return {
+                    "status": "ok",
+                    "message": "os_write_complete",
+                    "downloaded_files": 1,
+                    "skipped_files": 0,
+                    "reboot_required": True,
+                }
+
+        module.OSWriter = FakeOSWriter
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.runtime = {"mode": "recovery", "update": {"enabled": True}}
+        app.config_store = FakeConfigStore(app.runtime)
+        app.os_writer = None
+        app.logger = None
+
+        result = app._handle_request({"command": "write_os"}, None)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(
+            result["release_url"],
             "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
+        )
+        self.assertEqual(
+            writer_calls,
+            ["https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"],
         )
 
     def test_wifi_portal_post_reload_reconfigures_discovered_gateway_runtime(self):

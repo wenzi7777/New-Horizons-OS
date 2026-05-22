@@ -2,6 +2,7 @@
 import time
 import machine
 import neopixel
+import gc
 
 import board_pins
 
@@ -41,15 +42,16 @@ class SK6812Status:
         self.state = "off"
 
         self.brightness = 0.08
-        self.external_enabled = bool(_cfg("ENABLE_EXTERNAL_LED", True))
-        self.external_mode = "auto"
+        self.external_mode = "off"
+        self.external_enabled = False
         self.external_manual_preset = "stream_health"
-        self.external_active_preset = "stream_health_idle"
+        self.external_active_preset = "off"
         self.external_brightness = self._clamp_brightness(_cfg("EXTERNAL_LED_DEFAULT_BRIGHTNESS", 0.35))
         self.external_last_colors = None
         self.indicator_context = {}
 
-        self.oled_enabled = bool(_cfg("ENABLE_OLED", True))
+        self.oled_mode = "off"
+        self.oled_enabled = False
         self.oled_page = _cfg("OLED_DEFAULT_PAGE", "live_status")
         self.oled_update_hz = int(_cfg("OLED_DEFAULT_UPDATE_HZ", 1))
         self.oled_contrast = int(_cfg("OLED_DEFAULT_CONTRAST", 128))
@@ -173,19 +175,6 @@ class SK6812Status:
             machine.Pin(board_pins.SK6812_PIN),
             board_pins.SK6812_COUNT
         )
-        if self.external_enabled and getattr(board_pins, "WS2812B_COUNT", 0):
-            try:
-                self.external_np = neopixel.NeoPixel(
-                    machine.Pin(board_pins.WS2812B_PIN),
-                    board_pins.WS2812B_COUNT
-                )
-                self._write_external(((0, 0, 0),) * board_pins.WS2812B_COUNT, force=True)
-            except Exception:
-                self.external_np = None
-        if self.oled_enabled:
-            self.detect_oled()
-            if self.oled_detected:
-                self._init_oled()
         self.off()
         print("SK6812 begin")
 
@@ -194,10 +183,12 @@ class SK6812Status:
             indicators = {}
         external = indicators.get("external_led", {})
         if isinstance(external, dict):
-            if "enabled" in external:
-                self.external_enabled = bool(external.get("enabled"))
-            if external.get("mode") in ("auto", "manual"):
-                self.external_mode = external.get("mode")
+            mode = external.get("mode")
+            if mode in ("off", "on"):
+                self.external_mode = mode
+                self.external_enabled = mode == "on"
+                if mode == "off":
+                    self.release_external_led("mode_off")
             preset = external.get("manual_preset")
             if preset in self.MANUAL_PRESETS:
                 self.external_manual_preset = preset
@@ -206,33 +197,35 @@ class SK6812Status:
 
         oled = indicators.get("oled", {})
         if isinstance(oled, dict):
-            if "enabled" in oled:
-                self.oled_enabled = bool(oled.get("enabled"))
+            mode = oled.get("mode")
+            if mode in ("off", "auto", "on"):
+                self.oled_mode = mode
+                self.oled_enabled = mode != "off"
+                if mode == "off":
+                    self.release_oled("mode_off")
             if oled.get("page") in self.OLED_PAGES:
                 self.oled_page = oled.get("page")
             if "update_hz" in oled:
                 self.oled_update_hz = max(1, min(5, int(oled.get("update_hz") or 1)))
             if "contrast" in oled:
                 self.oled_contrast = max(0, min(255, int(oled.get("contrast") or 0)))
-            if self.oled_enabled:
-                self.detect_oled()
-                if self.oled_detected:
-                    self._init_oled()
-            else:
-                self._clear_oled()
+            if self.oled_initialized and self.oled_fb is not None:
+                self._oled_cmd(0x81)
+                self._oled_cmd(self.oled_contrast)
 
     def status(self):
         return {
             "external_led": {
-                "enabled": self.external_enabled,
                 "mode": self.external_mode,
+                "active": self.external_np is not None,
                 "manual_preset": self.external_manual_preset,
                 "active_preset": self.external_active_preset,
                 "brightness": self.external_brightness,
             },
             "oled": {
+                "mode": self.oled_mode,
+                "active": bool(self.oled_initialized and self.oled_fb is not None),
                 "detected": self.oled_detected,
-                "enabled": self.oled_enabled and self.oled_detected,
                 "addr": "0x{:02X}".format(self.oled_addr) if self.oled_addr else "",
                 "page": self.oled_page,
                 "update_hz": self.oled_update_hz,
@@ -240,6 +233,81 @@ class SK6812Status:
                 "last_error": self.oled_last_error,
             },
         }
+
+    def ensure_optional_indicators(self):
+        active = False
+        if self.external_mode == "on":
+            active = self._init_external_led() or active
+        else:
+            self.release_external_led("mode_off")
+
+        if self.oled_mode == "off":
+            self.release_oled("mode_off")
+        elif self.detect_oled():
+            active = self._init_oled() or active
+        else:
+            self.release_oled("not_detected")
+        return active
+
+    def release_optional_indicators(self, reason="released"):
+        self.release_external_led(reason)
+        self.release_oled(reason)
+
+    def _init_external_led(self):
+        if self.external_np is not None:
+            return True
+        count = int(getattr(board_pins, "WS2812B_COUNT", 0))
+        if count <= 0:
+            return False
+        try:
+            self.external_np = neopixel.NeoPixel(
+                machine.Pin(board_pins.WS2812B_PIN),
+                count,
+            )
+            self.external_last_colors = None
+            self._write_external(((0, 0, 0),) * count, force=True)
+            return True
+        except Exception:
+            self.external_np = None
+            self.external_last_colors = None
+            return False
+
+    def release_external_led(self, reason="released"):
+        had_resource = self.external_np is not None or self.external_last_colors is not None
+        if self.external_np is not None:
+            try:
+                self._write_external(((0, 0, 0),) * int(getattr(board_pins, "WS2812B_COUNT", 0)), force=True)
+            except Exception:
+                pass
+        self.external_np = None
+        self.external_last_colors = None
+        self.external_active_preset = "off"
+        if had_resource:
+            try:
+                gc.collect()
+            except Exception:
+                pass
+
+    def release_oled(self, reason="released"):
+        had_resource = bool(self.oled_i2c or self.oled_fb or self.oled_buffer or self.oled_framebuf or self.oled_initialized)
+        if self.oled_fb is not None:
+            try:
+                self._clear_oled()
+            except Exception:
+                pass
+        self.oled_i2c = None
+        self.oled_fb = None
+        self.oled_buffer = None
+        self.oled_framebuf = None
+        self.oled_initialized = False
+        self.oled_detected = False
+        self.oled_addr = 0
+        self.oled_last_error = "not_detected" if reason == "not_detected" else ""
+        if had_resource:
+            try:
+                gc.collect()
+            except Exception:
+                pass
 
     def set_context(self, context):
         self.indicator_context = context if isinstance(context, dict) else {}
@@ -401,22 +469,9 @@ class SK6812Status:
         self.set_color(state_data["colors"][0])
 
     def _active_external_preset(self):
-        if not self.external_enabled:
+        if self.external_mode != "on":
             return "off"
-        if self.external_mode == "manual":
-            return self.external_manual_preset if self.external_manual_preset in self.MANUAL_PRESETS else "stream_health"
-        ctx = self.indicator_context
-        offline = ctx.get("offline_recording", {})
-        online = ctx.get("online_recording", {})
-        if isinstance(offline, dict) and offline.get("active"):
-            return "recording_focus"
-        if isinstance(online, dict) and online.get("enabled"):
-            return "recording_focus"
-        if ctx.get("calibration_active"):
-            return "calibration_focus"
-        if ctx.get("scan_active") or ctx.get("streaming"):
-            return "stream_health"
-        return "stream_health_idle"
+        return self.external_manual_preset if self.external_manual_preset in self.MANUAL_PRESETS else "stream_health"
 
     def _pulse(self, now, period_ms=1000, low=0.25, high=1.0):
         period_ms = max(1, int(period_ms))
@@ -425,8 +480,7 @@ class SK6812Status:
         return low + (high - low) * wave
 
     def _update_external(self, now):
-        if not self.external_enabled or self.external_np is None:
-            self._write_external(((0, 0, 0),) * int(getattr(board_pins, "WS2812B_COUNT", 0)))
+        if self.external_mode != "on" or self.external_np is None:
             return
         self.external_active_preset = self._active_external_preset()
         colors = self._external_colors(now, self.external_active_preset)
@@ -532,7 +586,7 @@ class SK6812Status:
         self.external_last_colors = colors
 
     def _init_oled(self):
-        if not self.oled_detected or not self.oled_enabled:
+        if not self.oled_detected or self.oled_mode == "off":
             return False
         if self.oled_initialized and self.oled_fb is not None:
             self._oled_cmd(0x81)
@@ -581,7 +635,7 @@ class SK6812Status:
             pass
 
     def _update_oled(self, now):
-        if not self.oled_enabled or not self.oled_detected:
+        if self.oled_mode == "off" or not self.oled_detected:
             return
         if not self.oled_initialized and not self._init_oled():
             return

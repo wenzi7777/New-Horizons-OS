@@ -58,6 +58,10 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             module.DEFAULT_RUNTIME["logging"],
             {"enabled": True, "capacity": "default", "serial": "status"},
         )
+        self.assertEqual(module.DEFAULT_RUNTIME["indicators"]["oled"]["mode"], "off")
+        self.assertEqual(module.DEFAULT_RUNTIME["indicators"]["external_led"]["mode"], "off")
+        self.assertNotIn("enabled", module.DEFAULT_RUNTIME["indicators"]["oled"])
+        self.assertNotIn("enabled", module.DEFAULT_RUNTIME["indicators"]["external_led"])
         self.assertEqual(module.DEFAULT_RUNTIME["transport"]["mode"], "udp_tcp")
         self.assertEqual(module.DEFAULT_RUNTIME["update"]["release_url"], "https://example.com/releases/latest.json")
         self.assertEqual(module.DEFAULT_RUNTIME["update"]["source"], "github")

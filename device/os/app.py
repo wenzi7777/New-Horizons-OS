@@ -26,6 +26,7 @@ class App:
         self.last_connect_ms = 0
         self.boot_network_initialized = False
         self.hardware_ready = False
+        self.offline_standby = False
         self.scan_ready = False
 
         self.config_store = RuntimeConfigStore(config.DEVICE_STATE_DIR)
@@ -129,6 +130,7 @@ class App:
             self._log_memory_stage("wifi")
             if not wifi_ok:
                 self.logger.warn("setup_wifi_connect_failed_offline")
+        self.offline_standby = bool((not wifi_ok) and not self.wifi.setup_active())
 
         self._ensure_led()
         self._ensure_action_button()
@@ -159,6 +161,9 @@ class App:
             self.logger.info("setup_status_announce_done")
             self._log_memory_stage("after_status")
             self._ensure_runtime_hardware()
+            self._ensure_optional_indicators("online_boot")
+        elif self.offline_standby:
+            self._ensure_optional_indicators("offline_standby")
         self.boot_network_initialized = wifi_ok
 
         self.update_led_state()
@@ -182,6 +187,7 @@ class App:
             self._service_action_button(now)
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
+                self.offline_standby = False
                 self._run_findme("wifi_connected")
                 self._ensure_streaming_services()
                 self._sync_time()
@@ -194,6 +200,7 @@ class App:
                     and not self.wifi.setup_active()
                     and not self._in_maintenance()):
                 self._ensure_runtime_hardware()
+                self._ensure_optional_indicators("runtime_hardware_ready")
                 self.update_led_state()
 
             if (not self._in_maintenance()
@@ -580,6 +587,17 @@ class App:
         except Exception as exc:
             return {"error": str(exc)}
 
+    def _ensure_optional_indicators(self, reason="operational"):
+        if self.led is None or self._recovery_update_low_resource_active():
+            return False
+        if not hasattr(self.led, "ensure_optional_indicators"):
+            return False
+        try:
+            return bool(self.led.ensure_optional_indicators())
+        except Exception as exc:
+            self.logger.warn("optional_indicators_failed reason={} error={}".format(reason, exc))
+            return False
+
     def _ensure_action_button(self):
         if self.action_button is not None:
             return
@@ -888,6 +906,51 @@ class App:
     def _authorized(self, addr):
         return bool(addr and addr[0] == "tcp")
 
+    def _command_now_ms(self):
+        try:
+            epoch = int(time.time())
+            if epoch > 1000000000:
+                return epoch * 1000
+        except Exception:
+            pass
+        return time.ticks_ms()
+
+    def _command_expired(self, request):
+        try:
+            expires_at_ms = int(request.get("expires_at_ms") or 0)
+        except Exception:
+            expires_at_ms = 0
+        if expires_at_ms <= 0:
+            return False
+        now_ms = self._command_now_ms()
+        epoch_cutoff = 100000000000
+        if expires_at_ms > epoch_cutoff or now_ms > epoch_cutoff:
+            if now_ms < epoch_cutoff:
+                return False
+            return now_ms >= expires_at_ms
+        return time.ticks_diff(now_ms, expires_at_ms) >= 0
+
+    def _wrong_mode(self, command, request, expected_mode=""):
+        target_mode = str(request.get("target_mode", "") or "")
+        return self._ok(
+            "wrong_mode",
+            error="wrong_mode",
+            command=command,
+            current_mode=self.mode,
+            target_mode=target_mode,
+            expected_mode=expected_mode,
+        )
+
+    def _boot_command_guard(self, command, request, allowed_modes):
+        if self._command_expired(request):
+            return self._ok("command_expired", error="command_expired", command=command)
+        target_mode = str(request.get("target_mode", "") or "").strip().lower()
+        if target_mode and target_mode != self.mode:
+            return self._wrong_mode(command, request)
+        if self.mode not in allowed_modes:
+            return self._wrong_mode(command, request, "/".join(allowed_modes))
+        return None
+
     def _handle_control_request(self, request, addr):
         if not self._authorized(addr):
             self.logger.warn("control_unauthorized from={}:{}".format(addr[0], addr[1]))
@@ -896,6 +959,14 @@ class App:
         cmd = request.get("command", request.get("cmd", "")).strip().lower()
         if not cmd:
             return self._ok("missing_command", error="missing_command")
+        if cmd == "reboot_to_os":
+            if self._command_expired(request):
+                return self._ok("command_expired", error="command_expired", command=cmd)
+            return self._wrong_mode(cmd, request, "recovery")
+        if cmd == "reboot_to_recovery":
+            guarded = self._boot_command_guard(cmd, request, ("normal", "minimal"))
+            if guarded is not None:
+                return guarded
         if not self._recovery_update_low_resource_active():
             self._ensure_streaming_services()
         elif cmd not in self._low_resource_allowed_commands():
@@ -905,7 +976,7 @@ class App:
                 next_command="reboot",
             )
 
-        if cmd in ("check_os_release", "write_os", "reboot_to_os"):
+        if cmd in ("check_os_release", "write_os"):
             return {
                 "status": "error",
                 "message": "requires_recovery",
@@ -1474,8 +1545,9 @@ class App:
         }
 
     def _release_url(self, request):
-        if request.get("release_url"):
-            return request.get("release_url")
+        release_url = str(request.get("release_url") or request.get("url") or "").strip()
+        if release_url:
+            return release_url
         runtime = getattr(self, "runtime", {}) if isinstance(getattr(self, "runtime", {}), dict) else {}
         release_url = runtime.get("update", {}).get("release_url", "")
         return release_url or getattr(config, "DEFAULT_RELEASE_URL", getattr(config, "GITHUB_RELEASE_URL", ""))
@@ -1522,6 +1594,23 @@ class App:
             return self._recovery_resources_required()
         release_url = self._release_url(request)
         self._prepare_recovery_update_mode()
+        current = self._current_update_state()
+        self._set_update_state({
+            "phase": "downloading",
+            "operation": "write_recovery",
+            "version": current.get("version", ""),
+            "manifest_url": current.get("manifest_url", ""),
+            "total_files": int(current.get("total_files", 0) or 0),
+            "applied_files": int(current.get("applied_files", 0) or 0),
+            "downloaded_files": int(current.get("downloaded_files", 0) or 0),
+            "skipped_files": int(current.get("skipped_files", 0) or 0),
+            "deleted_files": int(current.get("deleted_files", 0) or 0),
+            "current_file": "release manifest",
+            "last_error": "",
+            "last_result": "starting",
+            "reboot_required": False,
+        })
+        self._publish_update_progress("recovery_write_progress")
         writer = self._new_recovery_writer()
         try:
             result = writer.write_release(release_url)
@@ -1579,13 +1668,13 @@ class App:
         return result
 
     def _release_recovery_resources(self):
-        self.mode = "normal"
+        self.mode = "minimal"
         self.maintenance_reason = ""
         self._prepare_recovery_update_mode()
         memory = self._memory_status()
         return {
             "status": "ok",
-            "message": "recovery_resources_released",
+            "message": "minimal_system_started",
             "mode": self.mode,
             "recovery_update_low_resource": True,
             "next_commands": ["check_recovery_release", "write_recovery"],
@@ -1621,6 +1710,8 @@ class App:
                 pass
         if self.led is not None:
             try:
+                if hasattr(self.led, "release_optional_indicators"):
+                    self.led.release_optional_indicators("recovery_update")
                 if hasattr(self.led, "set_updating"):
                     self.led.set_updating()
                 if hasattr(self.led, "update"):
@@ -1746,7 +1837,7 @@ class App:
             "device_id": self.device_uid,
             "device_uid": self.device_uid,
             "device_name": self.device_name,
-            "mode": runtime.get("mode", "normal"),
+            "mode": self.mode or runtime.get("mode", "normal"),
             "update_state": self._current_update_state(),
             "reboot_required": self.reboot_required,
         }
@@ -2037,6 +2128,7 @@ class App:
             "status": "ok",
             "message": "status",
             "mode": self.mode,
+            "offline_standby": self.offline_standby,
             "maintenance_reason": self.maintenance_reason,
             "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "reboot_required": self.reboot_required,
@@ -2080,6 +2172,7 @@ class App:
             "status": "ok",
             "message": "status_announce",
             "mode": self.mode,
+            "offline_standby": self.offline_standby,
             "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "reboot_required": self.reboot_required,
             "device_id": self.device_uid,
@@ -2440,29 +2533,29 @@ class App:
         if not isinstance(oled_request, dict):
             oled_request = {}
 
-        if "external_led_enabled" in request:
-            external_request["enabled"] = request.get("external_led_enabled")
         if "external_led_mode" in request:
             external_request["mode"] = request.get("external_led_mode")
         if "manual_preset" in request:
             external_request["manual_preset"] = request.get("manual_preset")
         if "external_led_brightness" in request:
             external_request["brightness"] = request.get("external_led_brightness")
-        if "oled_enabled" in request:
-            oled_request["enabled"] = request.get("oled_enabled")
+        if "external_led" in request and not isinstance(request.get("external_led"), dict):
+            return self._ok("indicators_invalid", error="external_led_invalid")
+        if "oled_mode" in request:
+            oled_request["mode"] = request.get("oled_mode")
         if "oled_page" in request:
             oled_request["page"] = request.get("oled_page")
         if "oled_update_hz" in request:
             oled_request["update_hz"] = request.get("oled_update_hz")
         if "oled_contrast" in request:
             oled_request["contrast"] = request.get("oled_contrast")
+        if "oled" in request and not isinstance(request.get("oled"), dict):
+            return self._ok("indicators_invalid", error="oled_invalid")
 
         if external_request:
-            if "enabled" in external_request:
-                current_external["enabled"] = bool(external_request.get("enabled"))
             mode = external_request.get("mode")
             if mode is not None:
-                if mode not in ("auto", "manual"):
+                if mode not in ("off", "on"):
                     return self._ok("indicators_invalid", error="external_led_mode_invalid")
                 current_external["mode"] = mode
             preset = external_request.get("manual_preset")
@@ -2479,8 +2572,11 @@ class App:
 
         oled_requested = bool(oled_request)
         if oled_requested:
-            if "enabled" in oled_request:
-                current_oled["enabled"] = bool(oled_request.get("enabled"))
+            mode = oled_request.get("mode")
+            if mode is not None:
+                if mode not in ("off", "auto", "on"):
+                    return self._ok("indicators_invalid", error="oled_mode_invalid")
+                current_oled["mode"] = mode
             page = oled_request.get("page")
             if page is not None:
                 if page not in ("live_status", "sensor_snapshot", "recording_status"):
@@ -2497,14 +2593,6 @@ class App:
                 except Exception:
                     return self._ok("indicators_invalid", error="oled_contrast_invalid")
 
-        self._ensure_led()
-        if self.led:
-            # Probe optional OLED only when the requested config would actively use it.
-            oled_wants_enabled = bool(current_oled.get("enabled", True))
-            if oled_requested and oled_wants_enabled:
-                if not hasattr(self.led, "detect_oled") or not self.led.detect_oled():
-                    return self._ok("oled_not_detected", error="oled_not_detected")
-
         indicators = {
             "external_led": current_external,
             "oled": current_oled,
@@ -2515,11 +2603,13 @@ class App:
             self.led.configure(indicators)
             if hasattr(self.led, "set_context"):
                 self.led.set_context(self._indicator_context())
+            if self.boot_network_initialized or self.offline_standby or self.hardware_ready:
+                self._ensure_optional_indicators("set_indicators")
         return {
             "status": "ok",
             "message": "indicators_updated",
             "runtime": runtime,
-            "indicators": self._indicator_status(),
+            "indicators": self._indicator_status() or indicators,
             "reboot_required": False,
             "applied": True,
         }

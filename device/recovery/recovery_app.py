@@ -349,8 +349,70 @@ class RecoveryApp:
             return True
         return time.ticks_diff(now, self.reboot_deadline_ms) >= 0
 
+    def _command_now_ms(self):
+        try:
+            epoch = int(time.time())
+            if epoch > 1000000000:
+                return epoch * 1000
+        except Exception:
+            pass
+        return time.ticks_ms()
+
+    def _command_expired(self, request):
+        try:
+            expires_at_ms = int(request.get("expires_at_ms") or 0)
+        except Exception:
+            expires_at_ms = 0
+        if expires_at_ms <= 0:
+            return False
+        now_ms = self._command_now_ms()
+        epoch_cutoff = 100000000000
+        if expires_at_ms > epoch_cutoff or now_ms > epoch_cutoff:
+            if now_ms < epoch_cutoff:
+                return False
+            return now_ms >= expires_at_ms
+        return time.ticks_diff(now_ms, expires_at_ms) >= 0
+
+    def _wrong_mode(self, command, request, expected_mode=""):
+        return {
+            "status": "error",
+            "message": "wrong_mode",
+            "error": "wrong_mode",
+            "command": command,
+            "current_mode": "recovery",
+            "target_mode": str(request.get("target_mode", "") or ""),
+            "expected_mode": expected_mode,
+            "reboot_required": False,
+            "applied": False,
+        }
+
+    def _boot_command_guard(self, command, request):
+        if self._command_expired(request):
+            return {
+                "status": "error",
+                "message": "command_expired",
+                "error": "command_expired",
+                "command": command,
+                "reboot_required": False,
+                "applied": False,
+            }
+        target_mode = str(request.get("target_mode", "") or "").strip().lower()
+        if target_mode and target_mode != "recovery":
+            return self._wrong_mode(command, request, "recovery")
+        return None
+
     def _handle_request(self, request, addr):
         command = request.get("command", "status")
+
+        if command == "reboot_to_recovery":
+            guarded = self._boot_command_guard(command, request)
+            if guarded is not None:
+                return guarded
+            return self._wrong_mode(command, request, "normal")
+        if command == "reboot_to_os":
+            guarded = self._boot_command_guard(command, request)
+            if guarded is not None:
+                return guarded
 
         if command in ("status", "query"):
             runtime = self.config_store.load_runtime()
@@ -675,7 +737,12 @@ class RecoveryApp:
         }
 
     def _release_url(self, request):
-        return getattr(iconfig, "DEFAULT_RELEASE_URL", "")
+        release_url = str(request.get("release_url") or request.get("url") or "").strip()
+        if release_url:
+            return release_url
+        runtime = getattr(self, "runtime", {}) if isinstance(getattr(self, "runtime", {}), dict) else {}
+        release_url = str(runtime.get("update", {}).get("release_url", "") or "").strip()
+        return release_url or getattr(iconfig, "DEFAULT_RELEASE_URL", "")
 
     def _ensure_os_writer(self):
         if self.os_writer is None:
