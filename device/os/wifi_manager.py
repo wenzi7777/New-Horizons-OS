@@ -143,6 +143,7 @@ class WiFiManager:
         self.state = "wifi_link_no_ip"
         self.last_error = "dhcp_pending"
         self.last_connect_error = "dhcp_pending"
+        self.last_soft_retry_ms = self._ticks_ms()
         self._log_info("wifi_link_no_ip attempt={} status={} ip={}".format(attempt, status, ip))
         return False
 
@@ -189,31 +190,15 @@ class WiFiManager:
                 self.last_connect_error = "dhcp_pending"
                 self._log_info("wifi_dhcp_waiting status={} ip={}".format(status, ip))
 
-            retry_interval = int(getattr(config, "WIFI_SOFT_RETRY_MS", 30000))
+            retry_interval = int(getattr(
+                config,
+                "WIFI_DHCP_PENDING_RETRY_MS",
+                getattr(config, "WIFI_SOFT_RETRY_MS", 30000),
+            ))
             if self._ticks_diff(now_ms, self.last_soft_retry_ms) >= retry_interval:
                 self.last_soft_retry_ms = now_ms
                 threshold = int(getattr(config, "WIFI_HARD_RESET_AFTER_SOFT_RETRIES", 3))
-                first_link_no_ip_recovery = (
-                    not self.link_no_ip_hard_reset_done
-                    and self.last_connect_error == "dhcp_pending"
-                    and self.state in ("wifi_link_no_ip", "wifi_dhcp_waiting", "normal_boot")
-                )
-                if first_link_no_ip_recovery:
-                    self._log_warn(
-                        "wifi_recover_hard_reset reason=link_no_ip_first_recovery status={} ip={} free={}".format(
-                            status,
-                            ip,
-                            gc.mem_free(),
-                        )
-                    )
-                    self.link_no_ip_hard_reset_done = True
-                    self.hard_recoveries += 1
-                    self._reset_sta_interface()
-                    try:
-                        time.sleep_ms(300)
-                    except Exception:
-                        pass
-                elif self.soft_recoveries >= threshold:
+                if self.soft_recoveries >= threshold:
                     self._log_warn(
                         "wifi_recover_hard_reset reason=soft_retry_threshold status={} ip={} free={}".format(
                             status,
@@ -249,6 +234,28 @@ class WiFiManager:
             return False
 
         return False
+
+    def shutdown_for_reboot(self, reason="reboot"):
+        self._log_info("wifi_shutdown_for_reboot reason={}".format(reason))
+        try:
+            self.stop_setup_portal()
+        except Exception as exc:
+            self._log_warn("wifi_shutdown_portal_warning {}".format(exc))
+        if self.sta is not None:
+            try:
+                self.sta.disconnect()
+            except Exception:
+                pass
+            try:
+                self.sta.active(False)
+            except Exception as exc:
+                self._log_warn("wifi_shutdown_sta_warning {}".format(exc))
+        gc.collect()
+        self.state = "wifi_quiet"
+
+    def fallback_to_setup_portal(self, reason="connect_failed"):
+        self.shutdown_for_reboot(reason)
+        return self.start_setup_portal(reason)
 
     def diagnostics(self):
         sta = self.sta

@@ -55,13 +55,18 @@ class FakePinFactory:
         return types.SimpleNamespace(value=lambda: 0)
 
 
+class UnpressedPinFactory(FakePinFactory):
+    def __call__(self, *args, **kwargs):
+        return types.SimpleNamespace(value=lambda: 1)
+
+
 class LauncherWifiSetupModeTests(unittest.TestCase):
     def test_import_does_not_require_recovery_runtime_modules(self):
         injected = {
             "machine": types.SimpleNamespace(Pin=FakePinFactory(), reset=lambda: None),
             "immutable_config": types.SimpleNamespace(
                 ACTION_BUTTON_PIN=46,
-                BOOT_WINDOW_MS=3000,
+                BOOT_WINDOW_MS=0,
                 BOOT_WINDOW_POLL_MS=50,
                 DEFAULT_MODE="recovery",
                 DEVICE_STATE_DIR="device_state",
@@ -243,6 +248,48 @@ class LauncherWifiSetupModeTests(unittest.TestCase):
                 else:
                     sys.modules[name] = saved
 
+        self.assertEqual(recovery_calls, [(True, "")])
+
+    def test_wifi_setup_boot_request_forces_recovery_setup_portal(self):
+        recovery_calls = []
+        full_calls = []
+
+        injected = {
+            "machine": types.SimpleNamespace(Pin=UnpressedPinFactory()),
+            "immutable_config": types.SimpleNamespace(
+                ACTION_BUTTON_PIN=46,
+                BOOT_WINDOW_MS=0,
+                BOOT_WINDOW_POLL_MS=50,
+                DEFAULT_MODE="normal",
+                DEVICE_STATE_DIR="device_state",
+                LOG_PATH="device_state/logs/device.log",
+                OS_DIR="nhos",
+            ),
+            "recovery_app": types.SimpleNamespace(
+                run=lambda wifi_setup_requested=False, recovery_error="": recovery_calls.append(
+                    (wifi_setup_requested, recovery_error)
+                )
+            ),
+            "app": types.SimpleNamespace(
+                App=lambda wifi_setup_requested=False: types.SimpleNamespace(
+                    run=lambda: full_calls.append(wifi_setup_requested)
+                )
+            ),
+            "recovery": types.SimpleNamespace(run=lambda **kwargs: None),
+        }
+        module, saved_modules = load_launcher_module(injected)
+        try:
+            module._load_runtime = lambda: {"mode": "normal", "boot_request": "wifi_setup"}
+            module._exists = lambda path: path == "nhos/app.mpy"
+            module.run()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(full_calls, [])
         self.assertEqual(recovery_calls, [(True, "")])
 
     def test_normal_os_failure_schedules_recovery_reset_instead_of_inline_fallback(self):

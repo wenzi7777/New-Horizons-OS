@@ -154,6 +154,7 @@ class FakeWiFi:
         self.connect_result = connect_result
         self.findme_results = []
         self.service_connected = False
+        self.shutdown_calls = []
 
     def start_setup_portal(self, reason):
         self.setup_started.append(reason)
@@ -197,6 +198,11 @@ class FakeWiFi:
 
     def portal_status(self):
         return {"active": self.portal_active}
+
+    def shutdown_for_reboot(self, reason="reboot"):
+        self.shutdown_calls.append(reason)
+        self.connected = False
+        self.portal_active = False
 
     def run_findme(self, reason="manual"):
         self.findme_results.append(reason)
@@ -675,7 +681,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertIn("scan_start", events)
         self.assertIn("optional_indicators", events)
 
-    def test_post_write_first_boot_reboots_to_recovery_when_network_window_expires(self):
+    def test_post_write_first_boot_reboots_to_wifi_setup_after_network_window_expires(self):
         module, fake_scan, events, saved_modules = load_full_app_module(
             wifi_connect_result=False,
             os_state={"version": "v-os-test", "last_result": "applied"},
@@ -683,9 +689,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         )
         try:
             app = module.App(wifi_setup_requested=False)
+            module.time.ticks_ms = lambda: 5000
             app.setup()
 
-            app._service_post_write_network_priority(1001)
+            self.assertFalse(app._service_post_write_network_priority(5999))
+            app._service_post_write_network_priority(6000)
         finally:
             for name, saved in saved_modules.items():
                 if saved is None:
@@ -695,7 +703,8 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
         self.assertEqual(fake_scan.start_calls, 0)
         self.assertEqual(app.config_store.runtime["mode"], "recovery")
-        self.assertEqual(app.config_store.runtime["boot_request"], "recovery")
+        self.assertEqual(app.config_store.runtime["boot_request"], "wifi_setup")
+        self.assertEqual(app.wifi.shutdown_calls, ["post_write_network_priority_timeout"])
         self.assertEqual(module._test_reset_calls, [True])
 
     def test_deferred_wifi_service_starts_network_services_after_ip_ready(self):

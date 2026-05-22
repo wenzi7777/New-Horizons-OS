@@ -187,6 +187,7 @@ class App:
             self.offline_standby = True
             self.logger.warn("offline_standby_start reason=wifi_not_ready")
         if defer_local_services:
+            self.post_write_network_started_ms = time.ticks_ms()
             self.logger.warn("post_write_network_priority_defer_local_services")
         else:
             self._ensure_boot_local_services()
@@ -857,8 +858,10 @@ class App:
         timeout_ms = int(getattr(config, "POST_WRITE_NETWORK_RECOVERY_MS", 60000))
         if time.ticks_diff(now, self.post_write_network_started_ms) < timeout_ms:
             return False
-        self.logger.warn("post_write_network_priority_timeout reboot_to_recovery")
-        self.config_store.update_runtime({"mode": "recovery", "boot_request": "recovery"})
+        self.logger.warn("post_write_network_priority_timeout reboot_to_wifi_setup")
+        if hasattr(self.wifi, "shutdown_for_reboot"):
+            self.wifi.shutdown_for_reboot("post_write_network_priority_timeout")
+        self.config_store.update_runtime({"mode": "recovery", "boot_request": "wifi_setup"})
         try:
             time.sleep_ms(250)
         except Exception:

@@ -66,12 +66,19 @@ class RecoveryApp:
             )
         )
         wifi_ok = False
-        if self.wifi_setup_requested or not self._has_network_hint():
-            self.wifi.start_setup_portal("boot_window" if self.wifi_setup_requested else "missing_credentials")
+        runtime_wifi_setup_requested = self.runtime.get("boot_request") == "wifi_setup"
+        if self.wifi_setup_requested or runtime_wifi_setup_requested or not self._has_network_hint():
+            reason = "boot_window" if self.wifi_setup_requested else "boot_request" if runtime_wifi_setup_requested else "missing_credentials"
+            self.wifi.start_setup_portal(reason)
         else:
             wifi_ok = self.wifi.connect()
             if not wifi_ok:
-                if getattr(self.wifi, "state", "") not in ("wifi_link_no_ip", "wifi_dhcp_waiting"):
+                if getattr(self.wifi, "state", "") in ("wifi_link_no_ip", "wifi_dhcp_waiting"):
+                    if hasattr(self.wifi, "fallback_to_setup_portal"):
+                        self.wifi.fallback_to_setup_portal("dhcp_no_ip")
+                    else:
+                        self.wifi.start_setup_portal("dhcp_no_ip")
+                else:
                     self.wifi.start_setup_portal("connect_failed")
         if wifi_ok:
             self._run_findme("boot")

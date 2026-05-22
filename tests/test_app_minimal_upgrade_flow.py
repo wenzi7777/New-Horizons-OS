@@ -103,9 +103,13 @@ def load_recovery_app_module():
 class FakeConfigStore:
     def __init__(self, runtime):
         self.runtime = dict(runtime)
+        self.network = {"ssid": "saved", "password": "pw"}
 
     def load_runtime(self):
         return dict(self.runtime)
+
+    def load_network(self):
+        return dict(self.network)
 
     def update_runtime(self, patch):
         merged = dict(self.runtime)
@@ -550,6 +554,89 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         self.assertEqual(app.runtime["findme"]["last_error"], "")
         self.assertEqual(app.control_transport.reconfigure_calls, 1)
         self.assertIn("runtime_config_reloaded source=wifi_portal", app.logger.infos)
+
+    def test_recovery_direct_sta_link_no_ip_falls_back_to_setup_portal(self):
+        module = load_recovery_app_module()
+
+        class LinkNoIpWiFi:
+            def __init__(self):
+                self.state = "idle"
+                self.fallback_calls = []
+                self.findme_results = []
+
+            def connect(self):
+                self.state = "wifi_link_no_ip"
+                return False
+
+            def fallback_to_setup_portal(self, reason):
+                self.fallback_calls.append(reason)
+                self.state = "wifi_setup_active"
+                return True
+
+            def start_setup_portal(self, reason):
+                self.fallback_calls.append(reason)
+                self.state = "wifi_setup_active"
+                return True
+
+            def is_connected(self):
+                return False
+
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.device_name = "New Horizons OS"
+        app.device_uid = "UID123"
+        app.wifi_setup_requested = False
+        app.config_store = FakeConfigStore({"mode": "recovery"})
+        app.runtime = {"mode": "recovery"}
+        app.logger = FakeLogger()
+        app.wifi = LinkNoIpWiFi()
+        app.boot_network_initialized = False
+        app._os_installed = lambda: True
+        app._run_findme = lambda reason="boot": app.wifi.findme_results.append(reason)
+        app._announce_status = lambda *args, **kwargs: None
+
+        app.setup()
+
+        self.assertEqual(app.wifi.fallback_calls, ["dhcp_no_ip"])
+        self.assertFalse(app.boot_network_initialized)
+        self.assertEqual(app.wifi.findme_results, [])
+
+    def test_recovery_boot_request_wifi_setup_starts_portal_without_sta_connect(self):
+        module = load_recovery_app_module()
+
+        class PortalWiFi:
+            def __init__(self):
+                self.setup_started = []
+                self.connect_calls = 0
+
+            def start_setup_portal(self, reason):
+                self.setup_started.append(reason)
+                return True
+
+            def connect(self):
+                self.connect_calls += 1
+                return True
+
+            def is_connected(self):
+                return False
+
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.device_name = "New Horizons OS"
+        app.device_uid = "UID123"
+        app.wifi_setup_requested = False
+        app.config_store = FakeConfigStore({"mode": "recovery", "boot_request": "wifi_setup"})
+        app.runtime = {"mode": "recovery", "boot_request": "wifi_setup"}
+        app.logger = FakeLogger()
+        app.wifi = PortalWiFi()
+        app.boot_network_initialized = False
+        app._os_installed = lambda: True
+        app._run_findme = lambda reason="boot": None
+        app._announce_status = lambda *args, **kwargs: None
+
+        app.setup()
+
+        self.assertEqual(app.wifi.setup_started, ["boot_request"])
+        self.assertEqual(app.wifi.connect_calls, 0)
+        self.assertFalse(app.boot_network_initialized)
 
 
 if __name__ == "__main__":
