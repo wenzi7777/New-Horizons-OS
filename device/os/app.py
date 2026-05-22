@@ -793,10 +793,15 @@ class App:
         state = self._findme_status()
         server = (self.runtime or {}).get("server", {}) or {}
         host = str(server.get("host") or state.get("host") or "").strip()
+        last_error = str(state.get("last_error") or "")
         should_rediscover = (
             not host
-            or state.get("state") in ("rejected", "switching", "no_gateway")
-            or state.get("last_error") in ("device_rejected", "findme_no_gateway")
+            or state.get("state") in ("rejected", "switching", "no_gateway", "gateway_lost")
+            or last_error in ("device_rejected", "findme_no_gateway")
+            or last_error.startswith("findme_timeout")
+            or last_error.startswith("connect_failed:")
+            or last_error.startswith("recv_failed:")
+            or last_error.startswith("send_failed:")
         )
         long_attach_failure_ms = int(getattr(config, "GATEWAY_ATTACH_REDISCOVER_MS", 60000))
         if not should_rediscover and time.ticks_diff(now, self.last_findme_ms) < long_attach_failure_ms:

@@ -1,7 +1,7 @@
 FIRMWARE_NAME = "New Horizons OS"
 HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4"
 RUNTIME_VERSION = "v0.3.0"
-RECOVERY_VERSION = "v0.4.7"
+RECOVERY_VERSION = "v0.4.8"
 FIRMWARE_VERSION = RECOVERY_VERSION
 DEFAULT_MODE = "recovery"
 
@@ -41,6 +41,6 @@ DEFAULT_TARGET_FPS = 60
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 DEFAULT_MANIFESTS = {
-    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.7/device/recovery/manifest.json",
-    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.7/device/os/manifest.json",
+    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.8/device/recovery/manifest.json",
+    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.9/device/os/manifest.json",
 }

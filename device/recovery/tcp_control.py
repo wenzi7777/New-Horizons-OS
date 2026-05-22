@@ -7,8 +7,9 @@ class TCPControlTransport:
     MAX_PENDING = 8
     MAX_OUTBOX = 8
     FLUSH_BYTES_PER_POLL = 1024
-    RECONNECT_BACKOFF_MS = 2000
-    CONNECT_TIMEOUT_SEC = 1
+    RECONNECT_BACKOFF_MS = 5000
+    RECONNECT_BACKOFF_MAX_MS = 30000
+    CONNECT_TIMEOUT_SEC = 0.5
     RECV_CHUNK = 512
     WOULD_BLOCK_ERRNOS = (11, 115)
 
@@ -23,7 +24,8 @@ class TCPControlTransport:
         self.rx = b""
         self.pending = []
         self.outbox = []
-        self.last_attempt_ms = 0
+        self.last_attempt_ms = -self.RECONNECT_BACKOFF_MS
+        self.connect_failures = 0
         self.hello_sent = False
         self.findme_state = "idle"
         self.findme_gateway_id = ""
@@ -96,7 +98,8 @@ class TCPControlTransport:
             self.findme_state = "gateway_lost"
 
     def reconfigure(self):
-        self.last_attempt_ms = 0
+        self.last_attempt_ms = -self.RECONNECT_BACKOFF_MS
+        self.connect_failures = 0
         self.close()
 
     def ensure_connected(self, wifi_connected):
@@ -115,7 +118,7 @@ class TCPControlTransport:
                 return self._send_hello()
             return True
         now = self._ticks_ms()
-        if self._ticks_diff(now, self.last_attempt_ms) < self.RECONNECT_BACKOFF_MS:
+        if self._ticks_diff(now, self.last_attempt_ms) < self._connect_backoff_ms():
             return False
         self.last_attempt_ms = now
         self.close()
@@ -129,12 +132,28 @@ class TCPControlTransport:
             self.sock_key = key
             self.findme_state = "attaching"
             self.findme_last_error = ""
+            self.connect_failures = 0
             self._info("findme_attach_start host={} port={}".format(host, port))
             return self._send_hello()
         except Exception as exc:
-            self._warn("tcp_control_connect_failed {}".format(exc))
+            self.connect_failures += 1
+            self._mark_gateway_lost("connect_failed:{}".format(exc))
+            self._warn("tcp_control_connect_failed {} next_retry_ms={}".format(exc, self._connect_backoff_ms()))
             self.close()
             return False
+
+    def _connect_backoff_ms(self):
+        base = int(self.RECONNECT_BACKOFF_MS)
+        if self.connect_failures <= 0:
+            return base
+        shift = min(int(self.connect_failures) - 1, 6)
+        delay = base * (1 << shift)
+        return min(delay, int(self.RECONNECT_BACKOFF_MAX_MS))
+
+    def _mark_gateway_lost(self, error):
+        if self.findme_state != "rejected":
+            self.findme_state = "gateway_lost"
+        self.findme_last_error = str(error or "gateway_lost")
 
     def _send_hello(self):
         payload = {}

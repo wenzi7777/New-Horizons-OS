@@ -152,6 +152,7 @@ class FakeWiFi:
         self.events = events if events is not None else []
         self.state = "idle"
         self.connect_result = connect_result
+        self.findme_results = []
 
     def start_setup_portal(self, reason):
         self.setup_started.append(reason)
@@ -178,6 +179,7 @@ class FakeWiFi:
         return {"active": self.portal_active}
 
     def run_findme(self, reason="manual"):
+        self.findme_results.append(reason)
         return {
             "ok": True,
             "host": "127.0.0.1",
@@ -1185,6 +1187,43 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertIsNone(app.calibration)
         self.assertIn("filesystem_api_load", events)
         self.assertNotIn("calibration_store_load", events)
+
+    def test_findme_retries_quickly_after_gateway_timeout_or_lost_connection(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module(
+            runtime_override={
+                "server": {"host": "192.168.1.153", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": "local-gateway"},
+                "findme": {"host": "192.168.1.153", "gateway_id": "local-gateway", "last_error": "findme_timeout:[Errno 116] ETIMEDOUT"},
+            }
+        )
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.wifi.connected = True
+            app.control_transport = types.SimpleNamespace(
+                is_connected=lambda: False,
+                findme_status=lambda: {
+                    "state": "gateway_lost",
+                    "host": "192.168.1.153",
+                    "last_error": "connect_failed:[Errno 116] ETIMEDOUT",
+                    "connected": False,
+                },
+                reconfigure=lambda: None,
+            )
+            app.udp_stream = types.SimpleNamespace(reconfigure=lambda: None)
+            app.last_findme_ms = 0
+            module.time.ticks_diff = lambda now, then: now - then
+
+            skipped = app._service_findme(4999)
+            retried = app._service_findme(5000)
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertFalse(skipped)
+        self.assertTrue(retried)
+        self.assertEqual(app.wifi.findme_results, ["retry"])
 
     def test_recovery_check_and_write_require_explicit_resource_release(self):
         writer_calls = []

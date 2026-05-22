@@ -132,6 +132,61 @@ class TCPControlLoggingTest(unittest.TestCase):
         self.assertIn(b'"seq":2', joined)
         self.assertIn(b'"request_id":"r-1"', joined)
 
+    def test_failed_connect_uses_exponential_backoff_and_reports_gateway_lost(self):
+        class FailingSocket:
+            def settimeout(self, _timeout):
+                pass
+
+            def connect(self, _addr):
+                attempts.append(now_ms[0])
+                raise OSError(116, "ETIMEDOUT")
+
+            def close(self):
+                pass
+
+        class FakeSocketModule:
+            def getaddrinfo(self, host, port):
+                return [(None, None, None, None, (host, port))]
+
+            def socket(self):
+                return FailingSocket()
+
+        for relative_path in ("device/os/tcp_control.py", "device/recovery/tcp_control.py"):
+            with self.subTest(path=relative_path):
+                module = load_module(relative_path)
+                original_socket = module.socket
+                attempts = []
+                now_ms = [0]
+                module.socket = FakeSocketModule()
+                logger = FakeLogger()
+                transport = module.TCPControlTransport(lambda: {"server": {"host": "192.168.1.153", "tcp_port": 22345}}, "ABC", logger)
+                transport._ticks_ms = lambda: now_ms[0]
+                base_backoff = int(transport.RECONNECT_BACKOFF_MS)
+                try:
+                    self.assertFalse(transport.ensure_connected(True))
+                    self.assertEqual(attempts, [0])
+                    self.assertEqual(transport.findme_status()["state"], "gateway_lost")
+                    self.assertIn("connect_failed", transport.findme_status()["last_error"])
+
+                    now_ms[0] = base_backoff - 1
+                    self.assertFalse(transport.ensure_connected(True))
+                    self.assertEqual(attempts, [0])
+
+                    now_ms[0] = base_backoff
+                    self.assertFalse(transport.ensure_connected(True))
+                    self.assertEqual(attempts, [0, base_backoff])
+
+                    now_ms[0] = base_backoff * 2 - 1
+                    self.assertFalse(transport.ensure_connected(True))
+                    self.assertEqual(attempts, [0, base_backoff])
+
+                    now_ms[0] = base_backoff * 3
+                    self.assertFalse(transport.ensure_connected(True))
+                    self.assertEqual(attempts, [0, base_backoff, base_backoff * 3])
+                    self.assertLessEqual(len(logger.warns), 3)
+                finally:
+                    module.socket = original_socket
+
 
 if __name__ == "__main__":
     unittest.main()
