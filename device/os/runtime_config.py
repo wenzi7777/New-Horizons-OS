@@ -45,12 +45,13 @@ DEFAULT_RUNTIME = {
     },
     "indicators": {
         "external_led": {
-            "mode": "off",
+            "enabled": bool(getattr(config, "ENABLE_EXTERNAL_LED", True)),
+            "mode": "auto",
             "manual_preset": "stream_health",
             "brightness": float(getattr(config, "EXTERNAL_LED_DEFAULT_BRIGHTNESS", 0.35)),
         },
         "oled": {
-            "mode": "off",
+            "enabled": bool(getattr(config, "ENABLE_OLED", True)),
             "page": getattr(config, "OLED_DEFAULT_PAGE", "live_status"),
             "update_hz": int(getattr(config, "OLED_DEFAULT_UPDATE_HZ", 1)),
             "contrast": int(getattr(config, "OLED_DEFAULT_CONTRAST", 128)),

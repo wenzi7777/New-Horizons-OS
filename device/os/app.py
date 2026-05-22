@@ -5,7 +5,6 @@ import gc
 
 import config
 import board_pins
-import storage
 
 from device_identity import get_device_id, get_device_name, get_device_uid, get_packet_device_uid_bytes
 from device_logging import DeviceLogger
@@ -26,12 +25,6 @@ class App:
         self.maintenance_reason = ""
         self.last_connect_ms = 0
         self.boot_network_initialized = False
-        self.boot_local_services_initialized = False
-        self.offline_standby = False
-        self.optional_indicators_initialized = False
-        self.post_write_network_priority = False
-        self.post_write_network_started_ms = 0
-        self.post_write_os_version = ""
         self.hardware_ready = False
         self.scan_ready = False
 
@@ -85,14 +78,12 @@ class App:
         self.last_ntp_retry_ms = 0
         self.last_status_announce_ms = 0
         self.last_findme_ms = 0
-        self.last_wifi_service_ms = 0
         self.reboot_deadline_ms = None
         self.send_backoff_until_ms = 0
         self.last_gc_frame_id = 0
 
         self.sent_packets = 0
         self.failed_sends = 0
-        self._init_post_write_network_priority()
 
         if self._has_pending_matrix_layout():
             self.last_matrix_start_failed = True
@@ -115,49 +106,6 @@ class App:
                     "last_error": "previous_scan_session_interrupted",
                 },
             })
-
-    def _os_state_path(self):
-        return config.DEVICE_STATE_DIR + "/os_state.json"
-
-    def _load_os_state(self):
-        data = storage.load_json(self._os_state_path(), {})
-        return data if isinstance(data, dict) else {}
-
-    def _save_os_state(self, state):
-        storage.save_json(self._os_state_path(), state)
-
-    def _init_post_write_network_priority(self):
-        state = self._load_os_state()
-        if state.get("last_result") != "applied":
-            return
-        version = str(state.get("version") or getattr(config, "FIRMWARE_VERSION", "") or "")
-        if not version:
-            return
-        if state.get("network_ready_version") == version:
-            return
-        self.post_write_network_priority = True
-        self.post_write_network_started_ms = time.ticks_ms()
-        self.post_write_os_version = version
-        self.logger.warn("post_write_network_priority_start version={}".format(version))
-
-    def _post_write_network_priority_pending(self):
-        return bool(self.post_write_network_priority and not self.boot_network_initialized)
-
-    def _mark_post_write_network_ready(self, reason):
-        if not self.post_write_network_priority:
-            return
-        state = self._load_os_state()
-        version = self.post_write_os_version or str(state.get("version") or getattr(config, "FIRMWARE_VERSION", "") or "")
-        if version:
-            state["network_ready_version"] = version
-        state["network_ready_reason"] = reason
-        try:
-            state["network_ready_ms"] = int(time.ticks_ms())
-        except Exception:
-            state["network_ready_ms"] = 0
-        self._save_os_state(state)
-        self.post_write_network_priority = False
-        self.logger.info("post_write_network_priority_done version={} reason={}".format(version, reason))
 
     def setup(self):
         self.logger.info("setup_start")
@@ -182,20 +130,27 @@ class App:
             if not wifi_ok:
                 self.logger.warn("setup_wifi_connect_failed_offline")
 
-        defer_local_services = self._post_write_network_priority_pending() and not wifi_ok and not self.wifi.setup_active()
-        if not wifi_ok and not self.wifi.setup_active() and not defer_local_services:
-            self.offline_standby = True
-            self.logger.warn("offline_standby_start reason=wifi_not_ready")
-        if defer_local_services:
-            self.post_write_network_started_ms = time.ticks_ms()
-            self.logger.warn("post_write_network_priority_defer_local_services")
-        else:
-            self._ensure_boot_local_services()
+        self._ensure_led()
+        self._ensure_action_button()
+        if self.led:
+            self.logger.info("setup_led_begin_start")
+            self.led.begin()
+            if hasattr(self.led, "configure"):
+                self.led.configure(self.runtime.get("indicators", {}))
+            self.logger.info("setup_led_begin_done")
+            self.logger.info("setup_led_boot_window_start")
+            self.led.set_boot_window()
+            self.logger.info("setup_led_boot_window_done")
+            self._log_memory_stage("led")
+            if self.wifi.setup_active():
+                self.led.set_wifi_setup()
 
         if wifi_ok:
             self._run_findme("boot")
             self._log_memory_stage("findme")
             self._ensure_streaming_services()
+
+        if wifi_ok:
             self.logger.info("setup_ntp_sync_start")
             self._sync_time()
             self.logger.info("setup_ntp_sync_done")
@@ -203,15 +158,8 @@ class App:
             self._announce_status(force=True)
             self.logger.info("setup_status_announce_done")
             self._log_memory_stage("after_status")
-            self._mark_post_write_network_ready("boot")
-
-        self.boot_network_initialized = wifi_ok
-        defer_runtime_hardware = defer_local_services or self.offline_standby
-        if not self.wifi.setup_active() and not defer_runtime_hardware:
             self._ensure_runtime_hardware()
-            self._ensure_optional_indicators_if_operational()
-        elif self.offline_standby:
-            self._ensure_optional_indicators_if_operational()
+        self.boot_network_initialized = wifi_ok
 
         self.update_led_state()
         self.logger.info("setup_done")
@@ -232,9 +180,13 @@ class App:
                 self.control_transport.poll(self.wifi.is_connected(), self._handle_control_request)
             self._service_offline_state(now)
             self._service_action_button(now)
-            connected = self._service_wifi_connection(now)
-            if not connected:
-                self._service_post_write_network_priority(now)
+            if self.wifi.is_connected() and not self.boot_network_initialized:
+                self.boot_network_initialized = True
+                self._run_findme("wifi_connected")
+                self._ensure_streaming_services()
+                self._sync_time()
+                self._announce_status(now, force=True)
+                self.update_led_state()
             self._service_findme(now)
 
             if (self.boot_network_initialized
@@ -242,7 +194,6 @@ class App:
                     and not self.wifi.setup_active()
                     and not self._in_maintenance()):
                 self._ensure_runtime_hardware()
-                self._ensure_optional_indicators_if_operational()
                 self.update_led_state()
 
             if (not self._in_maintenance()
@@ -269,6 +220,19 @@ class App:
                 self._clear_tx_buffer()
             else:
                 self.handle_transmit()
+
+            if (not self.wifi.is_connected()
+                    and not self.wifi.setup_active()
+                    and self._has_network_hint()
+                    and time.ticks_diff(now, self.last_connect_ms) >= 10000):
+                self.last_connect_ms = now
+                wifi_ok = self.wifi.connect()
+                if wifi_ok:
+                    self._run_findme("wifi_reconnect")
+                    self.update_led_state()
+                else:
+                    self.logger.warn("wifi_reconnect_failed_offline")
+                    self.update_led_state()
 
             if self.led and time.ticks_diff(now, self.last_led_ms) >= led_interval:
                 self.last_led_ms = now
@@ -616,36 +580,6 @@ class App:
         except Exception as exc:
             return {"error": str(exc)}
 
-    def _optional_indicators_allowed(self):
-        if self.led is None:
-            return False
-        if self.wifi.setup_active() or self._in_maintenance() or self._recovery_update_low_resource_active():
-            return False
-        return bool(self.boot_network_initialized or self.offline_standby)
-
-    def _ensure_optional_indicators_if_operational(self):
-        if not self._optional_indicators_allowed():
-            return False
-        if not hasattr(self.led, "ensure_optional_indicators"):
-            return False
-        try:
-            self.led.ensure_optional_indicators()
-            self.optional_indicators_initialized = True
-            return True
-        except Exception as exc:
-            self.logger.warn("optional_indicators_init_failed {}".format(exc))
-            return False
-
-    def _release_optional_indicators(self, reason="released"):
-        if self.led is None or not hasattr(self.led, "release_optional_indicators"):
-            self.optional_indicators_initialized = False
-            return
-        try:
-            self.led.release_optional_indicators(reason)
-        except Exception as exc:
-            self.logger.warn("optional_indicators_release_failed {}".format(exc))
-        self.optional_indicators_initialized = False
-
     def _ensure_action_button(self):
         if self.action_button is not None:
             return
@@ -654,25 +588,6 @@ class App:
         except Exception as exc:
             self.logger.warn("action_button_init_failed {}".format(exc))
             self.action_button = None
-
-    def _ensure_boot_local_services(self):
-        if self.boot_local_services_initialized:
-            return
-        self._ensure_led()
-        self._ensure_action_button()
-        if self.led:
-            self.logger.info("setup_led_begin_start")
-            self.led.begin()
-            if hasattr(self.led, "configure"):
-                self.led.configure(self.runtime.get("indicators", {}))
-            self.logger.info("setup_led_begin_done")
-            self.logger.info("setup_led_boot_window_start")
-            self.led.set_boot_window()
-            self.logger.info("setup_led_boot_window_done")
-            self._log_memory_stage("led")
-            if self.wifi.setup_active():
-                self.led.set_wifi_setup()
-        self.boot_local_services_initialized = True
 
     def _button_pressed(self):
         if self.action_button is None:
@@ -780,6 +695,7 @@ class App:
             self.logger.warn("offline_recording_no_layout")
             return False
         try:
+            self._ensure_streaming_services()
             self._ensure_runtime_hardware()
             return bool(self.scan_ready)
         except Exception as exc:
@@ -826,48 +742,6 @@ class App:
             gc.collect()
         self.update_led_state()
         return result
-
-    def _service_wifi_connection(self, now):
-        if self.wifi.setup_active() or not self._has_network_hint():
-            return False
-        if hasattr(self.wifi, "service_connection"):
-            connected = self.wifi.service_connection(now_ms=now)
-        else:
-            connected = self.wifi.is_connected()
-        if connected and not self.boot_network_initialized:
-            was_post_write_priority = self.post_write_network_priority
-            self.boot_network_initialized = True
-            self.offline_standby = False
-            self._run_findme("wifi_connected")
-            self._ensure_streaming_services()
-            self._sync_time()
-            self._announce_status(now, force=True)
-            self._mark_post_write_network_ready("wifi_connected")
-            if was_post_write_priority:
-                self._ensure_boot_local_services()
-                self._ensure_runtime_hardware()
-                self._ensure_optional_indicators_if_operational()
-            self.update_led_state()
-        return bool(connected)
-
-    def _service_post_write_network_priority(self, now):
-        if not self._post_write_network_priority_pending():
-            return False
-        if self.wifi.setup_active() or self.wifi.is_connected():
-            return False
-        timeout_ms = int(getattr(config, "POST_WRITE_NETWORK_RECOVERY_MS", 60000))
-        if time.ticks_diff(now, self.post_write_network_started_ms) < timeout_ms:
-            return False
-        self.logger.warn("post_write_network_priority_timeout reboot_to_wifi_setup")
-        if hasattr(self.wifi, "shutdown_for_reboot"):
-            self.wifi.shutdown_for_reboot("post_write_network_priority_timeout")
-        self.config_store.update_runtime({"mode": "recovery", "boot_request": "wifi_setup"})
-        try:
-            time.sleep_ms(250)
-        except Exception:
-            pass
-        machine.reset()
-        return True
 
     def _handle_findme_switch_gateway(self, request):
         preferred_gateway_id = str(request.get("preferred_gateway_id") or request.get("gateway_id") or "").strip()
@@ -1009,8 +883,7 @@ class App:
         self._apply_logging_config(self.runtime.get("logging", {}))
         self.filter_config = self.config_store.load_filter()
         self._apply_matrix_layout()
-        if self.time_sync is not None:
-            self.time_sync.servers = list(self.runtime.get("ntp_servers", []))
+        self.time_sync.servers = list(self.runtime.get("ntp_servers", []))
 
     def _authorized(self, addr):
         return bool(addr and addr[0] == "tcp")
@@ -1023,14 +896,8 @@ class App:
         cmd = request.get("command", request.get("cmd", "")).strip().lower()
         if not cmd:
             return self._ok("missing_command", error="missing_command")
-        if self._command_expired(request):
-            return self._ok("command_expired", error="command_expired", command=cmd)
-        mode_error = self._boot_command_mode_error(cmd, request)
-        if mode_error is not None:
-            return mode_error
         if not self._recovery_update_low_resource_active():
-            if cmd != "release_recovery_resources":
-                self._ensure_streaming_services()
+            self._ensure_streaming_services()
         elif cmd not in self._low_resource_allowed_commands():
             return self._ok(
                 "low_resource_command_disabled",
@@ -1038,15 +905,7 @@ class App:
                 next_command="reboot",
             )
 
-        if cmd == "reboot_to_os":
-            return self._ok(
-                "wrong_mode",
-                error="wrong_mode",
-                current_mode=self.mode,
-                allowed_modes=["recovery"],
-            )
-
-        if cmd in ("check_os_release", "write_os"):
+        if cmd in ("check_os_release", "write_os", "reboot_to_os"):
             return {
                 "status": "error",
                 "message": "requires_recovery",
@@ -1102,9 +961,6 @@ class App:
 
         if cmd == "release_recovery_resources":
             return self._release_recovery_resources()
-
-        if cmd == "service_control":
-            return self._handle_service_control(request)
 
         if cmd == "reload_config":
             self._apply_runtime_reload()
@@ -1666,22 +1522,6 @@ class App:
             return self._recovery_resources_required()
         release_url = self._release_url(request)
         self._prepare_recovery_update_mode()
-        current = self._current_update_state()
-        self._set_update_state({
-            "phase": "downloading",
-            "operation": "write_recovery",
-            "version": current.get("version", ""),
-            "total_files": 0,
-            "applied_files": 0,
-            "downloaded_files": 0,
-            "skipped_files": 0,
-            "deleted_files": 0,
-            "current_file": "release manifest",
-            "last_error": "",
-            "last_result": "starting",
-            "reboot_required": False,
-        })
-        self._publish_update_progress("recovery_write_progress", status="ok")
         writer = self._new_recovery_writer()
         try:
             result = writer.write_release(release_url)
@@ -1739,40 +1579,17 @@ class App:
         return result
 
     def _release_recovery_resources(self):
-        if self._recovery_update_low_resource_active():
-            return {
-                "status": "ok",
-                "message": "minimal_system_started",
-                "mode": "minimal",
-                "recovery_update_low_resource": True,
-                "next_commands": ["check_recovery_release", "write_recovery"],
-                "memory": self._memory_status(),
-                "services": self._services_status(),
-                "reboot_required": False,
-                "applied": True,
-            }
-        if self.mode != "normal":
-            return {
-                "status": "error",
-                "message": "minimal_system_requires_normal",
-                "mode": self.mode,
-                "recovery_update_low_resource": False,
-                "next_command": "reboot_to_os",
-                "reboot_required": False,
-                "applied": False,
-            }
-        self.mode = "minimal"
+        self.mode = "normal"
         self.maintenance_reason = ""
         self._prepare_recovery_update_mode()
         memory = self._memory_status()
         return {
             "status": "ok",
-            "message": "minimal_system_started",
+            "message": "recovery_resources_released",
             "mode": self.mode,
             "recovery_update_low_resource": True,
             "next_commands": ["check_recovery_release", "write_recovery"],
             "memory": memory,
-            "services": self._services_status(),
             "reboot_required": False,
             "applied": True,
         }
@@ -1802,7 +1619,6 @@ class App:
                 self.offline_recorder.stop("recovery_update")
             except Exception:
                 pass
-        self._release_optional_indicators("recovery_update")
         if self.led is not None:
             try:
                 if hasattr(self.led, "set_updating"):
@@ -1901,9 +1717,6 @@ class App:
         operation = str(payload.get("operation", "write_recovery") or "write_recovery")
         phase = "done" if raw_phase == "complete" else "downloading"
         last_result = "applied" if raw_phase == "complete" else raw_phase
-        current_file = payload.get("current_file", "")
-        if raw_phase == "planned" and not current_file:
-            current_file = "release manifest"
         self._set_update_state({
             "phase": phase,
             "operation": operation,
@@ -1912,7 +1725,7 @@ class App:
             "applied_files": min(total, downloaded + skipped) if total else downloaded + skipped,
             "downloaded_files": downloaded,
             "skipped_files": skipped,
-            "current_file": "" if raw_phase == "complete" else current_file,
+            "current_file": "" if raw_phase == "complete" else payload.get("current_file", ""),
             "last_error": "",
             "last_result": last_result,
             "reboot_required": raw_phase == "complete",
@@ -1933,7 +1746,7 @@ class App:
             "device_id": self.device_uid,
             "device_uid": self.device_uid,
             "device_name": self.device_name,
-            "mode": self.mode or runtime.get("mode", "normal"),
+            "mode": runtime.get("mode", "normal"),
             "update_state": self._current_update_state(),
             "reboot_required": self.reboot_required,
         }
@@ -2006,8 +1819,6 @@ class App:
             "os_version": getattr(config, "FIRMWARE_VERSION", "unknown"),
             "recovery_version": self._recovery_version(),
             "recovery_update_low_resource": self._recovery_update_low_resource_active(),
-            "offline_standby": bool(self.offline_standby),
-            "optional_indicators_initialized": bool(self.optional_indicators_initialized),
         }
 
     def _memory_status(self):
@@ -2031,7 +1842,6 @@ class App:
         }
 
     def _memory_status_response(self):
-        wifi = self._wifi_diagnostics()
         return {
             "status": "ok",
             "message": "memory_status",
@@ -2041,8 +1851,6 @@ class App:
             "device_uid": self.device_uid,
             "device_name": self.device_name,
             "memory": self._memory_status(),
-            "wifi": wifi,
-            "wifi_state": wifi.get("wifi_state", getattr(self.wifi, "state", "")),
             "findme": {
                 "connected": bool(self.control_transport is not None and self.control_transport.is_connected()),
                 "state": self._findme_status().get("state", ""),
@@ -2054,7 +1862,6 @@ class App:
             "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "reboot_required": False,
             "applied": False,
-            "services": self._services_status(),
         }
 
     def _scan_stats(self):
@@ -2134,7 +1941,6 @@ class App:
             "failed_sends": int(self.failed_sends),
             "stream": stream,
             "control": self._control_health(),
-            "wifi": self._wifi_diagnostics(),
         }
         if include_memory:
             memory = self._memory_status()
@@ -2163,227 +1969,8 @@ class App:
             "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "reboot_required": False,
             "applied": False,
-            "services": self._services_status(),
         })
         return result
-
-    def _service_entry(self, service_id, label, running, actions=(), status="", detail=""):
-        return {
-            "id": service_id,
-            "label": label,
-            "running": bool(running),
-            "status": status or ("running" if running else "stopped"),
-            "detail": detail or "",
-            "actions": list(actions or ()),
-        }
-
-    def _service_actions(self, running, can_start=True, can_stop=True, can_restart=True):
-        actions = []
-        if running:
-            if can_stop:
-                actions.append("stop")
-            if can_restart:
-                actions.append("restart")
-        elif can_start:
-            actions.append("start")
-        return actions
-
-    def _services_status(self):
-        findme = self._findme_status()
-        logging_status = self._logging_status()
-        offline = self._offline_recording_status()
-        time_status = self.time_sync.status() if self.time_sync is not None else {}
-        return [
-            self._service_entry(
-                "matrix_scan",
-                "Matrix scan",
-                self.scan_ready and not self._in_maintenance(),
-                self._service_actions(self.scan_ready and not self._in_maintenance()),
-                "active" if self.scan_ready and not self._in_maintenance() else "stopped",
-                "{}x{}".format(len(self._active_rows()), len(self._active_cols())),
-            ),
-            self._service_entry(
-                "udp_stream",
-                "UDP stream",
-                self.udp_stream is not None,
-                self._service_actions(self.udp_stream is not None),
-                "active" if self.udp_stream is not None else "stopped",
-                "sent={} failed={}".format(int(self.sent_packets), int(self.failed_sends)),
-            ),
-            self._service_entry(
-                "gateway_control",
-                "Gateway control",
-                self.control_transport is not None and self.control_transport.is_connected(),
-                ("restart",),
-                str(findme.get("state") or ("attached" if self.control_transport is not None else "stopped")),
-                str(findme.get("gateway_id") or findme.get("last_error") or ""),
-            ),
-            self._service_entry(
-                "time_sync",
-                "Time sync",
-                self.time_sync is not None,
-                self._service_actions(self.time_sync is not None),
-                "synced" if time_status.get("synced") else ("running" if self.time_sync is not None else "stopped"),
-                str(time_status.get("last_error") or ""),
-            ),
-            self._service_entry(
-                "imu",
-                "IMU",
-                self.imu is not None,
-                self._service_actions(self.imu is not None, can_start=bool(getattr(config, "ENABLE_IMU", False))),
-                "enabled" if self.imu is not None else "stopped",
-            ),
-            self._service_entry(
-                "battery",
-                "Battery",
-                self.battery is not None,
-                self._service_actions(self.battery is not None, can_start=bool(getattr(config, "ENABLE_BATTERY", False))),
-                self._battery_status(refresh=False).get("state", "") if self.battery is not None else "stopped",
-            ),
-            self._service_entry(
-                "indicators",
-                "Indicators",
-                self.led is not None,
-                self._service_actions(self.led is not None, can_start=bool(getattr(config, "ENABLE_LED", False))),
-                self._indicator_status().get("state", "running") if self.led is not None else "stopped",
-            ),
-            self._service_entry(
-                "logging",
-                "Logging",
-                bool(logging_status.get("enabled", True)),
-                self._service_actions(bool(logging_status.get("enabled", True)), can_restart=False),
-                "enabled" if logging_status.get("enabled", True) else "disabled",
-                str(logging_status.get("capacity", "")),
-            ),
-            self._service_entry(
-                "offline_recorder",
-                "Offline recorder",
-                bool(offline.get("active")),
-                ("stop",) if offline.get("active") else (),
-                "active" if offline.get("active") else "idle",
-                str(offline.get("stop_reason") or offline.get("error") or ""),
-            ),
-        ]
-
-    def _ensure_udp_stream_service(self):
-        if self.udp_stream is None:
-            from udp_stream import UDPStreamTransport
-            self.udp_stream = UDPStreamTransport(lambda: self.runtime, self.logger)
-        if self.udp_rate is None:
-            from utils import RateCounter
-            self.udp_rate = RateCounter(1000)
-
-    def _ensure_time_sync_service(self):
-        if self.time_sync is None:
-            from time_sync import TimeSync
-            self.time_sync = TimeSync(self.runtime.get("ntp_servers", []))
-
-    def _handle_service_control(self, request):
-        service = str(request.get("service", "") or "").strip()
-        action = str(request.get("action", "") or "").strip()
-        if service not in (
-                "matrix_scan",
-                "udp_stream",
-                "gateway_control",
-                "time_sync",
-                "imu",
-                "battery",
-                "indicators",
-                "logging",
-                "offline_recorder"):
-            return self._ok("service_control_failed", error="service_unknown", service=service, action=action, services=self._services_status())
-        if action not in ("start", "stop", "restart"):
-            return self._ok("service_control_failed", error="service_action_invalid", service=service, action=action, services=self._services_status())
-
-        try:
-            if service == "matrix_scan":
-                if action in ("stop", "restart"):
-                    self._stop_scan()
-                if action in ("start", "restart"):
-                    if not self.hardware_ready:
-                        self._ensure_runtime_hardware()
-                    else:
-                        self._start_scan_if_configured(force=True)
-            elif service == "udp_stream":
-                if action in ("stop", "restart") and self.udp_stream is not None:
-                    try:
-                        self.udp_stream.close()
-                    except Exception:
-                        pass
-                    self.udp_stream = None
-                if action in ("start", "restart"):
-                    self._ensure_udp_stream_service()
-            elif service == "gateway_control":
-                if action != "restart":
-                    return self._ok("service_control_failed", error="service_action_unsupported", service=service, action=action, services=self._services_status())
-                self._run_findme("service_control")
-            elif service == "time_sync":
-                if action in ("stop", "restart"):
-                    self.time_sync = None
-                if action in ("start", "restart"):
-                    self._ensure_time_sync_service()
-                    self._sync_time()
-            elif service == "imu":
-                if not getattr(config, "ENABLE_IMU", False):
-                    return self._ok("service_control_failed", error="service_disabled", service=service, action=action, services=self._services_status())
-                if action in ("stop", "restart"):
-                    self.imu = None
-                    self.latest_imu = None
-                if action in ("start", "restart"):
-                    from bmi270 import BMI270
-                    self.imu = BMI270()
-                    self.imu.begin()
-            elif service == "battery":
-                if not getattr(config, "ENABLE_BATTERY", False):
-                    return self._ok("service_control_failed", error="service_disabled", service=service, action=action, services=self._services_status())
-                if action in ("stop", "restart"):
-                    self.battery = None
-                    self.latest_battery = None
-                if action in ("start", "restart"):
-                    from bq25180 import BQ25180
-                    self.battery = BQ25180()
-                    self.battery.begin()
-            elif service == "indicators":
-                if not getattr(config, "ENABLE_LED", False):
-                    return self._ok("service_control_failed", error="service_disabled", service=service, action=action, services=self._services_status())
-                if action in ("stop", "restart") and self.led is not None:
-                    self._release_optional_indicators("service_control")
-                    try:
-                        if hasattr(self.led, "off"):
-                            self.led.off()
-                    except Exception:
-                        pass
-                    self.led = None
-                if action in ("start", "restart"):
-                    self._ensure_led()
-                    if self.led:
-                        self.led.begin()
-                        if hasattr(self.led, "configure"):
-                            self.led.configure(self.runtime.get("indicators", {}))
-                        self._ensure_optional_indicators_if_operational()
-            elif service == "logging":
-                if action == "stop":
-                    self._set_logging({"enabled": False, "capacity": self._logging_status().get("capacity", "default")})
-                else:
-                    self._set_logging({"enabled": True, "capacity": self._logging_status().get("capacity", "default")})
-            elif service == "offline_recorder":
-                if action not in ("stop", "restart"):
-                    return self._ok("service_control_failed", error="service_action_unsupported", service=service, action=action, services=self._services_status())
-                if self.offline_recorder is not None:
-                    self.offline_recorder.stop("manual_service_control")
-        except Exception as exc:
-            return self._ok("service_control_failed", error=str(exc), service=service, action=action, services=self._services_status())
-
-        return {
-            "status": "ok",
-            "message": "service_control_applied",
-            "service": service,
-            "action": action,
-            "mode": self.mode,
-            "services": self._services_status(),
-            "reboot_required": False,
-            "applied": True,
-        }
 
     def _log_memory_stage(self, stage):
         try:
@@ -2406,24 +1993,8 @@ class App:
             "last_setup_result": getattr(self.wifi, "last_setup_result", ""),
         }
 
-    def _wifi_diagnostics(self):
-        if hasattr(self.wifi, "diagnostics"):
-            try:
-                data = dict(self.wifi.diagnostics() or {})
-            except Exception:
-                data = {}
-        else:
-            data = {}
-        data.setdefault("wifi_state", getattr(self.wifi, "state", ""))
-        data.setdefault("connected", bool(self.wifi.is_connected()))
-        data.setdefault("last_error", getattr(self.wifi, "last_error", ""))
-        data.setdefault("last_connect_error", data.get("last_error", ""))
-        data.setdefault("ifconfig", ("0.0.0.0", "0.0.0.0", "0.0.0.0", "0.0.0.0"))
-        return data
-
     def _hello_status(self):
         runtime = self.runtime if isinstance(self.runtime, dict) else {}
-        wifi = self._wifi_diagnostics()
         return {
             "status": "ok",
             "message": "hello",
@@ -2450,9 +2021,6 @@ class App:
             },
             "findme": self._findme_status(),
             "wifi_connected": self.wifi.is_connected(),
-            "wifi_state": wifi.get("wifi_state", ""),
-            "wifi": wifi,
-            "services": self._services_status(),
         }
 
     def _file_call(self, fn, *args):
@@ -2465,7 +2033,6 @@ class App:
         recorder_status = self._offline_recording_status()
         scan_stats = self._scan_stats()
         stream_stats = self._stream_stats()
-        wifi = self._wifi_diagnostics()
         return {
             "status": "ok",
             "message": "status",
@@ -2479,8 +2046,7 @@ class App:
             "device_name": self.device_name,
             "system": self._system_status(),
             "memory": self._memory_status(),
-            "wifi_state": wifi.get("wifi_state", self.wifi.state),
-            "wifi": wifi,
+            "wifi_state": self.wifi.state,
             "wifi_setup": self._wifi_setup_status_light(),
             "ntp": self.time_sync.status() if self.time_sync is not None else {},
             "filter": self.config_store.load_filter(),
@@ -2505,13 +2071,11 @@ class App:
             "stream": stream_stats,
             "scan_health": self._scan_health(include_memory=False, stats=scan_stats, stream=stream_stats),
             "offline_recording": recorder_status,
-            "services": self._services_status(),
         }
 
     def _status_announce_payload(self):
         runtime = self.runtime if isinstance(self.runtime, dict) else {}
         recorder_status = self._offline_recording_status()
-        wifi = self._wifi_diagnostics()
         return {
             "status": "ok",
             "message": "status_announce",
@@ -2536,8 +2100,7 @@ class App:
                 "matrix_scan_state": runtime.get("matrix_scan_state", {}),
                 "system": runtime.get("system", {}),
             },
-            "wifi_state": wifi.get("wifi_state", self.wifi.state),
-            "wifi": wifi,
+            "wifi_state": self.wifi.state,
             "wifi_connected": self.wifi.is_connected(),
             "findme": self._findme_status(),
             "logging": self._logging_status(),
@@ -2550,7 +2113,6 @@ class App:
             "failed_sends": self.failed_sends,
             "scan_health": self._scan_health(include_memory=False),
             "offline_recording": recorder_status,
-            "services": self._services_status(),
         }
 
     def _maintenance_status(self):
@@ -2586,58 +2148,6 @@ class App:
         }
         result.update(extra)
         return result
-
-    def _command_expired(self, request):
-        try:
-            expires_at = int(request.get("expires_at_ms") or 0)
-        except Exception:
-            expires_at = 0
-        if expires_at <= 0:
-            return False
-        now_ms = self._epoch_ms()
-        if now_ms <= 0:
-            return False
-        return now_ms > expires_at
-
-    def _epoch_ms(self):
-        try:
-            seconds = int(time.time())
-        except Exception:
-            return 0
-        if seconds < 1700000000:
-            return 0
-        return seconds * 1000
-
-    def _boot_command_mode_error(self, cmd, request):
-        if cmd not in ("reboot_to_os", "reboot_to_recovery"):
-            return None
-        target_mode = str(request.get("target_mode") or "").strip().lower()
-        current_mode = str(getattr(self, "mode", "normal") or "normal").strip().lower()
-        if target_mode and target_mode != current_mode:
-            return self._ok(
-                "wrong_mode",
-                error="wrong_mode",
-                current_mode=current_mode,
-                target_mode=target_mode,
-                command=cmd,
-            )
-        if cmd == "reboot_to_recovery" and current_mode not in ("normal", "minimal"):
-            return self._ok(
-                "wrong_mode",
-                error="wrong_mode",
-                current_mode=current_mode,
-                allowed_modes=["normal", "minimal"],
-                command=cmd,
-            )
-        if cmd == "reboot_to_os":
-            return self._ok(
-                "wrong_mode",
-                error="wrong_mode",
-                current_mode=current_mode,
-                allowed_modes=["recovery"],
-                command=cmd,
-            )
-        return None
 
     def _in_maintenance(self):
         return getattr(self, "mode", "normal") == "maintenance"
@@ -2762,7 +2272,7 @@ class App:
     def _ensure_runtime_hardware(self):
         if self.hardware_ready:
             return
-        self._ensure_local_runtime_services()
+        self._ensure_streaming_services()
 
         self._start_scan_if_configured()
 
@@ -2920,19 +2430,8 @@ class App:
     def _set_indicators(self, request):
         runtime = self.runtime if isinstance(self.runtime, dict) else {}
         current = runtime.get("indicators", {}) or {}
-        current_external = {
-            "mode": "off",
-            "manual_preset": "stream_health",
-            "brightness": float(getattr(config, "EXTERNAL_LED_DEFAULT_BRIGHTNESS", 0.35)),
-        }
-        current_external.update(dict(current.get("external_led", {}) or {}))
-        current_oled = {
-            "mode": "off",
-            "page": getattr(config, "OLED_DEFAULT_PAGE", "live_status"),
-            "update_hz": int(getattr(config, "OLED_DEFAULT_UPDATE_HZ", 1)),
-            "contrast": int(getattr(config, "OLED_DEFAULT_CONTRAST", 128)),
-        }
-        current_oled.update(dict(current.get("oled", {}) or {}))
+        current_external = dict(current.get("external_led", {}) or {})
+        current_oled = dict(current.get("oled", {}) or {})
 
         external_request = request.get("external_led", {})
         if not isinstance(external_request, dict):
@@ -2941,14 +2440,16 @@ class App:
         if not isinstance(oled_request, dict):
             oled_request = {}
 
+        if "external_led_enabled" in request:
+            external_request["enabled"] = request.get("external_led_enabled")
         if "external_led_mode" in request:
             external_request["mode"] = request.get("external_led_mode")
         if "manual_preset" in request:
             external_request["manual_preset"] = request.get("manual_preset")
         if "external_led_brightness" in request:
             external_request["brightness"] = request.get("external_led_brightness")
-        if "oled_mode" in request:
-            oled_request["mode"] = request.get("oled_mode")
+        if "oled_enabled" in request:
+            oled_request["enabled"] = request.get("oled_enabled")
         if "oled_page" in request:
             oled_request["page"] = request.get("oled_page")
         if "oled_update_hz" in request:
@@ -2957,9 +2458,11 @@ class App:
             oled_request["contrast"] = request.get("oled_contrast")
 
         if external_request:
+            if "enabled" in external_request:
+                current_external["enabled"] = bool(external_request.get("enabled"))
             mode = external_request.get("mode")
             if mode is not None:
-                if mode not in ("off", "on"):
+                if mode not in ("auto", "manual"):
                     return self._ok("indicators_invalid", error="external_led_mode_invalid")
                 current_external["mode"] = mode
             preset = external_request.get("manual_preset")
@@ -2976,11 +2479,8 @@ class App:
 
         oled_requested = bool(oled_request)
         if oled_requested:
-            mode = oled_request.get("mode")
-            if mode is not None:
-                if mode not in ("off", "auto", "on"):
-                    return self._ok("indicators_invalid", error="oled_mode_invalid")
-                current_oled["mode"] = mode
+            if "enabled" in oled_request:
+                current_oled["enabled"] = bool(oled_request.get("enabled"))
             page = oled_request.get("page")
             if page is not None:
                 if page not in ("live_status", "sensor_snapshot", "recording_status"):
@@ -2997,26 +2497,24 @@ class App:
                 except Exception:
                     return self._ok("indicators_invalid", error="oled_contrast_invalid")
 
+        self._ensure_led()
+        if self.led:
+            # Probe optional OLED only when the requested config would actively use it.
+            oled_wants_enabled = bool(current_oled.get("enabled", True))
+            if oled_requested and oled_wants_enabled:
+                if not hasattr(self.led, "detect_oled") or not self.led.detect_oled():
+                    return self._ok("oled_not_detected", error="oled_not_detected")
+
         indicators = {
             "external_led": current_external,
             "oled": current_oled,
         }
         runtime = self.config_store.update_runtime({"indicators": indicators})
         self.runtime = runtime
-        if (self.led is None
-                and getattr(config, "ENABLE_LED", False)
-                and not self.wifi.setup_active()
-                and not self._in_maintenance()
-                and not self._recovery_update_low_resource_active()
-                and (self.boot_network_initialized or self.offline_standby)):
-            self._ensure_led()
-            if self.led:
-                self.led.begin()
         if self.led:
             self.led.configure(indicators)
             if hasattr(self.led, "set_context"):
                 self.led.set_context(self._indicator_context())
-            self._ensure_optional_indicators_if_operational()
         return {
             "status": "ok",
             "message": "indicators_updated",
@@ -3312,41 +2810,29 @@ class App:
             self.vdboard.scan.update_battery_cache(self.latest_battery)
 
     def _ensure_streaming_services(self):
-        self._ensure_rate_counters()
-        if self.control_transport is not None and self.udp_stream is not None and self.time_sync is not None:
+        if self.control_transport is not None and self.udp_stream is not None:
             return
         from tcp_control import TCPControlTransport
         from udp_stream import UDPStreamTransport
         from time_sync import TimeSync
-
-        if self.control_transport is None:
-            self.control_transport = TCPControlTransport(
-                lambda: self.runtime,
-                self.device_uid,
-                self.logger,
-                self._hello_status,
-                self._handle_findme_event,
-            )
-        if self.udp_stream is None:
-            self.udp_stream = UDPStreamTransport(lambda: self.runtime, self.logger)
-        if self.time_sync is None:
-            self.time_sync = TimeSync(self.runtime.get("ntp_servers", []))
-
-    def _ensure_rate_counters(self):
-        if self.scan_rate is not None and self.udp_rate is not None:
-            return
         from utils import RateCounter
-        if self.scan_rate is None:
-            self.scan_rate = RateCounter(1000)
-        if self.udp_rate is None:
-            self.udp_rate = RateCounter(1000)
 
-    def _ensure_local_runtime_services(self):
-        self._ensure_rate_counters()
-        if config.ENABLE_IMU and self.imu is None:
+        self.control_transport = TCPControlTransport(
+            lambda: self.runtime,
+            self.device_uid,
+            self.logger,
+            self._hello_status,
+            self._handle_findme_event,
+        )
+        self.udp_stream = UDPStreamTransport(lambda: self.runtime, self.logger)
+        self.time_sync = TimeSync(self.runtime.get("ntp_servers", []))
+        self.scan_rate = RateCounter(1000)
+        self.udp_rate = RateCounter(1000)
+
+        if config.ENABLE_IMU:
             from bmi270 import BMI270
             self.imu = BMI270()
-        if config.ENABLE_BATTERY and self.battery is None:
+        if config.ENABLE_BATTERY:
             from bq25180 import BQ25180
             self.battery = BQ25180()
 

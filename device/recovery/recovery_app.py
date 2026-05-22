@@ -66,20 +66,12 @@ class RecoveryApp:
             )
         )
         wifi_ok = False
-        runtime_wifi_setup_requested = self.runtime.get("boot_request") == "wifi_setup"
-        if self.wifi_setup_requested or runtime_wifi_setup_requested or not self._has_network_hint():
-            reason = "boot_window" if self.wifi_setup_requested else "boot_request" if runtime_wifi_setup_requested else "missing_credentials"
-            self.wifi.start_setup_portal(reason)
+        if self.wifi_setup_requested or not self._has_network_hint():
+            self.wifi.start_setup_portal("boot_window" if self.wifi_setup_requested else "missing_credentials")
         else:
             wifi_ok = self.wifi.connect()
             if not wifi_ok:
-                if getattr(self.wifi, "state", "") in ("wifi_link_no_ip", "wifi_dhcp_waiting"):
-                    if hasattr(self.wifi, "fallback_to_setup_portal"):
-                        self.wifi.fallback_to_setup_portal("dhcp_no_ip")
-                    else:
-                        self.wifi.start_setup_portal("dhcp_no_ip")
-                else:
-                    self.wifi.start_setup_portal("connect_failed")
+                self.wifi.start_setup_portal("connect_failed")
         if wifi_ok:
             self._run_findme("boot")
             self._announce_status(force=True)
@@ -92,14 +84,21 @@ class RecoveryApp:
             self._service_wifi_setup_portal()
             self.control_transport.poll(self.wifi.is_connected(), self._handle_request)
 
-            if hasattr(self.wifi, "service_connection") and not self.wifi.is_connected() and not self.wifi.setup_active() and self._has_network_hint():
-                self.wifi.service_connection(now_ms=now)
-
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
                 self._run_findme("wifi_connected")
                 self._announce_status(now, force=True)
             self._service_findme(now)
+
+            if (not self.wifi.is_connected()
+                    and not self.wifi.setup_active()
+                    and self._has_network_hint()
+                    and time.ticks_diff(now, self.last_connect_ms) >= 10000):
+                self.last_connect_ms = now
+                if self.wifi.connect():
+                    self._run_findme("wifi_reconnect")
+                else:
+                    self.wifi.start_setup_portal("reconnect_failed")
 
             self._announce_status(now)
             if self.reboot_required and self._reboot_due(now):
@@ -307,7 +306,6 @@ class RecoveryApp:
         return ok
 
     def _status_payload(self):
-        wifi = self._wifi_diagnostics()
         return {
             "status": "ok",
             "message": "status_announce",
@@ -320,8 +318,6 @@ class RecoveryApp:
             "runtime": self.runtime,
             "findme": self._findme_status(),
             "wifi_connected": self.wifi.is_connected(),
-            "wifi_state": wifi.get("wifi_state", ""),
-            "wifi": wifi,
             "wifi_setup": self.wifi.portal_status(),
             "update_state": self._current_update_state(),
             "recovery_error": self.recovery_error,
@@ -329,7 +325,6 @@ class RecoveryApp:
         }
 
     def _hello_payload(self):
-        wifi = self._wifi_diagnostics()
         return {
             "status": "ok",
             "message": "hello",
@@ -345,8 +340,6 @@ class RecoveryApp:
             },
             "findme": self._findme_status(),
             "wifi_connected": self.wifi.is_connected(),
-            "wifi_state": wifi.get("wifi_state", ""),
-            "wifi": wifi,
             "recovery_error": self.recovery_error,
             "reboot_required": self.reboot_required,
         }
@@ -356,86 +349,11 @@ class RecoveryApp:
             return True
         return time.ticks_diff(now, self.reboot_deadline_ms) >= 0
 
-    def _ok(self, message, applied=False, reboot_required=False, error="", **extra):
-        result = {
-            "status": "ok" if not error else "error",
-            "message": message,
-            "reboot_required": reboot_required,
-            "applied": applied,
-            "error": error,
-        }
-        result.update(extra)
-        return result
-
-    def _command_expired(self, request):
-        try:
-            expires_at = int(request.get("expires_at_ms") or 0)
-        except Exception:
-            expires_at = 0
-        if expires_at <= 0:
-            return False
-        now_ms = self._epoch_ms()
-        if now_ms <= 0:
-            return False
-        return now_ms > expires_at
-
-    def _epoch_ms(self):
-        try:
-            seconds = int(time.time())
-        except Exception:
-            return 0
-        if seconds < 1700000000:
-            return 0
-        return seconds * 1000
-
-    def _boot_command_mode_error(self, command, request):
-        if command not in ("reboot_to_os", "reboot_to_recovery"):
-            return None
-        target_mode = str(request.get("target_mode") or "").strip().lower()
-        if target_mode and target_mode != "recovery":
-            return self._ok(
-                "wrong_mode",
-                error="wrong_mode",
-                current_mode="recovery",
-                target_mode=target_mode,
-                command=command,
-            )
-        if command == "reboot_to_recovery":
-            return self._ok(
-                "wrong_mode",
-                error="wrong_mode",
-                current_mode="recovery",
-                allowed_modes=["normal", "minimal"],
-                command=command,
-            )
-        return None
-
-    def _wifi_diagnostics(self):
-        if hasattr(self.wifi, "diagnostics"):
-            try:
-                data = dict(self.wifi.diagnostics() or {})
-            except Exception:
-                data = {}
-        else:
-            data = {}
-        data.setdefault("wifi_state", getattr(self.wifi, "state", ""))
-        data.setdefault("connected", bool(self.wifi.is_connected()))
-        data.setdefault("last_error", getattr(self.wifi, "last_error", ""))
-        data.setdefault("last_connect_error", data.get("last_error", ""))
-        data.setdefault("ifconfig", ("0.0.0.0", "0.0.0.0", "0.0.0.0", "0.0.0.0"))
-        return data
-
     def _handle_request(self, request, addr):
-        command = str(request.get("command", "status") or "status").strip().lower()
-        if self._command_expired(request):
-            return self._ok("command_expired", error="command_expired", command=command)
-        mode_error = self._boot_command_mode_error(command, request)
-        if mode_error is not None:
-            return mode_error
+        command = request.get("command", "status")
 
         if command in ("status", "query"):
             runtime = self.config_store.load_runtime()
-            wifi = self._wifi_diagnostics()
             return {
                 "status": "ok",
                 "message": "recovery_status",
@@ -450,8 +368,6 @@ class RecoveryApp:
                 "findme": self._findme_status(),
                 "logging": self._logging_status(),
                 "wifi_connected": self.wifi.is_connected(),
-                "wifi_state": wifi.get("wifi_state", ""),
-                "wifi": wifi,
                 "wifi_setup": self.wifi.portal_status(),
                 "update_state": self._current_update_state(),
                 "recovery_error": self.recovery_error,
@@ -543,15 +459,6 @@ class RecoveryApp:
             self.reboot_required = True
             self.reboot_deadline_ms = None
             return {"status": "ok", "message": "reboot_to_os_scheduled", "reboot_required": True}
-
-        if command == "reboot_to_recovery":
-            return self._ok(
-                "wrong_mode",
-                error="wrong_mode",
-                current_mode="recovery",
-                allowed_modes=["normal", "minimal"],
-                command=command,
-            )
 
         if command == "read_logs":
             max_lines = int(request.get("max_lines", 50))
@@ -746,7 +653,6 @@ class RecoveryApp:
 
     def _memory_status_response(self):
         findme = self._findme_status()
-        wifi = self._wifi_diagnostics()
         return {
             "status": "ok",
             "message": "memory_status",
@@ -756,8 +662,6 @@ class RecoveryApp:
             "device_uid": self.device_uid,
             "device_name": self.device_name,
             "memory": self._memory_status(),
-            "wifi": wifi,
-            "wifi_state": wifi.get("wifi_state", ""),
             "findme": {
                 "connected": bool(self.control_transport is not None and self.control_transport.is_connected()),
                 "state": findme.get("state", ""),
@@ -771,12 +675,7 @@ class RecoveryApp:
         }
 
     def _release_url(self, request):
-        requested = str((request or {}).get("release_url") or "").strip()
-        if requested:
-            return requested
-        runtime = self.runtime if isinstance(self.runtime, dict) else {}
-        release_url = runtime.get("update", {}).get("release_url", "")
-        return release_url or getattr(iconfig, "DEFAULT_RELEASE_URL", "")
+        return getattr(iconfig, "DEFAULT_RELEASE_URL", "")
 
     def _ensure_os_writer(self):
         if self.os_writer is None:

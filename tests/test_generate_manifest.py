@@ -148,6 +148,15 @@ class GenerateManifestTests(unittest.TestCase):
             "umqtt/__init__.py",
         } <= deletes)
 
+    def test_v0416_rollback_keeps_os_app_mpy_near_v0410_size(self):
+        manifest_path = REPO_ROOT / "device" / "os" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        files = {item["path"]: item for item in manifest.get("files", [])}
+
+        self.assertEqual(manifest["version"], "v0.4.16")
+        self.assertEqual(manifest["firmware_version"], "v0.4.16")
+        self.assertLess(files["app.mpy"]["size"], 47000)
+
 
 if __name__ == "__main__":
     unittest.main()

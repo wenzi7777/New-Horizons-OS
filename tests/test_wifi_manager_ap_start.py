@@ -63,65 +63,6 @@ class FakeSTA:
         return None
 
 
-class SlowDhcpSTA(FakeSTA):
-    def __init__(self, connected_after_polls=25):
-        super().__init__()
-        self.connected_after_polls = connected_after_polls
-        self.polls = 0
-        self.connecting = False
-        self.reset_count = 0
-
-    def active(self, value=None):
-        result = super().active(value)
-        if value is False:
-            self.connected = False
-            self.connecting = False
-            self.polls = 0
-            self.reset_count += 1
-        return result
-
-    def disconnect(self):
-        super().disconnect()
-        self.connected = False
-        self.connecting = False
-        self.polls = 0
-
-    def connect(self, ssid, password):
-        self.calls.append(("connect", ssid, password))
-        self.connected = False
-        self.connecting = True
-        self.polls = 0
-
-    def isconnected(self):
-        if self.connecting:
-            self.polls += 1
-            if self.polls >= self.connected_after_polls:
-                self.connected = True
-                self.connecting = False
-        return self.connected
-
-    def status(self):
-        return 1010 if self.connected else 1001
-
-    def ifconfig(self):
-        if self.connected:
-            return super().ifconfig()
-        return ("0.0.0.0", "0.0.0.0", "0.0.0.0", "0.0.0.0")
-
-
-class LinkNoIpSTA(SlowDhcpSTA):
-    def __init__(self):
-        super().__init__(connected_after_polls=1000000)
-        self.disconnect_count = 0
-
-    def disconnect(self):
-        self.disconnect_count += 1
-        super().disconnect()
-
-    def status(self):
-        return 1000
-
-
 class FakeNetwork(types.SimpleNamespace):
     AP_IF = 1
     STA_IF = 0
@@ -226,7 +167,6 @@ def load_wifi_manager(channel, include_os_dir=True):
         GATEWAY_DISCOVERY_ATTEMPTS=2,
         GATEWAY_DISCOVERY_RETRY_MS=5000,
         DEFAULT_RELEASE_URL="https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
-        WIFI_DHCP_PENDING_RETRY_MS=120000,
     )
     if include_os_dir:
         config_values["OS_DIR"] = "nhos"
@@ -320,77 +260,6 @@ class WiFiManagerApStartTests(unittest.TestCase):
 
         self.assertTrue(ok)
         self.assertEqual(module._test_portal_instances, [])
-
-    def test_full_channel_waits_for_slow_dhcp_without_resetting_sta(self):
-        module, fake_network = load_wifi_manager("full")
-        fake_network.sta = SlowDhcpSTA(connected_after_polls=25)
-        manager = module.WiFiManager()
-
-        ok = manager.connect_sta("TestWiFi", "pw")
-
-        self.assertTrue(ok)
-        self.assertEqual(fake_network.sta.reset_count, 0)
-        self.assertEqual(manager.state, "wifi_connected")
-
-    def test_minimal_channel_waits_for_slow_dhcp_without_resetting_sta(self):
-        module, fake_network = load_wifi_manager("minimal")
-        fake_network.sta = SlowDhcpSTA(connected_after_polls=25)
-        manager = module.WiFiManager()
-
-        ok = manager.connect_sta("TestWiFi", "pw")
-
-        self.assertTrue(ok)
-        self.assertEqual(fake_network.sta.reset_count, 0)
-        self.assertEqual(manager.state, "wifi_connected")
-
-    def test_full_channel_link_no_ip_returns_recoverable_state_without_reset(self):
-        module, fake_network = load_wifi_manager("full")
-        fake_network.sta = LinkNoIpSTA()
-        manager = module.WiFiManager()
-
-        ok = manager.connect_sta("TestWiFi", "pw")
-
-        self.assertFalse(ok)
-        self.assertEqual(manager.state, "wifi_link_no_ip")
-        self.assertEqual(manager.last_error, "dhcp_pending")
-        self.assertEqual(fake_network.sta.reset_count, 0)
-        self.assertEqual(manager.diagnostics()["wifi_state"], "wifi_link_no_ip")
-        self.assertEqual(manager.diagnostics()["ifconfig"][0], "0.0.0.0")
-
-    def test_minimal_channel_wifi_service_keeps_dhcp_pending_link_quiet(self):
-        module, fake_network = load_wifi_manager("minimal")
-        fake_network.sta = LinkNoIpSTA()
-        manager = module.WiFiManager()
-
-        manager.connect_sta("TestWiFi", "pw")
-        connect_calls_before = len([call for call in fake_network.sta.calls if call[0] == "connect"])
-        disconnect_calls_before = fake_network.sta.disconnect_count
-
-        self.assertFalse(manager.service_connection(now_ms=5000))
-        self.assertEqual(fake_network.sta.reset_count, 0)
-        self.assertFalse(manager.service_connection(now_ms=30000))
-        connect_calls_after = len([call for call in fake_network.sta.calls if call[0] == "connect"])
-        self.assertEqual(connect_calls_after, connect_calls_before)
-        self.assertEqual(fake_network.sta.disconnect_count, disconnect_calls_before)
-        self.assertEqual(fake_network.sta.reset_count, 0)
-        self.assertEqual(manager.diagnostics()["hard_recoveries"], 0)
-
-    def test_full_channel_wifi_service_keeps_first_link_no_ip_recovery_quiet(self):
-        module, fake_network = load_wifi_manager("full")
-        fake_network.sta = LinkNoIpSTA()
-        manager = module.WiFiManager()
-
-        manager.connect_sta("TestWiFi", "pw")
-        connect_calls_before = len([call for call in fake_network.sta.calls if call[0] == "connect"])
-        disconnect_calls_before = fake_network.sta.disconnect_count
-
-        self.assertEqual(fake_network.sta.reset_count, 0)
-        self.assertFalse(manager.service_connection(now_ms=30000))
-        connect_calls_after = len([call for call in fake_network.sta.calls if call[0] == "connect"])
-        self.assertEqual(connect_calls_after, connect_calls_before)
-        self.assertEqual(fake_network.sta.disconnect_count, disconnect_calls_before)
-        self.assertEqual(fake_network.sta.reset_count, 0)
-        self.assertEqual(manager.diagnostics()["hard_recoveries"], 0)
 
     def test_minimal_channel_activates_ap_before_config(self):
         module, fake_network = load_wifi_manager("minimal")

@@ -150,9 +150,7 @@ def run():
         os_installed = _exists(iconfig.OS_DIR + "/app.mpy")
         logger.info("launcher_mode={} os_installed={} boot_request={}".format(mode, os_installed, boot_request))
 
-        if boot_request == "wifi_setup":
-            _run_recovery(wifi_setup_requested=True)
-        elif boot_request == "recovery" or mode == "recovery":
+        if boot_request == "recovery" or mode == "recovery":
             _run_recovery(wifi_setup_requested=wifi_setup_requested)
         elif os_installed:
             sys.path.insert(0, iconfig.OS_DIR)

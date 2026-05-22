@@ -153,8 +153,6 @@ class FakeWiFi:
         self.state = "idle"
         self.connect_result = connect_result
         self.findme_results = []
-        self.service_connected = False
-        self.shutdown_calls = []
 
     def start_setup_portal(self, reason):
         self.setup_started.append(reason)
@@ -168,41 +166,17 @@ class FakeWiFi:
     def connect(self):
         self.events.append("wifi_connect")
         self.connected = bool(self.connect_result)
-        self.state = "wifi_connected" if self.connected else "wifi_link_no_ip"
+        self.state = "connected" if self.connected else "offline"
         return self.connected
 
     def is_connected(self):
         return self.connected
-
-    def service_connection(self, now_ms=None):
-        self.events.append(("wifi_service", now_ms))
-        if self.service_connected:
-            self.connected = True
-            self.state = "wifi_connected"
-        return self.connected
-
-    def diagnostics(self):
-        return {
-            "wifi_state": self.state,
-            "sta_status": 1001 if self.connected else 1000,
-            "ifconfig": ("192.168.1.50", "255.255.255.0", "192.168.1.1", "8.8.8.8") if self.connected else ("0.0.0.0", "0.0.0.0", "0.0.0.0", "0.0.0.0"),
-            "rssi": -42 if self.connected else 0,
-            "bssid": "",
-            "channel": 0,
-            "connect_attempts": 1,
-            "last_connect_error": "" if self.connected else "dhcp_pending",
-        }
 
     def service_setup_portal(self):
         return None
 
     def portal_status(self):
         return {"active": self.portal_active}
-
-    def shutdown_for_reboot(self, reason="reboot"):
-        self.shutdown_calls.append(reason)
-        self.connected = False
-        self.portal_active = False
 
     def run_findme(self, reason="manual"):
         self.findme_results.append(reason)
@@ -255,31 +229,10 @@ class FakeLED:
     def __init__(self, events=None):
         self.events = events if events is not None else []
         self.states = []
-        self.configured = []
-        self.optional_calls = 0
 
     def begin(self):
         self.events.append("led_begin")
         pass
-
-    def configure(self, indicators):
-        self.events.append(("led_configure", indicators))
-        self.configured.append(indicators)
-
-    def ensure_optional_indicators(self):
-        self.events.append("optional_indicators")
-        self.optional_calls += 1
-        return True
-
-    def release_optional_indicators(self, reason="released"):
-        self.events.append(("optional_indicators_released", reason))
-
-    def status(self):
-        return {
-            "state": self.states[-1] if self.states else "off",
-            "external_led": {"mode": "off"},
-            "oled": {"mode": "off", "active": False},
-        }
 
     def set_boot_window(self):
         self.events.append("led_boot_window")
@@ -361,32 +314,11 @@ class FakeIMU:
         return (0, 0, 0, 0, 0, 0, 0)
 
 
-def load_full_app_module(
-    runtime_override=None,
-    update_check=None,
-    enable_led=False,
-    enable_battery=False,
-    enable_imu=False,
-    wifi_connect_result=True,
-    os_state=None,
-    post_write_recovery_ms=60000,
-):
+def load_full_app_module(runtime_override=None, update_check=None, enable_led=False, enable_battery=False, enable_imu=False, wifi_connect_result=True):
     events = []
     fake_scan = NativePacketScan(events)
     fake_vdboard = types.SimpleNamespace(scan=fake_scan)
     saved_modules = {}
-    reset_calls = []
-    storage_state = dict(os_state or {})
-
-    class FakePin:
-        IN = 0
-        PULL_UP = 1
-
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def value(self):
-            return 1
 
     class ForbiddenMqttModule(types.ModuleType):
         def __getattr__(self, name):
@@ -464,21 +396,8 @@ def load_full_app_module(
             read_file=lambda *args: None,
         )
 
-    def fake_load_json(path, default=None):
-        if path == "device_state/os_state.json":
-            return dict(storage_state) if storage_state else default
-        return default
-
-    def fake_save_json(path, data):
-        if path == "device_state/os_state.json":
-            storage_state.clear()
-            storage_state.update(dict(data))
-
     injected = {
-        "machine": types.SimpleNamespace(
-            reset=lambda: reset_calls.append(True),
-            Pin=FakePin,
-        ),
+        "machine": types.SimpleNamespace(reset=lambda: None),
         "immutable_config": types.SimpleNamespace(
             FIRMWARE_VERSION="v-recovery-test",
             RECOVERY_VERSION="v-recovery-test",
@@ -518,9 +437,8 @@ def load_full_app_module(
             DATA_FILES_DIR="data/files",
             DATA_LOG_DIR="data/logs",
             DATA_TMP_DIR="data/tmp",
-            POST_WRITE_NETWORK_RECOVERY_MS=post_write_recovery_ms,
         ),
-        "board_pins": types.SimpleNamespace(validate_pins=lambda: {}, ACTION_BUTTON_PIN=46),
+        "board_pins": types.SimpleNamespace(validate_pins=lambda: {}),
         "vdboard": fake_vdboard,
         "calibration_store": types.SimpleNamespace(CalibrationStore=fake_calibration_store),
         "device_identity": types.SimpleNamespace(
@@ -540,10 +458,6 @@ def load_full_app_module(
         "packet_buffer": types.SimpleNamespace(PacketBuffer=lambda **kwargs: None),
         "runtime_config": types.SimpleNamespace(
             RuntimeConfigStore=lambda root: FakeRuntimeConfigStore(runtime_override)
-        ),
-        "storage": types.SimpleNamespace(
-            load_json=fake_load_json,
-            save_json=fake_save_json,
         ),
         "time_sync": types.SimpleNamespace(
             TimeSync=lambda servers: types.SimpleNamespace(
@@ -577,9 +491,6 @@ def load_full_app_module(
         spec.loader.exec_module(module)
         module.time.ticks_ms = lambda: 0
         module.time.ticks_diff = lambda now, then: now - then
-        module.time.sleep_ms = lambda _ms: None
-        module._test_storage_state = storage_state
-        module._test_reset_calls = reset_calls
         return module, fake_scan, events, saved_modules
     except Exception:
         for name, saved in saved_modules.items():
@@ -622,194 +533,6 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         boot_order = [event for event in events if event in ("wifi_connect", "scan_start")]
         self.assertEqual(boot_order[:2], ["wifi_connect", "scan_start"])
 
-    def test_normal_boot_enters_offline_standby_when_wifi_link_has_no_ip(self):
-        module, fake_scan, events, saved_modules = load_full_app_module(wifi_connect_result=False)
-        try:
-            app = module.App(wifi_setup_requested=False)
-            app.setup()
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        boot_order = [event for event in events if event in ("wifi_connect", "scan_start")]
-        self.assertEqual(boot_order, ["wifi_connect"])
-        self.assertTrue(app.offline_standby)
-        self.assertFalse(app.hardware_ready)
-        self.assertEqual(fake_scan.start_calls, 0)
-        self.assertFalse(app.boot_network_initialized)
-        self.assertIsNone(app.control_transport)
-        self.assertIsNone(app.udp_stream)
-
-    def test_post_write_first_boot_defers_local_services_until_network_ready(self):
-        module, fake_scan, events, saved_modules = load_full_app_module(
-            wifi_connect_result=False,
-            enable_led=True,
-            enable_battery=True,
-            enable_imu=True,
-            os_state={"version": "v-os-test", "last_result": "applied"},
-        )
-        try:
-            app = module.App(wifi_setup_requested=False)
-            app.setup()
-
-            self.assertEqual([event for event in events if event in ("wifi_connect", "led_begin", "scan_start")], ["wifi_connect"])
-            self.assertFalse(app.hardware_ready)
-            self.assertEqual(fake_scan.start_calls, 0)
-            self.assertIsNone(app.led)
-            self.assertIsNone(app.battery)
-            self.assertIsNone(app.imu)
-            self.assertNotIn("optional_indicators", events)
-
-            app.wifi.service_connected = True
-            connected = app._service_wifi_connection(30000)
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        self.assertTrue(connected)
-        self.assertTrue(app.boot_network_initialized)
-        self.assertTrue(app.hardware_ready)
-        self.assertEqual(fake_scan.start_calls, 1)
-        self.assertEqual(module._test_storage_state["network_ready_version"], "v-os-test")
-        self.assertIn("led_begin", events)
-        self.assertIn("scan_start", events)
-        self.assertIn("optional_indicators", events)
-
-    def test_post_write_first_boot_reboots_to_wifi_setup_after_network_window_expires(self):
-        module, fake_scan, events, saved_modules = load_full_app_module(
-            wifi_connect_result=False,
-            os_state={"version": "v-os-test", "last_result": "applied"},
-            post_write_recovery_ms=1000,
-        )
-        try:
-            app = module.App(wifi_setup_requested=False)
-            module.time.ticks_ms = lambda: 5000
-            app.setup()
-
-            self.assertFalse(app._service_post_write_network_priority(5999))
-            app._service_post_write_network_priority(6000)
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        self.assertEqual(fake_scan.start_calls, 0)
-        self.assertEqual(app.config_store.runtime["mode"], "recovery")
-        self.assertEqual(app.config_store.runtime["boot_request"], "wifi_setup")
-        self.assertEqual(app.wifi.shutdown_calls, ["post_write_network_priority_timeout"])
-        self.assertEqual(module._test_reset_calls, [True])
-
-    def test_deferred_wifi_service_starts_network_services_after_ip_ready(self):
-        module, _fake_scan, _events, saved_modules = load_full_app_module(wifi_connect_result=False)
-        try:
-            app = module.App(wifi_setup_requested=False)
-            app.setup()
-            app.wifi.service_connected = True
-
-            connected = app._service_wifi_connection(5000)
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        self.assertTrue(connected)
-        self.assertTrue(app.boot_network_initialized)
-        self.assertEqual(app.wifi.findme_results, ["wifi_connected"])
-        self.assertIsNotNone(app.control_transport)
-        self.assertIsNotNone(app.udp_stream)
-
-    def test_online_boot_loads_optional_indicators_after_status_and_runtime_hardware(self):
-        module, fake_scan, events, saved_modules = load_full_app_module(
-            enable_led=True,
-            enable_battery=True,
-            enable_imu=True,
-            runtime_override={
-                "indicators": {
-                    "external_led": {"mode": "on"},
-                    "oled": {"mode": "auto"},
-                },
-            },
-        )
-        try:
-            app = module.App(wifi_setup_requested=False)
-            app.setup()
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        self.assertTrue(app.boot_network_initialized)
-        self.assertTrue(app.hardware_ready)
-        self.assertEqual(fake_scan.start_calls, 1)
-        self.assertIn("optional_indicators", events)
-        self.assertLess(events.index("scan_start"), events.index("optional_indicators"))
-
-    def test_normal_offline_boot_enters_standby_without_scan_and_keeps_action_button_path(self):
-        module, fake_scan, events, saved_modules = load_full_app_module(
-            wifi_connect_result=False,
-            enable_led=True,
-            enable_battery=True,
-            enable_imu=True,
-            runtime_override={
-                "indicators": {
-                    "external_led": {"mode": "on"},
-                    "oled": {"mode": "auto"},
-                },
-            },
-        )
-        try:
-            app = module.App(wifi_setup_requested=False)
-            app.setup()
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        self.assertFalse(app.boot_network_initialized)
-        self.assertTrue(app.offline_standby)
-        self.assertFalse(app.hardware_ready)
-        self.assertEqual(fake_scan.start_calls, 0)
-        self.assertIsNotNone(app.action_button)
-        self.assertIn("optional_indicators", events)
-
-    def test_set_indicators_before_operational_only_persists_settings(self):
-        module, _fake_scan, events, saved_modules = load_full_app_module(
-            wifi_connect_result=False,
-            enable_led=True,
-        )
-        try:
-            app = module.App(wifi_setup_requested=False)
-            result = app._set_indicators({
-                "oled": {"mode": "auto"},
-                "external_led": {"mode": "on"},
-            })
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        self.assertEqual(result["message"], "indicators_updated")
-        self.assertEqual(result["runtime"]["indicators"]["oled"]["mode"], "auto")
-        self.assertEqual(result["runtime"]["indicators"]["external_led"]["mode"], "on")
-        self.assertIsNone(app.led)
-        self.assertNotIn("optional_indicators", events)
-
     def test_normal_boot_connects_wifi_before_led_initialization(self):
         module, _fake_scan, events, saved_modules = load_full_app_module(enable_led=True)
         try:
@@ -823,26 +546,6 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     sys.modules[name] = saved
 
         self.assertLess(events.index("wifi_connect"), events.index("led_begin"))
-
-    def test_status_includes_wifi_diagnostics(self):
-        module, _fake_scan, _events, saved_modules = load_full_app_module(wifi_connect_result=False)
-        try:
-            app = module.App(wifi_setup_requested=False)
-            app.setup()
-            status = app._status()
-            health = app._scan_health_response()
-            memory = app._memory_status_response()
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        self.assertEqual(status["wifi"]["wifi_state"], "wifi_link_no_ip")
-        self.assertEqual(status["wifi"]["ifconfig"][0], "0.0.0.0")
-        self.assertEqual(health["wifi"]["last_connect_error"], "dhcp_pending")
-        self.assertEqual(memory["wifi"]["sta_status"], 1000)
 
     def test_reboot_required_uses_dedicated_no_power_off_led_state(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module(enable_led=True)
@@ -1124,10 +827,10 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 else:
                     sys.modules[name] = saved
 
-        self.assertEqual([event for event in events if event in ("wifi_connect", "scan_start")], ["wifi_connect"])
+        self.assertEqual(events, ["wifi_connect"])
         self.assertEqual(app.wifi.setup_started, [])
         self.assertFalse(app.boot_network_initialized)
-        self.assertTrue(app.offline_standby)
+        self.assertEqual(fake_scan.init_calls, [])
         self.assertEqual(fake_scan.start_calls, 0)
 
     def test_gc_collects_once_per_frame_interval(self):
@@ -1271,73 +974,6 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
         self.assertEqual(native_scan.pop_packet_calls, 0)
         self.assertEqual(app.sent_packets, 0)
-
-    def test_expired_boot_command_is_rejected_without_rebooting(self):
-        module, _fake_scan, _events, saved_modules = load_full_app_module()
-        try:
-            module.time.time = lambda: 1779450002
-            app = module.App(wifi_setup_requested=False)
-
-            response = app._handle_control_request(
-                {
-                    "command": "reboot_to_recovery",
-                    "target_mode": "normal",
-                    "expires_at_ms": 1779450001000,
-                },
-                ("tcp", 0),
-            )
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        self.assertEqual(response["status"], "error")
-        self.assertEqual(response["message"], "command_expired")
-        self.assertFalse(response["reboot_required"])
-        self.assertFalse(app.reboot_required)
-
-    def test_reboot_to_recovery_requires_current_normal_target_mode(self):
-        module, _fake_scan, _events, saved_modules = load_full_app_module()
-        try:
-            app = module.App(wifi_setup_requested=False)
-
-            response = app._handle_control_request(
-                {"command": "reboot_to_recovery", "target_mode": "recovery"},
-                ("tcp", 0),
-            )
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        self.assertEqual(response["status"], "error")
-        self.assertEqual(response["message"], "wrong_mode")
-        self.assertFalse(response["reboot_required"])
-        self.assertFalse(app.reboot_required)
-
-    def test_reboot_to_os_is_wrong_mode_in_normal_os(self):
-        module, _fake_scan, _events, saved_modules = load_full_app_module()
-        try:
-            app = module.App(wifi_setup_requested=False)
-
-            response = app._handle_control_request(
-                {"command": "reboot_to_os", "target_mode": "recovery"},
-                ("tcp", 0),
-            )
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        self.assertEqual(response["status"], "error")
-        self.assertEqual(response["message"], "wrong_mode")
-        self.assertFalse(response["reboot_required"])
 
     def test_set_matrix_layout_persists_valid_pin_selection(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()
@@ -1611,39 +1247,12 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 writer_calls.append(("write", release_url))
                 if self.progress:
                     self.progress({
-                        "phase": "planned",
-                        "operation": "write_recovery",
-                        "version": "v-recovery-next",
-                        "total_files": 3,
-                        "written_files": 0,
-                        "skipped_files": 1,
-                        "current_file": "",
-                    })
-                    self.progress({
-                        "phase": "downloading",
-                        "operation": "write_recovery",
-                        "version": "v-recovery-next",
-                        "total_files": 3,
-                        "written_files": 0,
-                        "skipped_files": 1,
-                        "current_file": "recovery_app.mpy",
-                    })
-                    self.progress({
-                        "phase": "file_done",
-                        "operation": "write_recovery",
-                        "version": "v-recovery-next",
-                        "total_files": 3,
-                        "written_files": 1,
-                        "skipped_files": 1,
-                        "current_file": "recovery_app.mpy",
-                    })
-                    self.progress({
                         "phase": "complete",
                         "operation": "write_recovery",
                         "version": "v-recovery-next",
-                        "total_files": 3,
+                        "total_files": 2,
                         "written_files": 2,
-                        "skipped_files": 1,
+                        "skipped_files": 0,
                         "current_file": "",
                     })
                 return {
@@ -1651,7 +1260,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     "message": "recovery_write_complete",
                     "version": "v-recovery-next",
                     "downloaded_files": 2,
-                    "skipped_files": 1,
+                    "skipped_files": 0,
                     "deleted_files": 0,
                     "reboot_required": True,
                 }
@@ -1687,32 +1296,26 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(write_rejected["status"], "error")
         self.assertEqual(write_rejected["message"], "recovery_resources_required")
         self.assertEqual(write_rejected["next_command"], "release_recovery_resources")
-        self.assertEqual(released["message"], "minimal_system_started")
-        self.assertEqual(released["mode"], "minimal")
+        self.assertEqual(released["message"], "recovery_resources_released")
+        self.assertEqual(released["mode"], "normal")
         self.assertTrue(released["recovery_update_low_resource"])
         self.assertEqual(checked["message"], "recovery_release_checked")
         self.assertEqual(written["message"], "recovery_write_complete")
         self.assertEqual(written["update_state"]["operation"], "write_recovery")
         self.assertEqual(status["system"]["recovery_version"], "v-recovery-next")
         self.assertTrue(status["recovery_update_low_resource"])
-        self.assertEqual(app.mode, "minimal")
+        self.assertEqual(app.mode, "normal")
         self.assertEqual(app.control_transport.status_payloads, [])
-        self.assertEqual(len(app.control_transport.progress_payloads), 5)
-        progress_messages = [item[0]["message"] for item in app.control_transport.progress_payloads]
-        self.assertEqual(progress_messages[:4], ["recovery_write_progress"] * 4)
-        self.assertEqual(progress_messages[-1], "recovery_write_complete")
-        progress_payload, connected = app.control_transport.progress_payloads[-1]
+        self.assertEqual(len(app.control_transport.progress_payloads), 1)
+        progress_payload, connected = app.control_transport.progress_payloads[0]
         self.assertTrue(connected)
         self.assertEqual(progress_payload["message"], "recovery_write_complete")
-        self.assertEqual(progress_payload["mode"], "minimal")
+        self.assertEqual(progress_payload["mode"], "normal")
         self.assertEqual(progress_payload["device_uid"], "UID123")
         self.assertEqual(progress_payload["update_state"]["operation"], "write_recovery")
         self.assertEqual(progress_payload["update_state"]["phase"], "done")
-        first_progress = app.control_transport.progress_payloads[0][0]["update_state"]
-        self.assertEqual(first_progress["last_result"], "starting")
-        self.assertEqual(first_progress["current_file"], "release manifest")
         self.assertNotIn("runtime", progress_payload)
-        self.assertEqual(app.control_transport.flush_calls, [4096, 4096, 4096, 4096, 4096])
+        self.assertEqual(app.control_transport.flush_calls, [4096])
         self.assertEqual(
             writer_calls,
             [
@@ -1723,7 +1326,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             ],
         )
 
-    def test_release_recovery_resources_starts_minimal_system_without_maintenance(self):
+    def test_release_recovery_resources_enters_low_resource_mode_without_maintenance(self):
         class FakeWriter:
             def __init__(self, target, root_dir=".", logger=None, progress=None):
                 self.progress = progress
@@ -1782,14 +1385,13 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     sys.modules[name] = saved
 
         self.assertEqual(released["status"], "ok")
-        self.assertEqual(released["message"], "minimal_system_started")
-        self.assertEqual(released["mode"], "minimal")
+        self.assertEqual(released["message"], "recovery_resources_released")
+        self.assertEqual(released["mode"], "normal")
         self.assertTrue(released["recovery_update_low_resource"])
-        self.assertEqual(app.mode, "minimal")
+        self.assertEqual(app.mode, "normal")
         self.assertTrue(app.recovery_update_low_resource)
         self.assertEqual(written["status"], "ok")
         self.assertTrue(memory_status["recovery_update_low_resource"])
-        self.assertEqual(memory_status["mode"], "minimal")
         self.assertIsNotNone(app.control_transport)
         self.assertIsNone(app.udp_stream)
         self.assertIsNone(app.time_sync)
@@ -1799,54 +1401,6 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertIsNone(app.battery)
         self.assertIsNone(app.imu)
         self.assertIsNone(app.vdboard)
-
-    def test_release_recovery_resources_requires_normal_mode(self):
-        module, _fake_scan, _events, saved_modules = load_full_app_module()
-        try:
-            app = module.App(wifi_setup_requested=False)
-            app.mode = "maintenance"
-            response = app._handle_control_request({"command": "release_recovery_resources"}, ("tcp", 0))
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        self.assertEqual(response["status"], "error")
-        self.assertEqual(response["message"], "minimal_system_requires_normal")
-        self.assertEqual(response["mode"], "maintenance")
-        self.assertFalse(response["recovery_update_low_resource"])
-
-    def test_status_reports_services_and_scan_service_control(self):
-        module, fake_scan, _events, saved_modules = load_full_app_module(enable_led=True, enable_battery=True, enable_imu=True)
-        try:
-            app = module.App(wifi_setup_requested=False)
-            app.setup()
-            status = app._status()
-            services = {item["id"]: item for item in status["services"]}
-
-            stopped = app._handle_control_request({"command": "service_control", "service": "matrix_scan", "action": "stop"}, ("tcp", 0))
-            stopped_services = {item["id"]: item for item in stopped["services"]}
-
-            restarted = app._handle_control_request({"command": "service_control", "service": "matrix_scan", "action": "restart"}, ("tcp", 0))
-            restarted_services = {item["id"]: item for item in restarted["services"]}
-        finally:
-            for name, saved in saved_modules.items():
-                if saved is None:
-                    sys.modules.pop(name, None)
-                else:
-                    sys.modules[name] = saved
-
-        self.assertIn("matrix_scan", services)
-        self.assertTrue(services["matrix_scan"]["running"])
-        self.assertIn("stop", services["matrix_scan"]["actions"])
-        self.assertEqual(stopped["message"], "service_control_applied")
-        self.assertFalse(stopped_services["matrix_scan"]["running"])
-        self.assertEqual(restarted["message"], "service_control_applied")
-        self.assertTrue(restarted_services["matrix_scan"]["running"])
-        self.assertGreaterEqual(fake_scan.stop_calls, 2)
-        self.assertGreaterEqual(fake_scan.start_calls, 2)
 
     def test_maintenance_sample_cell_runs_bounded_scan_and_stops_afterwards(self):
         module, fake_scan, events, saved_modules = load_full_app_module()
