@@ -1186,7 +1186,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertIn("filesystem_api_load", events)
         self.assertNotIn("calibration_store_load", events)
 
-    def test_recovery_write_requires_maintenance_and_uses_release_writer(self):
+    def test_recovery_check_and_write_require_explicit_resource_release(self):
         writer_calls = []
 
         class FakeWriter:
@@ -1234,12 +1234,10 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         try:
             app = module.App(wifi_setup_requested=False)
             app.wifi.connected = True
+            check_rejected = app._handle_control_request({"command": "check_recovery_release"}, ("tcp", 0))
+            write_rejected = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
+            released = app._handle_control_request({"command": "release_recovery_resources"}, ("tcp", 0))
             checked = app._handle_control_request({"command": "check_recovery_release"}, ("tcp", 0))
-            rejected = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
-            maintenance = app._handle_control_request(
-                {"command": "enter_maintenance", "reason": "recovery_update"},
-                ("tcp", 0),
-            )
             written = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
             status = app._status()
         finally:
@@ -1253,15 +1251,21 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 else:
                     sys.modules[name] = saved
 
+        self.assertEqual(check_rejected["status"], "error")
+        self.assertEqual(check_rejected["message"], "recovery_resources_required")
+        self.assertEqual(check_rejected["next_command"], "release_recovery_resources")
+        self.assertEqual(write_rejected["status"], "error")
+        self.assertEqual(write_rejected["message"], "recovery_resources_required")
+        self.assertEqual(write_rejected["next_command"], "release_recovery_resources")
+        self.assertEqual(released["message"], "recovery_resources_released")
+        self.assertEqual(released["mode"], "normal")
+        self.assertTrue(released["recovery_update_low_resource"])
         self.assertEqual(checked["message"], "recovery_release_checked")
-        self.assertEqual(rejected["status"], "error")
-        self.assertEqual(rejected["message"], "maintenance_required")
-        self.assertEqual(rejected["next_command"], "enter_maintenance")
-        self.assertEqual(maintenance["message"], "maintenance_entered")
-        self.assertEqual(maintenance["mode"], "maintenance")
         self.assertEqual(written["message"], "recovery_write_complete")
         self.assertEqual(written["update_state"]["operation"], "write_recovery")
         self.assertEqual(status["system"]["recovery_version"], "v-recovery-next")
+        self.assertTrue(status["recovery_update_low_resource"])
+        self.assertEqual(app.mode, "normal")
         self.assertEqual(app.control_transport.status_payloads, [])
         self.assertEqual(len(app.control_transport.progress_payloads), 1)
         progress_payload, connected = app.control_transport.progress_payloads[0]
@@ -1283,7 +1287,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             ],
         )
 
-    def test_recovery_write_low_memory_mode_releases_runtime_services(self):
+    def test_release_recovery_resources_enters_low_resource_mode_without_maintenance(self):
         class FakeWriter:
             def __init__(self, target, root_dir=".", logger=None, progress=None):
                 self.progress = progress
@@ -1326,9 +1330,10 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             self.assertIsNotNone(app.imu)
             self.assertIsNotNone(app.udp_stream)
             self.assertIsNotNone(app.time_sync)
-            app._handle_control_request({"command": "enter_maintenance", "reason": "recovery_update"}, ("tcp", 0))
+            released = app._handle_control_request({"command": "release_recovery_resources"}, ("tcp", 0))
 
             written = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
+            memory_status = app._handle_control_request({"command": "memory_status"}, ("tcp", 0))
         finally:
             if saved_update_writer is None:
                 sys.modules.pop("update_writer", None)
@@ -1340,7 +1345,14 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 else:
                     sys.modules[name] = saved
 
+        self.assertEqual(released["status"], "ok")
+        self.assertEqual(released["message"], "recovery_resources_released")
+        self.assertEqual(released["mode"], "normal")
+        self.assertTrue(released["recovery_update_low_resource"])
+        self.assertEqual(app.mode, "normal")
+        self.assertTrue(app.recovery_update_low_resource)
         self.assertEqual(written["status"], "ok")
+        self.assertTrue(memory_status["recovery_update_low_resource"])
         self.assertIsNotNone(app.control_transport)
         self.assertIsNone(app.udp_stream)
         self.assertIsNone(app.time_sync)

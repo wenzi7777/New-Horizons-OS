@@ -64,6 +64,7 @@ class App:
         self.control_connected_since_ms = 0
         self.offline_led_unavailable_until_ms = 0
         self.recovery_writer = None
+        self.recovery_update_low_resource = False
         self.update_state = self._default_update_state()
 
         self.latest_matrix = None
@@ -511,6 +512,7 @@ class App:
             findme_gateway_lost = findme_state.get("state") == "gateway_lost" or bool(findme_state.get("last_success_ms") and findme_state.get("host"))
         return {
             "mode": self.mode,
+            "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "rows": len(self._active_rows()),
             "cols": len(self._active_cols()),
             "scan_active": bool(self.scan_ready and not self._in_maintenance()),
@@ -882,7 +884,6 @@ class App:
         return bool(addr and addr[0] == "tcp")
 
     def _handle_control_request(self, request, addr):
-        self._ensure_streaming_services()
         if not self._authorized(addr):
             self.logger.warn("control_unauthorized from={}:{}".format(addr[0], addr[1]))
             return None
@@ -890,6 +891,14 @@ class App:
         cmd = request.get("command", request.get("cmd", "")).strip().lower()
         if not cmd:
             return self._ok("missing_command", error="missing_command")
+        if not self._recovery_update_low_resource_active():
+            self._ensure_streaming_services()
+        elif cmd not in self._low_resource_allowed_commands():
+            return self._ok(
+                "low_resource_command_disabled",
+                error="low_resource_command_disabled",
+                next_command="reboot",
+            )
 
         if cmd in ("check_os_release", "write_os", "reboot_to_os"):
             return {
@@ -921,6 +930,7 @@ class App:
         if cmd == "reboot_to_recovery":
             self.config_store.update_runtime({"mode": "recovery", "boot_request": "recovery"})
             self.reboot_required = True
+            self.recovery_update_low_resource = False
             return self._ok("reboot_to_recovery_scheduled", applied=True, reboot_required=True)
 
         if self._in_maintenance() and cmd not in self._maintenance_allowed_commands():
@@ -943,6 +953,9 @@ class App:
 
         if cmd == "write_recovery":
             return self._write_recovery(request)
+
+        if cmd == "release_recovery_resources":
+            return self._release_recovery_resources()
 
         if cmd == "reload_config":
             self._apply_runtime_reload()
@@ -1277,6 +1290,7 @@ class App:
     def _exit_maintenance(self):
         self.mode = "normal"
         self.maintenance_reason = ""
+        self.recovery_update_low_resource = False
         self._release_maintenance_services()
         if self.hardware_ready:
             self._start_scan_if_configured()
@@ -1471,15 +1485,16 @@ class App:
         )
 
     def _check_recovery_release(self, request):
+        if not self._recovery_update_low_resource_active():
+            return self._recovery_resources_required()
         release_url = self._release_url(request)
-        if self._in_maintenance():
-            self._prepare_recovery_update_mode()
         writer = self._new_recovery_writer()
         try:
             result = writer.check_release(release_url)
         finally:
             gc.collect()
         result["release_url"] = release_url
+        result["recovery_update_low_resource"] = self._recovery_update_low_resource_active()
         self._set_update_state({
             "phase": "ready",
             "operation": "check_recovery_release",
@@ -1498,15 +1513,8 @@ class App:
         return result
 
     def _write_recovery(self, request):
-        if not self._in_maintenance():
-            return {
-                "status": "error",
-                "message": "maintenance_required",
-                "error": "maintenance_required",
-                "next_command": "enter_maintenance",
-                "reboot_required": False,
-                "applied": False,
-            }
+        if not self._recovery_update_low_resource_active():
+            return self._recovery_resources_required()
         release_url = self._release_url(request)
         self._prepare_recovery_update_mode()
         writer = self._new_recovery_writer()
@@ -1536,6 +1544,7 @@ class App:
                 "message": "recovery_write_failed",
                 "error": error,
                 "release_url": release_url,
+                "recovery_update_low_resource": self._recovery_update_low_resource_active(),
                 "update_state": self._current_update_state(),
                 "reboot_required": False,
             }
@@ -1543,6 +1552,7 @@ class App:
             self.recovery_writer = None
             gc.collect()
         result["release_url"] = release_url
+        result["recovery_update_low_resource"] = self._recovery_update_low_resource_active()
         installed_version = result.get("version", "")
         if installed_version:
             self.runtime = self.config_store.update_runtime({"system": {"recovery_version": installed_version}})
@@ -1563,7 +1573,35 @@ class App:
         result["update_state"] = self._current_update_state()
         return result
 
+    def _release_recovery_resources(self):
+        self.mode = "normal"
+        self.maintenance_reason = ""
+        self._prepare_recovery_update_mode()
+        memory = self._memory_status()
+        return {
+            "status": "ok",
+            "message": "recovery_resources_released",
+            "mode": self.mode,
+            "recovery_update_low_resource": True,
+            "next_commands": ["check_recovery_release", "write_recovery"],
+            "memory": memory,
+            "reboot_required": False,
+            "applied": True,
+        }
+
+    def _recovery_resources_required(self):
+        return {
+            "status": "error",
+            "message": "recovery_resources_required",
+            "error": "recovery_resources_required",
+            "next_command": "release_recovery_resources",
+            "recovery_update_low_resource": False,
+            "reboot_required": False,
+            "applied": False,
+        }
+
     def _prepare_recovery_update_mode(self):
+        self.recovery_update_low_resource = True
         self._stop_scan(persist_state=False)
         self._release_maintenance_services()
         if self.udp_stream is not None:
@@ -1775,6 +1813,7 @@ class App:
             "mode": self.mode,
             "os_version": getattr(config, "FIRMWARE_VERSION", "unknown"),
             "recovery_version": self._recovery_version(),
+            "recovery_update_low_resource": self._recovery_update_low_resource_active(),
         }
 
     def _memory_status(self):
@@ -1815,6 +1854,7 @@ class App:
             "runtime_version": getattr(config, "RUNTIME_VERSION", "unknown"),
             "os_version": getattr(config, "FIRMWARE_VERSION", "unknown"),
             "recovery_version": self._recovery_version(),
+            "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "reboot_required": False,
             "applied": False,
         }
@@ -1921,6 +1961,7 @@ class App:
             "runtime_version": getattr(config, "RUNTIME_VERSION", "unknown"),
             "os_version": getattr(config, "FIRMWARE_VERSION", "unknown"),
             "recovery_version": self._recovery_version(),
+            "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "reboot_required": False,
             "applied": False,
         })
@@ -1960,6 +2001,7 @@ class App:
             "runtime_version": getattr(config, "RUNTIME_VERSION", "unknown"),
             "os_version": getattr(config, "FIRMWARE_VERSION", "unknown"),
             "recovery_version": self._recovery_version(),
+            "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "runtime": {
                 "mode": self.mode,
                 "transport": runtime.get("transport", {}),
@@ -1991,6 +2033,7 @@ class App:
             "message": "status",
             "mode": self.mode,
             "maintenance_reason": self.maintenance_reason,
+            "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "reboot_required": self.reboot_required,
             "applied": False,
             "device_id": self.device_uid,
@@ -2032,6 +2075,7 @@ class App:
             "status": "ok",
             "message": "status_announce",
             "mode": self.mode,
+            "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "reboot_required": self.reboot_required,
             "device_id": self.device_uid,
             "device_uid": self.device_uid,
@@ -2089,17 +2133,35 @@ class App:
         self.offline_recorder.set_eligible(self._offline_recording_eligible())
         return self.offline_recorder.status()
 
-    def _ok(self, message, applied=False, reboot_required=False, error=""):
-        return {
+    def _ok(self, message, applied=False, reboot_required=False, error="", **extra):
+        result = {
             "status": "ok" if not error else "error",
             "message": message,
             "reboot_required": reboot_required,
             "applied": applied,
             "error": error,
         }
+        result.update(extra)
+        return result
 
     def _in_maintenance(self):
         return getattr(self, "mode", "normal") == "maintenance"
+
+    def _recovery_update_low_resource_active(self):
+        return bool(getattr(self, "recovery_update_low_resource", False))
+
+    def _low_resource_allowed_commands(self):
+        return (
+            "status",
+            "query",
+            "memory_status",
+            "scan_health",
+            "check_recovery_release",
+            "write_recovery",
+            "release_recovery_resources",
+            "reboot",
+            "reboot_to_recovery",
+        )
 
     def _maintenance_allowed_commands(self):
         return (
@@ -2109,6 +2171,7 @@ class App:
             "exit_maintenance",
             "reboot",
             "reboot_to_recovery",
+            "release_recovery_resources",
             "check_recovery_release",
             "write_recovery",
             "calibration_sample_cell",
