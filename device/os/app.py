@@ -1497,7 +1497,35 @@ class App:
     def _write_recovery(self, request):
         release_url = self._release_url(request)
         writer = self._ensure_recovery_writer()
-        result = writer.write_release(release_url)
+        try:
+            result = writer.write_release(release_url)
+        except Exception as exc:
+            error = str(exc) or exc.__class__.__name__
+            current = self._current_update_state()
+            self._set_update_state({
+                "phase": "error",
+                "operation": "write_recovery",
+                "version": current.get("version", ""),
+                "total_files": int(current.get("total_files", 0) or 0),
+                "applied_files": int(current.get("applied_files", 0) or 0),
+                "downloaded_files": int(current.get("downloaded_files", 0) or 0),
+                "skipped_files": int(current.get("skipped_files", 0) or 0),
+                "deleted_files": int(current.get("deleted_files", 0) or 0),
+                "current_file": current.get("current_file", ""),
+                "last_error": error,
+                "last_result": "failed",
+                "reboot_required": False,
+            })
+            self.logger.warn("recovery_write_failed {}".format(error))
+            self._publish_update_progress("recovery_write_failed", status="error")
+            return {
+                "status": "error",
+                "message": "recovery_write_failed",
+                "error": error,
+                "release_url": release_url,
+                "update_state": self._current_update_state(),
+                "reboot_required": False,
+            }
         result["release_url"] = release_url
         installed_version = result.get("version", "")
         if installed_version:
@@ -1570,7 +1598,37 @@ class App:
             "last_result": last_result,
             "reboot_required": raw_phase == "complete",
         })
-        self._announce_status(force=True)
+        message_prefix = "recovery" if operation == "write_recovery" else "os"
+        self._publish_update_progress(
+            "{}_write_complete".format(message_prefix) if raw_phase == "complete" else "{}_write_progress".format(message_prefix),
+            status="ok",
+        )
+
+    def _publish_update_progress(self, message, status="ok"):
+        if not self.wifi.is_connected():
+            return False
+        runtime = getattr(self, "runtime", {}) if isinstance(getattr(self, "runtime", {}), dict) else {}
+        payload = {
+            "status": status,
+            "message": message,
+            "device_id": self.device_uid,
+            "device_uid": self.device_uid,
+            "device_name": self.device_name,
+            "mode": runtime.get("mode", "normal"),
+            "update_state": self._current_update_state(),
+            "reboot_required": self.reboot_required,
+        }
+        ok = False
+        if hasattr(self.control_transport, "publish_update_progress"):
+            ok = self.control_transport.publish_update_progress(payload, self.wifi.is_connected())
+        else:
+            ok = self.control_transport.publish_status(payload, self.wifi.is_connected())
+        if ok and hasattr(self.control_transport, "flush"):
+            try:
+                self.control_transport.flush(4096)
+            except Exception:
+                pass
+        return ok
 
     def _normalize_logging_config(self, source):
         enabled = self._normalize_logging_enabled(source.get("enabled", True))

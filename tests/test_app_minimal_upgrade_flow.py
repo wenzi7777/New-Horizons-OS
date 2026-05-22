@@ -137,6 +137,8 @@ class FakeTCPControlTransport:
         self.reconfigure_calls = 0
         self.close_calls = 0
         self.status_payloads = []
+        self.progress_payloads = []
+        self.flush_calls = []
 
     def reconfigure(self):
         self.reconfigure_calls += 1
@@ -146,6 +148,14 @@ class FakeTCPControlTransport:
 
     def publish_status(self, payload, wifi_connected):
         self.status_payloads.append((payload, wifi_connected))
+        return True
+
+    def publish_update_progress(self, payload, wifi_connected):
+        self.progress_payloads.append((payload, wifi_connected))
+        return True
+
+    def flush(self, max_bytes=None):
+        self.flush_calls.append(max_bytes)
         return True
 
 
@@ -163,7 +173,7 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
 
         self.assertIsNone(module.OSWriter)
 
-    def test_os_write_progress_updates_state_and_publishes_status(self):
+    def test_os_write_progress_updates_state_and_flushes_compact_progress(self):
         module = load_recovery_app_module()
         app = module.RecoveryApp.__new__(module.RecoveryApp)
         app.device_id = "UID123"
@@ -201,10 +211,60 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         self.assertEqual(app.update_state["applied_files"], 3)
         self.assertEqual(app.update_state["downloaded_files"], 2)
         self.assertEqual(app.update_state["current_file"], "app.py")
-        self.assertEqual(len(app.control_transport.status_payloads), 1)
-        published, wifi_connected = app.control_transport.status_payloads[0]
+        self.assertEqual(app.control_transport.status_payloads, [])
+        self.assertEqual(len(app.control_transport.progress_payloads), 1)
+        published, wifi_connected = app.control_transport.progress_payloads[0]
         self.assertTrue(wifi_connected)
+        self.assertEqual(published["message"], "os_write_progress")
+        self.assertEqual(published["mode"], "recovery")
+        self.assertEqual(published["device_uid"], "UID123")
         self.assertEqual(published["update_state"]["applied_files"], 3)
+        self.assertNotIn("runtime", published)
+        self.assertEqual(app.control_transport.flush_calls, [4096])
+
+    def test_write_os_failure_reports_error_state_without_dropping_control_session(self):
+        module = load_recovery_app_module()
+
+        class FailingOSWriter:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def write_os(self, release_url):
+                raise OSError("download_failed")
+
+        module.OSWriter = FailingOSWriter
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.device_id = "UID123"
+        app.device_uid = "UID123"
+        app.device_name = "New Horizons OS"
+        app.runtime = {
+            "mode": "recovery",
+            "transport": {"mode": "udp_tcp"},
+            "update": {"enabled": True},
+        }
+        app.config_store = FakeConfigStore(app.runtime)
+        app.os_writer = None
+        app.logger = None
+        app.control_transport = FakeTCPControlTransport()
+        app.wifi = type("FakeWiFi", (), {
+            "is_connected": lambda self: True,
+            "release_setup_portal": lambda self: None,
+            "portal_status": lambda self: {"active": False},
+        })()
+        app.recovery_error = ""
+        app.reboot_required = False
+
+        result = app._handle_request({"command": "write_os"}, None)
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "os_write_failed")
+        self.assertEqual(result["error"], "download_failed")
+        self.assertEqual(result["update_state"]["phase"], "error")
+        self.assertEqual(result["update_state"]["operation"], "write_os")
+        self.assertEqual(result["update_state"]["last_error"], "download_failed")
+        self.assertEqual(len(app.control_transport.progress_payloads), 1)
+        self.assertEqual(app.control_transport.progress_payloads[0][0]["update_state"]["phase"], "error")
+        self.assertEqual(app.control_transport.flush_calls, [4096])
 
     def test_recovery_os_installed_detects_app_entrypoint(self):
         module = load_recovery_app_module()

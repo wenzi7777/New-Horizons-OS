@@ -312,6 +312,8 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         def __init__(self, *args, **kwargs):
             self.poll_calls = 0
             self.status_payloads = []
+            self.progress_payloads = []
+            self.flush_calls = []
             self.reconfigure_calls = 0
 
         def poll(self, *args, **kwargs):
@@ -319,6 +321,14 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
 
         def publish_status(self, payload, connected):
             self.status_payloads.append((payload, connected))
+            return True
+
+        def publish_update_progress(self, payload, connected):
+            self.progress_payloads.append((payload, connected))
+            return True
+
+        def flush(self, max_bytes=None):
+            self.flush_calls.append(max_bytes)
             return True
 
         def reconfigure(self):
@@ -1207,6 +1217,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         sys.modules["update_writer"] = types.SimpleNamespace(ManifestTargetWriter=FakeWriter)
         try:
             app = module.App(wifi_setup_requested=False)
+            app.wifi.connected = True
             checked = app._handle_control_request({"command": "check_recovery_release"}, ("tcp", 0))
             written = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
             status = app._status()
@@ -1225,6 +1236,17 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(written["message"], "recovery_write_complete")
         self.assertEqual(written["update_state"]["operation"], "write_recovery")
         self.assertEqual(status["system"]["recovery_version"], "v-recovery-next")
+        self.assertEqual(app.control_transport.status_payloads, [])
+        self.assertEqual(len(app.control_transport.progress_payloads), 1)
+        progress_payload, connected = app.control_transport.progress_payloads[0]
+        self.assertTrue(connected)
+        self.assertEqual(progress_payload["message"], "recovery_write_complete")
+        self.assertEqual(progress_payload["mode"], "normal")
+        self.assertEqual(progress_payload["device_uid"], "UID123")
+        self.assertEqual(progress_payload["update_state"]["operation"], "write_recovery")
+        self.assertEqual(progress_payload["update_state"]["phase"], "done")
+        self.assertNotIn("runtime", progress_payload)
+        self.assertEqual(app.control_transport.flush_calls, [4096])
         self.assertEqual(
             writer_calls,
             [
