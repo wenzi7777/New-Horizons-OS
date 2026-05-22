@@ -897,7 +897,8 @@ class App:
         if not cmd:
             return self._ok("missing_command", error="missing_command")
         if not self._recovery_update_low_resource_active():
-            self._ensure_streaming_services()
+            if cmd != "release_recovery_resources":
+                self._ensure_streaming_services()
         elif cmd not in self._low_resource_allowed_commands():
             return self._ok(
                 "low_resource_command_disabled",
@@ -961,6 +962,9 @@ class App:
 
         if cmd == "release_recovery_resources":
             return self._release_recovery_resources()
+
+        if cmd == "service_control":
+            return self._handle_service_control(request)
 
         if cmd == "reload_config":
             self._apply_runtime_reload()
@@ -1522,6 +1526,22 @@ class App:
             return self._recovery_resources_required()
         release_url = self._release_url(request)
         self._prepare_recovery_update_mode()
+        current = self._current_update_state()
+        self._set_update_state({
+            "phase": "downloading",
+            "operation": "write_recovery",
+            "version": current.get("version", ""),
+            "total_files": 0,
+            "applied_files": 0,
+            "downloaded_files": 0,
+            "skipped_files": 0,
+            "deleted_files": 0,
+            "current_file": "release manifest",
+            "last_error": "",
+            "last_result": "starting",
+            "reboot_required": False,
+        })
+        self._publish_update_progress("recovery_write_progress", status="ok")
         writer = self._new_recovery_writer()
         try:
             result = writer.write_release(release_url)
@@ -1579,17 +1599,40 @@ class App:
         return result
 
     def _release_recovery_resources(self):
-        self.mode = "normal"
+        if self._recovery_update_low_resource_active():
+            return {
+                "status": "ok",
+                "message": "minimal_system_started",
+                "mode": "minimal",
+                "recovery_update_low_resource": True,
+                "next_commands": ["check_recovery_release", "write_recovery"],
+                "memory": self._memory_status(),
+                "services": self._services_status(),
+                "reboot_required": False,
+                "applied": True,
+            }
+        if self.mode != "normal":
+            return {
+                "status": "error",
+                "message": "minimal_system_requires_normal",
+                "mode": self.mode,
+                "recovery_update_low_resource": False,
+                "next_command": "reboot_to_os",
+                "reboot_required": False,
+                "applied": False,
+            }
+        self.mode = "minimal"
         self.maintenance_reason = ""
         self._prepare_recovery_update_mode()
         memory = self._memory_status()
         return {
             "status": "ok",
-            "message": "recovery_resources_released",
+            "message": "minimal_system_started",
             "mode": self.mode,
             "recovery_update_low_resource": True,
             "next_commands": ["check_recovery_release", "write_recovery"],
             "memory": memory,
+            "services": self._services_status(),
             "reboot_required": False,
             "applied": True,
         }
@@ -1717,6 +1760,9 @@ class App:
         operation = str(payload.get("operation", "write_recovery") or "write_recovery")
         phase = "done" if raw_phase == "complete" else "downloading"
         last_result = "applied" if raw_phase == "complete" else raw_phase
+        current_file = payload.get("current_file", "")
+        if raw_phase == "planned" and not current_file:
+            current_file = "release manifest"
         self._set_update_state({
             "phase": phase,
             "operation": operation,
@@ -1725,7 +1771,7 @@ class App:
             "applied_files": min(total, downloaded + skipped) if total else downloaded + skipped,
             "downloaded_files": downloaded,
             "skipped_files": skipped,
-            "current_file": "" if raw_phase == "complete" else payload.get("current_file", ""),
+            "current_file": "" if raw_phase == "complete" else current_file,
             "last_error": "",
             "last_result": last_result,
             "reboot_required": raw_phase == "complete",
@@ -1746,7 +1792,7 @@ class App:
             "device_id": self.device_uid,
             "device_uid": self.device_uid,
             "device_name": self.device_name,
-            "mode": runtime.get("mode", "normal"),
+            "mode": self.mode or runtime.get("mode", "normal"),
             "update_state": self._current_update_state(),
             "reboot_required": self.reboot_required,
         }
@@ -1862,6 +1908,7 @@ class App:
             "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "reboot_required": False,
             "applied": False,
+            "services": self._services_status(),
         }
 
     def _scan_stats(self):
@@ -1969,8 +2016,225 @@ class App:
             "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "reboot_required": False,
             "applied": False,
+            "services": self._services_status(),
         })
         return result
+
+    def _service_entry(self, service_id, label, running, actions=(), status="", detail=""):
+        return {
+            "id": service_id,
+            "label": label,
+            "running": bool(running),
+            "status": status or ("running" if running else "stopped"),
+            "detail": detail or "",
+            "actions": list(actions or ()),
+        }
+
+    def _service_actions(self, running, can_start=True, can_stop=True, can_restart=True):
+        actions = []
+        if running:
+            if can_stop:
+                actions.append("stop")
+            if can_restart:
+                actions.append("restart")
+        elif can_start:
+            actions.append("start")
+        return actions
+
+    def _services_status(self):
+        findme = self._findme_status()
+        logging_status = self._logging_status()
+        offline = self._offline_recording_status()
+        time_status = self.time_sync.status() if self.time_sync is not None else {}
+        return [
+            self._service_entry(
+                "matrix_scan",
+                "Matrix scan",
+                self.scan_ready and not self._in_maintenance(),
+                self._service_actions(self.scan_ready and not self._in_maintenance()),
+                "active" if self.scan_ready and not self._in_maintenance() else "stopped",
+                "{}x{}".format(len(self._active_rows()), len(self._active_cols())),
+            ),
+            self._service_entry(
+                "udp_stream",
+                "UDP stream",
+                self.udp_stream is not None,
+                self._service_actions(self.udp_stream is not None),
+                "active" if self.udp_stream is not None else "stopped",
+                "sent={} failed={}".format(int(self.sent_packets), int(self.failed_sends)),
+            ),
+            self._service_entry(
+                "gateway_control",
+                "Gateway control",
+                self.control_transport is not None and self.control_transport.is_connected(),
+                ("restart",),
+                str(findme.get("state") or ("attached" if self.control_transport is not None else "stopped")),
+                str(findme.get("gateway_id") or findme.get("last_error") or ""),
+            ),
+            self._service_entry(
+                "time_sync",
+                "Time sync",
+                self.time_sync is not None,
+                self._service_actions(self.time_sync is not None),
+                "synced" if time_status.get("synced") else ("running" if self.time_sync is not None else "stopped"),
+                str(time_status.get("last_error") or ""),
+            ),
+            self._service_entry(
+                "imu",
+                "IMU",
+                self.imu is not None,
+                self._service_actions(self.imu is not None, can_start=bool(getattr(config, "ENABLE_IMU", False))),
+                "enabled" if self.imu is not None else "stopped",
+            ),
+            self._service_entry(
+                "battery",
+                "Battery",
+                self.battery is not None,
+                self._service_actions(self.battery is not None, can_start=bool(getattr(config, "ENABLE_BATTERY", False))),
+                self._battery_status(refresh=False).get("state", "") if self.battery is not None else "stopped",
+            ),
+            self._service_entry(
+                "indicators",
+                "Indicators",
+                self.led is not None,
+                self._service_actions(self.led is not None, can_start=bool(getattr(config, "ENABLE_LED", False))),
+                self._indicator_status().get("state", "running") if self.led is not None else "stopped",
+            ),
+            self._service_entry(
+                "logging",
+                "Logging",
+                bool(logging_status.get("enabled", True)),
+                self._service_actions(bool(logging_status.get("enabled", True)), can_restart=False),
+                "enabled" if logging_status.get("enabled", True) else "disabled",
+                str(logging_status.get("capacity", "")),
+            ),
+            self._service_entry(
+                "offline_recorder",
+                "Offline recorder",
+                bool(offline.get("active")),
+                ("stop",) if offline.get("active") else (),
+                "active" if offline.get("active") else "idle",
+                str(offline.get("stop_reason") or offline.get("error") or ""),
+            ),
+        ]
+
+    def _ensure_udp_stream_service(self):
+        if self.udp_stream is None:
+            from udp_stream import UDPStreamTransport
+            self.udp_stream = UDPStreamTransport(lambda: self.runtime, self.logger)
+        if self.udp_rate is None:
+            from utils import RateCounter
+            self.udp_rate = RateCounter(1000)
+
+    def _ensure_time_sync_service(self):
+        if self.time_sync is None:
+            from time_sync import TimeSync
+            self.time_sync = TimeSync(self.runtime.get("ntp_servers", []))
+
+    def _handle_service_control(self, request):
+        service = str(request.get("service", "") or "").strip()
+        action = str(request.get("action", "") or "").strip()
+        if service not in (
+                "matrix_scan",
+                "udp_stream",
+                "gateway_control",
+                "time_sync",
+                "imu",
+                "battery",
+                "indicators",
+                "logging",
+                "offline_recorder"):
+            return self._ok("service_control_failed", error="service_unknown", service=service, action=action, services=self._services_status())
+        if action not in ("start", "stop", "restart"):
+            return self._ok("service_control_failed", error="service_action_invalid", service=service, action=action, services=self._services_status())
+
+        try:
+            if service == "matrix_scan":
+                if action in ("stop", "restart"):
+                    self._stop_scan()
+                if action in ("start", "restart"):
+                    if not self.hardware_ready:
+                        self._ensure_runtime_hardware()
+                    else:
+                        self._start_scan_if_configured(force=True)
+            elif service == "udp_stream":
+                if action in ("stop", "restart") and self.udp_stream is not None:
+                    try:
+                        self.udp_stream.close()
+                    except Exception:
+                        pass
+                    self.udp_stream = None
+                if action in ("start", "restart"):
+                    self._ensure_udp_stream_service()
+            elif service == "gateway_control":
+                if action != "restart":
+                    return self._ok("service_control_failed", error="service_action_unsupported", service=service, action=action, services=self._services_status())
+                self._run_findme("service_control")
+            elif service == "time_sync":
+                if action in ("stop", "restart"):
+                    self.time_sync = None
+                if action in ("start", "restart"):
+                    self._ensure_time_sync_service()
+                    self._sync_time()
+            elif service == "imu":
+                if not getattr(config, "ENABLE_IMU", False):
+                    return self._ok("service_control_failed", error="service_disabled", service=service, action=action, services=self._services_status())
+                if action in ("stop", "restart"):
+                    self.imu = None
+                    self.latest_imu = None
+                if action in ("start", "restart"):
+                    from bmi270 import BMI270
+                    self.imu = BMI270()
+                    self.imu.begin()
+            elif service == "battery":
+                if not getattr(config, "ENABLE_BATTERY", False):
+                    return self._ok("service_control_failed", error="service_disabled", service=service, action=action, services=self._services_status())
+                if action in ("stop", "restart"):
+                    self.battery = None
+                    self.latest_battery = None
+                if action in ("start", "restart"):
+                    from bq25180 import BQ25180
+                    self.battery = BQ25180()
+                    self.battery.begin()
+            elif service == "indicators":
+                if not getattr(config, "ENABLE_LED", False):
+                    return self._ok("service_control_failed", error="service_disabled", service=service, action=action, services=self._services_status())
+                if action in ("stop", "restart") and self.led is not None:
+                    try:
+                        if hasattr(self.led, "off"):
+                            self.led.off()
+                    except Exception:
+                        pass
+                    self.led = None
+                if action in ("start", "restart"):
+                    self._ensure_led()
+                    if self.led:
+                        self.led.begin()
+                        if hasattr(self.led, "configure"):
+                            self.led.configure(self.runtime.get("indicators", {}))
+            elif service == "logging":
+                if action == "stop":
+                    self._set_logging({"enabled": False, "capacity": self._logging_status().get("capacity", "default")})
+                else:
+                    self._set_logging({"enabled": True, "capacity": self._logging_status().get("capacity", "default")})
+            elif service == "offline_recorder":
+                if action not in ("stop", "restart"):
+                    return self._ok("service_control_failed", error="service_action_unsupported", service=service, action=action, services=self._services_status())
+                if self.offline_recorder is not None:
+                    self.offline_recorder.stop("manual_service_control")
+        except Exception as exc:
+            return self._ok("service_control_failed", error=str(exc), service=service, action=action, services=self._services_status())
+
+        return {
+            "status": "ok",
+            "message": "service_control_applied",
+            "service": service,
+            "action": action,
+            "mode": self.mode,
+            "services": self._services_status(),
+            "reboot_required": False,
+            "applied": True,
+        }
 
     def _log_memory_stage(self, stage):
         try:
@@ -2021,6 +2285,7 @@ class App:
             },
             "findme": self._findme_status(),
             "wifi_connected": self.wifi.is_connected(),
+            "services": self._services_status(),
         }
 
     def _file_call(self, fn, *args):
@@ -2071,6 +2336,7 @@ class App:
             "stream": stream_stats,
             "scan_health": self._scan_health(include_memory=False, stats=scan_stats, stream=stream_stats),
             "offline_recording": recorder_status,
+            "services": self._services_status(),
         }
 
     def _status_announce_payload(self):
@@ -2113,6 +2379,7 @@ class App:
             "failed_sends": self.failed_sends,
             "scan_health": self._scan_health(include_memory=False),
             "offline_recording": recorder_status,
+            "services": self._services_status(),
         }
 
     def _maintenance_status(self):

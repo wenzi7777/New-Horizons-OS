@@ -1247,12 +1247,39 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 writer_calls.append(("write", release_url))
                 if self.progress:
                     self.progress({
+                        "phase": "planned",
+                        "operation": "write_recovery",
+                        "version": "v-recovery-next",
+                        "total_files": 3,
+                        "written_files": 0,
+                        "skipped_files": 1,
+                        "current_file": "",
+                    })
+                    self.progress({
+                        "phase": "downloading",
+                        "operation": "write_recovery",
+                        "version": "v-recovery-next",
+                        "total_files": 3,
+                        "written_files": 0,
+                        "skipped_files": 1,
+                        "current_file": "recovery_app.mpy",
+                    })
+                    self.progress({
+                        "phase": "file_done",
+                        "operation": "write_recovery",
+                        "version": "v-recovery-next",
+                        "total_files": 3,
+                        "written_files": 1,
+                        "skipped_files": 1,
+                        "current_file": "recovery_app.mpy",
+                    })
+                    self.progress({
                         "phase": "complete",
                         "operation": "write_recovery",
                         "version": "v-recovery-next",
-                        "total_files": 2,
+                        "total_files": 3,
                         "written_files": 2,
-                        "skipped_files": 0,
+                        "skipped_files": 1,
                         "current_file": "",
                     })
                 return {
@@ -1260,7 +1287,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     "message": "recovery_write_complete",
                     "version": "v-recovery-next",
                     "downloaded_files": 2,
-                    "skipped_files": 0,
+                    "skipped_files": 1,
                     "deleted_files": 0,
                     "reboot_required": True,
                 }
@@ -1296,26 +1323,32 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(write_rejected["status"], "error")
         self.assertEqual(write_rejected["message"], "recovery_resources_required")
         self.assertEqual(write_rejected["next_command"], "release_recovery_resources")
-        self.assertEqual(released["message"], "recovery_resources_released")
-        self.assertEqual(released["mode"], "normal")
+        self.assertEqual(released["message"], "minimal_system_started")
+        self.assertEqual(released["mode"], "minimal")
         self.assertTrue(released["recovery_update_low_resource"])
         self.assertEqual(checked["message"], "recovery_release_checked")
         self.assertEqual(written["message"], "recovery_write_complete")
         self.assertEqual(written["update_state"]["operation"], "write_recovery")
         self.assertEqual(status["system"]["recovery_version"], "v-recovery-next")
         self.assertTrue(status["recovery_update_low_resource"])
-        self.assertEqual(app.mode, "normal")
+        self.assertEqual(app.mode, "minimal")
         self.assertEqual(app.control_transport.status_payloads, [])
-        self.assertEqual(len(app.control_transport.progress_payloads), 1)
-        progress_payload, connected = app.control_transport.progress_payloads[0]
+        self.assertEqual(len(app.control_transport.progress_payloads), 5)
+        progress_messages = [item[0]["message"] for item in app.control_transport.progress_payloads]
+        self.assertEqual(progress_messages[:4], ["recovery_write_progress"] * 4)
+        self.assertEqual(progress_messages[-1], "recovery_write_complete")
+        progress_payload, connected = app.control_transport.progress_payloads[-1]
         self.assertTrue(connected)
         self.assertEqual(progress_payload["message"], "recovery_write_complete")
-        self.assertEqual(progress_payload["mode"], "normal")
+        self.assertEqual(progress_payload["mode"], "minimal")
         self.assertEqual(progress_payload["device_uid"], "UID123")
         self.assertEqual(progress_payload["update_state"]["operation"], "write_recovery")
         self.assertEqual(progress_payload["update_state"]["phase"], "done")
+        first_progress = app.control_transport.progress_payloads[0][0]["update_state"]
+        self.assertEqual(first_progress["last_result"], "starting")
+        self.assertEqual(first_progress["current_file"], "release manifest")
         self.assertNotIn("runtime", progress_payload)
-        self.assertEqual(app.control_transport.flush_calls, [4096])
+        self.assertEqual(app.control_transport.flush_calls, [4096, 4096, 4096, 4096, 4096])
         self.assertEqual(
             writer_calls,
             [
@@ -1326,7 +1359,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             ],
         )
 
-    def test_release_recovery_resources_enters_low_resource_mode_without_maintenance(self):
+    def test_release_recovery_resources_starts_minimal_system_without_maintenance(self):
         class FakeWriter:
             def __init__(self, target, root_dir=".", logger=None, progress=None):
                 self.progress = progress
@@ -1385,13 +1418,14 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     sys.modules[name] = saved
 
         self.assertEqual(released["status"], "ok")
-        self.assertEqual(released["message"], "recovery_resources_released")
-        self.assertEqual(released["mode"], "normal")
+        self.assertEqual(released["message"], "minimal_system_started")
+        self.assertEqual(released["mode"], "minimal")
         self.assertTrue(released["recovery_update_low_resource"])
-        self.assertEqual(app.mode, "normal")
+        self.assertEqual(app.mode, "minimal")
         self.assertTrue(app.recovery_update_low_resource)
         self.assertEqual(written["status"], "ok")
         self.assertTrue(memory_status["recovery_update_low_resource"])
+        self.assertEqual(memory_status["mode"], "minimal")
         self.assertIsNotNone(app.control_transport)
         self.assertIsNone(app.udp_stream)
         self.assertIsNone(app.time_sync)
@@ -1401,6 +1435,54 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertIsNone(app.battery)
         self.assertIsNone(app.imu)
         self.assertIsNone(app.vdboard)
+
+    def test_release_recovery_resources_requires_normal_mode(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.mode = "maintenance"
+            response = app._handle_control_request({"command": "release_recovery_resources"}, ("tcp", 0))
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "error")
+        self.assertEqual(response["message"], "minimal_system_requires_normal")
+        self.assertEqual(response["mode"], "maintenance")
+        self.assertFalse(response["recovery_update_low_resource"])
+
+    def test_status_reports_services_and_scan_service_control(self):
+        module, fake_scan, _events, saved_modules = load_full_app_module(enable_led=True, enable_battery=True, enable_imu=True)
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            status = app._status()
+            services = {item["id"]: item for item in status["services"]}
+
+            stopped = app._handle_control_request({"command": "service_control", "service": "matrix_scan", "action": "stop"}, ("tcp", 0))
+            stopped_services = {item["id"]: item for item in stopped["services"]}
+
+            restarted = app._handle_control_request({"command": "service_control", "service": "matrix_scan", "action": "restart"}, ("tcp", 0))
+            restarted_services = {item["id"]: item for item in restarted["services"]}
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertIn("matrix_scan", services)
+        self.assertTrue(services["matrix_scan"]["running"])
+        self.assertIn("stop", services["matrix_scan"]["actions"])
+        self.assertEqual(stopped["message"], "service_control_applied")
+        self.assertFalse(stopped_services["matrix_scan"]["running"])
+        self.assertEqual(restarted["message"], "service_control_applied")
+        self.assertTrue(restarted_services["matrix_scan"]["running"])
+        self.assertGreaterEqual(fake_scan.stop_calls, 2)
+        self.assertGreaterEqual(fake_scan.start_calls, 2)
 
     def test_maintenance_sample_cell_runs_bounded_scan_and_stops_afterwards(self):
         module, fake_scan, events, saved_modules = load_full_app_module()
