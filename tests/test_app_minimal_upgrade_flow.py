@@ -123,10 +123,14 @@ class FakeConfigStore:
 class FakeLogger:
     def __init__(self):
         self.infos = []
+        self.warns = []
         self.configured = []
 
     def info(self, message):
         self.infos.append(message)
+
+    def warn(self, message):
+        self.warns.append(message)
 
     def configure(self, enabled=True, capacity="default"):
         self.configured.append((enabled, capacity))
@@ -336,6 +340,68 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["message"], "unknown_command")
         self.assertEqual(result["error"], "upgrade_to_full")
+
+    def test_recovery_rejects_expired_boot_command_without_rebooting(self):
+        module = load_recovery_app_module()
+        module.time.time = lambda: 1779450002
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.runtime = {"mode": "recovery"}
+        app.config_store = FakeConfigStore(app.runtime)
+        app.reboot_required = False
+        app.reboot_deadline_ms = None
+        app.logger = FakeLogger()
+
+        result = app._handle_request(
+            {
+                "command": "reboot_to_os",
+                "target_mode": "recovery",
+                "expires_at_ms": 1779450001000,
+            },
+            None,
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "command_expired")
+        self.assertFalse(result["reboot_required"])
+        self.assertFalse(app.reboot_required)
+
+    def test_recovery_reboot_to_recovery_is_wrong_mode(self):
+        module = load_recovery_app_module()
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.runtime = {"mode": "recovery"}
+        app.config_store = FakeConfigStore(app.runtime)
+        app.reboot_required = False
+        app.reboot_deadline_ms = None
+        app.logger = FakeLogger()
+
+        result = app._handle_request(
+            {"command": "reboot_to_recovery", "target_mode": "normal"},
+            None,
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "wrong_mode")
+        self.assertFalse(result["reboot_required"])
+        self.assertFalse(app.reboot_required)
+
+    def test_recovery_reboot_to_os_requires_recovery_target_mode(self):
+        module = load_recovery_app_module()
+        app = module.RecoveryApp.__new__(module.RecoveryApp)
+        app.runtime = {"mode": "recovery"}
+        app.config_store = FakeConfigStore(app.runtime)
+        app.reboot_required = False
+        app.reboot_deadline_ms = None
+        app.logger = FakeLogger()
+
+        result = app._handle_request(
+            {"command": "reboot_to_os", "target_mode": "normal"},
+            None,
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "wrong_mode")
+        self.assertFalse(result["reboot_required"])
+        self.assertFalse(app.reboot_required)
 
     def test_write_os_runs_in_recovery_and_uses_github_release_url(self):
         module = load_recovery_app_module()

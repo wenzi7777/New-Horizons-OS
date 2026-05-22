@@ -109,6 +109,19 @@ class SlowDhcpSTA(FakeSTA):
         return ("0.0.0.0", "0.0.0.0", "0.0.0.0", "0.0.0.0")
 
 
+class LinkNoIpSTA(SlowDhcpSTA):
+    def __init__(self):
+        super().__init__(connected_after_polls=1000000)
+        self.disconnect_count = 0
+
+    def disconnect(self):
+        self.disconnect_count += 1
+        super().disconnect()
+
+    def status(self):
+        return 1000
+
+
 class FakeNetwork(types.SimpleNamespace):
     AP_IF = 1
     STA_IF = 0
@@ -328,6 +341,41 @@ class WiFiManagerApStartTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(fake_network.sta.reset_count, 0)
         self.assertEqual(manager.state, "wifi_connected")
+
+    def test_full_channel_link_no_ip_returns_recoverable_state_without_reset(self):
+        module, fake_network = load_wifi_manager("full")
+        fake_network.sta = LinkNoIpSTA()
+        manager = module.WiFiManager()
+
+        ok = manager.connect_sta("TestWiFi", "pw")
+
+        self.assertFalse(ok)
+        self.assertEqual(manager.state, "wifi_link_no_ip")
+        self.assertEqual(manager.last_error, "dhcp_pending")
+        self.assertEqual(fake_network.sta.reset_count, 0)
+        self.assertEqual(manager.diagnostics()["wifi_state"], "wifi_link_no_ip")
+        self.assertEqual(manager.diagnostics()["ifconfig"][0], "0.0.0.0")
+
+    def test_minimal_channel_wifi_service_soft_retries_before_hard_reset(self):
+        module, fake_network = load_wifi_manager("minimal")
+        fake_network.sta = LinkNoIpSTA()
+        manager = module.WiFiManager()
+
+        manager.connect_sta("TestWiFi", "pw")
+        connect_calls_before = len([call for call in fake_network.sta.calls if call[0] == "connect"])
+
+        self.assertFalse(manager.service_connection(now_ms=5000))
+        self.assertEqual(fake_network.sta.reset_count, 0)
+        self.assertFalse(manager.service_connection(now_ms=30000))
+        soft_connect_calls = len([call for call in fake_network.sta.calls if call[0] == "connect"])
+        self.assertGreater(soft_connect_calls, connect_calls_before)
+        self.assertEqual(fake_network.sta.reset_count, 0)
+
+        for now_ms in (60000, 90000, 120000):
+            manager.service_connection(now_ms=now_ms)
+
+        self.assertGreaterEqual(fake_network.sta.reset_count, 1)
+        self.assertGreaterEqual(manager.diagnostics()["hard_recoveries"], 1)
 
     def test_minimal_channel_activates_ap_before_config(self):
         module, fake_network = load_wifi_manager("minimal")
