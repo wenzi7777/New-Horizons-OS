@@ -377,6 +377,18 @@ class WiFiManagerApStartTests(unittest.TestCase):
         self.assertGreaterEqual(fake_network.sta.reset_count, 1)
         self.assertGreaterEqual(manager.diagnostics()["hard_recoveries"], 1)
 
+    def test_full_channel_hard_resets_first_link_no_ip_recovery(self):
+        module, fake_network = load_wifi_manager("full")
+        fake_network.sta = LinkNoIpSTA()
+        manager = module.WiFiManager()
+
+        manager.connect_sta("TestWiFi", "pw")
+
+        self.assertEqual(fake_network.sta.reset_count, 0)
+        self.assertFalse(manager.service_connection(now_ms=30000))
+        self.assertGreaterEqual(fake_network.sta.reset_count, 1)
+        self.assertEqual(manager.diagnostics()["hard_recoveries"], 1)
+
     def test_minimal_channel_activates_ap_before_config(self):
         module, fake_network = load_wifi_manager("minimal")
 

@@ -5,6 +5,7 @@ import gc
 
 import config
 import board_pins
+import storage
 
 from device_identity import get_device_id, get_device_name, get_device_uid, get_packet_device_uid_bytes
 from device_logging import DeviceLogger
@@ -25,6 +26,12 @@ class App:
         self.maintenance_reason = ""
         self.last_connect_ms = 0
         self.boot_network_initialized = False
+        self.boot_local_services_initialized = False
+        self.offline_standby = False
+        self.optional_indicators_initialized = False
+        self.post_write_network_priority = False
+        self.post_write_network_started_ms = 0
+        self.post_write_os_version = ""
         self.hardware_ready = False
         self.scan_ready = False
 
@@ -85,6 +92,7 @@ class App:
 
         self.sent_packets = 0
         self.failed_sends = 0
+        self._init_post_write_network_priority()
 
         if self._has_pending_matrix_layout():
             self.last_matrix_start_failed = True
@@ -107,6 +115,49 @@ class App:
                     "last_error": "previous_scan_session_interrupted",
                 },
             })
+
+    def _os_state_path(self):
+        return config.DEVICE_STATE_DIR + "/os_state.json"
+
+    def _load_os_state(self):
+        data = storage.load_json(self._os_state_path(), {})
+        return data if isinstance(data, dict) else {}
+
+    def _save_os_state(self, state):
+        storage.save_json(self._os_state_path(), state)
+
+    def _init_post_write_network_priority(self):
+        state = self._load_os_state()
+        if state.get("last_result") != "applied":
+            return
+        version = str(state.get("version") or getattr(config, "FIRMWARE_VERSION", "") or "")
+        if not version:
+            return
+        if state.get("network_ready_version") == version:
+            return
+        self.post_write_network_priority = True
+        self.post_write_network_started_ms = time.ticks_ms()
+        self.post_write_os_version = version
+        self.logger.warn("post_write_network_priority_start version={}".format(version))
+
+    def _post_write_network_priority_pending(self):
+        return bool(self.post_write_network_priority and not self.boot_network_initialized)
+
+    def _mark_post_write_network_ready(self, reason):
+        if not self.post_write_network_priority:
+            return
+        state = self._load_os_state()
+        version = self.post_write_os_version or str(state.get("version") or getattr(config, "FIRMWARE_VERSION", "") or "")
+        if version:
+            state["network_ready_version"] = version
+        state["network_ready_reason"] = reason
+        try:
+            state["network_ready_ms"] = int(time.ticks_ms())
+        except Exception:
+            state["network_ready_ms"] = 0
+        self._save_os_state(state)
+        self.post_write_network_priority = False
+        self.logger.info("post_write_network_priority_done version={} reason={}".format(version, reason))
 
     def setup(self):
         self.logger.info("setup_start")
@@ -131,20 +182,14 @@ class App:
             if not wifi_ok:
                 self.logger.warn("setup_wifi_connect_failed_offline")
 
-        self._ensure_led()
-        self._ensure_action_button()
-        if self.led:
-            self.logger.info("setup_led_begin_start")
-            self.led.begin()
-            if hasattr(self.led, "configure"):
-                self.led.configure(self.runtime.get("indicators", {}))
-            self.logger.info("setup_led_begin_done")
-            self.logger.info("setup_led_boot_window_start")
-            self.led.set_boot_window()
-            self.logger.info("setup_led_boot_window_done")
-            self._log_memory_stage("led")
-            if self.wifi.setup_active():
-                self.led.set_wifi_setup()
+        defer_local_services = self._post_write_network_priority_pending() and not wifi_ok and not self.wifi.setup_active()
+        if not wifi_ok and not self.wifi.setup_active() and not defer_local_services:
+            self.offline_standby = True
+            self.logger.warn("offline_standby_start reason=wifi_not_ready")
+        if defer_local_services:
+            self.logger.warn("post_write_network_priority_defer_local_services")
+        else:
+            self._ensure_boot_local_services()
 
         if wifi_ok:
             self._run_findme("boot")
@@ -157,10 +202,15 @@ class App:
             self._announce_status(force=True)
             self.logger.info("setup_status_announce_done")
             self._log_memory_stage("after_status")
+            self._mark_post_write_network_ready("boot")
 
-        if not self.wifi.setup_active():
-            self._ensure_runtime_hardware()
         self.boot_network_initialized = wifi_ok
+        defer_runtime_hardware = defer_local_services or self.offline_standby
+        if not self.wifi.setup_active() and not defer_runtime_hardware:
+            self._ensure_runtime_hardware()
+            self._ensure_optional_indicators_if_operational()
+        elif self.offline_standby:
+            self._ensure_optional_indicators_if_operational()
 
         self.update_led_state()
         self.logger.info("setup_done")
@@ -181,7 +231,9 @@ class App:
                 self.control_transport.poll(self.wifi.is_connected(), self._handle_control_request)
             self._service_offline_state(now)
             self._service_action_button(now)
-            self._service_wifi_connection(now)
+            connected = self._service_wifi_connection(now)
+            if not connected:
+                self._service_post_write_network_priority(now)
             self._service_findme(now)
 
             if (self.boot_network_initialized
@@ -189,6 +241,7 @@ class App:
                     and not self.wifi.setup_active()
                     and not self._in_maintenance()):
                 self._ensure_runtime_hardware()
+                self._ensure_optional_indicators_if_operational()
                 self.update_led_state()
 
             if (not self._in_maintenance()
@@ -562,6 +615,36 @@ class App:
         except Exception as exc:
             return {"error": str(exc)}
 
+    def _optional_indicators_allowed(self):
+        if self.led is None:
+            return False
+        if self.wifi.setup_active() or self._in_maintenance() or self._recovery_update_low_resource_active():
+            return False
+        return bool(self.boot_network_initialized or self.offline_standby)
+
+    def _ensure_optional_indicators_if_operational(self):
+        if not self._optional_indicators_allowed():
+            return False
+        if not hasattr(self.led, "ensure_optional_indicators"):
+            return False
+        try:
+            self.led.ensure_optional_indicators()
+            self.optional_indicators_initialized = True
+            return True
+        except Exception as exc:
+            self.logger.warn("optional_indicators_init_failed {}".format(exc))
+            return False
+
+    def _release_optional_indicators(self, reason="released"):
+        if self.led is None or not hasattr(self.led, "release_optional_indicators"):
+            self.optional_indicators_initialized = False
+            return
+        try:
+            self.led.release_optional_indicators(reason)
+        except Exception as exc:
+            self.logger.warn("optional_indicators_release_failed {}".format(exc))
+        self.optional_indicators_initialized = False
+
     def _ensure_action_button(self):
         if self.action_button is not None:
             return
@@ -570,6 +653,25 @@ class App:
         except Exception as exc:
             self.logger.warn("action_button_init_failed {}".format(exc))
             self.action_button = None
+
+    def _ensure_boot_local_services(self):
+        if self.boot_local_services_initialized:
+            return
+        self._ensure_led()
+        self._ensure_action_button()
+        if self.led:
+            self.logger.info("setup_led_begin_start")
+            self.led.begin()
+            if hasattr(self.led, "configure"):
+                self.led.configure(self.runtime.get("indicators", {}))
+            self.logger.info("setup_led_begin_done")
+            self.logger.info("setup_led_boot_window_start")
+            self.led.set_boot_window()
+            self.logger.info("setup_led_boot_window_done")
+            self._log_memory_stage("led")
+            if self.wifi.setup_active():
+                self.led.set_wifi_setup()
+        self.boot_local_services_initialized = True
 
     def _button_pressed(self):
         if self.action_button is None:
@@ -732,13 +834,37 @@ class App:
         else:
             connected = self.wifi.is_connected()
         if connected and not self.boot_network_initialized:
+            was_post_write_priority = self.post_write_network_priority
             self.boot_network_initialized = True
+            self.offline_standby = False
             self._run_findme("wifi_connected")
             self._ensure_streaming_services()
             self._sync_time()
             self._announce_status(now, force=True)
+            self._mark_post_write_network_ready("wifi_connected")
+            if was_post_write_priority:
+                self._ensure_boot_local_services()
+                self._ensure_runtime_hardware()
+                self._ensure_optional_indicators_if_operational()
             self.update_led_state()
         return bool(connected)
+
+    def _service_post_write_network_priority(self, now):
+        if not self._post_write_network_priority_pending():
+            return False
+        if self.wifi.setup_active() or self.wifi.is_connected():
+            return False
+        timeout_ms = int(getattr(config, "POST_WRITE_NETWORK_RECOVERY_MS", 60000))
+        if time.ticks_diff(now, self.post_write_network_started_ms) < timeout_ms:
+            return False
+        self.logger.warn("post_write_network_priority_timeout reboot_to_recovery")
+        self.config_store.update_runtime({"mode": "recovery", "boot_request": "recovery"})
+        try:
+            time.sleep_ms(250)
+        except Exception:
+            pass
+        machine.reset()
+        return True
 
     def _handle_findme_switch_gateway(self, request):
         preferred_gateway_id = str(request.get("preferred_gateway_id") or request.get("gateway_id") or "").strip()
@@ -1673,6 +1799,7 @@ class App:
                 self.offline_recorder.stop("recovery_update")
             except Exception:
                 pass
+        self._release_optional_indicators("recovery_update")
         if self.led is not None:
             try:
                 if hasattr(self.led, "set_updating"):
@@ -1876,6 +2003,8 @@ class App:
             "os_version": getattr(config, "FIRMWARE_VERSION", "unknown"),
             "recovery_version": self._recovery_version(),
             "recovery_update_low_resource": self._recovery_update_low_resource_active(),
+            "offline_standby": bool(self.offline_standby),
+            "optional_indicators_initialized": bool(self.optional_indicators_initialized),
         }
 
     def _memory_status(self):
@@ -2215,6 +2344,7 @@ class App:
                 if not getattr(config, "ENABLE_LED", False):
                     return self._ok("service_control_failed", error="service_disabled", service=service, action=action, services=self._services_status())
                 if action in ("stop", "restart") and self.led is not None:
+                    self._release_optional_indicators("service_control")
                     try:
                         if hasattr(self.led, "off"):
                             self.led.off()
@@ -2227,6 +2357,7 @@ class App:
                         self.led.begin()
                         if hasattr(self.led, "configure"):
                             self.led.configure(self.runtime.get("indicators", {}))
+                        self._ensure_optional_indicators_if_operational()
             elif service == "logging":
                 if action == "stop":
                     self._set_logging({"enabled": False, "capacity": self._logging_status().get("capacity", "default")})
@@ -2786,8 +2917,19 @@ class App:
     def _set_indicators(self, request):
         runtime = self.runtime if isinstance(self.runtime, dict) else {}
         current = runtime.get("indicators", {}) or {}
-        current_external = dict(current.get("external_led", {}) or {})
-        current_oled = dict(current.get("oled", {}) or {})
+        current_external = {
+            "mode": "off",
+            "manual_preset": "stream_health",
+            "brightness": float(getattr(config, "EXTERNAL_LED_DEFAULT_BRIGHTNESS", 0.35)),
+        }
+        current_external.update(dict(current.get("external_led", {}) or {}))
+        current_oled = {
+            "mode": "off",
+            "page": getattr(config, "OLED_DEFAULT_PAGE", "live_status"),
+            "update_hz": int(getattr(config, "OLED_DEFAULT_UPDATE_HZ", 1)),
+            "contrast": int(getattr(config, "OLED_DEFAULT_CONTRAST", 128)),
+        }
+        current_oled.update(dict(current.get("oled", {}) or {}))
 
         external_request = request.get("external_led", {})
         if not isinstance(external_request, dict):
@@ -2796,16 +2938,14 @@ class App:
         if not isinstance(oled_request, dict):
             oled_request = {}
 
-        if "external_led_enabled" in request:
-            external_request["enabled"] = request.get("external_led_enabled")
         if "external_led_mode" in request:
             external_request["mode"] = request.get("external_led_mode")
         if "manual_preset" in request:
             external_request["manual_preset"] = request.get("manual_preset")
         if "external_led_brightness" in request:
             external_request["brightness"] = request.get("external_led_brightness")
-        if "oled_enabled" in request:
-            oled_request["enabled"] = request.get("oled_enabled")
+        if "oled_mode" in request:
+            oled_request["mode"] = request.get("oled_mode")
         if "oled_page" in request:
             oled_request["page"] = request.get("oled_page")
         if "oled_update_hz" in request:
@@ -2814,11 +2954,9 @@ class App:
             oled_request["contrast"] = request.get("oled_contrast")
 
         if external_request:
-            if "enabled" in external_request:
-                current_external["enabled"] = bool(external_request.get("enabled"))
             mode = external_request.get("mode")
             if mode is not None:
-                if mode not in ("auto", "manual"):
+                if mode not in ("off", "on"):
                     return self._ok("indicators_invalid", error="external_led_mode_invalid")
                 current_external["mode"] = mode
             preset = external_request.get("manual_preset")
@@ -2835,8 +2973,11 @@ class App:
 
         oled_requested = bool(oled_request)
         if oled_requested:
-            if "enabled" in oled_request:
-                current_oled["enabled"] = bool(oled_request.get("enabled"))
+            mode = oled_request.get("mode")
+            if mode is not None:
+                if mode not in ("off", "auto", "on"):
+                    return self._ok("indicators_invalid", error="oled_mode_invalid")
+                current_oled["mode"] = mode
             page = oled_request.get("page")
             if page is not None:
                 if page not in ("live_status", "sensor_snapshot", "recording_status"):
@@ -2853,24 +2994,26 @@ class App:
                 except Exception:
                     return self._ok("indicators_invalid", error="oled_contrast_invalid")
 
-        self._ensure_led()
-        if self.led:
-            # Probe optional OLED only when the requested config would actively use it.
-            oled_wants_enabled = bool(current_oled.get("enabled", True))
-            if oled_requested and oled_wants_enabled:
-                if not hasattr(self.led, "detect_oled") or not self.led.detect_oled():
-                    return self._ok("oled_not_detected", error="oled_not_detected")
-
         indicators = {
             "external_led": current_external,
             "oled": current_oled,
         }
         runtime = self.config_store.update_runtime({"indicators": indicators})
         self.runtime = runtime
+        if (self.led is None
+                and getattr(config, "ENABLE_LED", False)
+                and not self.wifi.setup_active()
+                and not self._in_maintenance()
+                and not self._recovery_update_low_resource_active()
+                and (self.boot_network_initialized or self.offline_standby)):
+            self._ensure_led()
+            if self.led:
+                self.led.begin()
         if self.led:
             self.led.configure(indicators)
             if hasattr(self.led, "set_context"):
                 self.led.set_context(self._indicator_context())
+            self._ensure_optional_indicators_if_operational()
         return {
             "status": "ok",
             "message": "indicators_updated",

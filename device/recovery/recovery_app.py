@@ -764,7 +764,12 @@ class RecoveryApp:
         }
 
     def _release_url(self, request):
-        return getattr(iconfig, "DEFAULT_RELEASE_URL", "")
+        requested = str((request or {}).get("release_url") or "").strip()
+        if requested:
+            return requested
+        runtime = self.runtime if isinstance(self.runtime, dict) else {}
+        release_url = runtime.get("update", {}).get("release_url", "")
+        return release_url or getattr(iconfig, "DEFAULT_RELEASE_URL", "")
 
     def _ensure_os_writer(self):
         if self.os_writer is None:

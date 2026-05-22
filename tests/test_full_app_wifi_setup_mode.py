@@ -249,10 +249,31 @@ class FakeLED:
     def __init__(self, events=None):
         self.events = events if events is not None else []
         self.states = []
+        self.configured = []
+        self.optional_calls = 0
 
     def begin(self):
         self.events.append("led_begin")
         pass
+
+    def configure(self, indicators):
+        self.events.append(("led_configure", indicators))
+        self.configured.append(indicators)
+
+    def ensure_optional_indicators(self):
+        self.events.append("optional_indicators")
+        self.optional_calls += 1
+        return True
+
+    def release_optional_indicators(self, reason="released"):
+        self.events.append(("optional_indicators_released", reason))
+
+    def status(self):
+        return {
+            "state": self.states[-1] if self.states else "off",
+            "external_led": {"mode": "off"},
+            "oled": {"mode": "off", "active": False},
+        }
 
     def set_boot_window(self):
         self.events.append("led_boot_window")
@@ -334,11 +355,32 @@ class FakeIMU:
         return (0, 0, 0, 0, 0, 0, 0)
 
 
-def load_full_app_module(runtime_override=None, update_check=None, enable_led=False, enable_battery=False, enable_imu=False, wifi_connect_result=True):
+def load_full_app_module(
+    runtime_override=None,
+    update_check=None,
+    enable_led=False,
+    enable_battery=False,
+    enable_imu=False,
+    wifi_connect_result=True,
+    os_state=None,
+    post_write_recovery_ms=60000,
+):
     events = []
     fake_scan = NativePacketScan(events)
     fake_vdboard = types.SimpleNamespace(scan=fake_scan)
     saved_modules = {}
+    reset_calls = []
+    storage_state = dict(os_state or {})
+
+    class FakePin:
+        IN = 0
+        PULL_UP = 1
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def value(self):
+            return 1
 
     class ForbiddenMqttModule(types.ModuleType):
         def __getattr__(self, name):
@@ -416,8 +458,21 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
             read_file=lambda *args: None,
         )
 
+    def fake_load_json(path, default=None):
+        if path == "device_state/os_state.json":
+            return dict(storage_state) if storage_state else default
+        return default
+
+    def fake_save_json(path, data):
+        if path == "device_state/os_state.json":
+            storage_state.clear()
+            storage_state.update(dict(data))
+
     injected = {
-        "machine": types.SimpleNamespace(reset=lambda: None),
+        "machine": types.SimpleNamespace(
+            reset=lambda: reset_calls.append(True),
+            Pin=FakePin,
+        ),
         "immutable_config": types.SimpleNamespace(
             FIRMWARE_VERSION="v-recovery-test",
             RECOVERY_VERSION="v-recovery-test",
@@ -457,8 +512,9 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
             DATA_FILES_DIR="data/files",
             DATA_LOG_DIR="data/logs",
             DATA_TMP_DIR="data/tmp",
+            POST_WRITE_NETWORK_RECOVERY_MS=post_write_recovery_ms,
         ),
-        "board_pins": types.SimpleNamespace(validate_pins=lambda: {}),
+        "board_pins": types.SimpleNamespace(validate_pins=lambda: {}, ACTION_BUTTON_PIN=46),
         "vdboard": fake_vdboard,
         "calibration_store": types.SimpleNamespace(CalibrationStore=fake_calibration_store),
         "device_identity": types.SimpleNamespace(
@@ -478,6 +534,10 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         "packet_buffer": types.SimpleNamespace(PacketBuffer=lambda **kwargs: None),
         "runtime_config": types.SimpleNamespace(
             RuntimeConfigStore=lambda root: FakeRuntimeConfigStore(runtime_override)
+        ),
+        "storage": types.SimpleNamespace(
+            load_json=fake_load_json,
+            save_json=fake_save_json,
         ),
         "time_sync": types.SimpleNamespace(
             TimeSync=lambda servers: types.SimpleNamespace(
@@ -511,6 +571,9 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         spec.loader.exec_module(module)
         module.time.ticks_ms = lambda: 0
         module.time.ticks_diff = lambda now, then: now - then
+        module.time.sleep_ms = lambda _ms: None
+        module._test_storage_state = storage_state
+        module._test_reset_calls = reset_calls
         return module, fake_scan, events, saved_modules
     except Exception:
         for name, saved in saved_modules.items():
@@ -553,7 +616,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         boot_order = [event for event in events if event in ("wifi_connect", "scan_start")]
         self.assertEqual(boot_order[:2], ["wifi_connect", "scan_start"])
 
-    def test_normal_boot_starts_local_services_when_wifi_link_has_no_ip(self):
+    def test_normal_boot_enters_offline_standby_when_wifi_link_has_no_ip(self):
         module, fake_scan, events, saved_modules = load_full_app_module(wifi_connect_result=False)
         try:
             app = module.App(wifi_setup_requested=False)
@@ -566,12 +629,74 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     sys.modules[name] = saved
 
         boot_order = [event for event in events if event in ("wifi_connect", "scan_start")]
-        self.assertEqual(boot_order[:2], ["wifi_connect", "scan_start"])
-        self.assertTrue(app.hardware_ready)
-        self.assertEqual(fake_scan.start_calls, 1)
+        self.assertEqual(boot_order, ["wifi_connect"])
+        self.assertTrue(app.offline_standby)
+        self.assertFalse(app.hardware_ready)
+        self.assertEqual(fake_scan.start_calls, 0)
         self.assertFalse(app.boot_network_initialized)
         self.assertIsNone(app.control_transport)
         self.assertIsNone(app.udp_stream)
+
+    def test_post_write_first_boot_defers_local_services_until_network_ready(self):
+        module, fake_scan, events, saved_modules = load_full_app_module(
+            wifi_connect_result=False,
+            enable_led=True,
+            enable_battery=True,
+            enable_imu=True,
+            os_state={"version": "v-os-test", "last_result": "applied"},
+        )
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+
+            self.assertEqual([event for event in events if event in ("wifi_connect", "led_begin", "scan_start")], ["wifi_connect"])
+            self.assertFalse(app.hardware_ready)
+            self.assertEqual(fake_scan.start_calls, 0)
+            self.assertIsNone(app.led)
+            self.assertIsNone(app.battery)
+            self.assertIsNone(app.imu)
+            self.assertNotIn("optional_indicators", events)
+
+            app.wifi.service_connected = True
+            connected = app._service_wifi_connection(30000)
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertTrue(connected)
+        self.assertTrue(app.boot_network_initialized)
+        self.assertTrue(app.hardware_ready)
+        self.assertEqual(fake_scan.start_calls, 1)
+        self.assertEqual(module._test_storage_state["network_ready_version"], "v-os-test")
+        self.assertIn("led_begin", events)
+        self.assertIn("scan_start", events)
+        self.assertIn("optional_indicators", events)
+
+    def test_post_write_first_boot_reboots_to_recovery_when_network_window_expires(self):
+        module, fake_scan, events, saved_modules = load_full_app_module(
+            wifi_connect_result=False,
+            os_state={"version": "v-os-test", "last_result": "applied"},
+            post_write_recovery_ms=1000,
+        )
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+
+            app._service_post_write_network_priority(1001)
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(fake_scan.start_calls, 0)
+        self.assertEqual(app.config_store.runtime["mode"], "recovery")
+        self.assertEqual(app.config_store.runtime["boot_request"], "recovery")
+        self.assertEqual(module._test_reset_calls, [True])
 
     def test_deferred_wifi_service_starts_network_services_after_ip_ready(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module(wifi_connect_result=False)
@@ -593,6 +718,88 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(app.wifi.findme_results, ["wifi_connected"])
         self.assertIsNotNone(app.control_transport)
         self.assertIsNotNone(app.udp_stream)
+
+    def test_online_boot_loads_optional_indicators_after_status_and_runtime_hardware(self):
+        module, fake_scan, events, saved_modules = load_full_app_module(
+            enable_led=True,
+            enable_battery=True,
+            enable_imu=True,
+            runtime_override={
+                "indicators": {
+                    "external_led": {"mode": "on"},
+                    "oled": {"mode": "auto"},
+                },
+            },
+        )
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertTrue(app.boot_network_initialized)
+        self.assertTrue(app.hardware_ready)
+        self.assertEqual(fake_scan.start_calls, 1)
+        self.assertIn("optional_indicators", events)
+        self.assertLess(events.index("scan_start"), events.index("optional_indicators"))
+
+    def test_normal_offline_boot_enters_standby_without_scan_and_keeps_action_button_path(self):
+        module, fake_scan, events, saved_modules = load_full_app_module(
+            wifi_connect_result=False,
+            enable_led=True,
+            enable_battery=True,
+            enable_imu=True,
+            runtime_override={
+                "indicators": {
+                    "external_led": {"mode": "on"},
+                    "oled": {"mode": "auto"},
+                },
+            },
+        )
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertFalse(app.boot_network_initialized)
+        self.assertTrue(app.offline_standby)
+        self.assertFalse(app.hardware_ready)
+        self.assertEqual(fake_scan.start_calls, 0)
+        self.assertIsNotNone(app.action_button)
+        self.assertIn("optional_indicators", events)
+
+    def test_set_indicators_before_operational_only_persists_settings(self):
+        module, _fake_scan, events, saved_modules = load_full_app_module(
+            wifi_connect_result=False,
+            enable_led=True,
+        )
+        try:
+            app = module.App(wifi_setup_requested=False)
+            result = app._set_indicators({
+                "oled": {"mode": "auto"},
+                "external_led": {"mode": "on"},
+            })
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(result["message"], "indicators_updated")
+        self.assertEqual(result["runtime"]["indicators"]["oled"]["mode"], "auto")
+        self.assertEqual(result["runtime"]["indicators"]["external_led"]["mode"], "on")
+        self.assertIsNone(app.led)
+        self.assertNotIn("optional_indicators", events)
 
     def test_normal_boot_connects_wifi_before_led_initialization(self):
         module, _fake_scan, events, saved_modules = load_full_app_module(enable_led=True)
@@ -908,10 +1115,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 else:
                     sys.modules[name] = saved
 
-        self.assertEqual([event for event in events if event in ("wifi_connect", "scan_start")], ["wifi_connect", "scan_start"])
+        self.assertEqual([event for event in events if event in ("wifi_connect", "scan_start")], ["wifi_connect"])
         self.assertEqual(app.wifi.setup_started, [])
         self.assertFalse(app.boot_network_initialized)
-        self.assertEqual(fake_scan.start_calls, 1)
+        self.assertTrue(app.offline_standby)
+        self.assertEqual(fake_scan.start_calls, 0)
 
     def test_gc_collects_once_per_frame_interval(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()

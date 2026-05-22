@@ -31,6 +31,7 @@ class WiFiManager:
         self.last_soft_retry_ms = 0
         self.last_ssid = ""
         self.last_password = ""
+        self.link_no_ip_hard_reset_done = False
 
     def connect(self):
         wifi_mode = config.WIFI_MODE
@@ -135,6 +136,7 @@ class WiFiManager:
         self.last_error = ""
         self.last_connect_error = ""
         self.soft_recoveries = 0
+        self.link_no_ip_hard_reset_done = False
         return True
 
     def _mark_link_no_ip(self, sta, attempt, status, ip):
@@ -191,11 +193,41 @@ class WiFiManager:
             if self._ticks_diff(now_ms, self.last_soft_retry_ms) >= retry_interval:
                 self.last_soft_retry_ms = now_ms
                 threshold = int(getattr(config, "WIFI_HARD_RESET_AFTER_SOFT_RETRIES", 3))
-                if self.soft_recoveries >= threshold:
-                    self._log_warn("wifi_recover_hard_reset status={} ip={}".format(status, ip))
+                first_link_no_ip_recovery = (
+                    not self.link_no_ip_hard_reset_done
+                    and self.last_connect_error == "dhcp_pending"
+                    and self.state in ("wifi_link_no_ip", "wifi_dhcp_waiting", "normal_boot")
+                )
+                if first_link_no_ip_recovery:
+                    self._log_warn(
+                        "wifi_recover_hard_reset reason=link_no_ip_first_recovery status={} ip={} free={}".format(
+                            status,
+                            ip,
+                            gc.mem_free(),
+                        )
+                    )
+                    self.link_no_ip_hard_reset_done = True
+                    self.hard_recoveries += 1
+                    self._reset_sta_interface()
+                    try:
+                        time.sleep_ms(300)
+                    except Exception:
+                        pass
+                elif self.soft_recoveries >= threshold:
+                    self._log_warn(
+                        "wifi_recover_hard_reset reason=soft_retry_threshold status={} ip={} free={}".format(
+                            status,
+                            ip,
+                            gc.mem_free(),
+                        )
+                    )
                     self.hard_recoveries += 1
                     self.soft_recoveries = 0
                     self._reset_sta_interface()
+                    try:
+                        time.sleep_ms(300)
+                    except Exception:
+                        pass
                 else:
                     self._log_info("wifi_recover_soft_retry status={} ip={}".format(status, ip))
                     self.soft_recoveries += 1
