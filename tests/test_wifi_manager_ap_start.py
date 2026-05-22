@@ -63,6 +63,52 @@ class FakeSTA:
         return None
 
 
+class SlowDhcpSTA(FakeSTA):
+    def __init__(self, connected_after_polls=25):
+        super().__init__()
+        self.connected_after_polls = connected_after_polls
+        self.polls = 0
+        self.connecting = False
+        self.reset_count = 0
+
+    def active(self, value=None):
+        result = super().active(value)
+        if value is False:
+            self.connected = False
+            self.connecting = False
+            self.polls = 0
+            self.reset_count += 1
+        return result
+
+    def disconnect(self):
+        super().disconnect()
+        self.connected = False
+        self.connecting = False
+        self.polls = 0
+
+    def connect(self, ssid, password):
+        self.calls.append(("connect", ssid, password))
+        self.connected = False
+        self.connecting = True
+        self.polls = 0
+
+    def isconnected(self):
+        if self.connecting:
+            self.polls += 1
+            if self.polls >= self.connected_after_polls:
+                self.connected = True
+                self.connecting = False
+        return self.connected
+
+    def status(self):
+        return 1010 if self.connected else 1001
+
+    def ifconfig(self):
+        if self.connected:
+            return super().ifconfig()
+        return ("0.0.0.0", "0.0.0.0", "0.0.0.0", "0.0.0.0")
+
+
 class FakeNetwork(types.SimpleNamespace):
     AP_IF = 1
     STA_IF = 0
@@ -260,6 +306,28 @@ class WiFiManagerApStartTests(unittest.TestCase):
 
         self.assertTrue(ok)
         self.assertEqual(module._test_portal_instances, [])
+
+    def test_full_channel_waits_for_slow_dhcp_without_resetting_sta(self):
+        module, fake_network = load_wifi_manager("full")
+        fake_network.sta = SlowDhcpSTA(connected_after_polls=25)
+        manager = module.WiFiManager()
+
+        ok = manager.connect_sta("TestWiFi", "pw")
+
+        self.assertTrue(ok)
+        self.assertEqual(fake_network.sta.reset_count, 0)
+        self.assertEqual(manager.state, "wifi_connected")
+
+    def test_minimal_channel_waits_for_slow_dhcp_without_resetting_sta(self):
+        module, fake_network = load_wifi_manager("minimal")
+        fake_network.sta = SlowDhcpSTA(connected_after_polls=25)
+        manager = module.WiFiManager()
+
+        ok = manager.connect_sta("TestWiFi", "pw")
+
+        self.assertTrue(ok)
+        self.assertEqual(fake_network.sta.reset_count, 0)
+        self.assertEqual(manager.state, "wifi_connected")
 
     def test_minimal_channel_activates_ap_before_config(self):
         module, fake_network = load_wifi_manager("minimal")

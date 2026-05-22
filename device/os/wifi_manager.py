@@ -69,18 +69,19 @@ class WiFiManager:
 
                 sta.connect(ssid, password)
 
-                for _ in range(20):
-                    if sta.isconnected():
-                        self._log_info("wifi_sta_connected ip={}".format(sta.ifconfig()[0]))
-                        if not keep_setup_portal:
-                            self.stop_setup_portal()
-                            self._disable_ap()
-                        self.state = "wifi_connected"
-                        return True
+                if self._wait_for_sta_connected(sta, getattr(config, "WIFI_CONNECT_WAIT_SEC", 20)):
+                    return self._finish_sta_connected(sta, keep_setup_portal)
 
-                    time.sleep(1)
+                status = self._sta_status(sta)
+                ip = self._sta_ip(sta)
+                if self._sta_connection_pending(status, ip):
+                    self._log_info("wifi_sta_wait_dhcp attempt={} status={} ip={}".format(attempt, status, ip))
+                    if self._wait_for_sta_connected(sta, getattr(config, "WIFI_DHCP_GRACE_SEC", 45)):
+                        return self._finish_sta_connected(sta, keep_setup_portal)
+                    status = self._sta_status(sta)
+                    ip = self._sta_ip(sta)
 
-                self._log_warn("wifi_sta_connect_timeout attempt={}".format(attempt))
+                self._log_warn("wifi_sta_connect_timeout attempt={} status={} ip={}".format(attempt, status, ip))
 
             except RuntimeError as e:
                 self._log_warn("wifi_sta_connect_runtime_error {} free={}".format(e, gc.mem_free()))
@@ -95,6 +96,40 @@ class WiFiManager:
         self.last_error = "wifi_connect_failed"
         self.state = "wifi_failed"
         return False
+
+    def _wait_for_sta_connected(self, sta, seconds):
+        for _ in range(max(1, int(seconds))):
+            if sta.isconnected():
+                return True
+            time.sleep(1)
+        return sta.isconnected()
+
+    def _finish_sta_connected(self, sta, keep_setup_portal=False):
+        self._log_info("wifi_sta_connected ip={}".format(self._sta_ip(sta)))
+        if not keep_setup_portal:
+            self.stop_setup_portal()
+            self._disable_ap()
+        self.state = "wifi_connected"
+        return True
+
+    def _sta_status(self, sta):
+        try:
+            return int(sta.status())
+        except Exception:
+            return None
+
+    def _sta_ip(self, sta):
+        try:
+            return str(sta.ifconfig()[0])
+        except Exception:
+            return ""
+
+    def _sta_connection_pending(self, status, ip):
+        if ip and ip != "0.0.0.0":
+            return True
+        if status is None:
+            return False
+        return 1000 < int(status) < 2000
 
     def _reset_sta_interface(self):
         self._log_info("wifi_sta_reset")
