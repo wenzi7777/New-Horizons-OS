@@ -298,7 +298,21 @@ class FakeBattery:
         return self.last_status_code == self.STATUS_DONE
 
 
-def load_full_app_module(runtime_override=None, update_check=None, enable_led=False, enable_battery=False, wifi_connect_result=True):
+class FakeIMU:
+    def __init__(self):
+        self.begin_calls = 0
+        self.read_calls = 0
+
+    def begin(self):
+        self.begin_calls += 1
+        return True
+
+    def read(self):
+        self.read_calls += 1
+        return (0, 0, 0, 0, 0, 0, 0)
+
+
+def load_full_app_module(runtime_override=None, update_check=None, enable_led=False, enable_battery=False, enable_imu=False, wifi_connect_result=True):
     events = []
     fake_scan = NativePacketScan(events)
     fake_vdboard = types.SimpleNamespace(scan=fake_scan)
@@ -391,7 +405,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
             HARDWARE_MODEL="VD-CTL/R v1.0.F 2026.4",
             RUNTIME_VERSION="v-runtime-test",
             FIRMWARE_VERSION="v-os-test",
-            ENABLE_IMU=False,
+            ENABLE_IMU=enable_imu,
             ENABLE_BATTERY=enable_battery,
             ENABLE_LED=enable_led,
             KEEP_CALIBRATION_MODULE_LOADED=True,
@@ -463,6 +477,8 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         injected["sk6812"] = types.SimpleNamespace(SK6812Status=lambda: FakeLED(events))
     if enable_battery:
         injected["bq25180"] = types.SimpleNamespace(BQ25180=FakeBattery)
+    if enable_imu:
+        injected["bmi270"] = types.SimpleNamespace(BMI270=FakeIMU)
     for name, module in injected.items():
         saved_modules[name] = sys.modules.get(name)
         sys.modules[name] = module
@@ -1266,6 +1282,74 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 ("write", "https://example.com/latest.json"),
             ],
         )
+
+    def test_recovery_write_low_memory_mode_releases_runtime_services(self):
+        class FakeWriter:
+            def __init__(self, target, root_dir=".", logger=None, progress=None):
+                self.progress = progress
+
+            def write_release(self, release_url):
+                if self.progress:
+                    self.progress({
+                        "phase": "complete",
+                        "operation": "write_recovery",
+                        "version": "v-recovery-next",
+                        "total_files": 1,
+                        "written_files": 1,
+                        "skipped_files": 0,
+                        "current_file": "",
+                    })
+                return {
+                    "status": "ok",
+                    "message": "recovery_write_complete",
+                    "version": "v-recovery-next",
+                    "downloaded_files": 1,
+                    "skipped_files": 0,
+                    "deleted_files": 0,
+                    "reboot_required": True,
+                }
+
+        module, _fake_scan, _events, saved_modules = load_full_app_module(
+            runtime_override={"update": {"release_url": "https://example.com/latest.json"}},
+            enable_led=True,
+            enable_battery=True,
+            enable_imu=True,
+        )
+        saved_update_writer = sys.modules.get("update_writer")
+        sys.modules["update_writer"] = types.SimpleNamespace(ManifestTargetWriter=FakeWriter)
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.wifi.connected = True
+            app.setup()
+            self.assertIsNotNone(app.led)
+            self.assertIsNotNone(app.battery)
+            self.assertIsNotNone(app.imu)
+            self.assertIsNotNone(app.udp_stream)
+            self.assertIsNotNone(app.time_sync)
+            app._handle_control_request({"command": "enter_maintenance", "reason": "recovery_update"}, ("tcp", 0))
+
+            written = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
+        finally:
+            if saved_update_writer is None:
+                sys.modules.pop("update_writer", None)
+            else:
+                sys.modules["update_writer"] = saved_update_writer
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(written["status"], "ok")
+        self.assertIsNotNone(app.control_transport)
+        self.assertIsNone(app.udp_stream)
+        self.assertIsNone(app.time_sync)
+        self.assertIsNone(app.scan_rate)
+        self.assertIsNone(app.udp_rate)
+        self.assertIsNone(app.led)
+        self.assertIsNone(app.battery)
+        self.assertIsNone(app.imu)
+        self.assertIsNone(app.vdboard)
 
     def test_maintenance_sample_cell_runs_bounded_scan_and_stops_afterwards(self):
         module, fake_scan, events, saved_modules = load_full_app_module()

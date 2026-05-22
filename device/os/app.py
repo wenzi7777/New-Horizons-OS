@@ -1472,8 +1472,13 @@ class App:
 
     def _check_recovery_release(self, request):
         release_url = self._release_url(request)
+        if self._in_maintenance():
+            self._prepare_recovery_update_mode()
         writer = self._new_recovery_writer()
-        result = writer.check_release(release_url)
+        try:
+            result = writer.check_release(release_url)
+        finally:
+            gc.collect()
         result["release_url"] = release_url
         self._set_update_state({
             "phase": "ready",
@@ -1561,12 +1566,75 @@ class App:
     def _prepare_recovery_update_mode(self):
         self._stop_scan(persist_state=False)
         self._release_maintenance_services()
+        if self.udp_stream is not None:
+            try:
+                self.udp_stream.close()
+            except Exception:
+                pass
+        if self.offline_recorder is not None:
+            try:
+                self.offline_recorder.stop("recovery_update")
+            except Exception:
+                pass
+        if self.led is not None:
+            try:
+                if hasattr(self.led, "set_updating"):
+                    self.led.set_updating()
+                if hasattr(self.led, "update"):
+                    self.led.update()
+            except Exception:
+                pass
         self.latest_matrix = None
         self.latest_frame = None
         self.latest_imu = None
         self.latest_battery = None
+        self.imu = None
+        self.battery = None
+        self.led = None
+        self.udp_stream = None
+        self.time_sync = None
+        self.offline_recorder = None
+        self.scan_rate = None
+        self.udp_rate = None
+        self.packet = None
+        self.filter_chain = None
+        self.vdboard = None
+        self.decode_scan_frame = None
+        self.native_streaming = False
         self.recovery_writer = None
+        self._unload_recovery_update_modules()
         gc.collect()
+
+    def _unload_recovery_update_modules(self):
+        try:
+            import sys
+        except Exception:
+            return
+        for module_name in (
+                "bmi270",
+                "micropython_bmi270",
+                "micropython_bmi270.bmi270",
+                "micropython_bmi270.i2c_helpers",
+                "bq25180",
+                "sk6812",
+                "neopixel",
+                "framebuf",
+                "filter_engine",
+                "frame_protocol",
+                "packet",
+                "packet_buffer",
+                "udp_stream",
+                "time_sync",
+                "utils",
+                "vdboard",
+                "matrix_scan",
+                "offline_recorder",
+                "i2c_bus",
+        ):
+            try:
+                sys.modules.pop(module_name, None)
+            except Exception:
+                pass
 
     def _default_update_state(self):
         return {

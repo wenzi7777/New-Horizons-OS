@@ -58,6 +58,9 @@ class GenerateManifestTests(unittest.TestCase):
                 [item["path"] for item in manifest["files"]],
                 ["app.py"],
             )
+            raw_manifest = manifest_path.read_text(encoding="utf-8")
+            self.assertNotIn("\n  ", raw_manifest)
+            self.assertLess(len(raw_manifest), len(json.dumps(manifest, indent=2)))
 
     def test_os_manifest_can_publish_mpy_artifacts_and_delete_source_py(self):
         module = load_generate_manifest_module()

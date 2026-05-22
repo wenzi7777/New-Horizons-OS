@@ -130,7 +130,7 @@ def main() -> None:
     deletes = sorted(set(deletes))
     if deletes:
         manifest["delete"] = deletes
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, separators=(",", ":")) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
