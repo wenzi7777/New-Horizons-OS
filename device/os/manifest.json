@@ -2,15 +2,15 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.4.3",
-  "version": "v0.4.3",
+  "firmware_version": "v0.4.4",
+  "version": "v0.4.4",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.3/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.4/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
-      "sha256": "24c17bfaf9dd61d1184ae61e902b9377ee329b2721e9aff4c00de01772fe3897",
-      "size": 38236,
+      "sha256": "382df8d2fab1685c2ba274674720ff3dcdf8dcd33d2b25f301947bf52fcdd84a",
+      "size": 40050,
       "kind": "code",
       "reboot_required": true
     },
@@ -44,8 +44,8 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "d3af60103bb936f087fca4fd5be23b3fe9d640a11fd5ac680c0c90d4f962611f",
-      "size": 3353,
+      "sha256": "fd1eee6d37391cf2643ea76d14a62833bc217e8393c24cde8e7ec9751418d6a3",
+      "size": 3437,
       "kind": "code",
       "reboot_required": true
     },
@@ -219,8 +219,8 @@
     },
     {
       "path": "udp_stream.mpy",
-      "sha256": "5bb38fb8a7299000a3a78ed01e06170cf9c45a5c1ae73d5a6f0cd90985602f63",
-      "size": 877,
+      "sha256": "0012e51fc6bed440dfbbac283c928d23242d6d0a180fb81ab526148e34d14e4f",
+      "size": 1237,
       "kind": "code",
       "reboot_required": true
     },

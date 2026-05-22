@@ -84,7 +84,17 @@ class NativePacketScan(FakeScan):
         }
 
     def stream_stats(self):
-        return {"packet_frames": self.pop_packet_calls}
+        return {
+            "produced_frames": 12,
+            "consumed_frames": 11,
+            "dropped_frames": 1,
+            "packet_frames": self.pop_packet_calls,
+            "ring_count": 0,
+            "buffer_frames": 2,
+            "point_count": 1,
+            "imu_cached": True,
+            "battery_cached": True,
+        }
 
     def stats(self):
         return (1, 0, 0, 1, 0, 8, 1, 1, 1, 1)
@@ -623,6 +633,65 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(status["memory"]["heap_free"], 123456)
         self.assertEqual(status["memory"]["heap_allocated"], 65432)
         self.assertEqual(status["memory"]["heap_total"], 188888)
+
+    def test_status_reports_requested_and_measured_scan_fps(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module(
+            runtime_override={"scan_timing": {"target_fps": 75, "settle_us": 20, "core_id": 1}}
+        )
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            app.scan_rate = types.SimpleNamespace(rate=41.5)
+            app.sent_packets = 20
+            app.failed_sends = 2
+
+            status = app._status()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        health = status["scan_health"]
+        self.assertEqual(health["requested_target_fps"], 75)
+        self.assertEqual(health["measured_scan_fps"], 41.5)
+        self.assertNotIn("effective_target_fps", health)
+        self.assertEqual(health["sent_packets"], 20)
+        self.assertEqual(health["failed_sends"], 2)
+        self.assertEqual(health["stream"]["produced_frames"], 12)
+
+    def test_scan_health_command_is_lightweight_status(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module(
+            runtime_override={"scan_timing": {"target_fps": 75, "settle_us": 20, "core_id": 1}}
+        )
+        try:
+            module.gc.mem_free = lambda: 30000
+            module.gc.mem_alloc = lambda: 198000
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            app.scan_rate = types.SimpleNamespace(rate=42)
+            app.sent_packets = 30
+            app.failed_sends = 1
+
+            response = app._handle_control_request({"command": "scan_health"}, ("tcp", 0))
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["command"], "scan_health")
+        self.assertEqual(response["message"], "scan_health")
+        self.assertEqual(response["requested_target_fps"], 75)
+        self.assertEqual(response["measured_scan_fps"], 42)
+        self.assertEqual(response["sent_packets"], 30)
+        self.assertEqual(response["failed_sends"], 1)
+        self.assertEqual(response["memory"]["heap_free"], 30000)
+        self.assertEqual(response["native"]["heap_largest_free_block"], 32768)
+        self.assertEqual(response["stream"]["point_count"], 1)
 
     def test_runtime_services_are_deferred_until_after_wifi_boot(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()

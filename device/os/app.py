@@ -43,6 +43,7 @@ class App:
         self.packet = None
         self.filter_chain = None
         self.scan_rate = None
+        self.udp_rate = None
         self.vdboard = None
         self.decode_scan_frame = None
         self.native_streaming = False
@@ -335,6 +336,8 @@ class App:
         ok = self.udp_stream.send(packet, self.wifi.is_connected())
         if ok:
             self.sent_packets += 1
+            if self.udp_rate is not None:
+                self.udp_rate.tick()
             self.send_backoff_until_ms = 0
             return True
 
@@ -382,13 +385,25 @@ class App:
         if self._in_maintenance() and hasattr(self.led, "set_maintenance"):
             self.led.set_maintenance()
             return
-        if self._findme_rejected() and hasattr(self.led, "set_findme_rejected"):
+        findme_state = self._findme_status()
+        findme_connected = bool(self.control_transport is not None and self.control_transport.is_connected())
+        findme_rejected = findme_state.get("state") == "rejected" or findme_state.get("last_error") == "device_rejected"
+        findme_gateway_lost = False
+        if self.wifi.is_connected() and not findme_connected:
+            findme_gateway_lost = findme_state.get("state") == "gateway_lost" or bool(findme_state.get("last_success_ms") and findme_state.get("host"))
+
+        if findme_rejected and hasattr(self.led, "set_findme_rejected"):
             self.led.set_findme_rejected()
             return
-        if self._findme_gateway_lost() and hasattr(self.led, "set_findme_gateway_lost"):
+        if findme_gateway_lost and hasattr(self.led, "set_findme_gateway_lost"):
             self.led.set_findme_gateway_lost()
             return
-        if self._findme_no_gateway() and hasattr(self.led, "set_findme_no_gateway"):
+        if (
+                self.wifi.is_connected()
+                and not findme_connected
+                and bool(findme_state.get("last_error"))
+                and findme_state.get("state") in ("no_gateway", "idle", "discovered", "")
+                and hasattr(self.led, "set_findme_no_gateway")):
             self.led.set_findme_no_gateway()
             return
         if self.wifi.setup_active():
@@ -486,6 +501,14 @@ class App:
                 pressure_max = max(self.latest_matrix)
             except Exception:
                 pressure_max = 0
+        findme_state = self._findme_status()
+        findme_connected = bool(self.control_transport is not None and self.control_transport.is_connected())
+        findme_no_gateway = False
+        findme_gateway_lost = False
+        findme_rejected = findme_state.get("state") == "rejected" or findme_state.get("last_error") == "device_rejected"
+        if self.wifi.is_connected() and not findme_connected:
+            findme_no_gateway = bool(findme_state.get("last_error")) and findme_state.get("state") in ("no_gateway", "idle", "discovered", "")
+            findme_gateway_lost = findme_state.get("state") == "gateway_lost" or bool(findme_state.get("last_success_ms") and findme_state.get("host"))
         return {
             "mode": self.mode,
             "rows": len(self._active_rows()),
@@ -495,11 +518,11 @@ class App:
             "streaming": bool(self.scan_ready and self._stream_online()),
             "target_fps": int(scan_timing.get("target_fps", getattr(config, "TARGET_FPS", 60))),
             "current_fps": current_fps,
-            "control_connected": bool(self.control_transport is not None and self.control_transport.is_connected()),
-            "findme": self._findme_status(),
-            "findme_no_gateway": self._findme_no_gateway(),
-            "findme_gateway_lost": self._findme_gateway_lost(),
-            "findme_rejected": self._findme_rejected(),
+            "control_connected": findme_connected,
+            "findme": findme_state,
+            "findme_no_gateway": findme_no_gateway,
+            "findme_gateway_lost": findme_gateway_lost,
+            "findme_rejected": findme_rejected,
             "failed_sends": int(self.failed_sends),
             "dropped_frames": int(stream.get("dropped", stream.get("dropped_frames", 0)) or 0),
             "offline_recording": offline_status,
@@ -882,6 +905,9 @@ class App:
 
         if cmd == "memory_status":
             return self._memory_status_response()
+
+        if cmd == "scan_health":
+            return self._scan_health_response()
 
         if cmd == "maintenance_status":
             return self._maintenance_status()
@@ -1646,6 +1672,113 @@ class App:
             "applied": False,
         }
 
+    def _scan_stats(self):
+        if self.vdboard is None or not hasattr(self.vdboard.scan, "stats"):
+            return ()
+        try:
+            return self.vdboard.scan.stats()
+        except Exception:
+            return ()
+
+    def _stream_stats(self):
+        if self.vdboard is None or not hasattr(self.vdboard.scan, "stream_stats"):
+            return {}
+        try:
+            return self.vdboard.scan.stream_stats() or {}
+        except Exception:
+            return {}
+
+    def _control_health(self):
+        control = self.control_transport
+        if control is None:
+            return {"connected": False, "outbox": 0, "last_error": "", "state": "", "gateway_id": ""}
+        outbox = 0
+        if hasattr(control, "outbox_size"):
+            try:
+                outbox = int(control.outbox_size())
+            except Exception:
+                outbox = 0
+        status = {}
+        if hasattr(control, "findme_status"):
+            try:
+                status = control.findme_status() or {}
+            except Exception:
+                status = {}
+        return {
+            "connected": bool(control.is_connected()) if hasattr(control, "is_connected") else False,
+            "outbox": outbox,
+            "last_error": str(status.get("last_error") or ""),
+            "state": str(status.get("state") or ""),
+            "gateway_id": str(status.get("gateway_id") or ""),
+        }
+
+    def _scan_health(self, include_memory=False, stats=None, stream=None):
+        runtime = self.runtime if isinstance(self.runtime, dict) else {}
+        scan_timing = runtime.get("scan_timing", {}) or {}
+        if stats is None:
+            stats = self._scan_stats()
+        if stream is None:
+            stream = self._stream_stats()
+        requested_target = int(scan_timing.get("target_fps", getattr(config, "TARGET_FPS", 60)) or 0)
+        measured_scan = getattr(self.scan_rate, "rate", 0) if self.scan_rate is not None else 0
+        measured_udp = getattr(self.udp_rate, "rate", 0) if self.udp_rate is not None else 0
+        produced = stream.get("produced_frames", None)
+        consumed = stream.get("consumed_frames", None)
+        dropped = stream.get("dropped_frames", None)
+        if len(stats) >= 3:
+            if produced is None:
+                produced = stats[0]
+            if consumed is None:
+                consumed = stats[1]
+            if dropped is None:
+                dropped = stats[2]
+        health = {
+            "requested_target_fps": requested_target,
+            "settle_us": int(scan_timing.get("settle_us", getattr(config, "MATRIX_SETTLE_US", 20)) or 0),
+            "send_every_n_frames": int(scan_timing.get("send_every_n_frames", getattr(config, "SEND_EVERY_N_FRAMES", 1)) or 1),
+            "buffer_frames": int(runtime.get("buffer_frames", getattr(config, "PACKET_BUFFER_SIZE", 2)) or 0),
+            "measured_scan_fps": measured_scan,
+            "measured_udp_fps": measured_udp,
+            "matrix_shape": {"rows": len(self._active_rows()), "cols": len(self._active_cols())},
+            "scan_active": bool(self.scan_ready and not self._in_maintenance()),
+            "scan_ready": bool(self.scan_ready),
+            "produced_frames": int(produced or 0),
+            "consumed_frames": int(consumed or 0),
+            "dropped_frames": int(dropped or 0),
+            "sent_packets": int(self.sent_packets),
+            "failed_sends": int(self.failed_sends),
+            "stream": stream,
+            "control": self._control_health(),
+        }
+        if include_memory:
+            memory = self._memory_status()
+            health["memory"] = {
+                "heap_free": memory.get("heap_free", 0),
+                "heap_allocated": memory.get("heap_allocated", 0),
+                "heap_total": memory.get("heap_total", 0),
+                "heap_used_percent": memory.get("heap_used_percent", 0),
+            }
+            health["native"] = memory.get("native", {})
+        return health
+
+    def _scan_health_response(self):
+        result = self._scan_health(include_memory=True)
+        result.update({
+            "status": "ok",
+            "message": "scan_health",
+            "command": "scan_health",
+            "mode": self.mode,
+            "device_id": self.device_uid,
+            "device_uid": self.device_uid,
+            "device_name": self.device_name,
+            "runtime_version": getattr(config, "RUNTIME_VERSION", "unknown"),
+            "os_version": getattr(config, "FIRMWARE_VERSION", "unknown"),
+            "recovery_version": self._recovery_version(),
+            "reboot_required": False,
+            "applied": False,
+        })
+        return result
+
     def _log_memory_stage(self, stage):
         try:
             free = int(gc.mem_free())
@@ -1704,6 +1837,8 @@ class App:
 
     def _status(self):
         recorder_status = self._offline_recording_status()
+        scan_stats = self._scan_stats()
+        stream_stats = self._stream_stats()
         return {
             "status": "ok",
             "message": "status",
@@ -1737,10 +1872,9 @@ class App:
             "last_scan_health": self.last_scan_health,
             "sent_packets": self.sent_packets,
             "failed_sends": self.failed_sends,
-            "scan": self.vdboard.scan.stats() if self.vdboard is not None else (),
-            "stream": self.vdboard.scan.stream_stats() if (
-                self.vdboard is not None and hasattr(self.vdboard.scan, "stream_stats")
-            ) else {},
+            "scan": scan_stats,
+            "stream": stream_stats,
+            "scan_health": self._scan_health(include_memory=False, stats=scan_stats, stream=stream_stats),
             "offline_recording": recorder_status,
         }
 
@@ -1781,6 +1915,7 @@ class App:
             "update_state": self._current_update_state(),
             "sent_packets": self.sent_packets,
             "failed_sends": self.failed_sends,
+            "scan_health": self._scan_health(include_memory=False),
             "offline_recording": recorder_status,
         }
 
@@ -1908,7 +2043,7 @@ class App:
             col_pins=active_cols,
             fps=scan_timing.get("target_fps", config.TARGET_FPS),
             settle_us=scan_timing.get("settle_us", config.MATRIX_SETTLE_US),
-            buffer_frames=self.runtime.get("buffer_frames", 8),
+            buffer_frames=self.runtime.get("buffer_frames", getattr(config, "PACKET_BUFFER_SIZE", 2)),
             core_id=scan_timing.get("core_id", 1),
         )
         self.native_streaming = self._native_stream_available()
@@ -2475,6 +2610,7 @@ class App:
         self.udp_stream = UDPStreamTransport(lambda: self.runtime, self.logger)
         self.time_sync = TimeSync(self.runtime.get("ntp_servers", []))
         self.scan_rate = RateCounter(1000)
+        self.udp_rate = RateCounter(1000)
 
         if config.ENABLE_IMU:
             from bmi270 import BMI270
