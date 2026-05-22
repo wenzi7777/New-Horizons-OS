@@ -124,6 +124,7 @@ class App:
             self.logger.info("setup_wifi_connect_start")
             wifi_ok = self.wifi.connect()
             self.logger.info("setup_wifi_connect_done ok={}".format(bool(wifi_ok)))
+            self._log_memory_stage("wifi")
             if not wifi_ok:
                 self.logger.warn("setup_wifi_connect_failed_offline")
 
@@ -138,11 +139,13 @@ class App:
             self.logger.info("setup_led_boot_window_start")
             self.led.set_boot_window()
             self.logger.info("setup_led_boot_window_done")
+            self._log_memory_stage("led")
             if self.wifi.setup_active():
                 self.led.set_wifi_setup()
 
         if wifi_ok:
             self._run_findme("boot")
+            self._log_memory_stage("findme")
             self._ensure_streaming_services()
 
         if wifi_ok:
@@ -152,6 +155,7 @@ class App:
             self.logger.info("setup_status_announce_start")
             self._announce_status(force=True)
             self.logger.info("setup_status_announce_done")
+            self._log_memory_stage("after_status")
             self._ensure_runtime_hardware()
         self.boot_network_initialized = wifi_ok
 
@@ -700,6 +704,7 @@ class App:
     def _run_findme(self, reason="manual"):
         if not self.wifi.is_connected():
             return {"ok": False, "error": "wifi_not_connected"}
+        gc.collect()
         self.last_findme_ms = time.ticks_ms()
         result = self.wifi.run_findme(reason=reason)
         self.runtime = self.config_store.load_runtime()
@@ -708,6 +713,8 @@ class App:
                 self.control_transport.reconfigure()
             if self.udp_stream is not None:
                 self.udp_stream.reconfigure()
+        else:
+            gc.collect()
         self.update_led_state()
         return result
 
@@ -757,6 +764,17 @@ class App:
         if not self.wifi.is_connected() or self.wifi.setup_active():
             return False
         if self.control_transport is not None and self.control_transport.is_connected():
+            return False
+        state = self._findme_status()
+        server = (self.runtime or {}).get("server", {}) or {}
+        host = str(server.get("host") or state.get("host") or "").strip()
+        should_rediscover = (
+            not host
+            or state.get("state") in ("rejected", "switching", "no_gateway")
+            or state.get("last_error") in ("device_rejected", "findme_no_gateway")
+        )
+        long_attach_failure_ms = int(getattr(config, "GATEWAY_ATTACH_REDISCOVER_MS", 60000))
+        if not should_rediscover and time.ticks_diff(now, self.last_findme_ms) < long_attach_failure_ms:
             return False
         retry_ms = int(getattr(config, "GATEWAY_DISCOVERY_RETRY_MS", 5000))
         if time.ticks_diff(now, self.last_findme_ms) < retry_ms:
@@ -861,6 +879,9 @@ class App:
 
         if cmd in ("status", "query"):
             return self._status()
+
+        if cmd == "memory_status":
+            return self._memory_status_response()
 
         if cmd == "maintenance_status":
             return self._maintenance_status()
@@ -1603,6 +1624,78 @@ class App:
             ) else {},
         }
 
+    def _memory_status_response(self):
+        return {
+            "status": "ok",
+            "message": "memory_status",
+            "command": "memory_status",
+            "mode": self.mode,
+            "device_id": self.device_uid,
+            "device_uid": self.device_uid,
+            "device_name": self.device_name,
+            "memory": self._memory_status(),
+            "findme": {
+                "connected": bool(self.control_transport is not None and self.control_transport.is_connected()),
+                "state": self._findme_status().get("state", ""),
+                "gateway_id": self._findme_status().get("gateway_id", ""),
+            },
+            "runtime_version": getattr(config, "RUNTIME_VERSION", "unknown"),
+            "os_version": getattr(config, "FIRMWARE_VERSION", "unknown"),
+            "recovery_version": self._recovery_version(),
+            "reboot_required": False,
+            "applied": False,
+        }
+
+    def _log_memory_stage(self, stage):
+        try:
+            free = int(gc.mem_free())
+        except Exception:
+            free = 0
+        try:
+            allocated = int(gc.mem_alloc())
+        except Exception:
+            allocated = 0
+        self.logger.info("mem_stage stage={} free={} allocated={}".format(stage, free, allocated))
+
+    def _wifi_setup_status_light(self):
+        if self.wifi.setup_active():
+            return self.wifi.portal_status(include_storage=True)
+        return {
+            "active": False,
+            "state": getattr(self.wifi, "state", ""),
+            "last_error": getattr(self.wifi, "last_error", ""),
+            "last_setup_result": getattr(self.wifi, "last_setup_result", ""),
+        }
+
+    def _hello_status(self):
+        runtime = self.runtime if isinstance(self.runtime, dict) else {}
+        return {
+            "status": "ok",
+            "message": "hello",
+            "mode": self.mode,
+            "device_id": self.device_uid,
+            "device_uid": self.device_uid,
+            "device_name": self.device_name,
+            "system": self._system_status(),
+            "runtime_version": getattr(config, "RUNTIME_VERSION", "unknown"),
+            "os_version": getattr(config, "FIRMWARE_VERSION", "unknown"),
+            "recovery_version": self._recovery_version(),
+            "runtime": {
+                "mode": self.mode,
+                "transport": runtime.get("transport", {}),
+                "findme": self._findme_status(),
+                "matrix_layout": {
+                    "active_rows": self._active_rows(),
+                    "active_cols": self._active_cols(),
+                },
+                "matrix_layout_state": runtime.get("matrix_layout_state", {}),
+                "matrix_scan_state": runtime.get("matrix_scan_state", {}),
+                "scan_timing": runtime.get("scan_timing", {}),
+            },
+            "findme": self._findme_status(),
+            "wifi_connected": self.wifi.is_connected(),
+        }
+
     def _file_call(self, fn, *args):
         try:
             return fn(*args)
@@ -1624,13 +1717,13 @@ class App:
             "system": self._system_status(),
             "memory": self._memory_status(),
             "wifi_state": self.wifi.state,
-            "wifi_setup": self.wifi.portal_status(),
+            "wifi_setup": self._wifi_setup_status_light(),
             "ntp": self.time_sync.status() if self.time_sync is not None else {},
             "filter": self.config_store.load_filter(),
             "runtime": self.config_store.load_runtime(),
             "findme": self._findme_status(),
             "logging": self._logging_status(),
-            "battery": self._battery_status(refresh=True),
+            "battery": self._battery_status(refresh=False),
             "indicators": self._indicator_status(),
             "update_state": self._current_update_state(),
             "calibration_levels": self.calibration.list_levels() if self.calibration is not None else [],
@@ -1666,7 +1759,6 @@ class App:
             "runtime": {
                 "mode": self.mode,
                 "transport": runtime.get("transport", {}),
-                "server": runtime.get("server", {}),
                 "findme": self._findme_status(),
                 "logging": runtime.get("logging", {}),
                 "scan_timing": runtime.get("scan_timing", {}),
@@ -1676,7 +1768,6 @@ class App:
                 },
                 "matrix_layout_state": runtime.get("matrix_layout_state", {}),
                 "matrix_scan_state": runtime.get("matrix_scan_state", {}),
-                "indicators": runtime.get("indicators", {}),
                 "system": runtime.get("system", {}),
             },
             "wifi_state": self.wifi.state,
@@ -1684,7 +1775,6 @@ class App:
             "findme": self._findme_status(),
             "logging": self._logging_status(),
             "battery": self._battery_status(refresh=False),
-            "indicators": self._indicator_status(),
             "matrix_configured": self._matrix_configured(),
             "matrix_shape": {"rows": len(self._active_rows()), "cols": len(self._active_cols())},
             "last_matrix_start_failed": self.last_matrix_start_failed,
@@ -1838,11 +1928,13 @@ class App:
             self.logger.info("setup_battery_begin_start")
             self.battery.begin()
             self.logger.info("setup_battery_begin_done")
+            self._log_memory_stage("battery")
 
         if self.imu:
             self.logger.info("setup_imu_begin_start")
             self.imu.begin()
             self.logger.info("setup_imu_begin_done")
+            self._log_memory_stage("imu")
 
         self.hardware_ready = True
 
@@ -2377,7 +2469,7 @@ class App:
             lambda: self.runtime,
             self.device_uid,
             self.logger,
-            self._status,
+            self._hello_status,
             self._handle_findme_event,
         )
         self.udp_stream = UDPStreamTransport(lambda: self.runtime, self.logger)

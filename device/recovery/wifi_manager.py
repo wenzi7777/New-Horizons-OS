@@ -11,7 +11,6 @@ import config
 import secrets
 from device_identity import get_device_name, get_device_suffix, get_device_uid
 import findme
-import storage
 
 
 WiFiSetupPortal = None
@@ -290,7 +289,7 @@ class WiFiManager:
             return False
         return self.sta.isconnected()
 
-    def portal_status(self):
+    def portal_status(self, include_storage=False):
         network_cfg = self.config_store.load_network() if self.config_store is not None else {}
         runtime_cfg = self.config_store.load_runtime() if self.config_store is not None else {}
         portal_ip = config.SETUP_PORTAL_HOST
@@ -301,7 +300,13 @@ class WiFiManager:
                 portal_ip = self.ap.ifconfig()[0]
             except Exception:
                 portal_ip = config.SETUP_PORTAL_HOST
-        os_installed = storage.exists(getattr(config, "OS_DIR", "nhos") + "/app.mpy")
+        os_installed = False
+        if include_storage or self.setup_active():
+            try:
+                import storage
+                os_installed = storage.exists(getattr(config, "OS_DIR", "nhos") + "/app.mpy")
+            except Exception:
+                os_installed = False
         return {
             "active": self.setup_active(),
             "state": self.state,

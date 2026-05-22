@@ -5,11 +5,11 @@ import time
 
 class TCPControlTransport:
     MAX_PENDING = 8
+    MAX_OUTBOX = 8
+    FLUSH_BYTES_PER_POLL = 1024
     RECONNECT_BACKOFF_MS = 2000
     CONNECT_TIMEOUT_SEC = 1
     RECV_CHUNK = 512
-    SEND_TIMEOUT_MS = 300
-    SEND_RETRY_MS = 10
     WOULD_BLOCK_ERRNOS = (11, 115)
 
     def __init__(self, runtime_getter, device_uid, logger=None, hello_getter=None, findme_handler=None):
@@ -22,6 +22,7 @@ class TCPControlTransport:
         self.sock_key = None
         self.rx = b""
         self.pending = []
+        self.outbox = []
         self.last_attempt_ms = 0
         self.hello_sent = False
         self.findme_state = "idle"
@@ -32,6 +33,7 @@ class TCPControlTransport:
     def poll(self, wifi_connected, handler=None):
         if not self.ensure_connected(wifi_connected):
             return False
+        self.flush()
         self._read_available()
         if handler is not None:
             while self.pending:
@@ -58,6 +60,7 @@ class TCPControlTransport:
                     }
                 if response is not None:
                     self.publish_result(self._annotate_response(request, response, command), wifi_connected)
+        self.flush()
         return True
 
     def publish_status(self, payload, wifi_connected):
@@ -87,6 +90,7 @@ class TCPControlTransport:
         self.sock = None
         self.sock_key = None
         self.rx = b""
+        self.outbox = []
         self.hello_sent = False
         if self.findme_state == "attached":
             self.findme_state = "gateway_lost"
@@ -151,39 +155,85 @@ class TCPControlTransport:
             "device_uid": self.device_uid,
             "payload": payload or {},
         }
-        data = (json.dumps(body) + "\n").encode()
-        return self._send_bytes(data)
+        try:
+            data = (json.dumps(body, separators=(",", ":")) + "\n").encode()
+        except TypeError:
+            data = (json.dumps(body) + "\n").encode()
+        return self._enqueue_bytes(message_type, payload or {}, data)
 
-    def _send_bytes(self, data):
+    def _enqueue_bytes(self, message_type, payload, data):
         if self.sock is None:
             return False
-        deadline = self._ticks_add(self._ticks_ms(), self.SEND_TIMEOUT_MS)
-        total = len(data)
-        sent = 0
-        view = memoryview(data)
-        while sent < total:
+        item = {
+            "type": message_type,
+            "message": str(payload.get("message") or "") if isinstance(payload, dict) else "",
+            "data": data,
+            "offset": 0,
+        }
+        if self._is_coalescable_status(item):
+            self.outbox = [queued for queued in self.outbox if not self._is_coalescable_status(queued)]
+        if message_type == "hello":
+            self.outbox.insert(0, item)
+            return True
+        if len(self.outbox) >= self.MAX_OUTBOX:
+            dropped = False
+            for idx, queued in enumerate(self.outbox):
+                if queued.get("type") in ("status", "update_progress"):
+                    self.outbox.pop(idx)
+                    dropped = True
+                    break
+            if not dropped:
+                if message_type == "result":
+                    self.findme_last_error = "outbox_full"
+                    self._warn("tcp_control_outbox_full result_preserved_failed")
+                return False
+        self.outbox.append(item)
+        return True
+
+    def _is_coalescable_status(self, item):
+        return item.get("type") == "status" and item.get("message") == "status_announce"
+
+    def flush(self, max_bytes=None):
+        return self._flush_outbox(max_bytes)
+
+    def outbox_size(self):
+        return len(self.outbox)
+
+    def _flush_outbox(self, max_bytes=None):
+        if self.sock is None:
+            return False
+        remaining = int(max_bytes or self.FLUSH_BYTES_PER_POLL)
+        while self.outbox and remaining > 0:
+            item = self.outbox[0]
+            data = item.get("data", b"")
+            offset = int(item.get("offset") or 0)
+            if offset >= len(data):
+                self.outbox.pop(0)
+                continue
             try:
-                written = self.sock.send(view[sent:])
+                written = self.sock.send(data[offset: offset + remaining])
             except Exception as exc:
-                if self._is_would_block(exc) and self._ticks_diff(deadline, self._ticks_ms()) > 0:
-                    self._sleep_ms(self.SEND_RETRY_MS)
-                    continue
+                if self._is_would_block(exc):
+                    self.findme_last_error = "send_backpressure"
+                    return False
                 self.findme_last_error = "send_failed:{}".format(exc)
                 self._warn("tcp_control_send_failed {}".format(exc))
                 self.close()
                 return False
             if written is None:
-                return True
+                written = min(remaining, len(data) - offset)
+            written = int(written)
             if written <= 0:
-                if self._ticks_diff(deadline, self._ticks_ms()) > 0:
-                    self._sleep_ms(self.SEND_RETRY_MS)
-                    continue
-                self.findme_last_error = "send_failed:zero_write"
-                self._warn("tcp_control_send_failed zero_write")
-                self.close()
+                self.findme_last_error = "send_backpressure"
                 return False
-            sent += int(written)
-        return True
+            item["offset"] = offset + written
+            remaining -= written
+            if int(item.get("offset") or 0) >= len(data):
+                self.outbox.pop(0)
+        return not self.outbox
+
+    def _send_bytes(self, data):
+        return self._enqueue_bytes("raw", {}, data)
 
     def _is_would_block(self, exc):
         try:

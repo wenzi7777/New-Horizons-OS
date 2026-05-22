@@ -455,9 +455,18 @@ class WiFiManagerApStartTests(unittest.TestCase):
     def test_recovery_portal_status_defaults_missing_os_dir_to_nhos(self):
         module, _fake_network = load_wifi_manager("minimal", include_os_dir=False)
         checked_paths = []
-        module.storage.exists = lambda path: checked_paths.append(path) or False
+        original_storage = sys.modules.get("storage")
+        fake_storage = types.ModuleType("storage")
+        fake_storage.exists = lambda path: checked_paths.append(path) or False
+        sys.modules["storage"] = fake_storage
 
-        status = module.WiFiManager(config_store=FakeConfigStore()).portal_status()
+        try:
+            status = module.WiFiManager(config_store=FakeConfigStore()).portal_status(include_storage=True)
+        finally:
+            if original_storage is None:
+                sys.modules.pop("storage", None)
+            else:
+                sys.modules["storage"] = original_storage
 
         self.assertFalse(status["os_installed"])
         self.assertEqual(checked_paths, ["nhos/app.mpy"])

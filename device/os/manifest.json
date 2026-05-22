@@ -2,15 +2,15 @@
   "manifest_version": 1,
   "type": "os",
   "firmware_name": "New Horizons OS",
-  "firmware_version": "v0.4.2",
-  "version": "v0.4.2",
+  "firmware_version": "v0.4.3",
+  "version": "v0.4.3",
   "target_root": "/nhos",
-  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.2/device/os_mpy",
+  "base_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.3/device/os_mpy",
   "files": [
     {
       "path": "app.mpy",
-      "sha256": "5c2f940b4b8f11eb467330106782e2517681e5c57db98cb3f731af71756c2987",
-      "size": 37020,
+      "sha256": "24c17bfaf9dd61d1184ae61e902b9377ee329b2721e9aff4c00de01772fe3897",
+      "size": 38236,
       "kind": "code",
       "reboot_required": true
     },
@@ -44,7 +44,7 @@
     },
     {
       "path": "config.mpy",
-      "sha256": "c4e08b0295cdaeece37a1005d5c499d6e52fdbcbf6b90b89ed9ac6f0f5e44fab",
+      "sha256": "d3af60103bb936f087fca4fd5be23b3fe9d640a11fd5ac680c0c90d4f962611f",
       "size": 3353,
       "kind": "code",
       "reboot_required": true
@@ -205,8 +205,8 @@
     },
     {
       "path": "tcp_control.mpy",
-      "sha256": "a608fe1eafa71f612a5051143629bd38645d024fa56d5178090c3de5ceb61242",
-      "size": 4543,
+      "sha256": "e6cff89135d10fef7ef9366b30cfd37179f04e09ceab8709dbef154b4f0a1183",
+      "size": 5285,
       "kind": "code",
       "reboot_required": true
     },
@@ -247,8 +247,8 @@
     },
     {
       "path": "wifi_manager.mpy",
-      "sha256": "2e2c6a506c3a40d101c4882fc009357d09cc440127bd13c163b4e8f1222dce4c",
-      "size": 8608,
+      "sha256": "874126167ad903024b6ea4072b23f17ddb6d20e53361117a9fcf24d1f2353557",
+      "size": 8663,
       "kind": "code",
       "reboot_required": true
     }

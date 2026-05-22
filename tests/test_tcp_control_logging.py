@@ -34,6 +34,7 @@ class TCPControlLoggingTest(unittest.TestCase):
         sent = []
         transport.sock = type("Sock", (), {"send": lambda _self, data: sent.append(bytes(data)) or len(data)})()
         transport.sock_key = ("127.0.0.1", 1, "ABC")
+        transport.hello_sent = True
 
         response = transport._annotate_response(
             {"command": "status", "request_id": "req-1"},
@@ -41,10 +42,11 @@ class TCPControlLoggingTest(unittest.TestCase):
             "status",
         )
         transport.publish_result(response, True)
+        transport.flush()
 
-        self.assertIn(b'"type": "result"', sent[-1])
-        self.assertIn(b'"request_id": "req-1"', sent[-1])
-        self.assertIn(b'"command": "status"', sent[-1])
+        self.assertIn(b'"type":"result"', sent[-1])
+        self.assertIn(b'"request_id":"req-1"', sent[-1])
+        self.assertIn(b'"command":"status"', sent[-1])
 
     def test_tcp_send_retries_eagain_without_closing_socket(self):
         class EagainThenSendSocket:
@@ -71,12 +73,15 @@ class TCPControlLoggingTest(unittest.TestCase):
                 sock = EagainThenSendSocket()
                 transport.sock = sock
                 transport.sock_key = ("127.0.0.1", 1, "ABC")
+                transport.hello_sent = True
 
                 self.assertTrue(transport.publish_status({"message": "status"}, True))
-                self.assertGreaterEqual(sock.calls, 2)
+                self.assertFalse(transport.flush())
+                self.assertEqual(sock.calls, 1)
                 self.assertFalse(sock.closed)
                 self.assertIs(transport.sock, sock)
-                self.assertIn(b'"type": "status"', sock.payloads[-1])
+                self.assertTrue(transport.flush())
+                self.assertIn(b'"type":"status"', sock.payloads[-1])
 
     def test_tcp_send_handles_partial_writes(self):
         class PartialSocket:
@@ -96,11 +101,36 @@ class TCPControlLoggingTest(unittest.TestCase):
                 sock = PartialSocket()
                 transport.sock = sock
                 transport.sock_key = ("127.0.0.1", 1, "ABC")
+                transport.hello_sent = True
 
                 self.assertTrue(transport.publish_result({"message": "ok"}, True))
+                for _ in range(10):
+                    if transport.flush():
+                        break
                 joined = b"".join(sock.parts)
-                self.assertIn(b'"type": "result"', joined)
+                self.assertIn(b'"type":"result"', joined)
                 self.assertTrue(joined.endswith(b"\n"))
+
+    def test_status_announce_is_coalesced_but_result_is_kept(self):
+        module = load_module("device/os/tcp_control.py")
+        logger = FakeLogger()
+        transport = module.TCPControlTransport(lambda: {"server": {"host": "127.0.0.1", "tcp_port": 1}}, "ABC", logger)
+        sent = []
+        transport.sock = type("Sock", (), {"send": lambda _self, data: sent.append(bytes(data)) or len(data)})()
+        transport.sock_key = ("127.0.0.1", 1, "ABC")
+        transport.hello_sent = True
+
+        self.assertTrue(transport.publish_status({"message": "status_announce", "seq": 1}, True))
+        self.assertTrue(transport.publish_status({"message": "status_announce", "seq": 2}, True))
+        self.assertTrue(transport.publish_result({"message": "important", "request_id": "r-1"}, True))
+
+        self.assertEqual(2, transport.outbox_size())
+        while transport.outbox_size():
+            self.assertTrue(transport.flush())
+        joined = b"".join(sent)
+        self.assertNotIn(b'"seq":1', joined)
+        self.assertIn(b'"seq":2', joined)
+        self.assertIn(b'"request_id":"r-1"', joined)
 
 
 if __name__ == "__main__":

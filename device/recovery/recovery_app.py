@@ -44,7 +44,7 @@ class RecoveryApp:
             lambda: self.runtime,
             self.device_uid,
             self.logger,
-            self._status_payload,
+            self._hello_payload,
             self._handle_findme_event,
         )
         self.os_writer = None
@@ -152,11 +152,14 @@ class RecoveryApp:
     def _run_findme(self, reason="manual"):
         if not self.wifi.is_connected():
             return {"ok": False, "error": "wifi_not_connected"}
+        gc.collect()
         self.last_findme_ms = time.ticks_ms()
         result = self.wifi.run_findme(reason=reason)
         self.runtime = self.config_store.load_runtime()
         if result.get("ok"):
             self.control_transport.reconfigure()
+        else:
+            gc.collect()
         return result
 
     def _handle_findme_switch_gateway(self, request):
@@ -211,6 +214,17 @@ class RecoveryApp:
         if not self.wifi.is_connected() or self.wifi.setup_active():
             return False
         if self.control_transport.is_connected():
+            return False
+        state = self._findme_status()
+        server = (self.runtime or {}).get("server", {}) or {}
+        host = str(server.get("host") or state.get("host") or "").strip()
+        should_rediscover = (
+            not host
+            or state.get("state") in ("rejected", "switching", "no_gateway")
+            or state.get("last_error") in ("device_rejected", "findme_no_gateway")
+        )
+        long_attach_failure_ms = int(getattr(iconfig, "GATEWAY_ATTACH_REDISCOVER_MS", 60000))
+        if not should_rediscover and time.ticks_diff(now, self.last_findme_ms) < long_attach_failure_ms:
             return False
         retry_ms = int(getattr(iconfig, "GATEWAY_DISCOVERY_RETRY_MS", 5000))
         if time.ticks_diff(now, self.last_findme_ms) < retry_ms:
@@ -305,6 +319,26 @@ class RecoveryApp:
             "reboot_required": self.reboot_required,
         }
 
+    def _hello_payload(self):
+        return {
+            "status": "ok",
+            "message": "hello",
+            "device_id": self.device_uid,
+            "device_uid": self.device_uid,
+            "device_name": self.device_name,
+            "system": self._system_status(self.runtime),
+            "mode": "recovery",
+            "runtime": {
+                "mode": "recovery",
+                "transport": self.runtime.get("transport", {}),
+                "findme": self._findme_status(),
+            },
+            "findme": self._findme_status(),
+            "wifi_connected": self.wifi.is_connected(),
+            "recovery_error": self.recovery_error,
+            "reboot_required": self.reboot_required,
+        }
+
     def _reboot_due(self, now):
         if self.reboot_deadline_ms is None:
             return True
@@ -334,6 +368,9 @@ class RecoveryApp:
                 "recovery_error": self.recovery_error,
                 "reboot_required": self.reboot_required,
             }
+
+        if command == "memory_status":
+            return self._memory_status_response()
 
         if command == "check_os_release":
             self._prepare_ota_memory()
@@ -579,6 +616,29 @@ class RecoveryApp:
             "heap_allocated": allocated,
             "heap_total": total,
             "heap_used_percent": int((allocated * 100) // total) if total else 0,
+        }
+
+    def _memory_status_response(self):
+        findme = self._findme_status()
+        return {
+            "status": "ok",
+            "message": "memory_status",
+            "command": "memory_status",
+            "mode": "recovery",
+            "device_id": self.device_uid,
+            "device_uid": self.device_uid,
+            "device_name": self.device_name,
+            "memory": self._memory_status(),
+            "findme": {
+                "connected": bool(self.control_transport is not None and self.control_transport.is_connected()),
+                "state": findme.get("state", ""),
+                "gateway_id": findme.get("gateway_id", ""),
+            },
+            "runtime_version": getattr(iconfig, "RUNTIME_VERSION", "unknown"),
+            "os_version": self._installed_os_version(self.runtime),
+            "recovery_version": getattr(iconfig, "RECOVERY_VERSION", getattr(iconfig, "FIRMWARE_VERSION", "unknown")),
+            "reboot_required": False,
+            "applied": False,
         }
 
     def _release_url(self, request):
