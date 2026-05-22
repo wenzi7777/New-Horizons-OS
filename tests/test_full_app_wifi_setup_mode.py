@@ -1170,7 +1170,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertIn("filesystem_api_load", events)
         self.assertNotIn("calibration_store_load", events)
 
-    def test_recovery_update_commands_use_release_writer_in_normal_mode(self):
+    def test_recovery_write_requires_maintenance_and_uses_release_writer(self):
         writer_calls = []
 
         class FakeWriter:
@@ -1219,6 +1219,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app = module.App(wifi_setup_requested=False)
             app.wifi.connected = True
             checked = app._handle_control_request({"command": "check_recovery_release"}, ("tcp", 0))
+            rejected = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
+            maintenance = app._handle_control_request(
+                {"command": "enter_maintenance", "reason": "recovery_update"},
+                ("tcp", 0),
+            )
             written = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
             status = app._status()
         finally:
@@ -1233,6 +1238,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     sys.modules[name] = saved
 
         self.assertEqual(checked["message"], "recovery_release_checked")
+        self.assertEqual(rejected["status"], "error")
+        self.assertEqual(rejected["message"], "maintenance_required")
+        self.assertEqual(rejected["next_command"], "enter_maintenance")
+        self.assertEqual(maintenance["message"], "maintenance_entered")
+        self.assertEqual(maintenance["mode"], "maintenance")
         self.assertEqual(written["message"], "recovery_write_complete")
         self.assertEqual(written["update_state"]["operation"], "write_recovery")
         self.assertEqual(status["system"]["recovery_version"], "v-recovery-next")
@@ -1252,6 +1262,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             [
                 ("init", "recovery", "."),
                 ("check", "https://example.com/latest.json"),
+                ("init", "recovery", "."),
                 ("write", "https://example.com/latest.json"),
             ],
         )

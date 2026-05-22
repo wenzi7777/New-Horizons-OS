@@ -1461,20 +1461,18 @@ class App:
         release_url = runtime.get("update", {}).get("release_url", "")
         return release_url or getattr(config, "DEFAULT_RELEASE_URL", getattr(config, "GITHUB_RELEASE_URL", ""))
 
-    def _ensure_recovery_writer(self):
-        if self.recovery_writer is None:
-            from update_writer import ManifestTargetWriter
-            self.recovery_writer = ManifestTargetWriter(
-                "recovery",
-                ".",
-                self.logger,
-                progress=self._target_write_progress,
-            )
-        return self.recovery_writer
+    def _new_recovery_writer(self):
+        from update_writer import ManifestTargetWriter
+        return ManifestTargetWriter(
+            "recovery",
+            ".",
+            self.logger,
+            progress=self._target_write_progress,
+        )
 
     def _check_recovery_release(self, request):
         release_url = self._release_url(request)
-        writer = self._ensure_recovery_writer()
+        writer = self._new_recovery_writer()
         result = writer.check_release(release_url)
         result["release_url"] = release_url
         self._set_update_state({
@@ -1495,8 +1493,18 @@ class App:
         return result
 
     def _write_recovery(self, request):
+        if not self._in_maintenance():
+            return {
+                "status": "error",
+                "message": "maintenance_required",
+                "error": "maintenance_required",
+                "next_command": "enter_maintenance",
+                "reboot_required": False,
+                "applied": False,
+            }
         release_url = self._release_url(request)
-        writer = self._ensure_recovery_writer()
+        self._prepare_recovery_update_mode()
+        writer = self._new_recovery_writer()
         try:
             result = writer.write_release(release_url)
         except Exception as exc:
@@ -1526,6 +1534,9 @@ class App:
                 "update_state": self._current_update_state(),
                 "reboot_required": False,
             }
+        finally:
+            self.recovery_writer = None
+            gc.collect()
         result["release_url"] = release_url
         installed_version = result.get("version", "")
         if installed_version:
@@ -1546,6 +1557,16 @@ class App:
         })
         result["update_state"] = self._current_update_state()
         return result
+
+    def _prepare_recovery_update_mode(self):
+        self._stop_scan(persist_state=False)
+        self._release_maintenance_services()
+        self.latest_matrix = None
+        self.latest_frame = None
+        self.latest_imu = None
+        self.latest_battery = None
+        self.recovery_writer = None
+        gc.collect()
 
     def _default_update_state(self):
         return {
@@ -2020,6 +2041,8 @@ class App:
             "exit_maintenance",
             "reboot",
             "reboot_to_recovery",
+            "check_recovery_release",
+            "write_recovery",
             "calibration_sample_cell",
             "calibration_sample_all",
             "calibration_save",
