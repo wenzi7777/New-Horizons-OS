@@ -14,23 +14,31 @@ class UDPStreamTransport:
         self.addr = None
         self.failure_count = 0
         self.last_warn_ms = 0
+        self.last_error = ""
+        self.last_errno = 0
 
     def send(self, payload, wifi_connected):
         if not wifi_connected:
             self.close()
-            return False
+            self.last_error = "wifi_disconnected"
+            self.last_errno = 0
+            return {"ok": False, "error": self.last_error, "errno": self.last_errno}
         if not self._ensure_socket():
-            return False
+            return {"ok": False, "error": self.last_error or "socket_unavailable", "errno": self.last_errno}
         try:
             self.sock.sendto(payload, self.addr)
             self.failure_count = 0
+            self.last_error = ""
+            self.last_errno = 0
             return True
         except Exception as exc:
             self.failure_count += 1
+            self.last_errno = self._errno(exc)
+            self.last_error = "ENOMEM" if self.last_errno == 12 else str(exc)
             self._warn_throttled("udp_stream_send_failed {}".format(exc))
-            if self.failure_count >= self.REOPEN_FAILURES:
+            if self.last_errno == 12 or self.failure_count >= self.REOPEN_FAILURES:
                 self.close()
-            return False
+            return {"ok": False, "error": self.last_error, "errno": self.last_errno}
 
     def close(self):
         if self.sock is not None:
@@ -64,9 +72,17 @@ class UDPStreamTransport:
             self.failure_count = 0
             return True
         except Exception as exc:
+            self.last_errno = self._errno(exc)
+            self.last_error = str(exc)
             self._warn("udp_stream_open_failed {}".format(exc))
             self.close()
             return False
+
+    def _errno(self, exc):
+        try:
+            return int(exc.args[0])
+        except Exception:
+            return 0
 
     def _ticks_ms(self):
         try:

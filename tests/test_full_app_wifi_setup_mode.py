@@ -1087,6 +1087,72 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(native_scan.pop_packet_calls, 0)
         self.assertEqual(app.sent_packets, 0)
 
+    def test_udp_enomem_pauses_stream_before_next_native_packet_pop(self):
+        module, _fake_scan, events, saved_modules = load_full_app_module()
+        native_scan = NativePacketScan(events)
+        closes = []
+        collects = []
+
+        class FailingUDP:
+            def send(self, _payload, _connected):
+                return {"ok": False, "error": "ENOMEM", "errno": 12}
+
+            def close(self):
+                closes.append("close")
+
+        try:
+            app = module.App.__new__(module.App)
+            app.runtime = {"scan_timing": {"send_every_n_frames": 1}}
+            app.vdboard = types.SimpleNamespace(scan=native_scan)
+            app.native_streaming = True
+            app.frame_id = 0
+            app.last_gc_frame_id = 0
+            app.scan_packet_buffer = None
+            app.scan_rate = types.SimpleNamespace(tick=lambda: None)
+            app.udp_rate = None
+            app.control_transport = types.SimpleNamespace(is_connected=lambda: True, outbox_size=lambda: 0)
+            app.udp_stream = FailingUDP()
+            app.wifi = types.SimpleNamespace(is_connected=lambda: True)
+            app.sent_packets = 0
+            app.failed_sends = 0
+            app.send_backoff_until_ms = 0
+            app.logger = FakeLogger()
+            app.mode = "normal"
+            app.recovery_update_low_resource = False
+            app.resource_state = "normal"
+            app.stream_cooldown_level = 0
+            app.stream_paused_until_ms = 0
+            app.stream_last_error = ""
+            app.stream_last_error_ms = 0
+            app.stream_resume_probe_frames = 0
+            app.tx_buffer = None
+            app.offline_recorder = None
+            module.config.SEND_EVERY_N_FRAMES = 1
+            module.config.PRINT_FPS = False
+            module.config.STREAM_COOLDOWN_MS = (2000, 5000, 10000)
+            module.time.ticks_ms = lambda: 1000
+            module.time.ticks_add = lambda now, delta: now + delta
+            module.time.ticks_diff = lambda now, then: now - then
+            module.gc.collect = lambda: collects.append("gc")
+
+            app.handle_scan(1000)
+            first_pop_calls = native_scan.pop_packet_calls
+            app.handle_scan(1001)
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(first_pop_calls, 1)
+        self.assertEqual(native_scan.pop_packet_calls, 1)
+        self.assertEqual(app.failed_sends, 1)
+        self.assertEqual(app.resource_state, "stream_paused")
+        self.assertEqual(app.send_backoff_until_ms, 3000)
+        self.assertEqual(closes, ["close"])
+        self.assertEqual(collects, ["gc"])
+
     def test_set_matrix_layout_persists_valid_pin_selection(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()
         try:

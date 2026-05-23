@@ -194,6 +194,8 @@ class TCPControlTransport:
         if message_type == "hello":
             self.outbox.insert(0, item)
             return True
+        if message_type == "result":
+            return self._enqueue_priority_result(item)
         if len(self.outbox) >= self.MAX_OUTBOX:
             dropped = False
             for idx, queued in enumerate(self.outbox):
@@ -208,6 +210,26 @@ class TCPControlTransport:
                 return False
         self.outbox.append(item)
         return True
+
+    def _enqueue_priority_result(self, item):
+        while len(self.outbox) >= self.MAX_OUTBOX:
+            if not self._drop_low_priority_outbox_item():
+                self.findme_last_error = "outbox_full"
+                self._warn("tcp_control_outbox_full result_preserved_failed")
+                return False
+        insert_at = 0
+        while insert_at < len(self.outbox) and self.outbox[insert_at].get("type") == "hello":
+            insert_at += 1
+        self.outbox.insert(insert_at, item)
+        return True
+
+    def _drop_low_priority_outbox_item(self):
+        for wanted in ("status", "update_progress"):
+            for idx, queued in enumerate(self.outbox):
+                if queued.get("type") == wanted:
+                    self.outbox.pop(idx)
+                    return True
+        return False
 
     def _is_coalescable_status(self, item):
         return item.get("type") == "status" and item.get("message") == "status_announce"

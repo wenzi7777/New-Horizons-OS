@@ -132,6 +132,29 @@ class TCPControlLoggingTest(unittest.TestCase):
         self.assertIn(b'"seq":2', joined)
         self.assertIn(b'"request_id":"r-1"', joined)
 
+    def test_result_preempts_status_and_progress_when_outbox_is_full(self):
+        module = load_module("device/os/tcp_control.py")
+        logger = FakeLogger()
+        transport = module.TCPControlTransport(lambda: {"server": {"host": "127.0.0.1", "tcp_port": 1}}, "ABC", logger)
+        sent = []
+        transport.sock = type("Sock", (), {"send": lambda _self, data: sent.append(bytes(data)) or len(data)})()
+        transport.sock_key = ("127.0.0.1", 1, "ABC")
+        transport.hello_sent = True
+
+        for seq in range(transport.MAX_OUTBOX):
+            if seq % 2:
+                self.assertTrue(transport.publish_update_progress({"message": "progress", "seq": seq}, True))
+            else:
+                self.assertTrue(transport.publish_status({"message": "status", "seq": seq}, True))
+
+        self.assertEqual(transport.MAX_OUTBOX, transport.outbox_size())
+        self.assertTrue(transport.publish_result({"message": "important", "request_id": "r-critical"}, True))
+        self.assertEqual(transport.MAX_OUTBOX, transport.outbox_size())
+
+        self.assertTrue(transport.flush(4096))
+        self.assertIn(b'"type":"result"', sent[0])
+        self.assertIn(b'"request_id":"r-critical"', sent[0])
+
     def test_failed_connect_uses_exponential_backoff_and_reports_gateway_lost(self):
         class FailingSocket:
             def settimeout(self, _timeout):

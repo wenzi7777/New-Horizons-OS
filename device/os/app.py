@@ -85,6 +85,14 @@ class App:
 
         self.sent_packets = 0
         self.failed_sends = 0
+        self.resource_state = "normal"
+        self.stream_paused_until_ms = 0
+        self.stream_cooldown_level = 0
+        self.stream_last_error = ""
+        self.stream_last_errno = 0
+        self.stream_last_error_ms = 0
+        self.stream_pause_count = 0
+        self.stream_resume_probe_frames = 0
 
         if self._has_pending_matrix_layout():
             self.last_matrix_start_failed = True
@@ -277,9 +285,6 @@ class App:
                 online = False
             if not online and not offline_active:
                 return
-            packet = self._native_pop_packet()
-            if packet is None:
-                return
 
             self.frame_id += 1
             fps = self.scan_rate.tick() if self.scan_rate is not None else None
@@ -298,6 +303,9 @@ class App:
                 config.SEND_EVERY_N_FRAMES
             )
             if send_every > 1 and (self.frame_id % send_every != 0):
+                return
+            packet = self._native_pop_packet()
+            if packet is None:
                 return
             if offline_active:
                 self.offline_recorder.write_packet(packet, timestamp_ms)
@@ -342,19 +350,106 @@ class App:
             return False
 
         ok = self.udp_stream.send(packet, self.wifi.is_connected())
-        if ok:
+        if self._send_result_ok(ok):
             self.sent_packets += 1
             if self.udp_rate is not None:
                 self.udp_rate.tick()
             self.send_backoff_until_ms = 0
+            self._note_stream_send_success()
             return True
 
         self.failed_sends += 1
+        error, errno = self._send_result_error(ok)
+        if errno == 12 or str(error).upper() == "ENOMEM":
+            self._pause_stream("udp_enomem", error or "ENOMEM", errno)
+        else:
+            self._short_stream_backoff(error or "send_failed", errno)
+        return False
+
+    def _send_result_ok(self, result):
+        if isinstance(result, dict):
+            return bool(result.get("ok"))
+        return bool(result)
+
+    def _send_result_error(self, result):
+        if isinstance(result, dict):
+            errno = int(result.get("errno", 0) or 0)
+            error = str(result.get("error", "") or "")
+            return error, errno
+        return "send_failed", 0
+
+    def _short_stream_backoff(self, error="send_failed", errno=0):
+        self.stream_last_error = str(error or "send_failed")
+        self.stream_last_errno = int(errno or 0)
+        self.stream_last_error_ms = time.ticks_ms()
+        self.resource_state = "degraded"
         self.send_backoff_until_ms = time.ticks_add(
             time.ticks_ms(),
             getattr(config, "SEND_FAILURE_BACKOFF_MS", 100)
         )
-        return False
+
+    def _pause_stream(self, reason, error="", errno=0):
+        now = time.ticks_ms()
+        cooldowns = getattr(config, "STREAM_COOLDOWN_MS", (2000, 5000, 10000))
+        if not cooldowns:
+            cooldowns = (2000,)
+        try:
+            cooldown = int(cooldowns[min(int(self.stream_cooldown_level), len(cooldowns) - 1)])
+        except Exception:
+            cooldown = 2000
+        self.stream_cooldown_level = min(int(getattr(self, "stream_cooldown_level", 0)) + 1, max(0, len(cooldowns) - 1))
+        self.stream_last_error = str(error or reason or "stream_paused")
+        self.stream_last_errno = int(errno or 0)
+        self.stream_last_error_ms = now
+        self.stream_pause_count = int(getattr(self, "stream_pause_count", 0)) + 1
+        self.stream_resume_probe_frames = int(getattr(config, "STREAM_RECOVERY_PROBE_FRAMES", 3))
+        self.resource_state = "stream_paused"
+        self.stream_paused_until_ms = time.ticks_add(now, cooldown)
+        self.send_backoff_until_ms = self.stream_paused_until_ms
+        self._clear_tx_buffer()
+        try:
+            if self.udp_stream is not None:
+                self.udp_stream.close()
+        except Exception:
+            pass
+        try:
+            gc.collect()
+        except Exception:
+            pass
+        try:
+            self.logger.warn(
+                "stream_paused reason={} error={} errno={} cooldown_ms={}".format(
+                    reason,
+                    self.stream_last_error,
+                    self.stream_last_errno,
+                    cooldown,
+                )
+            )
+        except Exception:
+            pass
+
+    def _note_stream_send_success(self):
+        if int(getattr(self, "stream_resume_probe_frames", 0)) > 0:
+            self.stream_resume_probe_frames -= 1
+            if self.stream_resume_probe_frames > 0:
+                self.resource_state = "degraded"
+                return
+        self.resource_state = "normal"
+        self.stream_last_error = ""
+        self.stream_last_errno = 0
+        self.stream_cooldown_level = 0
+        self.stream_paused_until_ms = 0
+
+    def _stream_cooldown_active(self, now=None):
+        paused_until = int(getattr(self, "stream_paused_until_ms", 0) or 0)
+        if not paused_until:
+            return False
+        if now is None:
+            now = time.ticks_ms()
+        active = time.ticks_diff(now, paused_until) < 0
+        if not active and getattr(self, "resource_state", "") == "stream_paused":
+            self.resource_state = "degraded"
+        return active
 
     def _transmit_backing_off(self, now=None):
         if not self.send_backoff_until_ms:
@@ -632,6 +727,8 @@ class App:
         self.action_button_handled = False
 
     def _stream_online(self):
+        if self._stream_cooldown_active():
+            return False
         if not self.wifi.is_connected() or self.control_transport is None:
             return False
         if hasattr(self.control_transport, "is_connected") and not self.control_transport.is_connected():
@@ -1089,6 +1186,8 @@ class App:
                 "active_rows": list(old_layout.get("active_rows", [])),
                 "active_cols": list(old_layout.get("active_cols", [])),
             }
+            rollback_committed = bool(self._has_committed_matrix_layout())
+            self._stop_stream_for_reconfigure("matrix_layout")
             self.runtime = self.config_store.update_runtime({
                 "matrix_layout_state": {
                     "pending": True,
@@ -1115,7 +1214,7 @@ class App:
                     "matrix_layout": rollback_layout,
                     "matrix_layout_state": {
                         "pending": False,
-                        "committed": False,
+                        "committed": rollback_committed,
                         "last_error": str(exc),
                     },
                     "matrix_scan_state": {
@@ -1133,11 +1232,12 @@ class App:
                 return {
                     "status": "error",
                     "message": "matrix_layout_failed",
-                    "runtime": rollback_runtime,
+                    "runtime": self._runtime_scan_payload(rollback_runtime),
                     "reboot_required": False,
                     "applied": False,
                     "error": str(exc),
                     "scan_memory": self._native_memory_stats(),
+                    "scan_health": self._scan_health(include_memory=True),
                 }
             runtime = self.config_store.update_runtime({
                 "matrix_layout": {
@@ -1159,7 +1259,8 @@ class App:
             return {
                 "status": "ok",
                 "message": "matrix_layout_updated",
-                "runtime": runtime,
+                "runtime": self._runtime_scan_payload(runtime),
+                "scan_health": self._scan_health(include_memory=True),
                 "reboot_required": False,
                 "applied": True,
             }
@@ -1901,12 +2002,56 @@ class App:
         except Exception:
             return getattr(config, "RECOVERY_VERSION", getattr(config, "RECOVERY_FIRMWARE_VERSION", "unknown"))
 
+    def _resource_state(self):
+        if self._recovery_update_low_resource_active():
+            return "recovery_update_low_resource"
+        if self._in_maintenance():
+            return "maintenance"
+        if self._stream_cooldown_active():
+            return "stream_paused"
+        state = str(getattr(self, "resource_state", "normal") or "normal")
+        if state == "stream_paused":
+            return "degraded"
+        return state if state in ("normal", "degraded", "stream_paused", "maintenance", "recovery_update_low_resource") else "normal"
+
+    def _stream_state(self):
+        now = time.ticks_ms()
+        paused_until = int(getattr(self, "stream_paused_until_ms", 0) or 0)
+        cooldown_ms = 0
+        if paused_until and time.ticks_diff(now, paused_until) < 0:
+            cooldown_ms = max(0, int(-time.ticks_diff(now, paused_until)))
+            state = "paused"
+        elif str(getattr(self, "resource_state", "")) in ("degraded", "stream_paused") or getattr(self, "stream_last_error", ""):
+            state = "degraded"
+        else:
+            state = "normal"
+        transport_failures = 0
+        transport_error = ""
+        if self.udp_stream is not None:
+            transport_failures = int(getattr(self.udp_stream, "failure_count", 0) or 0)
+            transport_error = str(getattr(self.udp_stream, "last_error", "") or "")
+        return {
+            "state": state,
+            "cooldown_ms": cooldown_ms,
+            "paused_until_ms": paused_until,
+            "cooldown_level": int(getattr(self, "stream_cooldown_level", 0) or 0),
+            "pause_count": int(getattr(self, "stream_pause_count", 0) or 0),
+            "resume_probe_frames": int(getattr(self, "stream_resume_probe_frames", 0) or 0),
+            "last_error": str(getattr(self, "stream_last_error", "") or transport_error),
+            "last_errno": int(getattr(self, "stream_last_errno", 0) or 0),
+            "last_error_ms": int(getattr(self, "stream_last_error_ms", 0) or 0),
+            "sent_packets": int(getattr(self, "sent_packets", 0) or 0),
+            "failed_sends": int(getattr(self, "failed_sends", 0) or 0),
+            "transport_failures": transport_failures,
+        }
+
     def _system_status(self):
         return {
             "name": self.device_name,
             "hardware_model": getattr(config, "HARDWARE_MODEL", "unknown"),
             "runtime_version": getattr(config, "RUNTIME_VERSION", "unknown"),
             "mode": self.mode,
+            "resource_state": self._resource_state(),
             "os_version": getattr(config, "FIRMWARE_VERSION", "unknown"),
             "recovery_version": self._recovery_version(),
             "recovery_update_low_resource": self._recovery_update_low_resource_active(),
@@ -1922,14 +2067,19 @@ class App:
         except Exception:
             allocated = 0
         total = free + allocated if free or allocated else 0
+        native = self.vdboard.scan.memory_stats() if (
+            self.vdboard is not None and hasattr(self.vdboard.scan, "memory_stats")
+        ) else {}
         return {
             "heap_free": free,
             "heap_allocated": allocated,
             "heap_total": total,
             "heap_used_percent": int((allocated * 100) // total) if total else 0,
-            "native": self.vdboard.scan.memory_stats() if (
-                self.vdboard is not None and hasattr(self.vdboard.scan, "memory_stats")
-            ) else {},
+            "heap_largest_free_block": int(native.get("heap_largest_free_block", 0) or 0),
+            "resource_state": self._resource_state(),
+            "stream_state": self._stream_state(),
+            "control": self._control_health(),
+            "native": native,
         }
 
     def _memory_status_response(self):
@@ -1951,6 +2101,8 @@ class App:
             "os_version": getattr(config, "FIRMWARE_VERSION", "unknown"),
             "recovery_version": self._recovery_version(),
             "recovery_update_low_resource": self._recovery_update_low_resource_active(),
+            "resource_state": self._resource_state(),
+            "stream_state": self._stream_state(),
             "reboot_required": False,
             "applied": False,
         }
@@ -2031,6 +2183,8 @@ class App:
             "sent_packets": int(self.sent_packets),
             "failed_sends": int(self.failed_sends),
             "stream": stream,
+            "stream_state": self._stream_state(),
+            "resource_state": self._resource_state(),
             "control": self._control_health(),
         }
         if include_memory:
@@ -2102,6 +2256,8 @@ class App:
                 "mode": self.mode,
                 "transport": runtime.get("transport", {}),
                 "findme": self._findme_status(),
+                "resource_state": self._resource_state(),
+                "stream_state": self._stream_state(),
                 "matrix_layout": {
                     "active_rows": self._active_rows(),
                     "active_cols": self._active_cols(),
@@ -2159,6 +2315,8 @@ class App:
             "last_scan_health": self.last_scan_health,
             "sent_packets": self.sent_packets,
             "failed_sends": self.failed_sends,
+            "resource_state": self._resource_state(),
+            "stream_state": self._stream_state(),
             "scan": scan_stats,
             "stream": stream_stats,
             "scan_health": self._scan_health(include_memory=False, stats=scan_stats, stream=stream_stats),
@@ -2185,6 +2343,8 @@ class App:
                 "findme": self._findme_status(),
                 "logging": runtime.get("logging", {}),
                 "scan_timing": runtime.get("scan_timing", {}),
+                "resource_state": self._resource_state(),
+                "stream_state": self._stream_state(),
                 "matrix_layout": {
                     "active_rows": self._active_rows(),
                     "active_cols": self._active_cols(),
@@ -2204,6 +2364,8 @@ class App:
             "update_state": self._current_update_state(),
             "sent_packets": self.sent_packets,
             "failed_sends": self.failed_sends,
+            "resource_state": self._resource_state(),
+            "stream_state": self._stream_state(),
             "scan_health": self._scan_health(include_memory=False),
             "offline_recording": recorder_status,
         }
@@ -2427,6 +2589,37 @@ class App:
         state = (self.runtime or {}).get("matrix_scan_state", {}) or {}
         return bool(state.get("autostart_disabled"))
 
+    def _runtime_scan_payload(self, runtime=None):
+        runtime = runtime if isinstance(runtime, dict) else (self.runtime if isinstance(self.runtime, dict) else {})
+        return {
+            "matrix_layout": runtime.get("matrix_layout", {}),
+            "matrix_layout_state": runtime.get("matrix_layout_state", {}),
+            "matrix_scan_state": runtime.get("matrix_scan_state", {}),
+            "scan_timing": runtime.get("scan_timing", {}),
+            "buffer_frames": runtime.get("buffer_frames", getattr(config, "PACKET_BUFFER_SIZE", 2)),
+            "resource_state": self._resource_state(),
+            "stream_state": self._stream_state(),
+        }
+
+    def _stop_stream_for_reconfigure(self, reason):
+        self.send_backoff_until_ms = 0
+        self.stream_paused_until_ms = 0
+        self.stream_resume_probe_frames = 0
+        self.resource_state = "normal"
+        self._clear_tx_buffer()
+        if self.udp_stream is not None:
+            try:
+                self.udp_stream.close()
+            except Exception as exc:
+                try:
+                    self.logger.warn("udp_stream_reconfigure_close_failed reason={} error={}".format(reason, exc))
+                except Exception:
+                    pass
+        try:
+            gc.collect()
+        except Exception:
+            pass
+
     def _validate_matrix_layout(self, rows, cols):
         rows = self._normalize_pin_list(rows, config.AVAILABLE_ROWS, "active_rows")
         cols = self._normalize_pin_list(cols, config.AVAILABLE_COLS, "active_cols")
@@ -2477,12 +2670,13 @@ class App:
             return {
                 "status": "ok",
                 "message": "scan_timing_updated",
-                "runtime": self.runtime,
+                "runtime": self._runtime_scan_payload(self.runtime),
                 "reboot_required": False,
                 "applied": True,
             }
         scan_was_ready = bool(self.scan_ready)
 
+        self._stop_stream_for_reconfigure("scan_timing")
         runtime = self.config_store.update_runtime({"scan_timing": new_timing})
         self.runtime = runtime
         try:
@@ -2505,17 +2699,19 @@ class App:
             return {
                 "status": "error",
                 "message": "scan_timing_failed",
-                "runtime": rollback_runtime,
+                "runtime": self._runtime_scan_payload(rollback_runtime),
                 "reboot_required": False,
                 "applied": False,
                 "error": str(exc),
                 "scan_memory": self._native_memory_stats(),
+                "scan_health": self._scan_health(include_memory=True),
             }
 
         return {
             "status": "ok",
             "message": "scan_timing_updated",
-            "runtime": runtime,
+            "runtime": self._runtime_scan_payload(runtime),
+            "scan_health": self._scan_health(include_memory=True),
             "reboot_required": False,
             "applied": True,
         }

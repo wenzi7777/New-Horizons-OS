@@ -38,6 +38,13 @@ DEFAULT_RUNTIME = {
         "autostart_disabled": False,
         "last_error": "",
     },
+    "resource_state": "normal",
+    "stream_state": {
+        "state": "normal",
+        "cooldown_ms": 0,
+        "last_error": "",
+        "failed_sends": 0,
+    },
     "buffer_frames": 2,
     "ntp_servers": ["pool.ntp.org", "time.nist.gov"],
     "transport": {

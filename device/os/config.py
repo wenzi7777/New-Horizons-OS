@@ -4,9 +4,9 @@ DEVICE_ID = 0x00000001
 DEVICE_NAME = "New Horizons OS"
 HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4"
 RUNTIME_VERSION = "v0.3.0"
-FIRMWARE_VERSION = "v0.4.17"
+FIRMWARE_VERSION = "v0.4.18"
 OS_VERSION = FIRMWARE_VERSION
-RECOVERY_VERSION = "v0.4.17"
+RECOVERY_VERSION = "v0.4.18"
 RECOVERY_FIRMWARE_VERSION = RECOVERY_VERSION
 SETUP_AP_SSID_PREFIX = "NewHorizonsOS"
 SETUP_AP_PASSWORD = "newhorizons"
@@ -56,8 +56,8 @@ DEFAULT_GATEWAY_DISCOVERY_PORT = 22346
 GATEWAY_DISCOVERY_TIMEOUT_MS = 1500
 GATEWAY_DISCOVERY_ATTEMPTS = 2
 GATEWAY_DISCOVERY_RETRY_MS = 5000
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.17/device"
-RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.17/device"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.18/device"
+RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.18/device"
 GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
@@ -96,6 +96,8 @@ SEND_MAX_PER_LOOP = 1
 # Stop hammering lwIP briefly after a failed UDP send. Stale sensor packets are
 # not useful for realtime streaming, so the app drops them during this window.
 SEND_FAILURE_BACKOFF_MS = 100
+STREAM_COOLDOWN_MS = (2000, 5000, 10000)
+STREAM_RECOVERY_PROBE_FRAMES = 3
 
 # Matrix layout changes are staged and only committed when the native scan core
 # can produce a packet while leaving enough heap headroom for control/status work.
