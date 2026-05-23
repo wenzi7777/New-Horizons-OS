@@ -926,7 +926,6 @@ class App:
         self.runtime = self.config_store.update_runtime({
             "server": {
                 "host": "",
-                "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                 "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
                 "source": "findme",
                 "gateway_id": "",
@@ -936,7 +935,6 @@ class App:
                 "gateway_id": "",
                 "gateway_name": "",
                 "host": "",
-                "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                 "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
                 "last_error": "",
                 "preferred_gateway_id": preferred_gateway_id,
@@ -1017,7 +1015,6 @@ class App:
                 "findme": state,
                 "server": {
                     "host": "",
-                    "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                     "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
                     "source": "findme",
                     "gateway_id": "",
@@ -1056,7 +1053,7 @@ class App:
         self.time_sync.servers = list(self.runtime.get("ntp_servers", []))
 
     def _authorized(self, addr):
-        return bool(addr and addr[0] in ("tcp", "udp"))
+        return bool(addr and addr[0] == "udp")
 
     def _command_now_ms(self):
         try:
@@ -1368,7 +1365,7 @@ class App:
             return self._ok("credentials_reset", applied=True)
 
         if cmd == "start_wifi_setup":
-            self.wifi.start_setup_portal("tcp_command")
+            self.wifi.start_setup_portal("udp_command")
             self.update_led_state()
             return {
                 "status": "ok",

@@ -364,9 +364,8 @@ class WiFiManager:
         if result.get("ok"):
             self.last_error = ""
             self._log_info(
-                "findme_offer_selected host={} tcp={} udp={} id={}".format(
+                "findme_offer_selected host={} udp={} id={}".format(
                     result.get("host", ""),
-                    result.get("tcp_port", ""),
                     result.get("udp_port", ""),
                     result.get("gateway_id", ""),
                 )
@@ -385,7 +384,6 @@ class WiFiManager:
         return {
             "server": {
                 "host": "",
-                "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                 "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
                 "source": "findme",
                 "gateway_id": "",
@@ -398,7 +396,6 @@ class WiFiManager:
                 "gateway_id": "",
                 "gateway_name": "",
                 "host": "",
-                "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                 "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
                 "last_success_ms": 0,
                 "last_error": "",
@@ -427,7 +424,6 @@ class WiFiManager:
         if result.get("ok"):
             server = {
                 "host": result.get("host", ""),
-                "tcp_port": int(result.get("tcp_port") or getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                 "udp_port": int(result.get("udp_port") or getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
                 "source": "findme",
                 "gateway_id": result.get("gateway_id", ""),
@@ -437,7 +433,6 @@ class WiFiManager:
                 "gateway_id": server["gateway_id"],
                 "gateway_name": result.get("gateway_name", "New Horizons Gateway"),
                 "host": server["host"],
-                "tcp_port": server["tcp_port"],
                 "udp_port": server["udp_port"],
                 "last_success_ms": int(result.get("discovered_at_ms") or 0),
                 "last_error": "",

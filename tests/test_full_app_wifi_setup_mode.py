@@ -184,7 +184,6 @@ class FakeWiFi:
         return {
             "ok": True,
             "host": "127.0.0.1",
-            "tcp_port": 22345,
             "udp_port": 13250,
             "gateway_id": "test-gateway",
         }
@@ -198,7 +197,7 @@ class FakeRuntimeConfigStore:
             "matrix_layout": {"active_rows": [1], "active_cols": [1]},
             "matrix_layout_state": {"pending": False, "committed": True, "last_error": ""},
             "matrix_scan_state": {"active": False, "autostart_disabled": False, "last_error": ""},
-            "server": {"host": "127.0.0.1", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": "test-gateway"},
+            "server": {"host": "127.0.0.1", "udp_port": 13250, "source": "findme", "gateway_id": "test-gateway"},
             "findme": {"host": "127.0.0.1", "gateway_id": "test-gateway", "last_error": ""},
             "transport": {"mode": "udp"},
             "logging": {"enabled": True, "capacity": "default", "serial": "status"},
@@ -348,7 +347,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         def __getattr__(self, name):
             raise AssertionError("New Horizons OS must not import MQTT modules")
 
-    class FakeTCPControlTransport:
+    class FakeControlTransport:
         def __init__(self, *args, **kwargs):
             self.poll_calls = 0
             self.status_payloads = []
@@ -382,7 +381,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         def is_connected(self):
             return True
 
-    class FakeUDPControlTransport(FakeTCPControlTransport):
+    class FakeUDPControlTransport(FakeControlTransport):
         protocol = "NHCP/1"
 
     class FakeUDPStreamTransport:
@@ -519,7 +518,6 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
                 last_error="",
             )
         ),
-        "tcp_control": types.SimpleNamespace(TCPControlTransport=FakeTCPControlTransport),
         "udp_control": types.SimpleNamespace(UDPControlTransport=FakeUDPControlTransport),
         "udp_stream": types.SimpleNamespace(UDPStreamTransport=FakeUDPStreamTransport),
         "utils": types.SimpleNamespace(RateCounter=lambda interval: None),
@@ -881,7 +879,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app.sent_packets = 30
             app.failed_sends = 1
 
-            response = app._handle_control_request({"command": "scan_health"}, ("tcp", 0))
+            response = app._handle_control_request({"command": "scan_health"}, ("udp", 0))
         finally:
             for name, saved in saved_modules.items():
                 if saved is None:
@@ -915,13 +913,13 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             module.gc.mem_alloc = lambda: 180000
             app = module.App(wifi_setup_requested=False)
 
-            watch = app._handle_control_request({"command": "memory_status"}, ("tcp", 0))
+            watch = app._handle_control_request({"command": "memory_status"}, ("udp", 0))
             native_memory["heap_free"] = 19000
             native_memory["heap_largest_free_block"] = 12000
-            degraded = app._handle_control_request({"command": "memory_status"}, ("tcp", 0))
+            degraded = app._handle_control_request({"command": "memory_status"}, ("udp", 0))
             native_memory["heap_free"] = 15000
             native_memory["heap_largest_free_block"] = 7000
-            critical = app._handle_control_request({"command": "memory_status"}, ("tcp", 0))
+            critical = app._handle_control_request({"command": "memory_status"}, ("udp", 0))
         finally:
             for name, saved in saved_modules.items():
                 if saved is None:
@@ -1378,7 +1376,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app = module.App(wifi_setup_requested=False)
             response = app._handle_control_request(
                 {"command": "set_matrix_layout", "analog_pins": [1], "select_pins": [1]},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -1403,7 +1401,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
             response = app._handle_control_request(
                 {"command": "set_matrix_layout", "analog_pins": [1, 2], "select_pins": [1, 2]},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -1429,7 +1427,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
             response = app._handle_control_request(
                 {"command": "set_matrix_layout", "analog_pins": [1, 2], "select_pins": [1, 2]},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -1449,7 +1447,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
             response = app._handle_control_request(
                 {"command": "set_scan_timing", "target_fps": 75, "settle_us": 18},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -1470,7 +1468,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
             response = app._handle_control_request(
                 {"command": "set_scan_timing", "send_every_n_frames": 3},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -1490,7 +1488,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
             response = app._handle_control_request(
                 {"command": "set_scan_timing", "target_fps": 0},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -1511,11 +1509,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
             too_low = app._handle_control_request(
                 {"command": "set_scan_timing", "send_every_n_frames": 0},
-                ("tcp", 0),
+                ("udp", 0),
             )
             too_high = app._handle_control_request(
                 {"command": "set_scan_timing", "send_every_n_frames": 9},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -1543,7 +1541,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
             response = app._handle_control_request(
                 {"command": "set_scan_timing", "target_fps": 90},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -1566,9 +1564,9 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
             response = app._handle_control_request(
                 {"command": "enter_maintenance", "reason": "calibration"},
-                ("tcp", 0),
+                ("udp", 0),
             )
-            denied = app._handle_control_request({"command": "write_os"}, ("tcp", 0))
+            denied = app._handle_control_request({"command": "write_os"}, ("udp", 0))
         finally:
             for name, saved in saved_modules.items():
                 if saved is None:
@@ -1595,9 +1593,9 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app = module.App(wifi_setup_requested=False)
             app.setup()
             events.clear()
-            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
+            app._handle_control_request({"command": "enter_maintenance"}, ("udp", 0))
 
-            response = app._handle_control_request({"command": "maintenance_status"}, ("tcp", 0))
+            response = app._handle_control_request({"command": "maintenance_status"}, ("udp", 0))
         finally:
             for name, saved in saved_modules.items():
                 if saved is None:
@@ -1617,9 +1615,9 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app = module.App(wifi_setup_requested=False)
             app.setup()
             events.clear()
-            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
+            app._handle_control_request({"command": "enter_maintenance"}, ("udp", 0))
 
-            response = app._handle_control_request({"command": "file_list", "scope": "user"}, ("tcp", 0))
+            response = app._handle_control_request({"command": "file_list", "scope": "user"}, ("udp", 0))
         finally:
             for name, saved in saved_modules.items():
                 if saved is None:
@@ -1636,7 +1634,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
     def test_findme_retries_quickly_after_gateway_timeout_or_lost_connection(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module(
             runtime_override={
-                "server": {"host": "192.168.1.153", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": "local-gateway"},
+                "server": {"host": "192.168.1.153", "udp_port": 13250, "source": "findme", "gateway_id": "local-gateway"},
                 "findme": {"host": "192.168.1.153", "gateway_id": "local-gateway", "last_error": "findme_timeout:[Errno 116] ETIMEDOUT"},
             }
         )
@@ -1682,7 +1680,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     "target_mode": "normal",
                     "expires_at_ms": 1779450001000,
                 },
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -1703,7 +1701,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
             response = app._handle_control_request(
                 {"command": "reboot_to_recovery", "target_mode": "recovery"},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -1724,7 +1722,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
             response = app._handle_control_request(
                 {"command": "reboot_to_os", "target_mode": "recovery"},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -1752,7 +1750,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     "status": "ok",
                     "message": "recovery_release_checked",
                     "latest_version": "v-recovery-next",
-                    "manifest_url": "https://example.com/recovery/manifest.json",
+                    "manifest_url": "https://example.com/recovery/manifest.tlv",
                 }
 
             def write_release(self, release_url):
@@ -1778,18 +1776,18 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 }
 
         module, _fake_scan, _events, saved_modules = load_full_app_module(
-            runtime_override={"update": {"release_url": "https://example.com/latest.json"}}
+            runtime_override={"update": {"release_url": "https://example.com/latest.tlv"}}
         )
         saved_update_writer = sys.modules.get("update_writer")
         sys.modules["update_writer"] = types.SimpleNamespace(ManifestTargetWriter=FakeWriter)
         try:
             app = module.App(wifi_setup_requested=False)
             app.wifi.connected = True
-            check_rejected = app._handle_control_request({"command": "check_recovery_release"}, ("tcp", 0))
-            write_rejected = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
-            released = app._handle_control_request({"command": "release_recovery_resources"}, ("tcp", 0))
-            checked = app._handle_control_request({"command": "check_recovery_release"}, ("tcp", 0))
-            written = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
+            check_rejected = app._handle_control_request({"command": "check_recovery_release"}, ("udp", 0))
+            write_rejected = app._handle_control_request({"command": "write_recovery"}, ("udp", 0))
+            released = app._handle_control_request({"command": "release_recovery_resources"}, ("udp", 0))
+            checked = app._handle_control_request({"command": "check_recovery_release"}, ("udp", 0))
+            written = app._handle_control_request({"command": "write_recovery"}, ("udp", 0))
             status = app._status()
         finally:
             if saved_update_writer is None:
@@ -1835,9 +1833,9 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             writer_calls,
             [
                 ("init", "recovery", "."),
-                ("check", "https://example.com/latest.json"),
+                ("check", "https://example.com/latest.tlv"),
                 ("init", "recovery", "."),
-                ("write", "https://example.com/latest.json"),
+                ("write", "https://example.com/latest.tlv"),
             ],
         )
 
@@ -1868,7 +1866,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 }
 
         module, _fake_scan, _events, saved_modules = load_full_app_module(
-            runtime_override={"update": {"release_url": "https://example.com/latest.json"}},
+            runtime_override={"update": {"release_url": "https://example.com/latest.tlv"}},
             enable_led=True,
             enable_battery=True,
             enable_imu=True,
@@ -1884,10 +1882,10 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             self.assertIsNotNone(app.imu)
             self.assertIsNotNone(app.udp_stream)
             self.assertIsNotNone(app.time_sync)
-            released = app._handle_control_request({"command": "release_recovery_resources"}, ("tcp", 0))
+            released = app._handle_control_request({"command": "release_recovery_resources"}, ("udp", 0))
 
-            written = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
-            memory_status = app._handle_control_request({"command": "memory_status"}, ("tcp", 0))
+            written = app._handle_control_request({"command": "write_recovery"}, ("udp", 0))
+            memory_status = app._handle_control_request({"command": "memory_status"}, ("udp", 0))
         finally:
             if saved_update_writer is None:
                 sys.modules.pop("update_writer", None)
@@ -1930,7 +1928,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                 return {"status": "ok", "message": "should_not_write"}
 
         module, _fake_scan, _events, saved_modules = load_full_app_module(
-            runtime_override={"update": {"release_url": "https://example.com/latest.json"}}
+            runtime_override={"update": {"release_url": "https://example.com/latest.tlv"}}
         )
         saved_update_writer = sys.modules.get("update_writer")
         sys.modules["update_writer"] = types.SimpleNamespace(ManifestTargetWriter=FakeWriter)
@@ -1939,8 +1937,8 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             module.gc.mem_alloc = lambda: 200000
             app = module.App(wifi_setup_requested=False)
             app.wifi.connected = True
-            released = app._handle_control_request({"command": "release_recovery_resources"}, ("tcp", 0))
-            response = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
+            released = app._handle_control_request({"command": "release_recovery_resources"}, ("udp", 0))
+            response = app._handle_control_request({"command": "write_recovery"}, ("udp", 0))
         finally:
             if saved_update_writer is None:
                 sys.modules.pop("update_writer", None)
@@ -1965,7 +1963,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app = module.App(wifi_setup_requested=False)
             app.setup()
             events.clear()
-            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
+            app._handle_control_request({"command": "enter_maintenance"}, ("udp", 0))
             fake_scan.sample_cell_mv = lambda analog_pin, select_pin, duration_ms: 123.5
             gc_calls = []
             module.gc.collect = lambda: gc_calls.append("collect")
@@ -1978,7 +1976,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
                     "level": 2.5,
                     "duration_ms": 3000,
                 },
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -2026,11 +2024,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app = module.App(wifi_setup_requested=False)
             app.setup()
             app.vdboard = types.SimpleNamespace(scan=FrameSampleScan(frame, events))
-            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
+            app._handle_control_request({"command": "enter_maintenance"}, ("udp", 0))
 
             response = app._handle_control_request(
                 {"command": "calibration_sample_all", "level": 1.25, "duration_ms": 3},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -2059,11 +2057,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app = module.App(wifi_setup_requested=False)
             app.setup()
             events.clear()
-            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
+            app._handle_control_request({"command": "enter_maintenance"}, ("udp", 0))
 
             response = app._handle_control_request(
                 {"command": "calibration_sample_all", "level": 1.0, "duration_ms": 3000},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             if had_mem_free:
@@ -2086,7 +2084,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         try:
             app = module.App(wifi_setup_requested=False)
             responses = [
-                app._handle_control_request({"command": command}, ("tcp", 0))
+                app._handle_control_request({"command": command}, ("udp", 0))
                 for command in (
                     "enter_calibration_mode",
                     "start_calibration",
@@ -2110,11 +2108,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         try:
             app = module.App(wifi_setup_requested=False)
             app.setup()
-            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
+            app._handle_control_request({"command": "enter_maintenance"}, ("udp", 0))
 
             response = app._handle_control_request(
                 {"command": "set_matrix_layout", "analog_pins": [1], "select_pins": [1]},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():
@@ -2132,7 +2130,7 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
             app = module.App(wifi_setup_requested=False)
             response = app._handle_control_request(
                 {"command": "set_logging", "enabled": False, "capacity": "extended"},
-                ("tcp", 0),
+                ("udp", 0),
             )
             status = app._status()
         finally:
@@ -2155,11 +2153,11 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         try:
             app = module.App(wifi_setup_requested=False)
             app.setup()
-            app._handle_control_request({"command": "enter_maintenance"}, ("tcp", 0))
+            app._handle_control_request({"command": "enter_maintenance"}, ("udp", 0))
 
             response = app._handle_control_request(
                 {"command": "set_logging", "enabled": True, "capacity": "extended"},
-                ("tcp", 0),
+                ("udp", 0),
             )
         finally:
             for name, saved in saved_modules.items():

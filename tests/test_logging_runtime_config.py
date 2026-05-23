@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def load_runtime_module(module_path, module_name, config_name, config_module, storage_module=None):
     old_config = sys.modules.get(config_name)
     old_storage = sys.modules.get("storage")
-    storage_module = storage_module or types.SimpleNamespace(load_json=lambda *args: {}, save_json=lambda *args: None)
+    storage_module = storage_module or types.SimpleNamespace(load_tlv=lambda *args: {}, save_tlv=lambda *args: None)
     sys.modules[config_name] = config_module
     sys.modules["storage"] = storage_module
     try:
@@ -38,13 +38,12 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             SEND_EVERY_N_FRAMES=1,
             MATRIX_SETTLE_US=20,
             DEFAULT_SERVER_HOST="",
-            DEFAULT_TCP_CONTROL_PORT=22345,
             DEFAULT_UDP_STREAM_PORT=13250,
             DEFAULT_GATEWAY_DISCOVERY_PORT=22346,
             GITHUB_BASE_URL="https://example.com/device",
             RECOVERY_GITHUB_BASE_URL="https://example.com/base-device",
-            GITHUB_RELEASE_URL="https://example.com/releases/latest.json",
-            DEFAULT_RELEASE_URL="https://example.com/releases/latest.json",
+            GITHUB_RELEASE_URL="https://example.com/releases/latest.tlv",
+            DEFAULT_RELEASE_URL="https://example.com/releases/latest.tlv",
             WIFI_MODE="STA",
         )
         module = load_runtime_module(
@@ -63,23 +62,28 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
         self.assertNotIn("enabled", module.DEFAULT_RUNTIME["indicators"]["oled"])
         self.assertNotIn("enabled", module.DEFAULT_RUNTIME["indicators"]["external_led"])
         self.assertEqual(module.DEFAULT_RUNTIME["transport"]["mode"], "udp")
-        self.assertEqual(module.DEFAULT_RUNTIME["update"]["release_url"], "https://example.com/releases/latest.json")
+        self.assertEqual(module.DEFAULT_RUNTIME["update"]["release_url"], "https://example.com/releases/latest.tlv")
         self.assertEqual(module.DEFAULT_RUNTIME["update"]["source"], "github")
         self.assertEqual(sorted(module.DEFAULT_RUNTIME["update"]["sources"].keys()), ["github"])
         self.assertEqual(
             module.DEFAULT_RUNTIME["update"]["sources"]["github"]["os"],
-            "https://example.com/device/os/manifest.json",
+            "https://example.com/device/os/manifest.tlv",
         )
         self.assertEqual(
             module.DEFAULT_RUNTIME["update"]["sources"]["github"]["recovery"],
-            "https://example.com/base-device/recovery/manifest.json",
+            "https://example.com/base-device/recovery/manifest.tlv",
         )
+        store = module.RuntimeConfigStore("device_state")
+        self.assertEqual(store.runtime_path, "device_state/runtime_config.tlv")
+        self.assertEqual(store.network_path, "device_state/network_config.tlv")
+        self.assertEqual(store.filter_path, "device_state/filter_config.tlv")
+        self.assertEqual(store.update_state_path, "device_state/update_state.tlv")
 
     def test_os_runtime_loads_do_not_write_merged_defaults(self):
         saves = []
         fake_storage = types.SimpleNamespace(
-            load_json=lambda *args: {},
-            save_json=lambda path, payload: saves.append((path, payload)),
+            load_tlv=lambda *args: {},
+            save_tlv=lambda path, payload: saves.append((path, payload)),
         )
         fake_config = types.SimpleNamespace(
             PACKET_VERSION=2,
@@ -87,12 +91,11 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             SEND_EVERY_N_FRAMES=1,
             MATRIX_SETTLE_US=20,
             DEFAULT_SERVER_HOST="",
-            DEFAULT_TCP_CONTROL_PORT=22345,
             DEFAULT_UDP_STREAM_PORT=13250,
             DEFAULT_GATEWAY_DISCOVERY_PORT=22346,
             GITHUB_BASE_URL="https://example.com/device",
-            GITHUB_RELEASE_URL="https://example.com/releases/latest.json",
-            DEFAULT_RELEASE_URL="https://example.com/releases/latest.json",
+            GITHUB_RELEASE_URL="https://example.com/releases/latest.tlv",
+            DEFAULT_RELEASE_URL="https://example.com/releases/latest.tlv",
             WIFI_MODE="STA",
         )
         module = load_runtime_module(
@@ -124,11 +127,10 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             DEFAULT_NTP_SERVERS=["pool.ntp.org"],
             DEFAULT_TARGET_FPS=60,
             DEFAULT_SERVER_HOST="",
-            DEFAULT_TCP_CONTROL_PORT=22345,
             DEFAULT_UDP_STREAM_PORT=13250,
             DEFAULT_GATEWAY_DISCOVERY_PORT=22346,
-            DEFAULT_MANIFESTS={"recovery": "recovery.json", "os": "os.json"},
-            DEFAULT_RELEASE_URL="https://example.com/latest.json",
+            DEFAULT_MANIFESTS={"recovery": "recovery.tlv", "os": "os.tlv"},
+            DEFAULT_RELEASE_URL="https://example.com/latest.tlv",
             DEVICE_STATE_DIR="device_state",
         )
         module = load_runtime_module(
@@ -142,16 +144,16 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             module.DEFAULT_RUNTIME["logging"],
             {"enabled": True, "capacity": "default", "serial": "status"},
         )
-        self.assertEqual(module.DEFAULT_RUNTIME["transport"]["mode"], "udp_tcp")
-        self.assertEqual(module.DEFAULT_RUNTIME["update"]["release_url"], "https://example.com/latest.json")
+        self.assertEqual(module.DEFAULT_RUNTIME["transport"]["mode"], "udp")
+        self.assertEqual(module.DEFAULT_RUNTIME["update"]["release_url"], "https://example.com/latest.tlv")
         self.assertEqual(module.DEFAULT_RUNTIME["update"]["source"], "github")
         self.assertEqual(sorted(module.DEFAULT_RUNTIME["update"]["sources"].keys()), ["github"])
 
     def test_recovery_runtime_loads_do_not_write_merged_defaults(self):
         saves = []
         fake_storage = types.SimpleNamespace(
-            load_json=lambda *args: {},
-            save_json=lambda path, payload: saves.append((path, payload)),
+            load_tlv=lambda *args: {},
+            save_tlv=lambda path, payload: saves.append((path, payload)),
         )
         fake_iconfig = types.SimpleNamespace(
             FIRMWARE_NAME="New Horizons OS",
@@ -160,11 +162,10 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             DEFAULT_NTP_SERVERS=["pool.ntp.org"],
             DEFAULT_TARGET_FPS=60,
             DEFAULT_SERVER_HOST="",
-            DEFAULT_TCP_CONTROL_PORT=22345,
             DEFAULT_UDP_STREAM_PORT=13250,
             DEFAULT_GATEWAY_DISCOVERY_PORT=22346,
-            DEFAULT_MANIFESTS={"recovery": "recovery.json", "os": "os.json"},
-            DEFAULT_RELEASE_URL="https://example.com/latest.json",
+            DEFAULT_MANIFESTS={"recovery": "recovery.tlv", "os": "os.tlv"},
+            DEFAULT_RELEASE_URL="https://example.com/latest.tlv",
             DEVICE_STATE_DIR="device_state",
         )
         module = load_runtime_module(
@@ -175,6 +176,10 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
             fake_storage,
         )
         store = module.RuntimeConfigStore("device_state")
+        self.assertEqual(store.runtime_path, "device_state/runtime_config.tlv")
+        self.assertEqual(store.network_path, "device_state/network_config.tlv")
+        self.assertEqual(store.filter_path, "device_state/filter_config.tlv")
+        self.assertEqual(store.update_state_path, "device_state/update_state.tlv")
 
         store.load_runtime()
         store.load_network()

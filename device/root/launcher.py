@@ -52,29 +52,23 @@ class BootLogger:
 
 
 def _runtime_path():
-    return iconfig.DEVICE_STATE_DIR + "/runtime_config.json"
+    return iconfig.DEVICE_STATE_DIR + "/runtime_config.tlv"
 
 
-def _load_json(path, default):
+def _load_tlv(path, default):
     try:
-        import ujson as json
-    except ImportError:
-        import json
-    try:
-        with open(path, "r") as handle:
-            return json.load(handle)
-    except (OSError, ValueError):
+        import nhcp
+        with open(path, "rb") as handle:
+            return nhcp.decode_tlv(handle.read())
+    except Exception:
         return default
 
 
-def _write_json(path, data):
-    try:
-        import ujson as json
-    except ImportError:
-        import json
+def _write_tlv(path, data):
+    import nhcp
     tmp_path = path + ".tmp"
-    with open(tmp_path, "w") as handle:
-        json.dump(data, handle)
+    with open(tmp_path, "wb") as handle:
+        handle.write(nhcp.encode_tlv(data))
     try:
         os.remove(path)
     except OSError:
@@ -83,7 +77,7 @@ def _write_json(path, data):
 
 
 def _load_runtime():
-    data = _load_json(_runtime_path(), {})
+    data = _load_tlv(_runtime_path(), {})
     if isinstance(data, dict):
         return data
     return {}
@@ -92,7 +86,7 @@ def _load_runtime():
 def _update_runtime(updates):
     runtime = _load_runtime()
     runtime.update(updates)
-    _write_json(_runtime_path(), runtime)
+    _write_tlv(_runtime_path(), runtime)
     return runtime
 
 

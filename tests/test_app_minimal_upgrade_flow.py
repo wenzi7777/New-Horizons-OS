@@ -21,10 +21,10 @@ def load_recovery_app_module():
         DEVICE_STATE_DIR="device_state",
         STATUS_ANNOUNCE_INTERVAL_MS=2000,
         DEFAULT_MANIFESTS={
-            "recovery": "https://example.com/recovery/manifest.json",
-            "os": "https://example.com/os/manifest.json",
+            "recovery": "https://example.com/recovery/manifest.tlv",
+            "os": "https://example.com/os/manifest.tlv",
         },
-        DEFAULT_RELEASE_URL="https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
+        DEFAULT_RELEASE_URL="https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.tlv",
     )
     fake_identity = types.SimpleNamespace(
         get_device_id=lambda: "AABBCCDDEEFF",
@@ -34,20 +34,37 @@ def load_recovery_app_module():
     )
     fake_logger_mod = types.SimpleNamespace(DeviceLogger=lambda path: None)
     fake_fs_mod = types.SimpleNamespace(FilesystemAPI=lambda *args, **kwargs: None)
-    fake_tcp_mod = types.SimpleNamespace(
-        TCPControlTransport=lambda *args, **kwargs: types.SimpleNamespace(
+    fake_udp_mod = types.SimpleNamespace(
+        UDPControlTransport=lambda *args, **kwargs: types.SimpleNamespace(
             poll=lambda *poll_args, **poll_kwargs: None,
             publish_status=lambda *status_args, **status_kwargs: True,
             reconfigure=lambda: None,
             close=lambda: None,
         )
     )
-    fake_runtime_mod = types.SimpleNamespace(RuntimeConfigStore=lambda root: None)
-    class ForbiddenRecoveryUdpModule(types.ModuleType):
-        def __getattr__(self, name):
-            raise AssertionError("recovery must not import udp_control")
+    class MinimalRuntimeConfigStore:
+        def __init__(self, root):
+            self.runtime = {
+                "mode": "recovery",
+                "transport": {"mode": "udp"},
+                "server": {"host": "", "udp_port": 13250, "source": "findme", "gateway_id": ""},
+                "findme": {"state": "idle", "host": "", "gateway_id": "", "last_error": ""},
+                "update": {"enabled": True},
+                "logging": {"enabled": True, "capacity": "default"},
+            }
+            self.network = {"wifi_mode": "STA", "ssid": "", "password": ""}
 
-    fake_udp_mod = ForbiddenRecoveryUdpModule("udp_control")
+        def load_runtime(self):
+            return dict(self.runtime)
+
+        def update_runtime(self, patch):
+            self.runtime.update(patch)
+            return self.load_runtime()
+
+        def load_network(self):
+            return dict(self.network)
+
+    fake_runtime_mod = types.SimpleNamespace(RuntimeConfigStore=MinimalRuntimeConfigStore)
     fake_wifi_mod = types.SimpleNamespace(WiFiManager=lambda *args, **kwargs: None)
     fake_os_writer_mod = types.SimpleNamespace(
         OSWriter=lambda *args, **kwargs: types.SimpleNamespace(
@@ -55,7 +72,7 @@ def load_recovery_app_module():
                 "status": "ok",
                 "message": "os_release_checked",
                 "latest_version": "v0.2.0",
-                "manifest_url": "https://example.com/os-manifest.json",
+                "manifest_url": "https://example.com/os-manifest.tlv",
             },
             write_os=lambda release_url: {
                 "status": "ok",
@@ -73,7 +90,6 @@ def load_recovery_app_module():
         "device_identity": fake_identity,
         "device_logging": fake_logger_mod,
         "filesystem_api": fake_fs_mod,
-        "tcp_control": fake_tcp_mod,
         "runtime_config": fake_runtime_mod,
         "udp_control": fake_udp_mod,
         "wifi_manager": fake_wifi_mod,
@@ -132,7 +148,7 @@ class FakeLogger:
         self.configured.append((enabled, capacity))
 
 
-class FakeTCPControlTransport:
+class FakeUDPControlTransport:
     def __init__(self):
         self.reconfigure_calls = 0
         self.close_calls = 0
@@ -173,6 +189,16 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
 
         self.assertIsNone(module.OSWriter)
 
+    def test_recovery_app_defers_control_and_filesystem_until_needed(self):
+        module = load_recovery_app_module()
+
+        app = module.RecoveryApp()
+
+        self.assertIsNone(module.UDPControlTransport)
+        self.assertIsNone(module.FilesystemAPI)
+        self.assertIsNone(app.control_transport)
+        self.assertIsNone(app.filesystem)
+
     def test_os_write_progress_updates_state_and_flushes_compact_progress(self):
         module = load_recovery_app_module()
         app = module.RecoveryApp.__new__(module.RecoveryApp)
@@ -181,13 +207,13 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         app.device_name = "New Horizons OS"
         app.runtime = {
             "mode": "recovery",
-            "transport": {"mode": "udp_tcp"},
+            "transport": {"mode": "udp"},
         }
         app.wifi = type("FakeWiFi", (), {
             "is_connected": lambda self: True,
             "portal_status": lambda self: {"active": False},
         })()
-        app.control_transport = FakeTCPControlTransport()
+        app.control_transport = FakeUDPControlTransport()
         app.control = None
         app.recovery_error = ""
         app.reboot_required = False
@@ -239,13 +265,13 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         app.device_name = "New Horizons OS"
         app.runtime = {
             "mode": "recovery",
-            "transport": {"mode": "udp_tcp"},
+            "transport": {"mode": "udp"},
             "update": {"enabled": True},
         }
         app.config_store = FakeConfigStore(app.runtime)
         app.os_writer = None
         app.logger = None
-        app.control_transport = FakeTCPControlTransport()
+        app.control_transport = FakeUDPControlTransport()
         app.wifi = type("FakeWiFi", (), {
             "is_connected": lambda self: True,
             "release_setup_portal": lambda self: None,
@@ -292,7 +318,7 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         app.device_name = "New Horizons OS"
         app.runtime = {
             "mode": "recovery",
-            "update": {"manifest_url": "https://example.com/os-manifest.json"},
+            "update": {"manifest_url": "https://example.com/os-manifest.tlv"},
         }
         app.config_store = FakeConfigStore(app.runtime)
         app.wifi = type("FakeWiFi", (), {
@@ -323,7 +349,7 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         app.runtime = {
             "mode": "recovery",
             "update": {
-                "manifest_url": "https://example.com/recovery/manifest.json",
+                "manifest_url": "https://example.com/recovery/manifest.tlv",
                 "enabled": True,
             },
         }
@@ -422,7 +448,7 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         app.runtime = {
             "mode": "recovery",
             "update": {
-                "release_url": "https://example.com/latest.json",
+                "release_url": "https://example.com/latest.tlv",
                 "enabled": True,
             },
         }
@@ -431,7 +457,7 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         app.logger = None
 
         result = app._handle_request(
-            {"command": "write_os", "release_url": "http://192.168.1.2:8000/latest.json"},
+            {"command": "write_os", "release_url": "http://192.168.1.2:8000/latest.tlv"},
             None,
         )
 
@@ -439,9 +465,9 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         self.assertEqual(result["message"], "os_write_complete")
         self.assertEqual(
             result["release_url"],
-            "http://192.168.1.2:8000/latest.json",
+            "http://192.168.1.2:8000/latest.tlv",
         )
-        self.assertEqual(writer_calls, ["http://192.168.1.2:8000/latest.json"])
+        self.assertEqual(writer_calls, ["http://192.168.1.2:8000/latest.tlv"])
 
     def test_write_os_uses_runtime_release_url_when_request_omits_it(self):
         module = load_recovery_app_module()
@@ -466,7 +492,7 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         app.runtime = {
             "mode": "recovery",
             "update": {
-                "release_url": "https://example.com/runtime-latest.json",
+                "release_url": "https://example.com/runtime-latest.tlv",
                 "enabled": True,
             },
         }
@@ -477,8 +503,8 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         result = app._handle_request({"command": "write_os"}, None)
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["release_url"], "https://example.com/runtime-latest.json")
-        self.assertEqual(writer_calls, ["https://example.com/runtime-latest.json"])
+        self.assertEqual(result["release_url"], "https://example.com/runtime-latest.tlv")
+        self.assertEqual(writer_calls, ["https://example.com/runtime-latest.tlv"])
 
     def test_write_os_falls_back_to_default_release_url(self):
         module = load_recovery_app_module()
@@ -510,37 +536,36 @@ class RecoveryOSWriterFlowTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(
             result["release_url"],
-            "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
+            "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.tlv",
         )
         self.assertEqual(
             writer_calls,
-            ["https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"],
+            ["https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.tlv"],
         )
 
     def test_wifi_portal_post_reload_reconfigures_discovered_gateway_runtime(self):
         module = load_recovery_app_module()
         app = module.RecoveryApp.__new__(module.RecoveryApp)
         app.runtime = {
-            "transport": {"mode": "udp_tcp"},
-            "server": {"host": "", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": ""},
+            "transport": {"mode": "udp"},
+            "server": {"host": "", "udp_port": 13250, "source": "findme", "gateway_id": ""},
             "findme": {"host": "", "gateway_id": "", "last_error": "findme_no_gateway"},
             "logging": {"enabled": True, "capacity": "default"},
         }
         app.config_store = FakeConfigStore({
-            "transport": {"mode": "udp_tcp"},
-            "server": {"host": "192.168.1.200", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": "gw"},
+            "transport": {"mode": "udp"},
+            "server": {"host": "192.168.1.200", "udp_port": 13250, "source": "findme", "gateway_id": "gw"},
             "findme": {"host": "192.168.1.200", "gateway_id": "gw", "last_error": ""},
             "logging": {"enabled": True, "capacity": "default"},
         })
         app.logger = FakeLogger()
-        app.control_transport = FakeTCPControlTransport()
+        app.control_transport = FakeUDPControlTransport()
         app.wifi = FakePortalWiFi(handled=True)
 
         handled = app._service_wifi_setup_portal()
 
         self.assertTrue(handled)
         self.assertEqual(app.runtime["server"]["host"], "192.168.1.200")
-        self.assertEqual(app.runtime["server"]["tcp_port"], 22345)
         self.assertEqual(app.runtime["server"]["udp_port"], 13250)
         self.assertEqual(app.runtime["server"]["gateway_id"], "gw")
         self.assertEqual(app.runtime["findme"]["last_error"], "")

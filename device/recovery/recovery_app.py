@@ -10,12 +10,12 @@ import immutable_config as iconfig
 
 from device_identity import get_device_id, get_device_name, get_device_uid
 from device_logging import DeviceLogger
-from filesystem_api import FilesystemAPI
-from tcp_control import TCPControlTransport
 from runtime_config import RuntimeConfigStore
 from wifi_manager import WiFiManager
 
 OSWriter = None
+FilesystemAPI = None
+UDPControlTransport = None
 
 
 class RecoveryApp:
@@ -30,23 +30,9 @@ class RecoveryApp:
         self.runtime = self.config_store.load_runtime()
         self.logger = DeviceLogger(iconfig.LOG_PATH)
         self._apply_logging_config(self.runtime.get("logging", {}))
-        self.filesystem = FilesystemAPI(
-            getattr(iconfig, "DATA_FILES_DIR", "data/files"),
-            getattr(iconfig, "DATA_TMP_DIR", "data/tmp"),
-            {
-                "user": getattr(iconfig, "DATA_FILES_DIR", "data/files"),
-                "logs": getattr(iconfig, "DATA_LOG_DIR", "data/logs"),
-                "calibration": getattr(iconfig, "CALIBRATION_DIR", "device_state/calibration"),
-            },
-        )
+        self.filesystem = None
         self.wifi = WiFiManager(self.config_store, self.logger)
-        self.control_transport = TCPControlTransport(
-            lambda: self.runtime,
-            self.device_uid,
-            self.logger,
-            self._hello_payload,
-            self._handle_findme_event,
-        )
+        self.control_transport = None
         self.os_writer = None
         self.update_state = self._default_update_state()
         self.last_connect_ms = 0
@@ -82,7 +68,8 @@ class RecoveryApp:
         while True:
             now = time.ticks_ms()
             self._service_wifi_setup_portal()
-            self.control_transport.poll(self.wifi.is_connected(), self._handle_request)
+            if self.wifi.is_connected():
+                self._ensure_control_transport().poll(True, self._handle_request)
 
             if self.wifi.is_connected() and not self.boot_network_initialized:
                 self.boot_network_initialized = True
@@ -104,7 +91,8 @@ class RecoveryApp:
             if self.reboot_required and self._reboot_due(now):
                 time.sleep_ms(250)
                 try:
-                    self.control_transport.close()
+                    if self.control_transport is not None:
+                        self.control_transport.close()
                 except Exception:
                     pass
                 time.sleep_ms(50)
@@ -121,6 +109,38 @@ class RecoveryApp:
             return True
         except OSError:
             return False
+
+    def _ensure_filesystem(self):
+        if self.filesystem is None:
+            global FilesystemAPI
+            if FilesystemAPI is None:
+                from filesystem_api import FilesystemAPI as LoadedFilesystemAPI
+                FilesystemAPI = LoadedFilesystemAPI
+            self.filesystem = FilesystemAPI(
+                getattr(iconfig, "DATA_FILES_DIR", "data/files"),
+                getattr(iconfig, "DATA_TMP_DIR", "data/tmp"),
+                {
+                    "user": getattr(iconfig, "DATA_FILES_DIR", "data/files"),
+                    "logs": getattr(iconfig, "DATA_LOG_DIR", "data/logs"),
+                    "calibration": getattr(iconfig, "CALIBRATION_DIR", "device_state/calibration"),
+                },
+            )
+        return self.filesystem
+
+    def _ensure_control_transport(self):
+        if self.control_transport is None:
+            global UDPControlTransport
+            if UDPControlTransport is None:
+                from udp_control import UDPControlTransport as LoadedUDPControlTransport
+                UDPControlTransport = LoadedUDPControlTransport
+            self.control_transport = UDPControlTransport(
+                lambda: self.runtime,
+                self.device_uid,
+                self.logger,
+                self._hello_payload,
+                self._handle_findme_event,
+            )
+        return self.control_transport
 
     def _os_installed(self):
         os_dir = getattr(iconfig, "OS_DIR", "nhos")
@@ -140,7 +160,7 @@ class RecoveryApp:
         old_server = self.runtime.get("server", {})
         self.runtime = runtime
         self._apply_logging_config(self.runtime.get("logging", {}))
-        if old_transport != self.runtime.get("transport", {}) or old_server != self.runtime.get("server", {}):
+        if self.control_transport is not None and (old_transport != self.runtime.get("transport", {}) or old_server != self.runtime.get("server", {})):
             if hasattr(self.control_transport, "reconfigure"):
                 self.control_transport.reconfigure()
             else:
@@ -157,7 +177,7 @@ class RecoveryApp:
         result = self.wifi.run_findme(reason=reason)
         self.runtime = self.config_store.load_runtime()
         if result.get("ok"):
-            self.control_transport.reconfigure()
+            self._ensure_control_transport().reconfigure()
         else:
             gc.collect()
         return result
@@ -175,7 +195,6 @@ class RecoveryApp:
         self.runtime = self.config_store.update_runtime({
             "server": {
                 "host": "",
-                "tcp_port": int(getattr(iconfig, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                 "udp_port": int(getattr(iconfig, "DEFAULT_UDP_STREAM_PORT", 13250)),
                 "source": "findme",
                 "gateway_id": "",
@@ -185,7 +204,6 @@ class RecoveryApp:
                 "gateway_id": "",
                 "gateway_name": "",
                 "host": "",
-                "tcp_port": int(getattr(iconfig, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                 "udp_port": int(getattr(iconfig, "DEFAULT_UDP_STREAM_PORT", 13250)),
                 "last_error": "",
                 "preferred_gateway_id": preferred_gateway_id,
@@ -193,7 +211,7 @@ class RecoveryApp:
                 "claim_expires_at_ms": int(expires_at),
                 "last_claim_error": "",
             },
-            "transport": {"mode": "udp_tcp"},
+            "transport": {"mode": "udp"},
         })
         if self.control_transport is not None:
             self.control_transport.close()
@@ -213,7 +231,7 @@ class RecoveryApp:
     def _service_findme(self, now):
         if not self.wifi.is_connected() or self.wifi.setup_active():
             return False
-        if self.control_transport.is_connected():
+        if self.control_transport is not None and self.control_transport.is_connected():
             return False
         state = self._findme_status()
         server = (self.runtime or {}).get("server", {}) or {}
@@ -283,7 +301,6 @@ class RecoveryApp:
                 "findme": state,
                 "server": {
                     "host": "",
-                    "tcp_port": int(getattr(iconfig, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                     "udp_port": int(getattr(iconfig, "DEFAULT_UDP_STREAM_PORT", 13250)),
                     "source": "findme",
                     "gateway_id": "",
@@ -300,7 +317,7 @@ class RecoveryApp:
                 and time.ticks_diff(now, self.last_status_announce_ms) < iconfig.STATUS_ANNOUNCE_INTERVAL_MS):
             return False
         payload = self._status_payload()
-        ok = self.control_transport.publish_status(payload, self.wifi.is_connected())
+        ok = self._ensure_control_transport().publish_status(payload, self.wifi.is_connected())
         if ok:
             self.last_status_announce_ms = now
         return ok
@@ -537,25 +554,27 @@ class RecoveryApp:
 
         if command in ("file_list", "fs_list"):
             scope = request.get("scope", "user")
+            filesystem = self._ensure_filesystem()
             return {
                 "status": "ok",
                 "message": command,
                 "scope": scope,
-                "items": self.filesystem.list_files(scope),
-                "storage": self.filesystem.usage(),
+                "items": filesystem.list_files(scope),
+                "storage": filesystem.usage(),
                 "reboot_required": False,
             }
 
         if command == "fs_read":
             path = request.get("path", "")
-            data = self.filesystem.read_file(path, request.get("scope", "user"))
+            data = self._ensure_filesystem().read_file(path, request.get("scope", "user"))
             if data is None:
                 return {"status": "error", "message": "missing_file", "error": path, "reboot_required": False}
             return {"status": "ok", "message": "fs_read", "file": data, "reboot_required": False}
 
         if command == "file_upload_begin":
+            filesystem = self._ensure_filesystem()
             return self._file_call(
-                self.filesystem.upload_begin,
+                filesystem.upload_begin,
                 request.get("path", ""),
                 request.get("size", 0),
                 request.get("sha256", ""),
@@ -563,8 +582,9 @@ class RecoveryApp:
             )
 
         if command == "file_upload_chunk":
+            filesystem = self._ensure_filesystem()
             return self._file_call(
-                self.filesystem.upload_chunk,
+                filesystem.upload_chunk,
                 request.get("path", ""),
                 request.get("offset", 0),
                 request.get("data", ""),
@@ -572,14 +592,15 @@ class RecoveryApp:
             )
 
         if command == "file_upload_finish":
-            return self._file_call(self.filesystem.upload_finish, request.get("path", ""), request.get("scope", "user"))
+            return self._file_call(self._ensure_filesystem().upload_finish, request.get("path", ""), request.get("scope", "user"))
 
         if command == "file_download_begin":
-            return self._file_call(self.filesystem.download_begin, request.get("path", ""), request.get("scope", "user"))
+            return self._file_call(self._ensure_filesystem().download_begin, request.get("path", ""), request.get("scope", "user"))
 
         if command == "file_download_chunk":
+            filesystem = self._ensure_filesystem()
             return self._file_call(
-                self.filesystem.download_chunk,
+                filesystem.download_chunk,
                 request.get("path", ""),
                 request.get("offset", 0),
                 request.get("length", 1024),
@@ -588,7 +609,7 @@ class RecoveryApp:
 
         if command == "file_delete":
             try:
-                deleted = self.filesystem.delete_file(request.get("path", ""), request.get("scope", "user"))
+                deleted = self._ensure_filesystem().delete_file(request.get("path", ""), request.get("scope", "user"))
             except ValueError as exc:
                 return {"status": "error", "message": str(exc), "error": str(exc), "reboot_required": False}
             return {
@@ -623,14 +644,14 @@ class RecoveryApp:
         if command == "set_transport":
             runtime = self.config_store.update_runtime({
                 "transport": {
-                    "mode": "udp_tcp",
+                    "mode": "udp",
                 }
             })
             self.runtime = runtime
             return {"status": "ok", "message": "transport_updated", "runtime": runtime, "reboot_required": False}
 
         if command == "start_wifi_setup":
-            self.wifi.start_setup_portal("tcp_command")
+            self.wifi.start_setup_portal("udp_command")
             return {"status": "ok", "message": "wifi_setup_started", "wifi_setup": self.wifi.portal_status(), "reboot_required": False}
 
         if command == "stop_wifi_setup":
@@ -836,13 +857,14 @@ class RecoveryApp:
             "reboot_required": self.reboot_required,
         }
         ok = False
-        if hasattr(self.control_transport, "publish_update_progress"):
-            ok = self.control_transport.publish_update_progress(payload, self.wifi.is_connected())
+        control_transport = self._ensure_control_transport()
+        if hasattr(control_transport, "publish_update_progress"):
+            ok = control_transport.publish_update_progress(payload, self.wifi.is_connected())
         else:
-            ok = self.control_transport.publish_status(payload, self.wifi.is_connected())
-        if ok and hasattr(self.control_transport, "flush"):
+            ok = control_transport.publish_status(payload, self.wifi.is_connected())
+        if ok and hasattr(control_transport, "flush"):
             try:
-                self.control_transport.flush(4096)
+                control_transport.flush(4096)
             except Exception:
                 pass
         return ok

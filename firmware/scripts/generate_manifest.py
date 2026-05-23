@@ -1,8 +1,37 @@
 #!/usr/bin/env python3
 import argparse
 import hashlib
-import json
+import importlib.util
 from pathlib import Path
+
+
+TLV_MAGIC = b"NHTLV1\x00"
+
+
+def _load_nhcp(repo_root: Path):
+    nhcp_path = repo_root / "device" / "os" / "nhcp.py"
+    if not nhcp_path.exists():
+        nhcp_path = Path(__file__).resolve().parents[2] / "device" / "os" / "nhcp.py"
+    spec = importlib.util.spec_from_file_location("newhorizons_manifest_nhcp", nhcp_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def encode_tlv_payload(repo_root: Path, payload: dict) -> bytes:
+    return _load_nhcp(repo_root).encode_tlv(payload)
+
+
+def decode_tlv_file(path: Path) -> dict:
+    repo_root = path.resolve()
+    for parent in [path.resolve().parent, *path.resolve().parents]:
+        if (parent / "device" / "os" / "nhcp.py").exists():
+            repo_root = parent
+            break
+    payload = _load_nhcp(repo_root).decode_tlv(path.read_bytes())
+    if not isinstance(payload, dict):
+        raise ValueError("invalid_manifest_tlv")
+    return payload
 
 
 def sha256_file(path: Path) -> str:
@@ -26,7 +55,7 @@ def should_include(path: Path, root: Path) -> bool:
         return False
     if rel_parts and rel_parts[0] in (".device", "device_state"):
         return False
-    if rel_parts and rel_parts[-1] == "manifest.json":
+    if rel_parts and rel_parts[-1] in ("manifest.json", "manifest.tlv"):
         return False
     return True
 
@@ -34,11 +63,11 @@ def should_include(path: Path, root: Path) -> bool:
 def target_paths(repo_root: Path, target: str) -> tuple[Path, Path, str, str]:
     if target == "os":
         files_root = repo_root / "device" / "os"
-        manifest_path = files_root / "manifest.json"
+        manifest_path = files_root / "manifest.tlv"
         return files_root, manifest_path, "/nhos", "os"
     if target == "recovery":
         files_root = repo_root / "device" / "recovery"
-        manifest_path = files_root / "manifest.json"
+        manifest_path = files_root / "manifest.tlv"
         return files_root, manifest_path, "/recovery", "recovery"
     raise ValueError("unsupported target")
 
@@ -111,7 +140,7 @@ def main() -> None:
             "path": rel,
             "sha256": sha256_file(path),
             "size": path.stat().st_size,
-            "kind": "config" if rel.endswith(".json") else "code",
+            "kind": "config" if rel.endswith(".tlv") else "code",
             "reboot_required": rel.endswith((".py", ".mpy")),
         })
 
@@ -130,7 +159,7 @@ def main() -> None:
     deletes = sorted(set(deletes))
     if deletes:
         manifest["delete"] = deletes
-    manifest_path.write_text(json.dumps(manifest, separators=(",", ":")) + "\n", encoding="utf-8")
+    manifest_path.write_bytes(encode_tlv_payload(repo_root, manifest))
 
 
 if __name__ == "__main__":

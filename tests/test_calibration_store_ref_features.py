@@ -11,8 +11,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def load_calibration_store():
     path = REPO_ROOT / "device" / "os" / "calibration_store.py"
     fake_storage = types.SimpleNamespace(
-        load_json=lambda *_args, **_kwargs: {"points": {}},
-        save_json=lambda *_args, **_kwargs: None,
+        load_tlv=lambda *_args, **_kwargs: {"points": {}},
+        save_tlv=lambda *_args, **_kwargs: None,
     )
     saved_storage = sys.modules.get("storage")
     sys.modules["storage"] = fake_storage

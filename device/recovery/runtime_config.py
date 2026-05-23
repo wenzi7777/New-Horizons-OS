@@ -4,7 +4,6 @@ import storage
 
 DEFAULT_SERVER = {
     "host": getattr(iconfig, "DEFAULT_SERVER_HOST", ""),
-    "tcp_port": int(getattr(iconfig, "DEFAULT_TCP_CONTROL_PORT", 22345)),
     "udp_port": int(getattr(iconfig, "DEFAULT_UDP_STREAM_PORT", 13250)),
     "source": "findme",
     "gateway_id": "",
@@ -29,7 +28,7 @@ DEFAULT_RUNTIME = {
     "buffer_frames": iconfig.DEFAULT_BUFFER_FRAMES,
     "ntp_servers": list(iconfig.DEFAULT_NTP_SERVERS),
     "transport": {
-        "mode": "udp_tcp",
+        "mode": "udp",
     },
     "logging": {
         "enabled": True,
@@ -38,7 +37,6 @@ DEFAULT_RUNTIME = {
     },
     "server": {
         "host": DEFAULT_SERVER["host"],
-        "tcp_port": DEFAULT_SERVER["tcp_port"],
         "udp_port": DEFAULT_SERVER["udp_port"],
         "source": "findme",
         "gateway_id": DEFAULT_SERVER["gateway_id"],
@@ -50,7 +48,6 @@ DEFAULT_RUNTIME = {
         "gateway_id": "",
         "gateway_name": "",
         "host": "",
-        "tcp_port": int(getattr(iconfig, "DEFAULT_TCP_CONTROL_PORT", 22345)),
         "udp_port": int(getattr(iconfig, "DEFAULT_UDP_STREAM_PORT", 13250)),
         "last_success_ms": 0,
         "last_error": "",
@@ -92,10 +89,10 @@ DEFAULT_FILTER = {
 class RuntimeConfigStore:
     def __init__(self, base_dir=iconfig.DEVICE_STATE_DIR):
         self.base_dir = base_dir
-        self.runtime_path = self.base_dir + "/runtime_config.json"
-        self.network_path = self.base_dir + "/network_config.json"
-        self.filter_path = self.base_dir + "/filter_config.json"
-        self.update_state_path = self.base_dir + "/update_state.json"
+        self.runtime_path = self.base_dir + "/runtime_config.tlv"
+        self.network_path = self.base_dir + "/network_config.tlv"
+        self.filter_path = self.base_dir + "/filter_config.tlv"
+        self.update_state_path = self.base_dir + "/update_state.tlv"
 
     def _merged(self, base, override):
         result = {}
@@ -113,10 +110,10 @@ class RuntimeConfigStore:
         return result
 
     def load_runtime(self):
-        return self._merged(DEFAULT_RUNTIME, storage.load_json(self.runtime_path, {}))
+        return self._merged(DEFAULT_RUNTIME, storage.load_tlv(self.runtime_path, {}))
 
     def save_runtime(self, runtime):
-        storage.save_json(self.runtime_path, runtime)
+        storage.save_tlv(self.runtime_path, runtime)
 
     def update_runtime(self, patch):
         runtime = self._merged(self.load_runtime(), patch)
@@ -124,10 +121,10 @@ class RuntimeConfigStore:
         return runtime
 
     def load_network(self):
-        return self._merged(DEFAULT_NETWORK, storage.load_json(self.network_path, {}))
+        return self._merged(DEFAULT_NETWORK, storage.load_tlv(self.network_path, {}))
 
     def save_network(self, network_data):
-        storage.save_json(self.network_path, network_data)
+        storage.save_tlv(self.network_path, network_data)
 
     def update_network(self, patch):
         network_data = self._merged(self.load_network(), patch)
@@ -135,10 +132,10 @@ class RuntimeConfigStore:
         return network_data
 
     def load_filter(self):
-        return self._merged(DEFAULT_FILTER, storage.load_json(self.filter_path, {}))
+        return self._merged(DEFAULT_FILTER, storage.load_tlv(self.filter_path, {}))
 
     def save_filter(self, filter_data):
-        storage.save_json(self.filter_path, filter_data)
+        storage.save_tlv(self.filter_path, filter_data)
 
     def load_update_state(self):
         state = self._merged({
@@ -154,9 +151,9 @@ class RuntimeConfigStore:
             "last_error": "",
             "started_at_ms": 0,
             "finished_at_ms": 0,
-        }, storage.load_json(self.update_state_path, {}))
+        }, storage.load_tlv(self.update_state_path, {}))
         self.save_update_state(state)
         return state
 
     def save_update_state(self, state):
-        storage.save_json(self.update_state_path, state)
+        storage.save_tlv(self.update_state_path, state)

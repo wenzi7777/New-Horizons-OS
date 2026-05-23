@@ -665,7 +665,7 @@ class SK6812Status:
             else:
                 self._oled_text("NHOS {}".format(ctx.get("mode", "-")), 0, 0)
                 self._oled_text("FPS {}".format(self._fmt(ctx.get("current_fps", 0), 1)), 0, 10)
-                link = "TCP" if ctx.get("control_connected") else "NO TCP"
+                link = "UDP" if ctx.get("control_connected") else "NO UDP"
                 self._oled_text("{} {}x{}".format(link, int(ctx.get("rows") or 0), int(ctx.get("cols") or 0)), 0, 20)
             self._oled_show()
             return True

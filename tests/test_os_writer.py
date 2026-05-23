@@ -1,6 +1,5 @@
 import hashlib
 import importlib.util
-import json
 import sys
 import tempfile
 import unittest
@@ -82,11 +81,11 @@ class OSWriterTests(unittest.TestCase):
         release = {
             "product": "New Horizons OS",
             "latest": "v0.2.0",
-            "manifest_url": "https://example.com/os-manifest.json",
+            "manifest_url": "https://example.com/os-manifest.tlv",
         }
         urls = {
-            "https://example.com/latest.json": json.dumps(release).encode(),
-            "https://example.com/os-manifest.json": json.dumps(manifest).encode(),
+            "https://example.com/latest.tlv": module.storage.dumps_tlv(release),
+            "https://example.com/os-manifest.tlv": module.storage.dumps_tlv(manifest),
             "https://example.com/os/config.py": config_payload,
         }
         requested = []
@@ -103,25 +102,25 @@ class OSWriterTests(unittest.TestCase):
             (os_root / "app.py").write_bytes(app_payload)
             writer = module.OSWriter(root_dir=tmpdir)
 
-            result = writer.write_os("https://example.com/latest.json")
+            result = writer.write_os("https://example.com/latest.tlv")
 
             self.assertEqual(result["status"], "ok")
             self.assertEqual(result["message"], "os_write_complete")
             self.assertEqual(result["downloaded_files"], 1)
             self.assertEqual(result["skipped_files"], 1)
             self.assertEqual((os_root / "config.py").read_bytes(), config_payload)
-            self.assertEqual((Path(tmpdir) / "device_state" / "os_state.json").exists(), True)
+            self.assertEqual((Path(tmpdir) / "device_state" / "os_state.tlv").exists(), True)
             self.assertNotIn("https://example.com/os/app.py", requested)
 
             requested.clear()
             urls.pop("https://example.com/os/config.py")
-            second = writer.write_os("https://example.com/latest.json")
+            second = writer.write_os("https://example.com/latest.tlv")
 
             self.assertEqual(second["downloaded_files"], 0)
             self.assertEqual(second["skipped_files"], 2)
             self.assertEqual(
                 requested,
-                ["https://example.com/latest.json", "https://example.com/os-manifest.json"],
+                ["https://example.com/latest.tlv", "https://example.com/os-manifest.tlv"],
             )
 
 

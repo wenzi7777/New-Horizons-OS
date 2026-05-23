@@ -10,10 +10,10 @@ except ImportError:  # pragma: no cover - CPython fallback
 import config
 import secrets
 from device_identity import get_device_name, get_device_suffix, get_device_uid
-import findme
 
 
 WiFiSetupPortal = None
+FindMe = None
 
 
 class WiFiManager:
@@ -333,7 +333,7 @@ class WiFiManager:
             self.last_error = "findme_no_gateway"
             return result
         try:
-            result = findme.discover(
+            result = self._ensure_findme().discover(
                 get_device_uid(),
                 self._runtime_mode(),
                 device_name=get_device_name(getattr(config, "DEVICE_NAME", "New Horizons OS")),
@@ -350,9 +350,8 @@ class WiFiManager:
         if result.get("ok"):
             self.last_error = ""
             self._log_info(
-                "findme_offer_selected host={} tcp={} udp={} id={}".format(
+                "findme_offer_selected host={} udp={} id={}".format(
                     result.get("host", ""),
-                    result.get("tcp_port", ""),
                     result.get("udp_port", ""),
                     result.get("gateway_id", ""),
                 )
@@ -361,6 +360,13 @@ class WiFiManager:
             self.last_error = str(result.get("error", "findme_no_gateway"))
             self._log_warn("findme_failed error={}".format(result.get("error", "unknown")))
         return result
+
+    def _ensure_findme(self):
+        global FindMe
+        if FindMe is None:
+            import findme as LoadedFindMe
+            FindMe = LoadedFindMe
+        return FindMe
 
     def _runtime_mode(self):
         if self.config_store is None:
@@ -371,12 +377,11 @@ class WiFiManager:
         return {
             "server": {
                 "host": "",
-                "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                 "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
                 "source": "findme",
                 "gateway_id": "",
             },
-            "transport": {"mode": "udp_tcp"},
+            "transport": {"mode": "udp"},
             "findme": {
                 "enabled": True,
                 "port": int(getattr(config, "DEFAULT_GATEWAY_DISCOVERY_PORT", 22346)),
@@ -384,7 +389,6 @@ class WiFiManager:
                 "gateway_id": "",
                 "gateway_name": "",
                 "host": "",
-                "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                 "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
                 "last_success_ms": 0,
                 "last_error": "",
@@ -413,7 +417,6 @@ class WiFiManager:
         if result.get("ok"):
             server = {
                 "host": result.get("host", ""),
-                "tcp_port": int(result.get("tcp_port") or getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
                 "udp_port": int(result.get("udp_port") or getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
                 "source": "findme",
                 "gateway_id": result.get("gateway_id", ""),
@@ -423,7 +426,6 @@ class WiFiManager:
                 "gateway_id": server["gateway_id"],
                 "gateway_name": result.get("gateway_name", "New Horizons Gateway"),
                 "host": server["host"],
-                "tcp_port": server["tcp_port"],
                 "udp_port": server["udp_port"],
                 "last_success_ms": int(result.get("discovered_at_ms") or 0),
                 "last_error": "",
@@ -439,7 +441,7 @@ class WiFiManager:
             self.config_store.update_runtime({
                 "server": server,
                 "findme": findme_state,
-                "transport": {"mode": "udp_tcp"},
+                "transport": {"mode": "udp"},
             })
             return
         findme_state["state"] = "rejected" if result.get("error") == "findme_rejected" else "no_gateway"
@@ -450,7 +452,7 @@ class WiFiManager:
         self.config_store.update_runtime({
             "server": current_server,
             "findme": findme_state,
-            "transport": {"mode": "udp_tcp"},
+            "transport": {"mode": "udp"},
         })
 
     def _findme_versions(self):

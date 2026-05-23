@@ -4,19 +4,19 @@ import storage
 class CalibrationStore:
     def __init__(self, base_dir="device_state/calibration"):
         self.base_dir = base_dir
-        self.index_path = self.base_dir + "/index.json"
+        self.index_path = self.base_dir + "/index.tlv"
         self.points = {}
 
     def _sensor_key(self, analog_pin, select_pin):
         return "{}:{}".format(int(analog_pin), int(select_pin))
 
     def load(self):
-        index = storage.load_json(self.index_path, {"points": {}})
+        index = storage.load_tlv(self.index_path, {"points": {}})
         self.points = index.get("points", {})
         return self.points
 
     def save(self):
-        storage.save_json(self.index_path, {"points": self.points})
+        storage.save_tlv(self.index_path, {"points": self.points})
 
     def set_point(self, analog_pin, select_pin, level, raw_mv):
         sensor_key = self._sensor_key(analog_pin, select_pin)

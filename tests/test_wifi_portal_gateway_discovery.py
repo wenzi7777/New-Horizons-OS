@@ -6,7 +6,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PORTAL_PATH = REPO_ROOT / "device" / "recovery" / "wifi_portal.py"
-GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
+GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.tlv"
 
 
 def load_portal_module():
@@ -32,14 +32,13 @@ class FakeManager:
             "state": "wifi_setup_active",
             "last_error": "",
             "last_setup_result": "",
-            "server": {"host": "", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": ""},
+            "server": {"host": "", "udp_port": 13250, "source": "findme", "gateway_id": ""},
             "findme": {
                 "enabled": True,
                 "port": 22346,
                 "state": "idle",
                 "gateway_id": "",
                 "host": "",
-                "tcp_port": 22345,
                 "udp_port": 13250,
                 "last_success_ms": 0,
                 "last_error": "",
@@ -113,7 +112,6 @@ class WiFiPortalGatewayDiscoveryTests(unittest.TestCase):
         self.assertNotIn(">Manual</option>", html)
         self.assertNotIn("isensing-s1.u-aizu.ac.jp", html)
         self.assertNotIn('name="server_host"', html)
-        self.assertNotIn('name="tcp_port"', html)
         self.assertNotIn('name="udp_port"', html)
         self.assertNotIn('name="release_url"', html)
         self.assertNotIn('id="release_url"', html)

@@ -72,13 +72,13 @@ class UploadFilesystemTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             source = Path(tmpdir)
             (source / "transport").mkdir()
-            (source / "transport" / "tcp_control.py").write_text("x = 1\n", encoding="utf-8")
+            (source / "transport" / "udp_control.py").write_text("x = 1\n", encoding="utf-8")
 
             module.upload_tree("/dev/test", source, "recovery")
 
         self.assertEqual(calls[0], ("mkdir", "recovery"))
         self.assertIn(("mkdir", "recovery/transport"), calls)
-        self.assertIn(("copy", "recovery/transport/tcp_control.py"), calls)
+        self.assertIn(("copy", "recovery/transport/udp_control.py"), calls)
 
     def test_remote_copy_falls_back_to_raw_exec_when_os_stat_is_missing(self):
         module = load_upload_filesystem()
@@ -98,14 +98,14 @@ class UploadFilesystemTests(unittest.TestCase):
         module.subprocess.run = fake_run
         module.RAW_COPY_CHUNK_SIZE = 4
         with tempfile.TemporaryDirectory() as tmpdir:
-            local_path = Path(tmpdir) / "tcp_control.py"
+            local_path = Path(tmpdir) / "udp_control.py"
             local_path.write_bytes(b"abcdef")
 
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                module.remote_copy("/dev/test", local_path, "recovery/tcp_control.py")
+                module.remote_copy("/dev/test", local_path, "recovery/udp_control.py")
 
         exec_commands = [cmd for cmd in calls if cmd[:3] == ["mpremote", "connect", "/dev/test"] and cmd[3] == "exec"]
-        self.assertEqual(exec_commands[0][4], "f=open('recovery/tcp_control.py','wb');f.close()")
+        self.assertEqual(exec_commands[0][4], "f=open('recovery/udp_control.py','wb');f.close()")
         self.assertIn("b'abcd'", exec_commands[1][4])
         self.assertIn("b'ef'", exec_commands[2][4])
 

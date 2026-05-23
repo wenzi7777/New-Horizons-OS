@@ -1,7 +1,7 @@
 FIRMWARE_NAME = "New Horizons OS"
 HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4"
 RUNTIME_VERSION = "v0.3.0"
-RECOVERY_VERSION = "v0.4.18"
+RECOVERY_VERSION = "v0.4.25"
 FIRMWARE_VERSION = RECOVERY_VERSION
 DEFAULT_MODE = "recovery"
 
@@ -27,13 +27,12 @@ DATA_TMP_DIR = "data/tmp"
 LOG_PATH = DATA_LOG_DIR + "/device.log"
 
 DEFAULT_SERVER_HOST = ""
-DEFAULT_TCP_CONTROL_PORT = 22345
 DEFAULT_UDP_STREAM_PORT = 13250
 DEFAULT_GATEWAY_DISCOVERY_PORT = 22346
 GATEWAY_DISCOVERY_TIMEOUT_MS = 1500
 GATEWAY_DISCOVERY_ATTEMPTS = 2
 GATEWAY_DISCOVERY_RETRY_MS = 5000
-DEFAULT_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
+DEFAULT_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.tlv"
 DEFAULT_NTP_SERVERS = ["pool.ntp.org", "time.nist.gov"]
 DEFAULT_BUFFER_FRAMES = 2
 DEFAULT_TARGET_FPS = 60
@@ -41,6 +40,6 @@ DEFAULT_TARGET_FPS = 60
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
 DEFAULT_MANIFESTS = {
-    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.18/device/recovery/manifest.json",
-    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.18/device/os/manifest.json",
+    "recovery": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.25/device/recovery/manifest.tlv",
+    "os": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.25/device/os/manifest.tlv",
 }

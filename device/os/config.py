@@ -4,9 +4,9 @@ DEVICE_ID = 0x00000001
 DEVICE_NAME = "New Horizons OS"
 HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4"
 RUNTIME_VERSION = "v0.3.0"
-FIRMWARE_VERSION = "v0.4.24"
+FIRMWARE_VERSION = "v0.4.25"
 OS_VERSION = FIRMWARE_VERSION
-RECOVERY_VERSION = "v0.4.18"
+RECOVERY_VERSION = "v0.4.19"
 RECOVERY_FIRMWARE_VERSION = RECOVERY_VERSION
 SETUP_AP_SSID_PREFIX = "NewHorizonsOS"
 SETUP_AP_PASSWORD = "newhorizons"
@@ -50,15 +50,14 @@ BATTERY_RATE_HZ = 1
 LED_RATE_HZ = 20
 
 DEFAULT_SERVER_HOST = ""
-DEFAULT_TCP_CONTROL_PORT = 22345
 DEFAULT_UDP_STREAM_PORT = 13250
 DEFAULT_GATEWAY_DISCOVERY_PORT = 22346
 GATEWAY_DISCOVERY_TIMEOUT_MS = 1500
 GATEWAY_DISCOVERY_ATTEMPTS = 2
 GATEWAY_DISCOVERY_RETRY_MS = 5000
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.24/device"
-RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.18/device"
-GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.25/device"
+RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.19/device"
+GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.tlv"
 DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
 STATUS_ANNOUNCE_INTERVAL_MS = 2000
 
@@ -127,7 +126,7 @@ ENABLE_OTA = False
 
 # Optional sensor drivers are deferred when heap headroom is low. The BMI270
 # config load is large on the no-PSRAM board, so only start it when scan is
-# actually active and enough heap remains for TCP control/status work.
+# actually active and enough heap remains for UDP control/status work.
 OPTIONAL_BATTERY_MIN_HEAP_FREE = 49152
 OPTIONAL_IMU_MIN_HEAP_FREE = 81920
 OPTIONAL_IMU_REQUIRES_SCAN = True

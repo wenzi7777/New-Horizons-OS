@@ -1,4 +1,3 @@
-import json
 try:
     import uos as os
 except ImportError:  # pragma: no cover - CPython fallback
@@ -37,10 +36,10 @@ class ManifestTargetWriter:
         self.root_dir = root_dir.rstrip("/") if root_dir not in ("", ".") else "."
         self.logger = logger
         self.progress = progress
-        self.state_path = self._rooted("device_state/{}_state.json".format(target))
+        self.state_path = self._rooted("device_state/{}_state.tlv".format(target))
 
     def check_release(self, release_url):
-        release = self._fetch_json(release_url)
+        release = self._fetch_tlv(release_url)
         target_release = self._target_release(release)
         manifest_url = target_release.get("manifest_url", "")
         if not manifest_url:
@@ -55,12 +54,12 @@ class ManifestTargetWriter:
         }
 
     def write_release(self, release_url):
-        release = self._fetch_json(release_url)
+        release = self._fetch_tlv(release_url)
         target_release = self._target_release(release)
         manifest_url = target_release.get("manifest_url", "")
         if not manifest_url:
             raise ValueError("missing_manifest_url")
-        manifest = self._fetch_json(manifest_url)
+        manifest = self._fetch_tlv(manifest_url)
         version = manifest.get("version", target_release.get("latest", target_release.get("version", "")))
         summary = self._summarize(manifest)
         self._emit("planned", version, summary, "")
@@ -94,7 +93,7 @@ class ManifestTargetWriter:
             "deleted_files": deleted,
             "last_result": "applied",
         }
-        storage.save_json(self.state_path, state)
+        storage.save_tlv(self.state_path, state)
         self._emit("complete", version, summary, "", downloaded=downloaded)
         return {
             "status": "ok",
@@ -197,11 +196,9 @@ class ManifestTargetWriter:
         storage.remove(local_path)
         os.rename(tmp_path, local_path)
 
-    def _fetch_json(self, url):
+    def _fetch_tlv(self, url):
         payload = self._fetch_bytes(url)
-        if isinstance(payload, bytes):
-            payload = payload.decode()
-        return json.loads(payload)
+        return storage.loads_tlv(payload)
 
     def _fetch_bytes(self, url):
         if requests is not None:

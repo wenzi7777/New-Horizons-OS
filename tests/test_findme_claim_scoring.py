@@ -14,7 +14,6 @@ class FindMeClaimScoringTest(unittest.TestCase):
             GATEWAY_DISCOVERY_TIMEOUT_MS=1500,
             GATEWAY_DISCOVERY_ATTEMPTS=1,
             DEFAULT_GATEWAY_DISCOVERY_PORT=22346,
-            DEFAULT_TCP_CONTROL_PORT=22345,
             DEFAULT_UDP_STREAM_PORT=13250,
         )
         path = REPO_ROOT / "device" / "os" / "findme.py"

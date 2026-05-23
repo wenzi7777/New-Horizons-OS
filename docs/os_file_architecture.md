@@ -11,14 +11,14 @@
   launcher.py
   recovery.py
   device_state/
-    runtime_config.json
-    network_config.json
-    os_state.json
-    update_state.json
+    runtime_config.tlv
+    network_config.tlv
+    os_state.tlv
+    update_state.tlv
   recovery/
     recovery_app.py
     wifi_portal.py
-    tcp_control.py
+    udp_control.py
     udp_stream.py
     os_writer.py
     storage.py
@@ -28,7 +28,7 @@
     app.py
     config.py
     runtime_config.py
-    tcp_control.py
+    udp_control.py
     calibration_store.py
     ...
   ota_stage/
@@ -85,7 +85,7 @@ device/
 - `os`：只上傳 `device/os` 到 `/nhos`，用於本地開發測試。
 - `all`：上傳 root、recovery、OS。
 
-正式 OS 更新應使用 Recovery `write_os`。它固定從 GitHub `releases/latest.json` 取得 OS manifest，並且只寫入 hash 不同的 `/nhos` 檔案。本地開發測試不要切換 release URL，直接使用 `upload_filesystem.py --target os`。
+正式 OS 更新應使用 Recovery `write_os`。它固定從 GitHub `releases/latest.tlv` 取得 OS manifest，並且只寫入 hash 不同的 `/nhos` 檔案。本地開發測試不要切換 release URL，直接使用 `upload_filesystem.py --target os`。
 
 ## Firmware / Filesystem Commands
 

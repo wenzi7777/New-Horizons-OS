@@ -1,14 +1,14 @@
 """New Horizons FindMe LAN gateway selection."""
 
-import json
 import socket
 import time
 
 import config
+import nhcp
 
 
-DISCOVER_TYPE = "nh_findme_discover"
-OFFER_TYPE = "nh_findme_offer"
+DISCOVER_TYPE = "findme_discover"
+OFFER_TYPE = "findme_offer"
 PROTO_VERSION = 1
 
 
@@ -33,8 +33,21 @@ def _as_int(value, default):
         return default
 
 
-def _send_json(sock, payload, address):
-    sock.sendto(json.dumps(payload, separators=(",", ":")).encode("utf-8"), address)
+def _send_frame(sock, payload, address):
+    sock.sendto(nhcp.encode_frame(DISCOVER_TYPE, device_uid=payload.get("device_uid", ""), payload=payload), address)
+
+
+def _decode_offer(data):
+    try:
+        frame = nhcp.decode_frame(data)
+    except Exception:
+        return None
+    if frame.get("type") != OFFER_TYPE:
+        return None
+    payload = frame.get("payload", {})
+    if not isinstance(payload, dict):
+        return None
+    return payload
 
 
 def _offer_score(offer):
@@ -68,7 +81,6 @@ def discover(
     timeout_ms = timeout_ms or getattr(config, "GATEWAY_DISCOVERY_TIMEOUT_MS", 1500)
     attempts = attempts or getattr(config, "GATEWAY_DISCOVERY_ATTEMPTS", 2)
     discovery_port = discovery_port or getattr(config, "DEFAULT_GATEWAY_DISCOVERY_PORT", 22346)
-    tcp_default = getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)
     udp_default = getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)
     versions = versions or {}
     rejected_gateways = rejected_gateways or []
@@ -116,7 +128,7 @@ def discover(
         for _ in range(max(1, attempts)):
             start_ms = _now_ms()
             try:
-                _send_json(sock, request, ("255.255.255.255", discovery_port))
+                _send_frame(sock, request, ("255.255.255.255", discovery_port))
             except Exception as exc:
                 last_error = "findme_broadcast_failed:%s" % exc
                 continue
@@ -128,18 +140,12 @@ def discover(
                     last_error = "findme_timeout:%s" % exc
                     break
                 latency_ms = max(0, _ticks_diff(_now_ms(), start_ms))
-                try:
-                    obj = json.loads(data.decode("utf-8"))
-                except Exception:
-                    continue
-                if not isinstance(obj, dict) or obj.get("type") != OFFER_TYPE:
-                    continue
-                if _as_int(obj.get("version"), 0) != PROTO_VERSION:
+                obj = _decode_offer(data)
+                if obj is None:
                     continue
                 gateway_id = str(obj.get("gateway_id") or "")
                 offer = {
                     "host": addr[0],
-                    "tcp_port": _as_int(obj.get("tcp_port"), tcp_default),
                     "udp_port": _as_int(obj.get("udp_port"), udp_default),
                     "gateway_id": gateway_id,
                     "gateway_name": str(obj.get("gateway_name") or "New Horizons Gateway"),

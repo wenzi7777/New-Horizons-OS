@@ -81,7 +81,6 @@ def discover(
     timeout_ms = timeout_ms or getattr(config, "GATEWAY_DISCOVERY_TIMEOUT_MS", 1500)
     attempts = attempts or getattr(config, "GATEWAY_DISCOVERY_ATTEMPTS", 2)
     discovery_port = discovery_port or getattr(config, "DEFAULT_GATEWAY_DISCOVERY_PORT", 22346)
-    tcp_default = getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)
     udp_default = getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)
     versions = versions or {}
     rejected_gateways = rejected_gateways or []
@@ -147,7 +146,6 @@ def discover(
                 gateway_id = str(obj.get("gateway_id") or "")
                 offer = {
                     "host": addr[0],
-                    "tcp_port": _as_int(obj.get("tcp_port"), tcp_default),
                     "udp_port": _as_int(obj.get("udp_port"), udp_default),
                     "gateway_id": gateway_id,
                     "gateway_name": str(obj.get("gateway_name") or "New Horizons Gateway"),

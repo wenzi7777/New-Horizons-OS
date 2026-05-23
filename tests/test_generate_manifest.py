@@ -1,5 +1,4 @@
 import importlib.util
-import json
 import sys
 import tempfile
 import unittest
@@ -26,10 +25,10 @@ class GenerateManifestTests(unittest.TestCase):
             (files_root / ".device").mkdir(parents=True)
             (files_root / "device_state").mkdir(parents=True)
             (files_root / "app.py").write_text("print('ok')\n", encoding="utf-8")
-            (files_root / ".device" / "runtime_config.json").write_text("{}", encoding="utf-8")
-            (files_root / ".device" / "filter_config.json").write_text("{}", encoding="utf-8")
-            (files_root / "device_state" / "runtime_config.json").write_text("{}", encoding="utf-8")
-            (files_root / "device_state" / "filter_config.json").write_text("{}", encoding="utf-8")
+            (files_root / ".device" / "runtime_config.tlv").write_bytes(b"")
+            (files_root / ".device" / "filter_config.tlv").write_bytes(b"")
+            (files_root / "device_state" / "runtime_config.tlv").write_bytes(b"")
+            (files_root / "device_state" / "filter_config.tlv").write_bytes(b"")
 
             old_argv = sys.argv
             sys.argv = [
@@ -46,8 +45,8 @@ class GenerateManifestTests(unittest.TestCase):
             finally:
                 sys.argv = old_argv
 
-            manifest_path = repo_root / "device" / "os" / "manifest.json"
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest_path = repo_root / "device" / "os" / "manifest.tlv"
+            manifest = module.decode_tlv_file(manifest_path)
             self.assertEqual(manifest["type"], "os")
             self.assertEqual(manifest["target_root"], "/nhos")
             self.assertEqual(
@@ -58,9 +57,9 @@ class GenerateManifestTests(unittest.TestCase):
                 [item["path"] for item in manifest["files"]],
                 ["app.py"],
             )
-            raw_manifest = manifest_path.read_text(encoding="utf-8")
-            self.assertNotIn("\n  ", raw_manifest)
-            self.assertLess(len(raw_manifest), len(json.dumps(manifest, indent=2)))
+            raw_manifest = manifest_path.read_bytes()
+            self.assertTrue(raw_manifest.startswith(module.TLV_MAGIC))
+            self.assertLess(len(raw_manifest), 512)
 
     def test_os_manifest_can_publish_mpy_artifacts_and_delete_source_py(self):
         module = load_generate_manifest_module()
@@ -71,13 +70,13 @@ class GenerateManifestTests(unittest.TestCase):
             (source_root / "transport").mkdir(parents=True)
             (delete_root / "umqtt").mkdir(parents=True)
             (source_root / "app.mpy").write_bytes(b"mpy-app")
-            (source_root / "transport" / "tcp_control.mpy").write_bytes(b"mpy-tcp")
+            (source_root / "transport" / "udp_control.mpy").write_bytes(b"mpy-udp")
             (source_root / "micropython_bmi270" / "config_file.bin").parent.mkdir(parents=True)
             (source_root / "micropython_bmi270" / "config_file.bin").write_bytes(b"bin")
             (delete_root / "app.py").write_text("print('old')\n", encoding="utf-8")
             (delete_root / "mqtt_transport.py").write_text("print('old')\n", encoding="utf-8")
             (delete_root / "umqtt" / "simple.py").write_text("print('old')\n", encoding="utf-8")
-            (delete_root / "manifest.json").write_text("{}", encoding="utf-8")
+            (delete_root / "manifest.tlv").write_bytes(b"")
 
             old_argv = sys.argv
             sys.argv = [
@@ -106,31 +105,35 @@ class GenerateManifestTests(unittest.TestCase):
             finally:
                 sys.argv = old_argv
 
-            manifest_path = repo_root / "device" / "os" / "manifest.json"
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest_path = repo_root / "device" / "os" / "manifest.tlv"
+            manifest = module.decode_tlv_file(manifest_path)
             self.assertEqual(
                 manifest["base_url"],
                 "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v9.9.9/device/os_mpy",
             )
             self.assertEqual(
                 [item["path"] for item in manifest["files"]],
-                ["app.mpy", "micropython_bmi270/config_file.bin", "transport/tcp_control.mpy"],
+                ["app.mpy", "micropython_bmi270/config_file.bin", "transport/udp_control.mpy"],
             )
             self.assertEqual(manifest["delete"], ["app.py", "main.py", "mqtt_transport.py", "umqtt/__init__.py", "umqtt/simple.py"])
 
-    def test_recovery_manifest_publishes_tcp_control_and_deletes_mqtt_files(self):
-        manifest_path = REPO_ROOT / "device" / "recovery" / "manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    def test_recovery_manifest_publishes_udp_control_and_deletes_legacy_files(self):
+        module = load_generate_manifest_module()
+        manifest_path = REPO_ROOT / "device" / "recovery" / "manifest.tlv"
+        manifest = module.decode_tlv_file(manifest_path)
         paths = [item["path"] for item in manifest.get("files", [])]
         deletes = set(manifest.get("delete", []))
 
-        self.assertIn("tcp_control.py", paths)
+        self.assertIn("udp_control.py", paths)
+        self.assertIn("nhcp.py", paths)
+        self.assertNotIn("tcp_control.py", paths)
         self.assertNotIn("mqtt_transport.py", paths)
         self.assertTrue({"mqtt_transport.py", "umqtt/simple.py", "umqtt/robust.py", "umqtt/__init__.py"} <= deletes)
 
     def test_os_manifest_publishes_udp_nhcp_modules_and_deletes_legacy_control_files(self):
-        manifest_path = REPO_ROOT / "device" / "os" / "manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        module = load_generate_manifest_module()
+        manifest_path = REPO_ROOT / "device" / "os" / "manifest.tlv"
+        manifest = module.decode_tlv_file(manifest_path)
         paths = [item["path"] for item in manifest.get("files", [])]
         deletes = set(manifest.get("delete", []))
 
@@ -152,13 +155,14 @@ class GenerateManifestTests(unittest.TestCase):
             "umqtt/__init__.py",
         } <= deletes)
 
-    def test_v0424_keeps_os_app_mpy_within_resource_budget(self):
-        manifest_path = REPO_ROOT / "device" / "os" / "manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    def test_v0425_keeps_os_app_mpy_within_resource_budget(self):
+        module = load_generate_manifest_module()
+        manifest_path = REPO_ROOT / "device" / "os" / "manifest.tlv"
+        manifest = module.decode_tlv_file(manifest_path)
         files = {item["path"]: item for item in manifest.get("files", [])}
 
-        self.assertEqual(manifest["version"], "v0.4.24")
-        self.assertEqual(manifest["firmware_version"], "v0.4.24")
+        self.assertEqual(manifest["version"], "v0.4.25")
+        self.assertEqual(manifest["firmware_version"], "v0.4.25")
         self.assertLess(files["app.mpy"]["size"], 2048)
         self.assertLess(files["app_core.mpy"]["size"], 50000)
 

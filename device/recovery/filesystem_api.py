@@ -36,7 +36,7 @@ class FilesystemAPI:
         return self.tmp_root.rstrip("/") + "/" + self._safe_scope(scope) + "/" + self._safe_rel(relative_path) + ".upload"
 
     def _meta_path(self, relative_path, scope="user"):
-        return self.tmp_root.rstrip("/") + "/" + self._safe_scope(scope) + "/" + self._safe_rel(relative_path) + ".upload.json"
+        return self.tmp_root.rstrip("/") + "/" + self._safe_scope(scope) + "/" + self._safe_rel(relative_path) + ".upload.tlv"
 
     def list_files(self, scope="user"):
         scope = self._safe_scope(scope)
@@ -82,7 +82,7 @@ class FilesystemAPI:
         storage.ensure_dir(storage.dirname(tmp_path))
         storage.ensure_dir(storage.dirname(meta_path))
         storage.remove(tmp_path)
-        storage.save_json(meta_path, {
+        storage.save_tlv(meta_path, {
             "scope": scope,
             "path": rel,
             "size": int(size),
@@ -98,7 +98,7 @@ class FilesystemAPI:
         rel = self._safe_rel(relative_path)
         tmp_path = self._tmp_path(rel, scope)
         meta_path = self._meta_path(rel, scope)
-        meta = storage.load_json(meta_path, None)
+        meta = storage.load_tlv(meta_path, None)
         if not meta:
             raise ValueError("upload_not_started")
         offset = int(offset)
@@ -112,7 +112,7 @@ class FilesystemAPI:
             f.write(chunk)
         written = offset + len(chunk)
         meta["written"] = written
-        storage.save_json(meta_path, meta)
+        storage.save_tlv(meta_path, meta)
         return {"status": "ok", "message": "upload_chunk_written", "scope": scope, "path": rel, "written": written}
 
     def upload_finish(self, relative_path, scope="user"):
@@ -120,7 +120,7 @@ class FilesystemAPI:
         rel = self._safe_rel(relative_path)
         tmp_path = self._tmp_path(rel, scope)
         meta_path = self._meta_path(rel, scope)
-        meta = storage.load_json(meta_path, None)
+        meta = storage.load_tlv(meta_path, None)
         if not meta:
             raise ValueError("upload_not_started")
         expected_size = int(meta.get("size", 0))

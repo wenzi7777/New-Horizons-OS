@@ -1,6 +1,5 @@
 import hashlib
 import importlib.util
-import json
 import sys
 import tempfile
 import unittest
@@ -21,6 +20,11 @@ def load_update_writer_module():
         return module
     finally:
         sys.path.pop(0)
+
+
+def encode_tlv(payload):
+    module = load_update_writer_module()
+    return module.storage.dumps_tlv(payload)
 
 
 class FakeResponse:
@@ -77,15 +81,15 @@ class ManifestTargetWriterTests(unittest.TestCase):
         release = {
             "product": "New Horizons OS",
             "latest": "v0.2.18",
-            "manifest_url": "https://example.com/os-manifest.json",
+            "manifest_url": "https://example.com/os-manifest.tlv",
             "recovery": {
                 "version": "v0.2.18",
-                "manifest_url": "https://example.com/recovery-manifest.json",
+                "manifest_url": "https://example.com/recovery-manifest.tlv",
             },
         }
         urls = {
-            "https://example.com/latest.json": json.dumps(release).encode(),
-            "https://example.com/recovery-manifest.json": json.dumps(manifest).encode(),
+            "https://example.com/latest.tlv": module.storage.dumps_tlv(release),
+            "https://example.com/recovery-manifest.tlv": module.storage.dumps_tlv(manifest),
             "https://example.com/recovery/immutable_config.py": app_payload,
         }
         requested = []
@@ -102,16 +106,16 @@ class ManifestTargetWriterTests(unittest.TestCase):
             (recovery_root / "old.py").write_text("legacy\n", encoding="utf-8")
             writer = module.ManifestTargetWriter("recovery", root_dir=tmpdir)
 
-            checked = writer.check_release("https://example.com/latest.json")
-            result = writer.write_release("https://example.com/latest.json")
+            checked = writer.check_release("https://example.com/latest.tlv")
+            result = writer.write_release("https://example.com/latest.tlv")
 
             self.assertEqual(checked["message"], "recovery_release_checked")
-            self.assertEqual(checked["manifest_url"], "https://example.com/recovery-manifest.json")
+            self.assertEqual(checked["manifest_url"], "https://example.com/recovery-manifest.tlv")
             self.assertEqual(result["message"], "recovery_write_complete")
             self.assertEqual(result["version"], "v0.2.18")
             self.assertEqual((recovery_root / "immutable_config.py").read_bytes(), app_payload)
             self.assertFalse((recovery_root / "old.py").exists())
-            self.assertEqual((Path(tmpdir) / "device_state" / "recovery_state.json").exists(), True)
+            self.assertEqual((Path(tmpdir) / "device_state" / "recovery_state.tlv").exists(), True)
             self.assertIn("https://example.com/recovery/immutable_config.py", requested)
 
     def test_rejects_manifest_with_wrong_target_root(self):
@@ -127,12 +131,12 @@ class ManifestTargetWriterTests(unittest.TestCase):
         release = {
             "recovery": {
                 "version": "v0.2.18",
-                "manifest_url": "https://example.com/wrong.json",
+                "manifest_url": "https://example.com/wrong.tlv",
             },
         }
         urls = {
-            "https://example.com/latest.json": json.dumps(release).encode(),
-            "https://example.com/wrong.json": json.dumps(manifest).encode(),
+            "https://example.com/latest.tlv": module.storage.dumps_tlv(release),
+            "https://example.com/wrong.tlv": module.storage.dumps_tlv(manifest),
         }
 
         def fake_get(url):
@@ -143,7 +147,7 @@ class ManifestTargetWriterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             writer = module.ManifestTargetWriter("recovery", root_dir=tmpdir)
             with self.assertRaises(ValueError):
-                writer.write_release("https://example.com/latest.json")
+                writer.write_release("https://example.com/latest.tlv")
 
 
 if __name__ == "__main__":

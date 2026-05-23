@@ -4,7 +4,6 @@ import storage
 
 DEFAULT_SERVER = {
     "host": getattr(config, "DEFAULT_SERVER_HOST", ""),
-    "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
     "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
     "source": "findme",
     "gateway_id": "",
@@ -70,7 +69,6 @@ DEFAULT_RUNTIME = {
     },
     "server": {
         "host": DEFAULT_SERVER["host"],
-        "tcp_port": DEFAULT_SERVER["tcp_port"],
         "udp_port": DEFAULT_SERVER["udp_port"],
         "source": "findme",
         "gateway_id": DEFAULT_SERVER["gateway_id"],
@@ -82,7 +80,6 @@ DEFAULT_RUNTIME = {
         "gateway_id": "",
         "gateway_name": "",
         "host": "",
-        "tcp_port": int(getattr(config, "DEFAULT_TCP_CONTROL_PORT", 22345)),
         "udp_port": int(getattr(config, "DEFAULT_UDP_STREAM_PORT", 13250)),
         "last_success_ms": 0,
         "last_error": "",
@@ -102,8 +99,8 @@ DEFAULT_RUNTIME = {
         "source": "github",
         "sources": {
             "github": {
-                "recovery": RECOVERY_GITHUB_BASE_URL + "/recovery/manifest.json",
-                "os": OS_GITHUB_BASE_URL + "/os/manifest.json",
+                "recovery": RECOVERY_GITHUB_BASE_URL + "/recovery/manifest.tlv",
+                "os": OS_GITHUB_BASE_URL + "/os/manifest.tlv",
             },
         },
     },
@@ -129,10 +126,10 @@ DEFAULT_FILTER = {
 class RuntimeConfigStore:
     def __init__(self, base_dir="device_state"):
         self.base_dir = base_dir
-        self.runtime_path = self.base_dir + "/runtime_config.json"
-        self.network_path = self.base_dir + "/network_config.json"
-        self.filter_path = self.base_dir + "/filter_config.json"
-        self.update_state_path = self.base_dir + "/update_state.json"
+        self.runtime_path = self.base_dir + "/runtime_config.tlv"
+        self.network_path = self.base_dir + "/network_config.tlv"
+        self.filter_path = self.base_dir + "/filter_config.tlv"
+        self.update_state_path = self.base_dir + "/update_state.tlv"
 
     def _merged(self, base, override):
         result = {}
@@ -157,11 +154,11 @@ class RuntimeConfigStore:
         return result
 
     def load_runtime(self):
-        data = storage.load_json(self.runtime_path, {})
+        data = storage.load_tlv(self.runtime_path, {})
         return self._merged(DEFAULT_RUNTIME, data)
 
     def save_runtime(self, runtime):
-        storage.save_json(self.runtime_path, runtime)
+        storage.save_tlv(self.runtime_path, runtime)
 
     def update_runtime(self, patch):
         runtime = self.load_runtime()
@@ -170,11 +167,11 @@ class RuntimeConfigStore:
         return runtime
 
     def load_network(self):
-        data = storage.load_json(self.network_path, {})
+        data = storage.load_tlv(self.network_path, {})
         return self._merged(DEFAULT_NETWORK, data)
 
     def save_network(self, network_data):
-        storage.save_json(self.network_path, network_data)
+        storage.save_tlv(self.network_path, network_data)
 
     def update_network(self, patch):
         network_data = self.load_network()
@@ -183,11 +180,11 @@ class RuntimeConfigStore:
         return network_data
 
     def load_filter(self):
-        data = storage.load_json(self.filter_path, {})
+        data = storage.load_tlv(self.filter_path, {})
         return self._merged(DEFAULT_FILTER, data)
 
     def save_filter(self, filter_data):
-        storage.save_json(self.filter_path, filter_data)
+        storage.save_tlv(self.filter_path, filter_data)
 
     def update_filter(self, patch):
         filter_data = self.load_filter()
@@ -210,10 +207,10 @@ class RuntimeConfigStore:
             "started_at_ms": 0,
             "finished_at_ms": 0,
         }
-        state = storage.load_json(self.update_state_path, {})
+        state = storage.load_tlv(self.update_state_path, {})
         state = self._merged(default, state)
         self.save_update_state(state)
         return state
 
     def save_update_state(self, state):
-        storage.save_json(self.update_state_path, state)
+        storage.save_tlv(self.update_state_path, state)

@@ -113,7 +113,7 @@ class FakeConfigStore:
             "last_ssid": "",
         }
         self.runtime = {
-            "server": {"host": "", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": ""},
+            "server": {"host": "", "udp_port": 13250, "source": "findme", "gateway_id": ""},
             "transport": {"mode": "udp"},
             "findme": {
                 "enabled": True,
@@ -121,14 +121,13 @@ class FakeConfigStore:
                 "state": "idle",
                 "gateway_id": "",
                 "host": "",
-                "tcp_port": 22345,
                 "udp_port": 13250,
                 "last_success_ms": 0,
                 "last_error": "",
                 "source": "findme",
             },
             "update": {
-                "release_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
+                "release_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.tlv",
                 "source": "github",
             },
         }
@@ -176,13 +175,12 @@ def load_wifi_manager(channel, include_os_dir=True):
         SETUP_PORTAL_PORT=80,
         PRINT_WIFI_STATUS=True,
         DEFAULT_SERVER_HOST="",
-        DEFAULT_TCP_CONTROL_PORT=22345,
         DEFAULT_UDP_STREAM_PORT=13250,
         DEFAULT_GATEWAY_DISCOVERY_PORT=22346,
         GATEWAY_DISCOVERY_TIMEOUT_MS=1500,
         GATEWAY_DISCOVERY_ATTEMPTS=2,
         GATEWAY_DISCOVERY_RETRY_MS=5000,
-        DEFAULT_RELEASE_URL="https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json",
+        DEFAULT_RELEASE_URL="https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.tlv",
     )
     if include_os_dir:
         config_values["OS_DIR"] = "nhos"
@@ -208,7 +206,6 @@ def load_wifi_manager(channel, include_os_dir=True):
         discover=lambda *_args, **_kwargs: {
             "ok": True,
             "host": "192.168.1.200",
-            "tcp_port": 22345,
             "udp_port": 13250,
             "gateway_id": "test-gateway",
             "gateway_name": "New Horizons Gateway",
@@ -238,6 +235,8 @@ def load_wifi_manager(channel, include_os_dir=True):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         module.WiFiSetupPortal = CountingPortal
+        if hasattr(module, "FindMe"):
+            module.FindMe = fake_findme
         module._test_portal_instances = portal_instances
     finally:
         for name, saved_module in saved_modules.items():
@@ -250,6 +249,13 @@ def load_wifi_manager(channel, include_os_dir=True):
 
 
 class WiFiManagerApStartTests(unittest.TestCase):
+    def test_minimal_channel_defers_findme_socket_import_until_discovery(self):
+        source = (REPO_ROOT / "device" / "recovery" / "wifi_manager.py").read_text(encoding="utf-8")
+        import_block = source.split("class WiFiManager:", 1)[0]
+
+        self.assertNotIn("import findme", import_block)
+        self.assertIn("def _ensure_findme", source)
+
     def test_minimal_channel_does_not_allocate_ap_during_normal_sta_boot(self):
         module, fake_network = load_wifi_manager("minimal")
         manager = module.WiFiManager()
@@ -410,7 +416,6 @@ class WiFiManagerApStartTests(unittest.TestCase):
             store.runtime["server"],
             {
                 "host": "192.168.1.200",
-                "tcp_port": 22345,
                 "udp_port": 13250,
                 "source": "findme",
                 "gateway_id": "test-gateway",
@@ -418,11 +423,11 @@ class WiFiManagerApStartTests(unittest.TestCase):
         )
         self.assertEqual(store.runtime["findme"]["gateway_id"], "test-gateway")
         self.assertEqual(store.runtime["findme"]["last_error"], "")
-        self.assertEqual(store.runtime["transport"]["mode"], "udp_tcp")
+        self.assertEqual(store.runtime["transport"]["mode"], "udp")
 
     def test_apply_credentials_keeps_portal_open_when_gateway_missing(self):
         module, _fake_network = load_wifi_manager("minimal")
-        module.findme.discover = lambda *_args, **_kwargs: {
+        module.FindMe.discover = lambda *_args, **_kwargs: {
             "ok": False,
             "error": "timeout",
         }
@@ -438,13 +443,13 @@ class WiFiManagerApStartTests(unittest.TestCase):
         self.assertEqual(manager.last_setup_result, "findme_no_gateway")
         self.assertEqual(store.runtime["server"]["host"], "")
         self.assertEqual(store.runtime["findme"]["last_error"], "timeout")
-        self.assertEqual(store.runtime["transport"]["mode"], "udp_tcp")
+        self.assertEqual(store.runtime["transport"]["mode"], "udp")
         self.assertTrue(manager.setup_active())
 
     def test_apply_credentials_resets_manual_server_before_discovery(self):
         module, _fake_network = load_wifi_manager("minimal")
         store = FakeConfigStore()
-        store.runtime["server"] = {"host": "old.example", "tcp_port": 1, "udp_port": 2}
+        store.runtime["server"] = {"host": "old.example", "udp_port": 2}
         manager = module.WiFiManager(config_store=store)
         manager.start_setup_portal()
 
@@ -452,7 +457,7 @@ class WiFiManagerApStartTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(store.runtime["server"]["host"], "192.168.1.200")
-        self.assertEqual(store.runtime["transport"]["mode"], "udp_tcp")
+        self.assertEqual(store.runtime["transport"]["mode"], "udp")
 
     def test_full_channel_discovers_gateway(self):
         module, _fake_network = load_wifi_manager("full")
@@ -470,14 +475,13 @@ class WiFiManagerApStartTests(unittest.TestCase):
         module, _fake_network = load_wifi_manager("minimal")
         store = FakeConfigStore()
         store.update_runtime({
-            "server": {"host": "192.168.1.200", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": "gw"},
+            "server": {"host": "192.168.1.200", "udp_port": 13250, "source": "findme", "gateway_id": "gw"},
             "findme": {
                 "enabled": True,
                 "port": 22346,
                 "state": "attached",
                 "gateway_id": "gw",
                 "host": "192.168.1.200",
-                "tcp_port": 22345,
                 "udp_port": 13250,
                 "last_success_ms": 42,
                 "last_error": "",

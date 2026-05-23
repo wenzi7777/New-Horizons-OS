@@ -90,17 +90,17 @@ class FilesystemAPIChunkTests(unittest.TestCase):
                 },
             )
 
-            api.upload_begin("user.json", 2, "", scope="user")
-            api.upload_chunk("user.json", 0, "7b7d", scope="user")
-            api.upload_finish("user.json", scope="user")
+            api.upload_begin("user.tlv", 2, "", scope="user")
+            api.upload_chunk("user.tlv", 0, "7b7d", scope="user")
+            api.upload_finish("user.tlv", scope="user")
             (root / "logs").mkdir()
             (root / "logs" / "device.log").write_text("hello", encoding="utf-8")
             (root / "calibration").mkdir()
-            (root / "calibration" / "level.json").write_text("{}", encoding="utf-8")
+            (root / "calibration" / "level.tlv").write_text("{}", encoding="utf-8")
 
-            self.assertEqual(api.download_begin("user.json")["scope"], "user")
+            self.assertEqual(api.download_begin("user.tlv")["scope"], "user")
             self.assertEqual(api.download_begin("device.log", scope="logs")["scope"], "logs")
-            self.assertEqual(api.download_begin("level.json", scope="calibration")["scope"], "calibration")
+            self.assertEqual(api.download_begin("level.tlv", scope="calibration")["scope"], "calibration")
             self.assertTrue(any(item["scope"] == "logs" for item in api.list_files(scope="logs")))
 
             with self.assertRaises(ValueError):
@@ -133,9 +133,9 @@ class FilesystemAPIChunkTests(unittest.TestCase):
                 (root / "files").mkdir()
                 (root / "logs").mkdir()
                 (root / "calibration").mkdir()
-                (root / "files" / "profile.json").write_bytes(b"{}")
+                (root / "files" / "profile.tlv").write_bytes(b"{}")
                 (root / "logs" / "device.log").write_bytes(b"hello")
-                (root / "calibration" / "level.json").write_bytes(b"1234")
+                (root / "calibration" / "level.tlv").write_bytes(b"1234")
 
                 usage = api.usage()
 

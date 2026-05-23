@@ -17,7 +17,7 @@ def should_include(path: Path, root: Path) -> bool:
         return False
     if path.suffix == ".pyc":
         return False
-    if rel_parts and rel_parts[-1] == "manifest.json":
+    if rel_parts and rel_parts[-1] in ("manifest.json", "manifest.tlv"):
         return False
     return True
 

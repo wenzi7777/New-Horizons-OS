@@ -1,8 +1,9 @@
-import json
 try:
     import uos as os
 except ImportError:  # pragma: no cover - CPython fallback
     import os
+
+import nhcp
 
 try:
     import hashlib
@@ -13,6 +14,8 @@ try:
     import ubinascii as binascii
 except ImportError:
     import binascii
+
+TLV_MAGIC = nhcp.TLV_MAGIC
 
 
 def _norm(path):
@@ -46,19 +49,27 @@ def exists(path):
         return False
 
 
-def load_json(path, default=None):
+def loads_tlv(data):
+    return nhcp.decode_tlv(data)
+
+
+def dumps_tlv(data):
+    return nhcp.encode_tlv(data)
+
+
+def load_tlv(path, default=None):
     try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except (OSError, ValueError):
+        with open(path, "rb") as f:
+            return loads_tlv(f.read())
+    except Exception:
         return default
 
 
-def save_json(path, data):
+def save_tlv(path, data):
     ensure_dir(dirname(path))
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(data, f)
+    with open(tmp, "wb") as f:
+        f.write(dumps_tlv(data))
     try:
         os.remove(path)
     except OSError:
