@@ -114,7 +114,7 @@ class FakeConfigStore:
         }
         self.runtime = {
             "server": {"host": "", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": ""},
-            "transport": {"mode": "udp_tcp"},
+            "transport": {"mode": "udp"},
             "findme": {
                 "enabled": True,
                 "port": 22346,
@@ -464,7 +464,7 @@ class WiFiManagerApStartTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(store.runtime["server"]["gateway_id"], "test-gateway")
-        self.assertEqual(store.runtime["transport"]["mode"], "udp_tcp")
+        self.assertEqual(store.runtime["transport"]["mode"], "udp")
 
     def test_portal_status_reports_findme(self):
         module, _fake_network = load_wifi_manager("minimal")

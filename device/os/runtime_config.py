@@ -48,7 +48,7 @@ DEFAULT_RUNTIME = {
     "buffer_frames": 2,
     "ntp_servers": ["pool.ntp.org", "time.nist.gov"],
     "transport": {
-        "mode": "udp_tcp",
+        "mode": "udp",
     },
     "indicators": {
         "external_led": {

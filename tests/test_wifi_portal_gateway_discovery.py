@@ -45,7 +45,7 @@ class FakeManager:
                 "last_error": "",
                 "source": "findme",
             },
-            "transport": {"mode": "udp_tcp"},
+            "transport": {"mode": "udp"},
             "mode": "normal",
             "os_installed": True,
             "release_url": GITHUB_RELEASE_URL,

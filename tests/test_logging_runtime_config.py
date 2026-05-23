@@ -62,7 +62,7 @@ class LoggingRuntimeConfigTests(unittest.TestCase):
         self.assertEqual(module.DEFAULT_RUNTIME["indicators"]["external_led"]["mode"], "off")
         self.assertNotIn("enabled", module.DEFAULT_RUNTIME["indicators"]["oled"])
         self.assertNotIn("enabled", module.DEFAULT_RUNTIME["indicators"]["external_led"])
-        self.assertEqual(module.DEFAULT_RUNTIME["transport"]["mode"], "udp_tcp")
+        self.assertEqual(module.DEFAULT_RUNTIME["transport"]["mode"], "udp")
         self.assertEqual(module.DEFAULT_RUNTIME["update"]["release_url"], "https://example.com/releases/latest.json")
         self.assertEqual(module.DEFAULT_RUNTIME["update"]["source"], "github")
         self.assertEqual(sorted(module.DEFAULT_RUNTIME["update"]["sources"].keys()), ["github"])

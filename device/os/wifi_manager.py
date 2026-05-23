@@ -390,7 +390,7 @@ class WiFiManager:
                 "source": "findme",
                 "gateway_id": "",
             },
-            "transport": {"mode": "udp_tcp"},
+            "transport": {"mode": "udp"},
             "findme": {
                 "enabled": True,
                 "port": int(getattr(config, "DEFAULT_GATEWAY_DISCOVERY_PORT", 22346)),
@@ -453,7 +453,7 @@ class WiFiManager:
             self.config_store.update_runtime({
                 "server": server,
                 "findme": findme_state,
-                "transport": {"mode": "udp_tcp"},
+                "transport": {"mode": "udp"},
             })
             return
         findme_state["state"] = "rejected" if result.get("error") == "findme_rejected" else "no_gateway"
@@ -464,7 +464,7 @@ class WiFiManager:
         self.config_store.update_runtime({
             "server": current_server,
             "findme": findme_state,
-            "transport": {"mode": "udp_tcp"},
+            "transport": {"mode": "udp"},
         })
 
     def _findme_versions(self):

@@ -200,7 +200,7 @@ class FakeRuntimeConfigStore:
             "matrix_scan_state": {"active": False, "autostart_disabled": False, "last_error": ""},
             "server": {"host": "127.0.0.1", "tcp_port": 22345, "udp_port": 13250, "source": "findme", "gateway_id": "test-gateway"},
             "findme": {"host": "127.0.0.1", "gateway_id": "test-gateway", "last_error": ""},
-            "transport": {"mode": "udp_tcp"},
+            "transport": {"mode": "udp"},
             "logging": {"enabled": True, "capacity": "default", "serial": "status"},
         }
         if runtime_override:
@@ -352,6 +352,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         def __init__(self, *args, **kwargs):
             self.poll_calls = 0
             self.status_payloads = []
+            self.result_payloads = []
             self.progress_payloads = []
             self.flush_calls = []
             self.reconfigure_calls = 0
@@ -361,6 +362,10 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
 
         def publish_status(self, payload, connected):
             self.status_payloads.append((payload, connected))
+            return True
+
+        def publish_result(self, payload, connected):
+            self.result_payloads.append((payload, connected))
             return True
 
         def publish_update_progress(self, payload, connected):
@@ -376,6 +381,9 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
 
         def is_connected(self):
             return True
+
+    class FakeUDPControlTransport(FakeTCPControlTransport):
+        protocol = "NHCP/1"
 
     class FakeUDPStreamTransport:
         def __init__(self, *args, **kwargs):
@@ -512,7 +520,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
             )
         ),
         "tcp_control": types.SimpleNamespace(TCPControlTransport=FakeTCPControlTransport),
-        "udp_control": types.ModuleType("udp_control"),
+        "udp_control": types.SimpleNamespace(UDPControlTransport=FakeUDPControlTransport),
         "udp_stream": types.SimpleNamespace(UDPStreamTransport=FakeUDPStreamTransport),
         "utils": types.SimpleNamespace(RateCounter=lambda interval: None),
         "wifi_manager": types.SimpleNamespace(
@@ -587,6 +595,40 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
 
         boot_order = [event for event in events if event in ("wifi_connect", "scan_start")]
         self.assertEqual(boot_order[:2], ["wifi_connect", "scan_start"])
+
+    def test_normal_os_uses_udp_control_transport(self):
+        module, _fake_scan, events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(getattr(app.control_transport, "protocol", ""), "NHCP/1")
+
+    def test_status_announce_uses_light_scan_resource_payload(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            payload = app._status_announce_payload()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(payload["message"], "status_announce")
+        self.assertIn("resource_guard", payload)
+        self.assertIn("scan_health", payload)
+        self.assertNotIn("system", payload)
+        self.assertNotIn("logging", payload)
+        self.assertNotIn("update_state", payload)
 
     def test_online_boot_loads_optional_indicators_after_runtime_hardware(self):
         module, fake_scan, events, saved_modules = load_full_app_module(

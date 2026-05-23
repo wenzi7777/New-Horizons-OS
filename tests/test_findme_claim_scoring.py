@@ -18,10 +18,19 @@ class FindMeClaimScoringTest(unittest.TestCase):
             DEFAULT_UDP_STREAM_PORT=13250,
         )
         path = REPO_ROOT / "device" / "os" / "findme.py"
+        os_dir = str(path.parent)
+        inserted = False
+        if os_dir not in sys.path:
+            sys.path.insert(0, os_dir)
+            inserted = True
         spec = importlib.util.spec_from_file_location("findme_under_test", path)
         module = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
-        spec.loader.exec_module(module)
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            if inserted:
+                sys.path.remove(os_dir)
         return module
 
     def test_matching_claim_beats_higher_priority_offer(self):

@@ -28,7 +28,7 @@ class FakeLogger:
 
 class TCPControlLoggingTest(unittest.TestCase):
     def test_tcp_command_result_echoes_command_and_request_id(self):
-        module = load_module("device/os/tcp_control.py")
+        module = load_module("device/recovery/tcp_control.py")
         logger = FakeLogger()
         transport = module.TCPControlTransport(lambda: {"server": {"host": "127.0.0.1", "tcp_port": 1}}, "ABC", logger)
         sent = []
@@ -65,7 +65,7 @@ class TCPControlLoggingTest(unittest.TestCase):
             def close(self):
                 self.closed = True
 
-        for relative_path in ("device/os/tcp_control.py", "device/recovery/tcp_control.py"):
+        for relative_path in ("device/recovery/tcp_control.py",):
             with self.subTest(path=relative_path):
                 module = load_module(relative_path)
                 logger = FakeLogger()
@@ -93,7 +93,7 @@ class TCPControlLoggingTest(unittest.TestCase):
                 self.parts.append(chunk)
                 return len(chunk)
 
-        for relative_path in ("device/os/tcp_control.py", "device/recovery/tcp_control.py"):
+        for relative_path in ("device/recovery/tcp_control.py",):
             with self.subTest(path=relative_path):
                 module = load_module(relative_path)
                 logger = FakeLogger()
@@ -112,7 +112,7 @@ class TCPControlLoggingTest(unittest.TestCase):
                 self.assertTrue(joined.endswith(b"\n"))
 
     def test_status_announce_is_coalesced_but_result_is_kept(self):
-        module = load_module("device/os/tcp_control.py")
+        module = load_module("device/recovery/tcp_control.py")
         logger = FakeLogger()
         transport = module.TCPControlTransport(lambda: {"server": {"host": "127.0.0.1", "tcp_port": 1}}, "ABC", logger)
         sent = []
@@ -133,7 +133,7 @@ class TCPControlLoggingTest(unittest.TestCase):
         self.assertIn(b'"request_id":"r-1"', joined)
 
     def test_result_preempts_status_and_progress_when_outbox_is_full(self):
-        module = load_module("device/os/tcp_control.py")
+        module = load_module("device/recovery/tcp_control.py")
         logger = FakeLogger()
         transport = module.TCPControlTransport(lambda: {"server": {"host": "127.0.0.1", "tcp_port": 1}}, "ABC", logger)
         sent = []
@@ -174,7 +174,7 @@ class TCPControlLoggingTest(unittest.TestCase):
             def socket(self):
                 return FailingSocket()
 
-        for relative_path in ("device/os/tcp_control.py", "device/recovery/tcp_control.py"):
+        for relative_path in ("device/recovery/tcp_control.py",):
             with self.subTest(path=relative_path):
                 module = load_module(relative_path)
                 original_socket = module.socket

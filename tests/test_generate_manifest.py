@@ -128,33 +128,37 @@ class GenerateManifestTests(unittest.TestCase):
         self.assertNotIn("mqtt_transport.py", paths)
         self.assertTrue({"mqtt_transport.py", "umqtt/simple.py", "umqtt/robust.py", "umqtt/__init__.py"} <= deletes)
 
-    def test_os_manifest_publishes_udp_tcp_modules_and_deletes_mqtt_files(self):
+    def test_os_manifest_publishes_udp_nhcp_modules_and_deletes_legacy_control_files(self):
         manifest_path = REPO_ROOT / "device" / "os" / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         paths = [item["path"] for item in manifest.get("files", [])]
         deletes = set(manifest.get("delete", []))
 
-        self.assertIn("tcp_control.mpy", paths)
+        self.assertIn("nhcp.mpy", paths)
+        self.assertIn("udp_control.mpy", paths)
         self.assertIn("udp_stream.mpy", paths)
         self.assertIn("fs_core.mpy", paths)
         self.assertIn("offline_recorder.mpy", paths)
+        self.assertNotIn("tcp_control.mpy", paths)
         self.assertNotIn("mqtt_transport.mpy", paths)
         self.assertTrue({
             "fs_core.py",
             "offline_recorder.py",
             "mqtt_transport.py",
+            "tcp_control.py",
+            "tcp_control.mpy",
             "umqtt/simple.py",
             "umqtt/robust.py",
             "umqtt/__init__.py",
         } <= deletes)
 
-    def test_v0423_keeps_os_app_mpy_within_resource_budget(self):
+    def test_v0424_keeps_os_app_mpy_within_resource_budget(self):
         manifest_path = REPO_ROOT / "device" / "os" / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         files = {item["path"]: item for item in manifest.get("files", [])}
 
-        self.assertEqual(manifest["version"], "v0.4.23")
-        self.assertEqual(manifest["firmware_version"], "v0.4.23")
+        self.assertEqual(manifest["version"], "v0.4.24")
+        self.assertEqual(manifest["firmware_version"], "v0.4.24")
         self.assertLess(files["app.mpy"]["size"], 2048)
         self.assertLess(files["app_core.mpy"]["size"], 50000)
 

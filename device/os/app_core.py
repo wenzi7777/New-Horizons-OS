@@ -944,7 +944,7 @@ class App:
                 "claim_expires_at_ms": int(expires_at),
                 "last_claim_error": "",
             },
-            "transport": {"mode": "udp_tcp"},
+            "transport": {"mode": "udp"},
         })
         if self.control_transport is not None:
             self.control_transport.close()
@@ -1056,7 +1056,7 @@ class App:
         self.time_sync.servers = list(self.runtime.get("ntp_servers", []))
 
     def _authorized(self, addr):
-        return bool(addr and addr[0] == "tcp")
+        return bool(addr and addr[0] in ("tcp", "udp"))
 
     def _command_now_ms(self):
         try:
@@ -1201,7 +1201,7 @@ class App:
         if cmd == "set_transport":
             runtime = self.config_store.update_runtime({
                 "transport": {
-                    "mode": "udp_tcp",
+                    "mode": "udp",
                 },
             })
             self.runtime = runtime
@@ -2412,7 +2412,6 @@ class App:
 
     def _status_announce_payload(self):
         runtime = self.runtime if isinstance(self.runtime, dict) else {}
-        recorder_status = self._offline_recording_status()
         resource_guard = self._resource_guard_payload()
         return {
             "status": "ok",
@@ -2424,12 +2423,10 @@ class App:
             "device_id": self.device_uid,
             "device_uid": self.device_uid,
             "device_name": self.device_name,
-            "system": self._system_status(),
             "runtime": {
                 "mode": self.mode,
                 "transport": runtime.get("transport", {}),
                 "findme": self._findme_status(),
-                "logging": runtime.get("logging", {}),
                 "scan_timing": runtime.get("scan_timing", {}),
                 "resource_state": self._resource_state(),
                 "stream_state": self._stream_state(),
@@ -2439,17 +2436,14 @@ class App:
                 },
                 "matrix_layout_state": runtime.get("matrix_layout_state", {}),
                 "matrix_scan_state": runtime.get("matrix_scan_state", {}),
-                "system": runtime.get("system", {}),
             },
             "wifi_state": self.wifi.state,
             "wifi_connected": self.wifi.is_connected(),
             "findme": self._findme_status(),
-            "logging": self._logging_status(),
             "battery": self._battery_status(refresh=False),
             "matrix_configured": self._matrix_configured(),
             "matrix_shape": {"rows": len(self._active_rows()), "cols": len(self._active_cols())},
             "last_matrix_start_failed": self.last_matrix_start_failed,
-            "update_state": self._current_update_state(),
             "sent_packets": self.sent_packets,
             "failed_sends": self.failed_sends,
             "resource_state": self._resource_state(),
@@ -2460,7 +2454,6 @@ class App:
                 "send_every_n_frames": effective_send_every(self.runtime, config, resource_guard),
                 "resource_guard": resource_guard,
             },
-            "offline_recording": recorder_status,
         }
 
     def _maintenance_status(self):
@@ -3262,12 +3255,12 @@ class App:
     def _ensure_streaming_services(self):
         if self.control_transport is not None and self.udp_stream is not None:
             return
-        from tcp_control import TCPControlTransport
+        from udp_control import UDPControlTransport
         from udp_stream import UDPStreamTransport
         from time_sync import TimeSync
         from utils import RateCounter
 
-        self.control_transport = TCPControlTransport(
+        self.control_transport = UDPControlTransport(
             lambda: self.runtime,
             self.device_uid,
             self.logger,
