@@ -7,7 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class UDPTCPTransportPolicyTest(unittest.TestCase):
     def test_device_uses_tcp_control_and_udp_stream_modules(self):
-        app_source = (PROJECT_ROOT / "device/os/app.py").read_text(encoding="utf-8")
+        app_source = (PROJECT_ROOT / "device/os/app_core.py").read_text(encoding="utf-8")
         recovery_source = (PROJECT_ROOT / "device/recovery/recovery_app.py").read_text(encoding="utf-8")
 
         self.assertIn("from tcp_control import TCPControlTransport", app_source)

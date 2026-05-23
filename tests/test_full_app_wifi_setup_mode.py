@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-FULL_APP_PATH = REPO_ROOT / "device" / "os" / "app.py"
+FULL_APP_PATH = REPO_ROOT / "device" / "os" / "app_core.py"
 RESOURCE_GUARD_PATH = REPO_ROOT / "device" / "os" / "resource_guard.py"
 
 
@@ -341,6 +341,8 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
     fake_scan = NativePacketScan(events)
     fake_vdboard = types.SimpleNamespace(scan=fake_scan)
     saved_modules = {}
+    os_dir = str(REPO_ROOT / "device" / "os")
+    path_added = False
 
     class ForbiddenMqttModule(types.ModuleType):
         def __getattr__(self, name):
@@ -526,6 +528,11 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
     for name, module in injected.items():
         saved_modules[name] = sys.modules.get(name)
         sys.modules[name] = module
+    saved_modules["app_core"] = sys.modules.get("app_core")
+    sys.modules.pop("app_core", None)
+    if os_dir not in sys.path:
+        sys.path.insert(0, os_dir)
+        path_added = True
 
     try:
         spec = importlib.util.spec_from_file_location("full_app_wifi_setup_test", FULL_APP_PATH)
@@ -533,6 +540,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         spec.loader.exec_module(module)
         module.time.ticks_ms = lambda: 0
         module.time.ticks_diff = lambda now, then: now - then
+        module._test_os_dir = os_dir if path_added else ""
         return module, fake_scan, events, saved_modules
     except Exception:
         for name, saved in saved_modules.items():
@@ -540,6 +548,11 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = saved
+        if path_added:
+            try:
+                sys.path.remove(os_dir)
+            except ValueError:
+                pass
         raise
 
 
