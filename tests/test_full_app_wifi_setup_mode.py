@@ -8,6 +8,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FULL_APP_PATH = REPO_ROOT / "device" / "os" / "app.py"
+RESOURCE_GUARD_PATH = REPO_ROOT / "device" / "os" / "resource_guard.py"
 
 
 class FakeScan:
@@ -378,6 +379,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
         def __init__(self, *args, **kwargs):
             self.sent = []
             self.reconfigure_calls = 0
+            self.closed = False
 
         def send(self, payload, connected):
             self.sent.append((payload, connected))
@@ -385,6 +387,9 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
 
         def reconfigure(self):
             self.reconfigure_calls += 1
+
+        def close(self):
+            self.closed = True
 
     def fake_calibration_store(root):
         def set_point(*args):
@@ -422,6 +427,9 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
 
     fake_pin.IN = 0
     fake_pin.PULL_UP = 1
+    resource_guard_spec = importlib.util.spec_from_file_location("resource_guard", RESOURCE_GUARD_PATH)
+    resource_guard_module = importlib.util.module_from_spec(resource_guard_spec)
+    resource_guard_spec.loader.exec_module(resource_guard_module)
 
     injected = {
         "machine": types.SimpleNamespace(
@@ -486,6 +494,7 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
             PacketBuilder=lambda **kwargs: types.SimpleNamespace(build=lambda **packet_kwargs: b"packet")
         ),
         "packet_buffer": types.SimpleNamespace(PacketBuffer=lambda **kwargs: None),
+        "resource_guard": resource_guard_module,
         "runtime_config": types.SimpleNamespace(
             RuntimeConfigStore=lambda root: FakeRuntimeConfigStore(runtime_override)
         ),
@@ -832,6 +841,44 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(response["memory"]["heap_free"], 30000)
         self.assertEqual(response["native"]["heap_largest_free_block"], 32768)
         self.assertEqual(response["stream"]["point_count"], 1)
+        self.assertEqual(response["resource_guard"]["state"], "watch")
+        self.assertEqual(response["memory"]["resource_guard"]["state"], "watch")
+
+    def test_resource_guard_classifies_watch_degraded_and_critical_memory(self):
+        module, fake_scan, _events, saved_modules = load_full_app_module()
+        native_memory = {
+            "heap_free": 30000,
+            "heap_largest_free_block": 20000,
+            "packet_scratch_bytes": 256,
+        }
+        try:
+            fake_scan.memory_stats = lambda: dict(native_memory)
+            module.gc.mem_free = lambda: native_memory["heap_free"]
+            module.gc.mem_alloc = lambda: 180000
+            app = module.App(wifi_setup_requested=False)
+
+            watch = app._handle_control_request({"command": "memory_status"}, ("tcp", 0))
+            native_memory["heap_free"] = 19000
+            native_memory["heap_largest_free_block"] = 12000
+            degraded = app._handle_control_request({"command": "memory_status"}, ("tcp", 0))
+            native_memory["heap_free"] = 15000
+            native_memory["heap_largest_free_block"] = 7000
+            critical = app._handle_control_request({"command": "memory_status"}, ("tcp", 0))
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(watch["memory"]["resource_guard"]["state"], "watch")
+        self.assertEqual(watch["memory"]["resource_guard"]["action"], "monitor")
+        self.assertEqual(degraded["memory"]["resource_guard"]["state"], "degraded")
+        self.assertEqual(degraded["memory"]["resource_guard"]["action"], "decimate_udp")
+        self.assertEqual(degraded["memory"]["resource_guard"]["send_every_n_frames_override"], 2)
+        self.assertEqual(critical["memory"]["resource_guard"]["state"], "critical")
+        self.assertEqual(critical["memory"]["resource_guard"]["action"], "pause_stream")
+        self.assertEqual(critical["memory"]["resource_guard"]["thresholds"]["critical"]["heap_free"], 16384)
 
     def test_runtime_services_are_deferred_until_after_wifi_boot(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()
@@ -1087,6 +1134,76 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(native_scan.pop_packet_calls, 0)
         self.assertEqual(app.sent_packets, 0)
 
+    def test_resource_guard_degraded_decimates_udp_without_stopping_scan(self):
+        module, fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            module.config.RESOURCE_CHECK_EVERY_N_FRAMES = 1
+            module.gc.mem_free = lambda: 19000
+            module.gc.mem_alloc = lambda: 200000
+            fake_scan.memory_stats = lambda: {
+                "heap_free": 19000,
+                "heap_largest_free_block": 12000,
+                "packet_scratch_bytes": 256,
+            }
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+
+            app.handle_scan(1000)
+            first_pop_calls = fake_scan.pop_packet_calls
+            app.handle_scan(1016)
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(first_pop_calls, 0)
+        self.assertEqual(fake_scan.pop_packet_calls, 1)
+        self.assertEqual(len(app.udp_stream.sent), 1)
+        self.assertTrue(app.scan_ready)
+        self.assertEqual(fake_scan.stop_calls, 0)
+        self.assertEqual(app._resource_guard_payload()["state"], "degraded")
+        self.assertEqual(app._status_announce_payload()["scan_health"]["send_every_n_frames"], 2)
+
+    def test_resource_guard_critical_pauses_udp_stream_and_collects(self):
+        module, fake_scan, _events, saved_modules = load_full_app_module()
+        collects = []
+        try:
+            module.config.RESOURCE_CHECK_EVERY_N_FRAMES = 1
+            module.config.STREAM_COOLDOWN_MS = (2000, 5000, 10000)
+            module.gc.mem_free = lambda: 15000
+            module.gc.mem_alloc = lambda: 200000
+            module.gc.collect = lambda: collects.append("gc")
+            module.time.ticks_ms = lambda: 1000
+            module.time.ticks_add = lambda now, delta: now + delta
+            module.time.ticks_diff = lambda now, then: now - then
+            fake_scan.memory_stats = lambda: {
+                "heap_free": 15000,
+                "heap_largest_free_block": 7000,
+                "packet_scratch_bytes": 256,
+            }
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            app.udp_stream.closed = False
+            collects[:] = []
+
+            app.handle_scan(1000)
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(fake_scan.pop_packet_calls, 0)
+        self.assertEqual(app.sent_packets, 0)
+        self.assertEqual(app.resource_state, "stream_paused")
+        self.assertEqual(app.stream_last_error, "heap_free=15000<16384 heap_largest_free_block=7000<8192")
+        self.assertEqual(app.send_backoff_until_ms, 3000)
+        self.assertTrue(app.udp_stream.closed)
+        self.assertEqual(collects, ["gc"])
+
     def test_udp_enomem_pauses_stream_before_next_native_packet_pop(self):
         module, _fake_scan, events, saved_modules = load_full_app_module()
         native_scan = NativePacketScan(events)
@@ -1244,6 +1361,26 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(response["runtime"]["scan_timing"]["target_fps"], 75)
         self.assertEqual(response["runtime"]["scan_timing"]["settle_us"], 18)
 
+    def test_set_scan_timing_accepts_send_every_n_frames(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            app = module.App(wifi_setup_requested=False)
+
+            response = app._handle_control_request(
+                {"command": "set_scan_timing", "send_every_n_frames": 3},
+                ("tcp", 0),
+            )
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["runtime"]["scan_timing"]["send_every_n_frames"], 3)
+        self.assertEqual(app.runtime["scan_timing"]["send_every_n_frames"], 3)
+
     def test_set_scan_timing_rejects_non_positive_fps(self):
         module, _fake_scan, _events, saved_modules = load_full_app_module()
         try:
@@ -1263,6 +1400,34 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(response["status"], "error")
         self.assertEqual(response["message"], "scan_timing_invalid")
         self.assertEqual(response["error"], "target_fps_must_be_positive")
+
+    def test_set_scan_timing_rejects_send_every_n_frames_outside_range(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module()
+        try:
+            module.config.MAX_SEND_EVERY_N_FRAMES = 8
+            app = module.App(wifi_setup_requested=False)
+
+            too_low = app._handle_control_request(
+                {"command": "set_scan_timing", "send_every_n_frames": 0},
+                ("tcp", 0),
+            )
+            too_high = app._handle_control_request(
+                {"command": "set_scan_timing", "send_every_n_frames": 9},
+                ("tcp", 0),
+            )
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(too_low["status"], "error")
+        self.assertEqual(too_low["message"], "scan_timing_invalid")
+        self.assertEqual(too_low["error"], "send_every_n_frames_must_be_between_1_and_8")
+        self.assertEqual(too_high["status"], "error")
+        self.assertEqual(too_high["message"], "scan_timing_invalid")
+        self.assertEqual(too_high["error"], "send_every_n_frames_must_be_between_1_and_8")
 
     def test_set_scan_timing_restarts_active_scan_with_health_probe(self):
         module, _fake_scan, events, saved_modules = load_full_app_module()
@@ -1650,6 +1815,47 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertIsNone(app.battery)
         self.assertIsNone(app.imu)
         self.assertIsNone(app.vdboard)
+
+    def test_write_recovery_rejects_when_minimal_memory_is_critical(self):
+        writer_calls = []
+
+        class FakeWriter:
+            def __init__(self, target, root_dir=".", logger=None, progress=None):
+                writer_calls.append(("init", target))
+
+            def write_release(self, release_url):
+                writer_calls.append(("write", release_url))
+                return {"status": "ok", "message": "should_not_write"}
+
+        module, _fake_scan, _events, saved_modules = load_full_app_module(
+            runtime_override={"update": {"release_url": "https://example.com/latest.json"}}
+        )
+        saved_update_writer = sys.modules.get("update_writer")
+        sys.modules["update_writer"] = types.SimpleNamespace(ManifestTargetWriter=FakeWriter)
+        try:
+            module.gc.mem_free = lambda: 15000
+            module.gc.mem_alloc = lambda: 200000
+            app = module.App(wifi_setup_requested=False)
+            app.wifi.connected = True
+            released = app._handle_control_request({"command": "release_recovery_resources"}, ("tcp", 0))
+            response = app._handle_control_request({"command": "write_recovery"}, ("tcp", 0))
+        finally:
+            if saved_update_writer is None:
+                sys.modules.pop("update_writer", None)
+            else:
+                sys.modules["update_writer"] = saved_update_writer
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(released["status"], "ok")
+        self.assertEqual(response["status"], "error")
+        self.assertEqual(response["message"], "memory_pressure_preflight_failed")
+        self.assertEqual(response["error"], "memory_pressure_preflight_failed")
+        self.assertEqual(response["resource_guard"]["state"], "critical")
+        self.assertEqual(writer_calls, [])
 
     def test_maintenance_sample_cell_runs_bounded_scan_and_stops_afterwards(self):
         module, fake_scan, events, saved_modules = load_full_app_module()

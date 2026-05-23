@@ -8,6 +8,7 @@ import board_pins
 
 from device_identity import get_device_id, get_device_name, get_device_uid, get_packet_device_uid_bytes
 from device_logging import DeviceLogger
+from resource_guard import ResourceGuard, configured_send_every, effective_send_every, gc_mem_alloc, gc_mem_free, guarded_heap_free
 from runtime_config import RuntimeConfigStore
 from wifi_manager import WiFiManager
 
@@ -93,6 +94,9 @@ class App:
         self.stream_last_error_ms = 0
         self.stream_pause_count = 0
         self.stream_resume_probe_frames = 0
+        self.resource_guard = ResourceGuard.from_config(config)
+        self.resource_guard_status = self.resource_guard.evaluate()
+        self.last_resource_check_frame_id = -1
 
         if self._has_pending_matrix_layout():
             self.last_matrix_start_failed = True
@@ -287,6 +291,9 @@ class App:
                 return
 
             self.frame_id += 1
+            guard = self._maybe_update_resource_guard()
+            if guard.get("state") == "critical":
+                return
             fps = self.scan_rate.tick() if self.scan_rate is not None else None
             if config.PRINT_FPS and fps is not None:
                 self.logger.info(
@@ -298,10 +305,7 @@ class App:
                     )
                 )
 
-            send_every = self.runtime.get("scan_timing", {}).get(
-                "send_every_n_frames",
-                config.SEND_EVERY_N_FRAMES
-            )
+            send_every = effective_send_every(self.runtime, config, getattr(self, "resource_guard_status", {}) or {})
             if send_every > 1 and (self.frame_id % send_every != 0):
                 return
             packet = self._native_pop_packet()
@@ -439,6 +443,9 @@ class App:
         self.stream_last_errno = 0
         self.stream_cooldown_level = 0
         self.stream_paused_until_ms = 0
+        guard_state = (getattr(self, "resource_guard_status", {}) or {}).get("state", "normal")
+        if guard_state == "degraded":
+            self.resource_state = "degraded"
 
     def _stream_cooldown_active(self, now=None):
         paused_until = int(getattr(self, "stream_paused_until_ms", 0) or 0)
@@ -457,6 +464,54 @@ class App:
         if now is None:
             now = time.ticks_ms()
         return time.ticks_diff(now, self.send_backoff_until_ms) < 0
+
+    def _resource_guard_payload(self, heap_free=None, heap_largest_free_block=None, native=None):
+        if not hasattr(self, "resource_guard"):
+            self.resource_guard = ResourceGuard.from_config(config)
+        if native is None:
+            native = self._native_memory_stats()
+        if heap_free is None:
+            heap_free = gc_mem_free(gc)
+        if heap_largest_free_block is None:
+            try:
+                heap_largest_free_block = int((native or {}).get("heap_largest_free_block", 0) or 0)
+            except Exception:
+                heap_largest_free_block = 0
+        guard_heap_free = guarded_heap_free(heap_free, native)
+        payload = self.resource_guard.evaluate(
+            guard_heap_free,
+            heap_largest_free_block,
+            configured_send_every(self.runtime, config),
+        )
+        self.resource_guard_status = payload
+        return payload
+
+    def _maybe_update_resource_guard(self):
+        interval = int(getattr(config, "RESOURCE_CHECK_EVERY_N_FRAMES", 10) or 10)
+        if interval < 1:
+            interval = 1
+        try:
+            last_frame = int(getattr(self, "last_resource_check_frame_id", -1))
+        except Exception:
+            last_frame = -1
+        if (last_frame >= 0
+                and int(self.frame_id) - last_frame < interval):
+            return getattr(self, "resource_guard_status", {}) or self._resource_guard_payload()
+
+        self.last_resource_check_frame_id = int(self.frame_id)
+        guard = self._resource_guard_payload()
+        state = guard.get("state", "normal")
+        if state == "critical":
+            if not self._stream_cooldown_active():
+                self._pause_stream("memory_pressure", guard.get("reason") or "memory_pressure", 0)
+            return guard
+        if state == "degraded":
+            if getattr(self, "resource_state", "") != "stream_paused":
+                self.resource_state = "degraded"
+        elif state == "normal":
+            if getattr(self, "resource_state", "") == "degraded" and not getattr(self, "stream_last_error", ""):
+                self.resource_state = "normal"
+        return guard
 
     def _maybe_collect_garbage(self):
         interval = int(getattr(config, "GC_EVERY_N_FRAMES", 0))
@@ -1695,6 +1750,9 @@ class App:
             return self._recovery_resources_required()
         release_url = self._release_url(request)
         self._prepare_recovery_update_mode()
+        preflight = self._recovery_memory_pressure_preflight(release_url)
+        if preflight is not None:
+            return preflight
         current = self._current_update_state()
         self._set_update_state({
             "phase": "downloading",
@@ -1794,6 +1852,27 @@ class App:
             "reboot_required": False,
             "applied": False,
         }
+
+    def _recovery_memory_pressure_preflight(self, release_url):
+        guard = self._resource_guard_payload()
+        if guard.get("state") != "critical":
+            return None
+        error = "memory_pressure_preflight_failed"
+        self._set_update_state({
+            "phase": "error",
+            "operation": "write_recovery",
+            "last_error": error,
+            "last_result": error,
+            "reboot_required": False,
+        })
+        return self._ok(
+            error,
+            error=error,
+            release_url=release_url,
+            resource_guard=guard,
+            recovery_update_low_resource=self._recovery_update_low_resource_active(),
+            update_state=self._current_update_state(),
+        )
 
     def _prepare_recovery_update_mode(self):
         self.recovery_update_low_resource = True
@@ -2058,25 +2137,26 @@ class App:
         }
 
     def _memory_status(self):
-        try:
-            free = int(gc.mem_free())
-        except Exception:
-            free = 0
-        try:
-            allocated = int(gc.mem_alloc())
-        except Exception:
-            allocated = 0
+        free = gc_mem_free(gc)
+        allocated = gc_mem_alloc(gc)
         total = free + allocated if free or allocated else 0
         native = self.vdboard.scan.memory_stats() if (
             self.vdboard is not None and hasattr(self.vdboard.scan, "memory_stats")
         ) else {}
+        largest = int(native.get("heap_largest_free_block", 0) or 0)
+        guard = self._resource_guard_payload(
+            heap_free=free,
+            heap_largest_free_block=largest,
+            native=native,
+        )
         return {
             "heap_free": free,
             "heap_allocated": allocated,
             "heap_total": total,
             "heap_used_percent": int((allocated * 100) // total) if total else 0,
-            "heap_largest_free_block": int(native.get("heap_largest_free_block", 0) or 0),
+            "heap_largest_free_block": largest,
             "resource_state": self._resource_state(),
+            "resource_guard": guard,
             "stream_state": self._stream_state(),
             "control": self._control_health(),
             "native": native,
@@ -2102,6 +2182,7 @@ class App:
             "recovery_version": self._recovery_version(),
             "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "resource_state": self._resource_state(),
+            "resource_guard": (getattr(self, "resource_guard_status", {}) or {}),
             "stream_state": self._stream_state(),
             "reboot_required": False,
             "applied": False,
@@ -2167,6 +2248,7 @@ class App:
                 consumed = stats[1]
             if dropped is None:
                 dropped = stats[2]
+        resource_guard = self._resource_guard_payload()
         health = {
             "requested_target_fps": requested_target,
             "settle_us": int(scan_timing.get("settle_us", getattr(config, "MATRIX_SETTLE_US", 20)) or 0),
@@ -2185,6 +2267,7 @@ class App:
             "stream": stream,
             "stream_state": self._stream_state(),
             "resource_state": self._resource_state(),
+            "resource_guard": resource_guard,
             "control": self._control_health(),
         }
         if include_memory:
@@ -2194,6 +2277,7 @@ class App:
                 "heap_allocated": memory.get("heap_allocated", 0),
                 "heap_total": memory.get("heap_total", 0),
                 "heap_used_percent": memory.get("heap_used_percent", 0),
+                "resource_guard": memory.get("resource_guard", {}),
             }
             health["native"] = memory.get("native", {})
         return health
@@ -2280,6 +2364,8 @@ class App:
         recorder_status = self._offline_recording_status()
         scan_stats = self._scan_stats()
         stream_stats = self._stream_stats()
+        memory = self._memory_status()
+        resource_guard = memory.get("resource_guard", getattr(self, "resource_guard_status", {}) or {})
         return {
             "status": "ok",
             "message": "status",
@@ -2293,7 +2379,7 @@ class App:
             "device_uid": self.device_uid,
             "device_name": self.device_name,
             "system": self._system_status(),
-            "memory": self._memory_status(),
+            "memory": memory,
             "wifi_state": self.wifi.state,
             "wifi_setup": self._wifi_setup_status_light(),
             "ntp": self.time_sync.status() if self.time_sync is not None else {},
@@ -2316,6 +2402,7 @@ class App:
             "sent_packets": self.sent_packets,
             "failed_sends": self.failed_sends,
             "resource_state": self._resource_state(),
+            "resource_guard": resource_guard,
             "stream_state": self._stream_state(),
             "scan": scan_stats,
             "stream": stream_stats,
@@ -2326,6 +2413,7 @@ class App:
     def _status_announce_payload(self):
         runtime = self.runtime if isinstance(self.runtime, dict) else {}
         recorder_status = self._offline_recording_status()
+        resource_guard = self._resource_guard_payload()
         return {
             "status": "ok",
             "message": "status_announce",
@@ -2365,8 +2453,13 @@ class App:
             "sent_packets": self.sent_packets,
             "failed_sends": self.failed_sends,
             "resource_state": self._resource_state(),
+            "resource_guard": resource_guard,
             "stream_state": self._stream_state(),
-            "scan_health": self._scan_health(include_memory=False),
+            "scan_health": {
+                "scan_ready": bool(self.scan_ready),
+                "send_every_n_frames": effective_send_every(self.runtime, config, resource_guard),
+                "resource_guard": resource_guard,
+            },
             "offline_recording": recorder_status,
         }
 
@@ -2666,11 +2759,39 @@ class App:
             if settle_us > 65535:
                 return self._ok("scan_timing_invalid", error="settle_us_too_large")
             new_timing["settle_us"] = settle_us
+        if "send_every_n_frames" in request:
+            max_send_every = int(getattr(config, "MAX_SEND_EVERY_N_FRAMES", 8) or 8)
+            try:
+                send_every = int(request.get("send_every_n_frames"))
+            except Exception:
+                return self._ok(
+                    "scan_timing_invalid",
+                    error="send_every_n_frames_must_be_between_1_and_{}".format(max_send_every),
+                )
+            if send_every < 1 or send_every > max_send_every:
+                return self._ok(
+                    "scan_timing_invalid",
+                    error="send_every_n_frames_must_be_between_1_and_{}".format(max_send_every),
+                )
+            new_timing["send_every_n_frames"] = send_every
         if new_timing == old_timing:
             return {
                 "status": "ok",
                 "message": "scan_timing_updated",
                 "runtime": self._runtime_scan_payload(self.runtime),
+                "reboot_required": False,
+                "applied": True,
+            }
+        scan_restart_required = ("target_fps" in request) or ("settle_us" in request)
+        if not scan_restart_required:
+            runtime = self.config_store.update_runtime({"scan_timing": new_timing})
+            self.runtime = runtime
+            self._resource_guard_payload()
+            return {
+                "status": "ok",
+                "message": "scan_timing_updated",
+                "runtime": self._runtime_scan_payload(runtime),
+                "scan_health": self._scan_health(include_memory=True),
                 "reboot_required": False,
                 "applied": True,
             }
