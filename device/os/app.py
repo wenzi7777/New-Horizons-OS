@@ -48,26 +48,9 @@ def _preconnect_wifi(wifi_setup_requested=False):
 
 class App:
     def __init__(self, wifi_setup_requested=False):
-        object.__setattr__(self, "wifi_setup_requested", wifi_setup_requested)
-        object.__setattr__(self, "_core", None)
-
-    def _load_core(self):
-        core = object.__getattribute__(self, "_core")
-        if core is None:
-            from app_core import App as CoreApp
-            core = CoreApp(wifi_setup_requested=object.__getattribute__(self, "wifi_setup_requested"))
-            object.__setattr__(self, "_core", core)
-        return core
+        self.wifi_setup_requested = wifi_setup_requested
 
     def run(self):
-        _preconnect_wifi(object.__getattribute__(self, "wifi_setup_requested"))
-        return self._load_core().run()
-
-    def __getattr__(self, name):
-        return getattr(self._load_core(), name)
-
-    def __setattr__(self, name, value):
-        if name in ("wifi_setup_requested", "_core"):
-            object.__setattr__(self, name, value)
-        else:
-            setattr(self._load_core(), name, value)
+        _preconnect_wifi(self.wifi_setup_requested)
+        from app_core import App as CoreApp
+        return CoreApp(wifi_setup_requested=self.wifi_setup_requested).run()
