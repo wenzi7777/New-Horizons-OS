@@ -1,6 +1,7 @@
 # bmi270.py
 import time
 import struct
+import gc
 
 import config
 import i2c_bus
@@ -46,10 +47,18 @@ class BMI270:
 
             self.driver = bmi270
             self.sensor = bmi270.BMI270(self.i2c, address=self.addr)
+            # The upstream constructor loads the BMI270 config file. It creates
+            # short-lived buffers while streaming the 8 KiB blob, so collect
+            # immediately before the rest of OS boot checks heap pressure.
+            gc.collect()
 
-            # 這個 driver 文件中說 load_config_file 是使用 sensor 所必要的。
+            # Keep a guarded retry for driver variants that do not initialize in
+            # the constructor, but avoid re-running the 8 KiB config path when
+            # the sensor already reports initialized.
             try:
-                self.sensor.load_config_file()
+                if getattr(self.sensor, "internal_status", 0) != 0x01:
+                    self.sensor.load_config_file()
+                    gc.collect()
             except Exception as e:
                 print("BMI270 load_config_file warning:", e)
 
@@ -63,6 +72,7 @@ class BMI270:
                 self.sensor.gyro_range = bmi270.GYRO_RANGE_500
             except Exception:
                 pass
+            gc.collect()
 
             self.available = True
             print("BMI270 initialized at", hex(self.addr))
