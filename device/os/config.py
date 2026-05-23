@@ -4,7 +4,7 @@ DEVICE_ID = 0x00000001
 DEVICE_NAME = "New Horizons OS"
 HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4"
 RUNTIME_VERSION = "v0.3.0"
-FIRMWARE_VERSION = "v0.4.19"
+FIRMWARE_VERSION = "v0.4.20"
 OS_VERSION = FIRMWARE_VERSION
 RECOVERY_VERSION = "v0.4.18"
 RECOVERY_FIRMWARE_VERSION = RECOVERY_VERSION
@@ -56,7 +56,7 @@ DEFAULT_GATEWAY_DISCOVERY_PORT = 22346
 GATEWAY_DISCOVERY_TIMEOUT_MS = 1500
 GATEWAY_DISCOVERY_ATTEMPTS = 2
 GATEWAY_DISCOVERY_RETRY_MS = 5000
-GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.19/device"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.20/device"
 RECOVERY_GITHUB_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.18/device"
 GITHUB_RELEASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/latest.json"
 DEFAULT_RELEASE_URL = GITHUB_RELEASE_URL
@@ -124,6 +124,13 @@ ENABLE_IMU = True
 ENABLE_BATTERY = True
 ENABLE_LED = True
 ENABLE_OTA = False
+
+# Optional sensor drivers are deferred when heap headroom is low. The BMI270
+# config load is large on the no-PSRAM board, so only start it when scan is
+# actually active and enough heap remains for TCP control/status work.
+OPTIONAL_BATTERY_MIN_HEAP_FREE = 49152
+OPTIONAL_IMU_MIN_HEAP_FREE = 81920
+OPTIONAL_IMU_REQUIRES_SCAN = True
 
 WIFI_MODE = "STA"
 BOOT_WINDOW_MS = 3000

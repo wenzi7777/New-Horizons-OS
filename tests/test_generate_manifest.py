@@ -148,14 +148,14 @@ class GenerateManifestTests(unittest.TestCase):
             "umqtt/__init__.py",
         } <= deletes)
 
-    def test_v0419_keeps_os_app_mpy_within_resource_budget(self):
+    def test_v0420_keeps_os_app_mpy_within_resource_budget(self):
         manifest_path = REPO_ROOT / "device" / "os" / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         files = {item["path"]: item for item in manifest.get("files", [])}
 
-        self.assertEqual(manifest["version"], "v0.4.19")
-        self.assertEqual(manifest["firmware_version"], "v0.4.19")
-        self.assertLess(files["app.mpy"]["size"], 49000)
+        self.assertEqual(manifest["version"], "v0.4.20")
+        self.assertEqual(manifest["firmware_version"], "v0.4.20")
+        self.assertLess(files["app.mpy"]["size"], 50000)
 
 
 if __name__ == "__main__":

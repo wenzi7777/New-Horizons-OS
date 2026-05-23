@@ -448,6 +448,9 @@ def load_full_app_module(runtime_override=None, update_check=None, enable_led=Fa
             ENABLE_IMU=enable_imu,
             ENABLE_BATTERY=enable_battery,
             ENABLE_LED=enable_led,
+            OPTIONAL_BATTERY_MIN_HEAP_FREE=0,
+            OPTIONAL_IMU_MIN_HEAP_FREE=0,
+            OPTIONAL_IMU_REQUIRES_SCAN=True,
             KEEP_CALIBRATION_MODULE_LOADED=True,
             USE_PACKET_BUFFER=False,
             DEVICE_STATE_DIR="device_state",
@@ -973,6 +976,50 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(fake_scan.init_calls, [])
         self.assertEqual(fake_scan.start_calls, 0)
         self.assertFalse(app.scan_ready)
+
+    def test_empty_matrix_layout_defers_imu_sensor_start(self):
+        module, fake_scan, events, saved_modules = load_full_app_module(
+            enable_imu=True,
+            enable_battery=True,
+            runtime_override={"matrix_layout": {"active_rows": [], "active_cols": []}},
+        )
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(events, ["wifi_connect"])
+        self.assertEqual(fake_scan.start_calls, 0)
+        self.assertIsNotNone(app.battery)
+        self.assertIsNone(app.imu)
+        self.assertTrue(any("setup_imu_deferred reason=scan_not_ready" in msg for msg in app.logger.infos))
+
+    def test_imu_sensor_start_is_deferred_when_heap_headroom_is_low(self):
+        module, fake_scan, events, saved_modules = load_full_app_module(
+            enable_imu=True,
+            enable_battery=True,
+        )
+        try:
+            module.gc.mem_free = lambda: 65536
+            module.config.OPTIONAL_IMU_MIN_HEAP_FREE = 999999
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertEqual(fake_scan.start_calls, 1)
+        self.assertIsNotNone(app.battery)
+        self.assertIsNone(app.imu)
+        self.assertTrue(any("setup_imu_deferred reason=memory_pressure" in msg for msg in app.logger.warns))
 
     def test_normal_boot_does_not_start_ap_portal_after_sta_connect_failure(self):
         module, fake_scan, events, saved_modules = load_full_app_module(wifi_connect_result=False)

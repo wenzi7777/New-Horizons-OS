@@ -43,8 +43,8 @@ class WiFiManager:
         sta.active(True)
         time.sleep_ms(300)
 
-        if sta.isconnected():
-            self._log_info("wifi_sta_already_connected ip={}".format(sta.ifconfig()[0]))
+        if self._sta_connected(sta):
+            self._log_info("wifi_sta_already_connected ip={}".format(self._sta_ip(sta)))
             self.state = "wifi_connected"
             return True
 
@@ -70,8 +70,8 @@ class WiFiManager:
                 sta.connect(ssid, password)
 
                 for _ in range(20):
-                    if sta.isconnected():
-                        self._log_info("wifi_sta_connected ip={}".format(sta.ifconfig()[0]))
+                    if self._sta_connected(sta):
+                        self._log_info("wifi_sta_connected ip={}".format(self._sta_ip(sta)))
                         if not keep_setup_portal:
                             self.stop_setup_portal()
                             self._disable_ap()
@@ -80,7 +80,14 @@ class WiFiManager:
 
                     time.sleep(1)
 
-                self._log_warn("wifi_sta_connect_timeout attempt={}".format(attempt))
+                self._log_warn(
+                    "wifi_sta_connect_timeout attempt={} status={} ip={} free={}".format(
+                        attempt,
+                        self._sta_status(sta),
+                        self._sta_ip(sta),
+                        gc.mem_free(),
+                    )
+                )
 
             except RuntimeError as e:
                 self._log_warn("wifi_sta_connect_runtime_error {} free={}".format(e, gc.mem_free()))
@@ -267,7 +274,34 @@ class WiFiManager:
     def is_connected(self):
         if self.sta is None:
             return False
-        return self.sta.isconnected()
+        return self._sta_connected(self.sta)
+
+    def _sta_connected(self, sta):
+        try:
+            if sta.isconnected():
+                return True
+        except Exception:
+            pass
+        try:
+            stat_got_ip = getattr(network, "STAT_GOT_IP", 1010)
+            if sta.status() == stat_got_ip:
+                return True
+        except Exception:
+            pass
+        ip = self._sta_ip(sta)
+        return bool(ip and ip != "0.0.0.0")
+
+    def _sta_status(self, sta):
+        try:
+            return sta.status()
+        except Exception:
+            return ""
+
+    def _sta_ip(self, sta):
+        try:
+            return sta.ifconfig()[0]
+        except Exception:
+            return ""
 
     def portal_status(self, include_storage=False):
         network_cfg = self.config_store.load_network() if self.config_store is not None else {}

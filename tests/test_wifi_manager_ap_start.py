@@ -36,6 +36,12 @@ class FakeSTA:
         self.enabled = False
         self.connected = False
         self.calls = []
+        self.connect_sets_connected = True
+        self.connect_sets_ip = False
+        self.connect_status_value = None
+        self.status_value = 1000
+        self.ip = "192.168.1.50"
+        self.ip_active = False
 
     def active(self, value=None):
         if value is None:
@@ -52,10 +58,20 @@ class FakeSTA:
 
     def connect(self, ssid, password):
         self.calls.append(("connect", ssid, password))
-        self.connected = True
+        if self.connect_sets_connected:
+            self.connected = True
+            self.status_value = 1010
+        if self.connect_status_value is not None:
+            self.status_value = self.connect_status_value
+        if self.connect_sets_ip:
+            self.ip_active = True
 
     def ifconfig(self):
-        return ("192.168.1.50", "255.255.255.0", "192.168.1.1", "8.8.8.8")
+        ip = self.ip if self.connected or self.status_value == 1010 or getattr(self, "ip_active", False) else "0.0.0.0"
+        return (ip, "255.255.255.0", "192.168.1.1", "8.8.8.8")
+
+    def status(self):
+        return self.status_value
 
     def config(self, key):
         if key == "mac":
@@ -260,6 +276,32 @@ class WiFiManagerApStartTests(unittest.TestCase):
 
         self.assertTrue(ok)
         self.assertEqual(module._test_portal_instances, [])
+
+    def test_full_channel_accepts_got_ip_status_when_isconnected_lags(self):
+        module, fake_network = load_wifi_manager("full")
+        fake_network.sta.connect_sets_connected = False
+        fake_network.sta.connect_status_value = 1010
+        manager = module.WiFiManager()
+
+        ok = manager.connect_sta("TestWiFi", "pw")
+
+        self.assertTrue(ok)
+        self.assertFalse(fake_network.sta.connected)
+        self.assertIn(("connect", "TestWiFi", "pw"), fake_network.sta.calls)
+
+    def test_full_channel_accepts_nonzero_ip_when_isconnected_lags(self):
+        module, fake_network = load_wifi_manager("full")
+        fake_network.sta.connect_sets_connected = False
+        fake_network.sta.connect_sets_ip = True
+        fake_network.sta.connect_status_value = 1001
+        fake_network.sta.ip = "192.168.1.77"
+        manager = module.WiFiManager()
+
+        ok = manager.connect_sta("TestWiFi", "pw")
+
+        self.assertTrue(ok)
+        self.assertFalse(fake_network.sta.connected)
+        self.assertIn(("connect", "TestWiFi", "pw"), fake_network.sta.calls)
 
     def test_minimal_channel_activates_ap_before_config(self):
         module, fake_network = load_wifi_manager("minimal")

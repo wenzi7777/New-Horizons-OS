@@ -2624,12 +2624,14 @@ class App:
 
         self._start_scan_if_configured()
 
+        self._ensure_battery_sensor()
         if self.battery:
             self.logger.info("setup_battery_begin_start")
             self.battery.begin()
             self.logger.info("setup_battery_begin_done")
             self._log_memory_stage("battery")
 
+        self._ensure_imu_sensor()
         if self.imu:
             self.logger.info("setup_imu_begin_start")
             self.imu.begin()
@@ -2637,6 +2639,47 @@ class App:
             self._log_memory_stage("imu")
 
         self.hardware_ready = True
+
+    def _optional_sensor_heap_free(self):
+        gc.collect()
+        return gc_mem_free(gc)
+
+    def _sensor_min_heap_free(self, attr_name):
+        try:
+            return int(getattr(config, attr_name, 0) or 0)
+        except Exception:
+            return 0
+
+    def _ensure_battery_sensor(self):
+        if self.battery is not None:
+            return True
+        if not getattr(config, "ENABLE_BATTERY", False):
+            return False
+        free = self._optional_sensor_heap_free()
+        minimum = self._sensor_min_heap_free("OPTIONAL_BATTERY_MIN_HEAP_FREE")
+        if free and minimum and free < minimum:
+            self.logger.warn("setup_battery_deferred reason=memory_pressure free={} min={}".format(free, minimum))
+            return False
+        from bq25180 import BQ25180
+        self.battery = BQ25180()
+        return True
+
+    def _ensure_imu_sensor(self):
+        if self.imu is not None:
+            return True
+        if not getattr(config, "ENABLE_IMU", False):
+            return False
+        if getattr(config, "OPTIONAL_IMU_REQUIRES_SCAN", True) and not self.scan_ready:
+            self.logger.info("setup_imu_deferred reason=scan_not_ready free={}".format(self._optional_sensor_heap_free()))
+            return False
+        free = self._optional_sensor_heap_free()
+        minimum = self._sensor_min_heap_free("OPTIONAL_IMU_MIN_HEAP_FREE")
+        if free and minimum and free < minimum:
+            self.logger.warn("setup_imu_deferred reason=memory_pressure free={} min={}".format(free, minimum))
+            return False
+        from bmi270 import BMI270
+        self.imu = BMI270()
+        return True
 
     def _clear_tx_buffer(self):
         if self.tx_buffer is not None and hasattr(self.tx_buffer, "clear"):
@@ -3235,13 +3278,6 @@ class App:
         self.time_sync = TimeSync(self.runtime.get("ntp_servers", []))
         self.scan_rate = RateCounter(1000)
         self.udp_rate = RateCounter(1000)
-
-        if config.ENABLE_IMU:
-            from bmi270 import BMI270
-            self.imu = BMI270()
-        if config.ENABLE_BATTERY:
-            from bq25180 import BQ25180
-            self.battery = BQ25180()
 
     def _ensure_file_services(self):
         if self.filesystem is None:
