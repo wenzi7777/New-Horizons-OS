@@ -9,6 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FULL_APP_PATH = REPO_ROOT / "device" / "os" / "app_core.py"
 RESOURCE_GUARD_PATH = REPO_ROOT / "device" / "os" / "resource_guard.py"
+NHCP_PATH = REPO_ROOT / "device" / "os" / "nhcp.py"
 
 
 class FakeScan:
@@ -627,6 +628,25 @@ class FullAppWifiSetupModeTests(unittest.TestCase):
         self.assertNotIn("system", payload)
         self.assertNotIn("logging", payload)
         self.assertNotIn("update_state", payload)
+
+    def test_status_announce_frame_stays_under_udp_control_budget(self):
+        module, _fake_scan, _events, saved_modules = load_full_app_module(enable_battery=True, enable_imu=True)
+        nhcp_spec = importlib.util.spec_from_file_location("nhcp_status_budget_test", NHCP_PATH)
+        nhcp = importlib.util.module_from_spec(nhcp_spec)
+        nhcp_spec.loader.exec_module(nhcp)
+        try:
+            app = module.App(wifi_setup_requested=False)
+            app.setup()
+            payload = app._status_announce_payload()
+            frame = nhcp.encode_frame("status", device_uid=app.device_uid, payload=payload)
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertLessEqual(len(frame), 1200)
 
     def test_online_boot_loads_optional_indicators_after_runtime_hardware(self):
         module, fake_scan, events, saved_modules = load_full_app_module(

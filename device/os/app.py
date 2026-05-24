@@ -4,7 +4,31 @@
 # The full application lives in app_core.py and is loaded after a lightweight
 # Wi-Fi preconnect attempt has given lwIP/DHCP more heap headroom.
 import gc
+import sys
 import time
+
+
+_BOOT_SHADOW_MODULES = (
+    "config",
+    "device_identity",
+    "device_logging",
+    "findme",
+    "fs_core",
+    "nhcp",
+    "runtime_config",
+    "secrets",
+    "storage",
+    "udp_control",
+    "wifi_manager",
+)
+
+
+def _purge_boot_shadow_modules():
+    for name in _BOOT_SHADOW_MODULES:
+        try:
+            sys.modules.pop(name, None)
+        except Exception:
+            pass
 
 
 class _PreconnectLogger:
@@ -51,6 +75,7 @@ class App:
         self.wifi_setup_requested = wifi_setup_requested
 
     def run(self):
+        _purge_boot_shadow_modules()
         _preconnect_wifi(self.wifi_setup_requested)
         from app_core import App as CoreApp
         return CoreApp(wifi_setup_requested=self.wifi_setup_requested).run()

@@ -78,6 +78,8 @@ python3 firmware/scripts/generate_manifest.py --repo-root . --target os --versio
   --delete-source-root device/os --delete-suffix .py \
   --delete-path main.py \
   --delete-path mqtt_transport.py \
+  --delete-path tcp_control.py \
+  --delete-path tcp_control.mpy \
   --delete-path umqtt/simple.py \
   --delete-path umqtt/robust.py \
   --delete-path umqtt/__init__.py
@@ -115,8 +117,8 @@ release TLV 解碼後格式：
 ```text
 {
   "product": "New Horizons OS",
-  "latest": "v0.4.25",
-  "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.25/device/os/manifest.tlv"
+  "latest": "v0.4.26",
+  "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.4.26/device/os/manifest.tlv"
 }
 ```
 

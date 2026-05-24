@@ -205,6 +205,50 @@ class LauncherWifiSetupModeTests(unittest.TestCase):
         self.assertEqual(full_calls, [True])
         self.assertNotIn(("warn", "launcher_force_minimal_for_wifi_setup"), module.BOOT_LOGS)
 
+    def test_normal_os_boot_drops_recovery_path_and_shared_modules(self):
+        observations = {}
+        recovery_nhcp = types.SimpleNamespace(marker="recovery-nhcp")
+
+        class ObservingApp:
+            def __init__(self, wifi_setup_requested=False):
+                self.wifi_setup_requested = wifi_setup_requested
+
+            def run(self):
+                observations["nhcp_module"] = sys.modules.get("nhcp")
+                observations["sys_path"] = list(sys.path)
+                observations["wifi_setup_requested"] = self.wifi_setup_requested
+
+        injected = {
+            "machine": types.SimpleNamespace(Pin=FakePinFactory()),
+            "immutable_config": types.SimpleNamespace(
+                ACTION_BUTTON_PIN=46,
+                BOOT_WINDOW_MS=3000,
+                BOOT_WINDOW_POLL_MS=50,
+                DEFAULT_MODE="recovery",
+                DEVICE_STATE_DIR="device_state",
+                LOG_PATH="device_state/logs/device.log",
+                OS_DIR="nhos",
+            ),
+            "app": types.SimpleNamespace(App=ObservingApp),
+            "nhcp": recovery_nhcp,
+        }
+        module, saved_modules = load_launcher_module(injected)
+        try:
+            module._load_runtime = lambda: {"mode": "normal"}
+            module._exists = lambda path: path == "nhos/app.mpy"
+            module.run()
+        finally:
+            for name, saved in saved_modules.items():
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+        self.assertIsNot(observations["nhcp_module"], recovery_nhcp)
+        self.assertNotIn("recovery", observations["sys_path"])
+        self.assertEqual(observations["sys_path"][0], "nhos")
+        self.assertTrue(observations["wifi_setup_requested"])
+
     def test_python_entrypoints_alone_do_not_count_as_installed_os(self):
         recovery_calls = []
 

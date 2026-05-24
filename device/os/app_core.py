@@ -2410,11 +2410,14 @@ class App:
     def _status_announce_payload(self):
         runtime = self.runtime if isinstance(self.runtime, dict) else {}
         resource_guard = self._resource_guard_payload()
+        light_guard = self._light_resource_guard(resource_guard)
+        stream_state = self._light_stream_state()
+        findme = self._light_findme_status()
+        matrix_shape = {"rows": len(self._active_rows()), "cols": len(self._active_cols())}
         return {
             "status": "ok",
             "message": "status_announce",
             "mode": self.mode,
-            "offline_standby": self.offline_standby,
             "recovery_update_low_resource": self._recovery_update_low_resource_active(),
             "reboot_required": self.reboot_required,
             "device_id": self.device_uid,
@@ -2423,34 +2426,55 @@ class App:
             "runtime": {
                 "mode": self.mode,
                 "transport": runtime.get("transport", {}),
-                "findme": self._findme_status(),
+                "findme": findme,
                 "scan_timing": runtime.get("scan_timing", {}),
                 "resource_state": self._resource_state(),
-                "stream_state": self._stream_state(),
-                "matrix_layout": {
-                    "active_rows": self._active_rows(),
-                    "active_cols": self._active_cols(),
-                },
-                "matrix_layout_state": runtime.get("matrix_layout_state", {}),
-                "matrix_scan_state": runtime.get("matrix_scan_state", {}),
+                "stream_state": stream_state,
+                "matrix_shape": matrix_shape,
             },
             "wifi_state": self.wifi.state,
             "wifi_connected": self.wifi.is_connected(),
-            "findme": self._findme_status(),
+            "findme": findme,
             "battery": self._battery_status(refresh=False),
             "matrix_configured": self._matrix_configured(),
-            "matrix_shape": {"rows": len(self._active_rows()), "cols": len(self._active_cols())},
-            "last_matrix_start_failed": self.last_matrix_start_failed,
+            "matrix_shape": matrix_shape,
             "sent_packets": self.sent_packets,
             "failed_sends": self.failed_sends,
             "resource_state": self._resource_state(),
-            "resource_guard": resource_guard,
-            "stream_state": self._stream_state(),
+            "resource_guard": light_guard,
+            "stream_state": stream_state,
             "scan_health": {
                 "scan_ready": bool(self.scan_ready),
                 "send_every_n_frames": effective_send_every(self.runtime, config, resource_guard),
-                "resource_guard": resource_guard,
+                "resource_state": self._resource_state(),
             },
+        }
+
+    def _light_findme_status(self):
+        status = self._findme_status()
+        return {
+            "state": status.get("state", ""),
+            "gateway_id": status.get("gateway_id", ""),
+            "connected": bool(status.get("connected")),
+            "last_error": status.get("last_error", ""),
+        }
+
+    def _light_resource_guard(self, guard):
+        guard = guard if isinstance(guard, dict) else {}
+        return {
+            "state": guard.get("state", "normal"),
+            "reason": guard.get("reason", ""),
+            "action": guard.get("action", ""),
+            "send_every_n_frames_override": guard.get("send_every_n_frames_override", None),
+        }
+
+    def _light_stream_state(self):
+        state = self._stream_state()
+        return {
+            "state": state.get("state", "normal"),
+            "cooldown_ms": int(state.get("cooldown_ms", 0) or 0),
+            "last_error": state.get("last_error", ""),
+            "failed_sends": int(state.get("failed_sends", 0) or 0),
         }
 
     def _maintenance_status(self):

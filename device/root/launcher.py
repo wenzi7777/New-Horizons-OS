@@ -20,6 +20,20 @@ _CONFIG_DEFAULTS = {
     "LOG_PATH": "data/logs/device.log",
 }
 
+_OS_SHADOW_MODULES = (
+    "config",
+    "device_identity",
+    "device_logging",
+    "findme",
+    "fs_core",
+    "nhcp",
+    "runtime_config",
+    "secrets",
+    "storage",
+    "udp_control",
+    "wifi_manager",
+)
+
 BOOT_LOGS = []
 
 
@@ -106,6 +120,36 @@ def _collect():
         pass
 
 
+def _purge_os_shadow_modules():
+    for name in _OS_SHADOW_MODULES:
+        try:
+            sys.modules.pop(name, None)
+        except Exception:
+            pass
+
+
+def _prepare_os_import_path(os_dir):
+    original = list(sys.path)
+    recovery_dir = getattr(iconfig, "RECOVERY_DIR", "recovery")
+    try:
+        while os_dir in sys.path:
+            sys.path.remove(os_dir)
+        while recovery_dir in sys.path:
+            sys.path.remove(recovery_dir)
+        sys.path.insert(0, os_dir)
+    except Exception:
+        sys.path[:] = original
+        raise
+    return original
+
+
+def _restore_import_path(original):
+    try:
+        sys.path[:] = original
+    except Exception:
+        pass
+
+
 def _wait_boot_window(logger):
     button = machine.Pin(iconfig.ACTION_BUTTON_PIN, machine.Pin.IN, machine.Pin.PULL_UP)
     started = time.ticks_ms()
@@ -147,20 +191,19 @@ def run():
         if boot_request == "recovery" or mode == "recovery":
             _run_recovery(wifi_setup_requested=wifi_setup_requested)
         elif os_installed:
-            sys.path.insert(0, iconfig.OS_DIR)
+            _purge_os_shadow_modules()
+            original_path = _prepare_os_import_path(iconfig.OS_DIR)
             try:
                 _collect()
                 from app import App
                 try:
                     App(wifi_setup_requested=wifi_setup_requested).run()
                 except Exception as exc:
+                    _restore_import_path(original_path)
                     _schedule_recovery_reboot(logger, str(exc))
                     return
             finally:
-                try:
-                    sys.path.pop(0)
-                except Exception:
-                    pass
+                _restore_import_path(original_path)
         else:
             _run_recovery(wifi_setup_requested=wifi_setup_requested)
     except Exception as exc:

@@ -167,7 +167,7 @@ def decode_frame(packet):
 
 
 def is_frame(packet):
-    return bool(packet and len(packet) >= 2 and packet[:2] == MAGIC)
+    return bool(packet and len(packet) >= HEADER_SIZE and packet[:2] == MAGIC and packet[2] == VERSION)
 
 
 def encode_value(value):
