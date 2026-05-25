@@ -40,6 +40,7 @@ class MatrixScanner {
   bool start();
   void stop();
   bool active() const;
+  bool hasLayout() const;
   bool setTiming(uint16_t targetFps, uint16_t settleUs, uint16_t sendEveryNFrames = kDefaultSendEveryNFrames);
   bool setLayout(const uint8_t* rows, size_t rowCount, const uint8_t* cols, size_t colCount);
   bool scanDue() const;
@@ -62,8 +63,8 @@ class MatrixScanner {
   volatile bool running_ = false;
   uint8_t rows_[kRows] = {0};
   uint8_t cols_[kCols] = {0};
-  size_t rowCount_ = kRows;
-  size_t colCount_ = kCols;
+  size_t rowCount_ = 0;
+  size_t colCount_ = 0;
   uint16_t targetFps_ = kDefaultTargetFps;
   uint16_t settleUs_ = kDefaultSettleUs;
   uint16_t sendEveryNFrames_ = kDefaultSendEveryNFrames;

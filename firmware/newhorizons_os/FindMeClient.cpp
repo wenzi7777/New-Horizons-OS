@@ -142,13 +142,40 @@ void FindMeClient::sendDiscover() {
     nextDiscoverMs_ = millis() + kDiscoverIntervalMs;
     return;
   }
-  udp_.beginPacket(IPAddress(255, 255, 255, 255), kDiscoveryPort);
-  udp_.write(reinterpret_cast<const uint8_t*>(payload.c_str()), payload.length());
-  udp_.endPacket();
+  bool sent = sendDiscoverTo(IPAddress(255, 255, 255, 255), payload);
+  sent = sendDiscoverTo(directedBroadcast(), payload) || sent;
+  IPAddress knownGateway;
+  if (knownGateway.fromString(streamHost_)) {
+    sent = sendDiscoverTo(knownGateway, payload) || sent;
+  }
+  if (!sent) {
+    lastError_ = "findme_discover_send_failed";
+  }
   lastDiscoverMs_ = millis();
   nextDiscoverMs_ = lastDiscoverMs_ + kDiscoverIntervalMs;
   state_ = "discovering";
   Serial.println(F("findme_discover_sent"));
+}
+
+bool FindMeClient::sendDiscoverTo(const IPAddress& host, const String& payload) {
+  if (!payload.length()) {
+    return false;
+  }
+  if (!udp_.beginPacket(host, kDiscoveryPort)) {
+    return false;
+  }
+  udp_.write(reinterpret_cast<const uint8_t*>(payload.c_str()), payload.length());
+  return udp_.endPacket() == 1;
+}
+
+IPAddress FindMeClient::directedBroadcast() const {
+  const IPAddress local = WiFi.localIP();
+  const IPAddress mask = WiFi.subnetMask();
+  return IPAddress(
+      static_cast<uint8_t>(local[0] | (0xff ^ mask[0])),
+      static_cast<uint8_t>(local[1] | (0xff ^ mask[1])),
+      static_cast<uint8_t>(local[2] | (0xff ^ mask[2])),
+      static_cast<uint8_t>(local[3] | (0xff ^ mask[3])));
 }
 
 void FindMeClient::readOffers() {

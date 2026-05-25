@@ -17,10 +17,8 @@ void putFloat(uint8_t* out, float value) {
 }  // namespace
 
 bool MatrixScanner::begin() {
-  memcpy(rows_, kRowAdcPins, kRowAdcPinCount);
-  memcpy(cols_, kColPins, kColPinCount);
-  rowCount_ = kRowAdcPinCount;
-  colCount_ = kColPinCount;
+  rowCount_ = 0;
+  colCount_ = 0;
   configurePins();
   return validatePinMap();
 }
@@ -42,6 +40,10 @@ bool MatrixScanner::active() const {
   return running_;
 }
 
+bool MatrixScanner::hasLayout() const {
+  return rowCount_ > 0 && colCount_ > 0;
+}
+
 bool MatrixScanner::setTiming(uint16_t targetFps, uint16_t settleUs, uint16_t sendEveryNFrames) {
   if (targetFps == 0 || targetFps > kMaxTargetFps || settleUs > 500 || sendEveryNFrames == 0 || sendEveryNFrames > 120) {
     return false;
@@ -54,7 +56,17 @@ bool MatrixScanner::setTiming(uint16_t targetFps, uint16_t settleUs, uint16_t se
 }
 
 bool MatrixScanner::setLayout(const uint8_t* rows, size_t rowCount, const uint8_t* cols, size_t colCount) {
-  if (!rows || !cols || rowCount == 0 || colCount == 0 || rowCount > kRows || colCount > kCols) {
+  if (rowCount == 0 || colCount == 0) {
+    if (rowCount != 0 || colCount != 0) {
+      return false;
+    }
+    setAllColsInactive();
+    rowCount_ = 0;
+    colCount_ = 0;
+    nextScanDueUs_ = 0;
+    return true;
+  }
+  if (!rows || !cols || rowCount > kRows || colCount > kCols) {
     return false;
   }
   for (size_t i = 0; i < rowCount; ++i) {
@@ -77,7 +89,7 @@ bool MatrixScanner::setLayout(const uint8_t* rows, size_t rowCount, const uint8_
 }
 
 bool MatrixScanner::scanDue() const {
-  return running_ && timeReached(micros(), nextScanDueUs_);
+  return running_ && hasLayout() && timeReached(micros(), nextScanDueUs_);
 }
 
 size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, MatrixFrame& frame) {

@@ -200,19 +200,23 @@ void setup() {
   }
 
   scanner.begin();
-  scanner.setLayout(
+  if (!scanner.setLayout(
       deviceConfig.data().matrixLayout.analogPins,
       deviceConfig.data().matrixLayout.analogCount,
       deviceConfig.data().matrixLayout.selectPins,
-      deviceConfig.data().matrixLayout.selectCount);
+      deviceConfig.data().matrixLayout.selectCount)) {
+    logBoot("matrix_layout_invalid config_ignored=true");
+  }
   scanner.setTiming(
       deviceConfig.data().scanTiming.targetFps,
       deviceConfig.data().scanTiming.settleUs,
       deviceConfig.data().scanTiming.sendEveryNFrames);
-  logBoot(String("boot_stage=scanner_ready rows=") + String(nhos::kRows) + " cols=" + String(nhos::kCols));
-  if (bootMode.mode() == nhos::RunMode::Normal) {
+  logBoot(String("boot_stage=scanner_ready shape=") + scanner.matrixShapeJson());
+  if (bootMode.mode() == nhos::RunMode::Normal && scanner.hasLayout()) {
     scanner.start();
     logBoot("scan_task_started");
+  } else if (!scanner.hasLayout()) {
+    logBoot("scan_task_deferred matrix_layout_empty");
   } else {
     logBoot("scan_task_deferred maintenance_mode=true");
   }

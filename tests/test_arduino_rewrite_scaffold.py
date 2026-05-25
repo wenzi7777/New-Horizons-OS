@@ -69,7 +69,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.5"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.6"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -302,6 +302,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         for key in (
             '"schema_version"',
             '"matrix_layout"',
+            '"configured"',
             '"scan_timing"',
             '"filter"',
             '"imu"',
@@ -314,6 +315,29 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("deviceConfig_->save", control)
         self.assertIn("deviceConfig_->statusJson()", control)
         self.assertNotIn("manual_preset", config + control)
+
+    def test_missing_device_config_leaves_matrix_layout_empty_and_scan_stopped(self):
+        config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
+        scanner_header = (ARDUINO_ROOT / "MatrixScanner.h").read_text(encoding="utf-8")
+        scanner = (ARDUINO_ROOT / "MatrixScanner.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        defaults_body = re.search(r"void DeviceConfig::setDefaults\(\) \{(?P<body>.*?)\n\}", config, re.S)
+        self.assertIsNotNone(defaults_body)
+        self.assertIn("data_.schemaVersion = 2", defaults_body.group("body"))
+        self.assertIn("data_.matrixLayout.analogCount = 0", defaults_body.group("body"))
+        self.assertIn("data_.matrixLayout.selectCount = 0", defaults_body.group("body"))
+        self.assertNotIn("kRowAdcPins", defaults_body.group("body"))
+        self.assertNotIn("kColPins", defaults_body.group("body"))
+        self.assertIn('extractBool(matrix, "configured", false)', config)
+        self.assertIn("bool hasLayout() const;", scanner_header)
+        self.assertIn("size_t rowCount_ = 0", scanner_header)
+        self.assertIn("size_t colCount_ = 0", scanner_header)
+        self.assertNotIn("memcpy(rows_, kRowAdcPins", scanner)
+        self.assertNotIn("rowCount_ = kRowAdcPinCount", scanner)
+        self.assertIn("scanner.hasLayout()", sketch)
+        self.assertIn("scan_task_deferred matrix_layout_empty", sketch)
+        self.assertIn("scanner.matrixShapeJson()", sketch)
 
     def test_ssd1306_128x32_driver_has_off_auto_enabled_modes(self):
         header = (ARDUINO_ROOT / "DisplayManager.h").read_text(encoding="utf-8")
@@ -391,7 +415,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.5}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.6}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
 

@@ -218,7 +218,17 @@ DeviceConfigData& DeviceConfig::mutableData() {
 }
 
 bool DeviceConfig::setMatrixLayout(const uint8_t* analogPins, size_t analogCount, const uint8_t* selectPins, size_t selectCount) {
-  if (!analogPins || !selectPins || analogCount == 0 || selectCount == 0 || analogCount > kRows || selectCount > kCols) {
+  if (analogCount == 0 || selectCount == 0) {
+    if (analogCount != 0 || selectCount != 0) {
+      return false;
+    }
+    data_.matrixLayout.analogCount = 0;
+    data_.matrixLayout.selectCount = 0;
+    memset(data_.matrixLayout.analogPins, 0, sizeof(data_.matrixLayout.analogPins));
+    memset(data_.matrixLayout.selectPins, 0, sizeof(data_.matrixLayout.selectPins));
+    return true;
+  }
+  if (!analogPins || !selectPins || analogCount > kRows || selectCount > kCols) {
     return false;
   }
   memcpy(data_.matrixLayout.analogPins, analogPins, analogCount);
@@ -313,11 +323,11 @@ bool DeviceConfig::validOledMode(const String& mode) {
 }
 
 void DeviceConfig::setDefaults() {
-  data_.schemaVersion = 1;
-  memcpy(data_.matrixLayout.analogPins, kRowAdcPins, kRowAdcPinCount);
-  memcpy(data_.matrixLayout.selectPins, kColPins, kColPinCount);
-  data_.matrixLayout.analogCount = kRowAdcPinCount;
-  data_.matrixLayout.selectCount = kColPinCount;
+  data_.schemaVersion = 2;
+  memset(data_.matrixLayout.analogPins, 0, sizeof(data_.matrixLayout.analogPins));
+  memset(data_.matrixLayout.selectPins, 0, sizeof(data_.matrixLayout.selectPins));
+  data_.matrixLayout.analogCount = 0;
+  data_.matrixLayout.selectCount = 0;
   data_.scanTiming.targetFps = kDefaultTargetFps;
   data_.scanTiming.settleUs = kDefaultSettleUs;
   data_.scanTiming.sendEveryNFrames = kDefaultSendEveryNFrames;
@@ -337,7 +347,8 @@ bool DeviceConfig::applyJson(const String& json) {
     lastError_ = "config_invalid_json";
     return false;
   }
-  data_.schemaVersion = static_cast<uint8_t>(extractInt(json, "schema_version", 1));
+  const uint8_t storedSchemaVersion = static_cast<uint8_t>(extractInt(json, "schema_version", 1));
+  data_.schemaVersion = 2;
 
   const String matrix = objectForKey(json, "matrix_layout");
   if (!matrix.isEmpty()) {
@@ -345,8 +356,11 @@ bool DeviceConfig::applyJson(const String& json) {
     uint8_t select[kCols] = {0};
     const size_t analogCount = extractArray(matrix, "analog_pins", analog, kRows);
     const size_t selectCount = extractArray(matrix, "select_pins", select, kCols);
-    if (analogCount && selectCount) {
+    const bool configured = storedSchemaVersion >= 2 && extractBool(matrix, "configured", false);
+    if (configured && analogCount && selectCount) {
       setMatrixLayout(analog, analogCount, select, selectCount);
+    } else {
+      setMatrixLayout(nullptr, 0, nullptr, 0);
     }
   }
 
@@ -396,7 +410,9 @@ String DeviceConfig::toJson() const {
   String out = "{";
   out += "\"schema_version\":";
   out += String(static_cast<unsigned int>(data_.schemaVersion));
-  out += ",\"matrix_layout\":{\"analog_pins\":";
+  out += ",\"matrix_layout\":{\"configured\":";
+  out += data_.matrixLayout.analogCount > 0 && data_.matrixLayout.selectCount > 0 ? "true" : "false";
+  out += ",\"analog_pins\":";
   appendArray(out, data_.matrixLayout.analogPins, data_.matrixLayout.analogCount);
   out += ",\"select_pins\":";
   appendArray(out, data_.matrixLayout.selectPins, data_.matrixLayout.selectCount);

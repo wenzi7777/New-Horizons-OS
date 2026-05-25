@@ -38,6 +38,8 @@ class FindMeClient {
 
   bool ensureUdp();
   void sendDiscover();
+  bool sendDiscoverTo(const IPAddress& host, const String& payload);
+  IPAddress directedBroadcast() const;
   void readOffers();
   void acceptOffer(const Offer& offer, const IPAddress& host);
   Offer decodeOffer(const uint8_t* data, size_t len) const;
