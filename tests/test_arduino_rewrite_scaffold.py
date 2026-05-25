@@ -1,0 +1,228 @@
+import re
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+ARDUINO_ROOT = REPO_ROOT / "firmware" / "newhorizons_os"
+SCRIPT_ROOT = REPO_ROOT / "firmware" / "scripts"
+
+
+class ArduinoRewriteScaffoldTests(unittest.TestCase):
+    def test_repository_uses_hardware_firmware_layout(self):
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+
+        self.assertTrue(ARDUINO_ROOT.is_dir())
+        self.assertTrue(SCRIPT_ROOT.is_dir())
+        self.assertIn("firmware/newhorizons_os/", readme)
+        self.assertIn("firmware/scripts/", readme)
+        self.assertIn("hardware/vd-ctl-r-v1.0f/", readme)
+        self.assertIn("firmware/build/", gitignore)
+        self.assertNotIn("firmware/arduino/newhorizons_os", readme)
+
+    def test_required_arduino_modules_exist(self):
+        expected = {
+            "newhorizons_os.ino",
+            "Config.h",
+            "Config.cpp",
+            "BoardPins.h",
+            "BoardPins.cpp",
+            "LedController.h",
+            "LedController.cpp",
+            "BootModeManager.h",
+            "BootModeManager.cpp",
+            "MatrixScanner.h",
+            "MatrixScanner.cpp",
+            "PacketBuilder.h",
+            "PacketBuilder.cpp",
+            "FindMeClient.h",
+            "FindMeClient.cpp",
+            "WifiManager.h",
+            "WifiManager.cpp",
+            "ControlServer.h",
+            "ControlServer.cpp",
+            "OtaManager.h",
+            "OtaManager.cpp",
+            "Storage.h",
+            "Storage.cpp",
+        }
+
+        missing = sorted(name for name in expected if not (ARDUINO_ROOT / name).exists())
+
+        self.assertEqual(missing, [])
+
+    def test_config_declares_new_protocol_packet_version_and_ports(self):
+        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+
+        self.assertIn('kProtocolName[] = "NHO/Arduino/1"', config)
+        self.assertIn("kPacketVersion = 3", config)
+        self.assertIn("kUdpStreamPort = 13250", config)
+        self.assertIn("kDiscoveryPort = 22346", config)
+        self.assertIn("kControlPort = 22345", config)
+        self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.1"', config)
+        self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
+
+    def test_wifi_setup_ap_uses_legacy_open_ssid(self):
+        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+
+        self.assertIn('kDefaultApSsidPrefix[] = "NewHorizonsOS"', config)
+        self.assertNotIn('kDefaultApSsidPrefix[] = "NewHorizonsOS-Arduino"', config)
+        self.assertIn('kDefaultApPassword[] = ""', config)
+        self.assertIn('kSetupPortalDomain[] = "newhorizons.os"', config)
+        self.assertIn("kSetupPortalPort = 80", config)
+
+    def test_findme_is_primary_gateway_attachment_flow(self):
+        header = (ARDUINO_ROOT / "FindMeClient.h").read_text(encoding="utf-8")
+        findme = (ARDUINO_ROOT / "FindMeClient.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("class FindMeClient", header)
+        self.assertIn("findme_discover", findme)
+        self.assertIn("findme_offer", findme)
+        self.assertIn("preferred_gateway_id", findme)
+        self.assertIn("claim_id", findme)
+        self.assertIn("kDiscoveryPort", findme)
+        self.assertIn("findme.begin", sketch)
+        self.assertIn("findme.service", sketch)
+        self.assertIn("findme.streamHost", sketch)
+        self.assertNotIn('host = "255.255.255.255"', sketch)
+        self.assertIn('cmd == "findme_discover"', control)
+        self.assertIn('cmd == "findme_switch_gateway"', control)
+        self.assertIn('data += ",\\"findme\\":";', control)
+        self.assertIn("findme_->statusJson()", control)
+
+    def test_arduino_file_management_uses_read_write_command_contract(self):
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+
+        for command in (
+            'cmd == "file_read_begin"',
+            'cmd == "file_read_chunk"',
+            'cmd == "file_write_begin"',
+            'cmd == "file_write_chunk"',
+            'cmd == "file_write_finish"',
+            'cmd == "file_delete"',
+        ):
+            self.assertIn(command, control)
+        self.assertIn("maintenance_required", control)
+
+    def test_wifi_setup_ssid_matches_legacy_full_device_suffix(self):
+        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
+
+        self.assertRegex(
+            wifi,
+            re.compile(
+                r'snprintf\(\s*ssid,\s*sizeof\(ssid\),\s*"%s-%02X%02X%02X%02X%02X%02X"',
+                re.S,
+            ),
+        )
+        self.assertIn("WiFi.softAP(ssid);", wifi)
+        self.assertNotIn("WiFi.softAP(ssid, kDefaultApPassword);", wifi)
+
+    def test_wifi_setup_starts_captive_portal_dns_and_http(self):
+        header = (ARDUINO_ROOT / "WifiManager.h").read_text(encoding="utf-8")
+        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("#include <DNSServer.h>", header)
+        self.assertIn("#include <WebServer.h>", header)
+        self.assertIn("DNSServer dnsServer_", header)
+        self.assertIn("WebServer portalServer_", header)
+        self.assertIn("dnsServer_.start", wifi)
+        self.assertIn("portalServer_.begin()", wifi)
+        self.assertIn("portalServer_.handleClient()", wifi)
+        self.assertIn("enableDhcpCaptivePortal", wifi)
+        self.assertIn("handlePortalSave", wifi)
+
+    def test_wifi_setup_enters_portal_without_credentials_or_boot_button_request(self):
+        header = (ARDUINO_ROOT / "WifiManager.h").read_text(encoding="utf-8")
+        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("bool begin(Storage& storage, bool forceSetupPortal = false);", header)
+        self.assertIn("bool hasCredentials() const;", header)
+        self.assertIn("if (!hasCredentials())", wifi)
+        self.assertIn("wifi_sta_no_credentials", wifi)
+        self.assertIn("if (forceSetupPortal)", wifi)
+        self.assertIn("wifi_setup_requested_by_action_button", wifi)
+        self.assertIn("wifi.begin(storage, bootMode.wifiSetupRequested())", sketch)
+
+    def test_action_button_boot_window_requests_wifi_setup(self):
+        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+        header = (ARDUINO_ROOT / "BootModeManager.h").read_text(encoding="utf-8")
+        boot = (ARDUINO_ROOT / "BootModeManager.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("kBootWifiSetupWindowMs = 3000", config)
+        self.assertIn("bool wifiSetupRequested() const;", header)
+        self.assertIn("wifiSetupRequested_", header)
+        self.assertIn("sampleWifiSetupButtonWindow", boot)
+        self.assertIn("millis() - started < kBootWifiSetupWindowMs", boot)
+        self.assertIn("digitalRead(kActionButtonPin) == LOW", boot)
+        self.assertIn("boot_action_button_setup_requested", boot)
+        self.assertNotIn("actionButtonHeld() ||", boot)
+
+    def test_wifi_setup_portal_lists_scanned_networks(self):
+        header = (ARDUINO_ROOT / "WifiManager.h").read_text(encoding="utf-8")
+        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("String wifiNetworkOptionsHtml() const;", header)
+        self.assertIn("WiFi.scanNetworks", wifi)
+        self.assertIn('id=\\"ssid_select\\"', wifi)
+        self.assertIn('onchange=\\"document.getElementById(\\\'ssid\\\').value=this.value\\"', wifi)
+        self.assertIn("WiFi.RSSI(i)", wifi)
+        self.assertIn("WiFi.encryptionType(i)", wifi)
+
+    def test_serial_boot_log_has_operational_milestones(self):
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+
+        for marker in (
+            "boot_stage=storage_ready",
+            "boot_stage=boot_mode_ready",
+            "boot_stage=i2c_ready",
+            "boot_stage=scanner_ready",
+            "boot_stage=wifi_ready",
+            "boot_stage=ota_ready",
+            "boot_stage=control_ready",
+            "runtime_ready protocol=",
+        ):
+            self.assertIn(marker, sketch)
+        self.assertIn("wifi_setup_ap_started ssid=", wifi)
+        self.assertIn("wifi_sta_connected ip=", wifi)
+        self.assertIn("control_server_started port=", control)
+
+    def test_board_pin_map_matches_new_horizons_hardware(self):
+        pins = (ARDUINO_ROOT / "BoardPins.cpp").read_text(encoding="utf-8")
+
+        self.assertRegex(pins, re.compile(r"kRowAdcPins\[\].*=\s*\{\s*1,\s*2,\s*3,\s*4,\s*5,\s*6,\s*7,\s*8,\s*9,\s*10\s*\}", re.S))
+        self.assertRegex(pins, re.compile(r"kColPins\[\].*=\s*\{\s*13,\s*14,\s*15,\s*16,\s*17,\s*18,\s*19,\s*20,\s*21,\s*26,\s*47,\s*33,\s*34,\s*48,\s*35,\s*36,\s*37,\s*38,\s*39,\s*40,\s*41\s*\}", re.S))
+        self.assertIn("kI2cScl = 42", pins)
+        self.assertIn("kI2cSda = 45", pins)
+        self.assertIn("kStatusLedPin = 11", pins)
+        self.assertIn("kExternalLedPin = 12", pins)
+        self.assertIn("kActionButtonPin = 46", pins)
+
+    def test_release_scripts_exist(self):
+        expected = {
+            "build_arduino_release.sh",
+            "flash_arduino_firmware.sh",
+            "generate_arduino_manifest.py",
+        }
+
+        missing = sorted(name for name in expected if not (SCRIPT_ROOT / name).exists())
+
+        self.assertEqual(missing, [])
+
+    def test_release_script_publishes_trackable_artifacts(self):
+        script = (SCRIPT_ROOT / "build_arduino_release.sh").read_text(encoding="utf-8")
+
+        self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
+        self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.1}"', script)
+        self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
+
+
+if __name__ == "__main__":
+    unittest.main()

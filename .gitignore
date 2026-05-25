@@ -1,3 +1,15 @@
+.DS_Store
 __pycache__/
 *.pyc
-.DS_Store
+.pytest_cache/
+.venv/
+
+firmware/arduino/build/
+firmware/build/
+firmware/newhorizons_os/build/
+*.elf
+*.map
+*.bin
+!releases/*.json
+!releases/artifacts/
+!releases/artifacts/*.bin

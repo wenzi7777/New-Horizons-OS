@@ -1,7 +1,0 @@
-remote=https://github.com/micropython/micropython.git
-commit=1c63211817d9c5164542b94771634cf80b300fdf
-idf_version=5.5.1
-board=NEWHORIZONS_ESP32S3_N8
-build=build-NEWHORIZONS_ESP32S3_N8-vdboard-8m
-flash=8MB
-psram=none
