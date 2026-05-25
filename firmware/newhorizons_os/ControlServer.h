@@ -5,6 +5,9 @@
 #include <vector>
 
 #include "BootModeManager.h"
+#include "DeviceConfig.h"
+#include "DisplayManager.h"
+#include "ExternalLedController.h"
 #include "FindMeClient.h"
 #include "LedController.h"
 #include "MatrixScanner.h"
@@ -17,7 +20,18 @@ namespace nhos {
 
 class ControlServer {
  public:
-  void begin(WifiManager& wifi, MatrixScanner& scanner, Storage& storage, BootModeManager& boot, OtaManager& ota, FindMeClient& findme, PowerManager& power, LedController& leds);
+  void begin(
+      WifiManager& wifi,
+      MatrixScanner& scanner,
+      Storage& storage,
+      BootModeManager& boot,
+      OtaManager& ota,
+      FindMeClient& findme,
+      PowerManager& power,
+      LedController& leds,
+      DeviceConfig& deviceConfig,
+      DisplayManager& display,
+      ExternalLedController& externalLeds);
   void service();
   bool maintenanceMode() const;
   String streamHost() const;
@@ -31,10 +45,13 @@ class ControlServer {
   String commandName(const String& request) const;
   String scanTimingStatusJson() const;
   String layoutStatusJson() const;
+  String indicatorsStatusJson() const;
   String extractString(const String& request, const char* key) const;
   int extractInt(const String& request, const char* key, int fallback) const;
+  float extractFloat(const String& request, const char* key, float fallback) const;
   bool extractBool(const String& request, const char* key, bool fallback) const;
   size_t extractArray(const String& request, const char* key, uint8_t* out, size_t maxCount) const;
+  String extractObject(const String& request, const char* key) const;
   bool requireMaintenance(const String& command) const;
   String fileSizeJson(const String& command, const String& scope, const String& path) const;
   String fileChunkJson(const String& command, const String& scope, const String& path, size_t offset, size_t length) const;
@@ -50,6 +67,9 @@ class ControlServer {
   FindMeClient* findme_ = nullptr;
   PowerManager* power_ = nullptr;
   LedController* leds_ = nullptr;
+  DeviceConfig* deviceConfig_ = nullptr;
+  DisplayManager* display_ = nullptr;
+  ExternalLedController* externalLeds_ = nullptr;
   bool started_ = false;
   String streamHost_;
   uint16_t streamPort_ = kUdpStreamPort;

@@ -1,0 +1,80 @@
+#pragma once
+
+#include <Arduino.h>
+
+#include "Config.h"
+#include "Storage.h"
+
+namespace nhos {
+
+struct MatrixLayoutConfig {
+  uint8_t analogPins[kRows] = {0};
+  uint8_t selectPins[kCols] = {0};
+  size_t analogCount = 0;
+  size_t selectCount = 0;
+};
+
+struct ScanTimingConfig {
+  uint16_t targetFps = kDefaultTargetFps;
+  uint16_t settleUs = kDefaultSettleUs;
+  uint16_t sendEveryNFrames = kDefaultSendEveryNFrames;
+};
+
+struct ExternalLedConfig {
+  String mode = "off";
+  String preset = "stream_health";
+  float brightness = 0.35f;
+};
+
+struct OledConfig {
+  String mode = "off";
+  String page = "live_status";
+  uint8_t updateHz = 1;
+  uint8_t contrast = 128;
+};
+
+struct DeviceConfigData {
+  uint8_t schemaVersion = 1;
+  MatrixLayoutConfig matrixLayout;
+  ScanTimingConfig scanTiming;
+  bool filterEnabled = true;
+  bool imuEnabled = true;
+  ExternalLedConfig externalLed;
+  OledConfig oled;
+};
+
+class DeviceConfig {
+ public:
+  bool load(Storage& storage);
+  bool save(Storage& storage);
+
+  const DeviceConfigData& data() const;
+  DeviceConfigData& mutableData();
+
+  bool setMatrixLayout(const uint8_t* analogPins, size_t analogCount, const uint8_t* selectPins, size_t selectCount);
+  bool setScanTiming(uint16_t targetFps, uint16_t settleUs, uint16_t sendEveryNFrames);
+  bool setFilterEnabled(bool enabled);
+  bool setImuEnabled(bool enabled);
+  bool setExternalLed(const String& mode, const String& preset, float brightness);
+  bool setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast);
+
+  String statusJson() const;
+  String filterJson() const;
+  String imuJson() const;
+  String configJson() const;
+
+  static bool validExternalLedMode(const String& mode);
+  static bool validOledMode(const String& mode);
+
+ private:
+  void setDefaults();
+  bool applyJson(const String& json);
+  String toJson() const;
+  String lastErrorJson() const;
+
+  DeviceConfigData data_;
+  bool loaded_ = false;
+  String lastError_;
+};
+
+}  // namespace nhos

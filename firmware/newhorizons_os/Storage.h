@@ -19,6 +19,8 @@ class Storage {
   bool validUserPath(const String& path) const;
   bool writeFile(const String& scope, const String& path, const uint8_t* data, size_t len, bool append = false);
   bool readFile(const String& scope, const String& path, std::vector<uint8_t>& out, size_t offset = 0, size_t length = 1024);
+  bool readTextFile(const String& path, String& out) const;
+  bool writeTextFileAtomic(const String& path, const String& content);
   size_t fileSize(const String& scope, const String& path);
   bool deleteFile(const String& scope, const String& path);
   String listFiles(const String& scope);

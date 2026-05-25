@@ -6,6 +6,9 @@
 #include "BootModeManager.h"
 #include "Config.h"
 #include "ControlServer.h"
+#include "DeviceConfig.h"
+#include "DisplayManager.h"
+#include "ExternalLedController.h"
 #include "FindMeClient.h"
 #include "LedController.h"
 #include "MatrixScanner.h"
@@ -18,8 +21,11 @@
 namespace {
 
 nhos::Storage storage;
+nhos::DeviceConfig deviceConfig;
 nhos::BootModeManager bootMode;
 nhos::LedController leds;
+nhos::ExternalLedController externalLeds;
+nhos::DisplayManager displayManager;
 nhos::WifiManager wifi;
 nhos::MatrixScanner scanner;
 nhos::PacketBuilder packetBuilder;
@@ -47,6 +53,18 @@ uint32_t scanWarningUntilMs = 0;
 void logBoot(const String& message) {
   Serial.println(message);
   storage.logLine(String(millis()) + " " + message);
+}
+
+String chargeStateName() {
+  switch (power.chargeState()) {
+    case nhos::ChargeState::ChargingOrMissing:
+      return "charging";
+    case nhos::ChargeState::ChargeDone:
+      return "done";
+    case nhos::ChargeState::NotCharging:
+    default:
+      return "idle";
+  }
 }
 
 void scanAndStreamIfDue() {
@@ -113,6 +131,7 @@ void sendHeartbeatIfDue() {
 void updateLedState() {
   const uint32_t nowMs = millis();
   const nhos::ScanHealth health = scanner.health();
+  nhos::LedSignal activeSignal = nhos::LedSignal::Online;
   if (health.overrunFrames > lastObservedOverrunFrames || health.udpSendFailures > lastObservedUdpFailures) {
     scanWarningUntilMs = nowMs + 10000;
     lastObservedOverrunFrames = health.overrunFrames;
@@ -120,31 +139,33 @@ void updateLedState() {
   }
 
   if (criticalError) {
-    leds.setSignal(nhos::LedSignal::Error);
+    activeSignal = nhos::LedSignal::Error;
   } else if (bootMode.mode() == nhos::RunMode::SafeMaintenance) {
-    leds.setSignal(nhos::LedSignal::SafeMode);
+    activeSignal = nhos::LedSignal::SafeMode;
   } else if (control.maintenanceMode()) {
-    leds.setSignal(nhos::LedSignal::Maintenance);
+    activeSignal = nhos::LedSignal::Maintenance;
   } else if (wifi.setupActive()) {
-    leds.setSignal(nhos::LedSignal::WifiSetup);
+    activeSignal = nhos::LedSignal::WifiSetup;
   } else if (!wifi.isConnected()) {
-    leds.setSignal(nhos::LedSignal::WifiConnecting);
+    activeSignal = nhos::LedSignal::WifiConnecting;
   } else if (!findme.hasGateway()) {
-    leds.setSignal(nhos::LedSignal::FindMePending);
+    activeSignal = nhos::LedSignal::FindMePending;
   } else {
     if (scanWarningUntilMs && static_cast<int32_t>(nowMs - scanWarningUntilMs) < 0) {
-      leds.setSignal(nhos::LedSignal::ScanWarning);
+      activeSignal = nhos::LedSignal::ScanWarning;
     } else if (ESP.getFreeHeap() < 30000 || ESP.getMaxAllocHeap() < 12000) {
-      leds.setSignal(nhos::LedSignal::RamDanger);
+      activeSignal = nhos::LedSignal::RamDanger;
     } else if (power.chargeState() == nhos::ChargeState::ChargingOrMissing) {
-      leds.setSignal(nhos::LedSignal::ChargingOrMissing);
+      activeSignal = nhos::LedSignal::ChargingOrMissing;
     } else if (power.chargeState() == nhos::ChargeState::ChargeDone) {
-      leds.setSignal(nhos::LedSignal::ChargeDone);
+      activeSignal = nhos::LedSignal::ChargeDone;
     } else {
-      leds.setSignal(nhos::LedSignal::Online);
+      activeSignal = nhos::LedSignal::Online;
     }
   }
+  leds.setSignal(activeSignal);
   leds.service(nowMs);
+  externalLeds.service(nowMs, health, activeSignal);
 }
 
 }  // namespace
@@ -157,12 +178,17 @@ void setup() {
 
   storage.begin();
   logBoot("boot_stage=storage_ready");
+  deviceConfig.load(storage);
+  logBoot(String("boot_stage=config_ready ") + deviceConfig.statusJson());
   leds.begin();
+  externalLeds.begin(deviceConfig.data().externalLed);
   logBoot("boot_stage=leds_ready");
   bootMode.begin();
   logBoot(String("boot_stage=boot_mode_ready mode=") + bootMode.modeName());
   Wire.begin(nhos::kI2cSda, nhos::kI2cScl, 400000);
   logBoot(String("boot_stage=i2c_ready sda=") + String(nhos::kI2cSda) + " scl=" + String(nhos::kI2cScl));
+  displayManager.begin(deviceConfig.data().oled);
+  logBoot(String("boot_stage=display_ready ") + displayManager.statusJson());
   power.begin(storage.getString("charge_profile", "compatible"));
   logBoot(String("boot_stage=power_ready ") + power.statusJson());
 
@@ -174,6 +200,15 @@ void setup() {
   }
 
   scanner.begin();
+  scanner.setLayout(
+      deviceConfig.data().matrixLayout.analogPins,
+      deviceConfig.data().matrixLayout.analogCount,
+      deviceConfig.data().matrixLayout.selectPins,
+      deviceConfig.data().matrixLayout.selectCount);
+  scanner.setTiming(
+      deviceConfig.data().scanTiming.targetFps,
+      deviceConfig.data().scanTiming.settleUs,
+      deviceConfig.data().scanTiming.sendEveryNFrames);
   logBoot(String("boot_stage=scanner_ready rows=") + String(nhos::kRows) + " cols=" + String(nhos::kCols));
   if (bootMode.mode() == nhos::RunMode::Normal) {
     scanner.start();
@@ -194,7 +229,7 @@ void setup() {
   logBoot(String("udp_stream_started port=") + String(nhos::kUdpStreamPort));
   ota.begin(storage);
   logBoot("boot_stage=ota_ready");
-  control.begin(wifi, scanner, storage, bootMode, ota, findme, power, leds);
+  control.begin(wifi, scanner, storage, bootMode, ota, findme, power, leds, deviceConfig, displayManager, externalLeds);
   logBoot(String("boot_stage=control_ready port=") + String(nhos::kControlPort));
 
   logBoot(String("runtime_ready protocol=") + nhos::kProtocolName + " firmware=" + nhos::kFirmwareVersion +
@@ -213,6 +248,13 @@ void loop() {
   sendHeartbeatIfDue();
   scanAndStreamIfDue();
   updateLedState();
+  displayManager.service(
+      millis(),
+      bootMode.modeName(),
+      wifi.isConnected() ? WiFi.localIP().toString() : WiFi.softAPIP().toString(),
+      scanner.health(),
+      ESP.getFreeHeap(),
+      chargeStateName());
   if (bootMode.rebootRequested()) {
     delay(100);
     ESP.restart();

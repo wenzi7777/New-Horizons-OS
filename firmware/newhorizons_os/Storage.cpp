@@ -76,6 +76,38 @@ bool Storage::readFile(const String& scope, const String& path, std::vector<uint
   return true;
 }
 
+bool Storage::readTextFile(const String& path, String& out) const {
+  if (!path.startsWith("/") || path.indexOf("..") >= 0) {
+    return false;
+  }
+  File file = SPIFFS.open(path, FILE_READ);
+  if (!file) {
+    return false;
+  }
+  out = file.readString();
+  return true;
+}
+
+bool Storage::writeTextFileAtomic(const String& path, const String& content) {
+  if (!path.startsWith("/") || path.indexOf("..") >= 0) {
+    return false;
+  }
+  const String tmpPath = path + ".tmp";
+  SPIFFS.remove(tmpPath);
+  File file = SPIFFS.open(tmpPath, FILE_WRITE);
+  if (!file) {
+    return false;
+  }
+  if (file.print(content) != content.length()) {
+    file.close();
+    SPIFFS.remove(tmpPath);
+    return false;
+  }
+  file.close();
+  SPIFFS.remove(path);
+  return SPIFFS.rename(tmpPath, path);
+}
+
 size_t Storage::fileSize(const String& scope, const String& path) {
   const String full = scopedPath(scope, path);
   if (full.isEmpty()) {
@@ -125,7 +157,8 @@ String Storage::storageStatusJson() {
   const size_t logBytes = directorySize("/logs");
   const size_t calibrationBytes = directorySize("/calibration");
   const size_t offlineBytes = directorySize("/offline");
-  const size_t known = userBytes + logBytes + calibrationBytes + offlineBytes;
+  const size_t configBytes = directorySize("/config");
+  const size_t known = userBytes + logBytes + calibrationBytes + offlineBytes + configBytes;
   const size_t otherBytes = used > known ? used - known : 0;
 
   String out = "{\"total_bytes\":";
@@ -143,6 +176,8 @@ String Storage::storageStatusJson() {
   out += String(static_cast<unsigned int>(calibrationBytes));
   out += "},{\"scope\":\"offline\",\"bytes\":";
   out += String(static_cast<unsigned int>(offlineBytes));
+  out += "},{\"scope\":\"config\",\"bytes\":";
+  out += String(static_cast<unsigned int>(configBytes));
   out += "},{\"scope\":\"other\",\"bytes\":";
   out += String(static_cast<unsigned int>(otherBytes));
   out += "}]}";
@@ -240,6 +275,7 @@ bool Storage::ensureDirs() {
   SPIFFS.mkdir("/logs");
   SPIFFS.mkdir("/calibration");
   SPIFFS.mkdir("/offline");
+  SPIFFS.mkdir("/config");
   return true;
 }
 

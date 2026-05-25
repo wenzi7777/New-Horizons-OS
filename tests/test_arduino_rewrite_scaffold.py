@@ -30,6 +30,12 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             "BoardPins.cpp",
             "LedController.h",
             "LedController.cpp",
+            "DeviceConfig.h",
+            "DeviceConfig.cpp",
+            "DisplayManager.h",
+            "DisplayManager.cpp",
+            "ExternalLedController.h",
+            "ExternalLedController.cpp",
             "PowerManager.h",
             "PowerManager.cpp",
             "BootModeManager.h",
@@ -63,7 +69,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.4"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.5"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -278,6 +284,84 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('\\"configured\\"', power)
         self.assertIn('cmd == "set_charge_profile"', control)
         self.assertIn('storage_->putString("charge_profile"', control)
+
+    def test_device_config_persists_webui_runtime_settings_to_spiffs(self):
+        header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
+        config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
+        storage_header = (ARDUINO_ROOT / "Storage.h").read_text(encoding="utf-8")
+        storage = (ARDUINO_ROOT / "Storage.cpp").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("struct DeviceConfigData", header)
+        self.assertIn('kDeviceConfigPath[] = "/config/device.json"', config)
+        self.assertIn("readTextFile", storage_header)
+        self.assertIn("writeTextFileAtomic", storage_header)
+        self.assertIn('SPIFFS.mkdir("/config")', storage)
+        self.assertIn("SPIFFS.rename", storage)
+        for key in (
+            '"schema_version"',
+            '"matrix_layout"',
+            '"scan_timing"',
+            '"filter"',
+            '"imu"',
+            '"indicators"',
+            '"external_led"',
+            '"oled"',
+        ):
+            self.assertIn(key, config)
+        self.assertIn("deviceConfig.load(storage)", sketch)
+        self.assertIn("deviceConfig_->save", control)
+        self.assertIn("deviceConfig_->statusJson()", control)
+        self.assertNotIn("manual_preset", config + control)
+
+    def test_ssd1306_128x32_driver_has_off_auto_enabled_modes(self):
+        header = (ARDUINO_ROOT / "DisplayManager.h").read_text(encoding="utf-8")
+        display = (ARDUINO_ROOT / "DisplayManager.cpp").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("#include <Adafruit_SSD1306.h>", header)
+        self.assertIn("kOledWidth = 128", display)
+        self.assertIn("kOledHeight = 32", display)
+        self.assertIn("enum class OledMode", header)
+        self.assertIn("Auto", header)
+        self.assertIn("Enabled", header)
+        self.assertIn("Off", header)
+        self.assertIn("0x3C", display)
+        self.assertIn("0x3D", display)
+        self.assertIn("probeAddress", display)
+        self.assertIn("SSD1306_SWITCHCAPVCC", display)
+        self.assertIn('"off"', display + control)
+        self.assertIn('"auto"', display + control)
+        self.assertIn('"enabled"', display + control)
+        self.assertIn("validOledMode", control)
+        self.assertIn("displayManager.begin", sketch)
+        self.assertIn("displayManager.service", sketch)
+        self.assertIn("display_->statusJson()", control)
+
+    def test_external_ws2812b_controller_is_separate_from_internal_sk6812_status_led(self):
+        status_header = (ARDUINO_ROOT / "LedController.h").read_text(encoding="utf-8")
+        external_header = (ARDUINO_ROOT / "ExternalLedController.h").read_text(encoding="utf-8")
+        external = (ARDUINO_ROOT / "ExternalLedController.cpp").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("class LedController", status_header)
+        self.assertIn("class ExternalLedController", external_header)
+        self.assertIn("#include <Adafruit_NeoPixel.h>", external_header)
+        self.assertIn("Adafruit_NeoPixel pixels_", external_header)
+        self.assertIn("kExternalLedCount", external)
+        self.assertIn("kExternalLedPin", external)
+        self.assertIn('"off"', external + control)
+        self.assertIn('"enabled"', external + control)
+        self.assertIn("validExternalLedMode", control)
+        self.assertNotIn("external_led", status_header)
+        self.assertIn("externalLeds.begin", sketch)
+        self.assertIn("externalLeds.service", sketch)
+        self.assertIn("externalLeds_->statusJson()", control)
+        self.assertIn("status_led", control)
+        self.assertIn("external_led", control)
         self.assertIn('storage.getString("charge_profile", "compatible")', sketch)
 
     def test_board_pin_map_matches_new_horizons_hardware(self):
@@ -307,7 +391,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.4}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.5}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
 

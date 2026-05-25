@@ -1,0 +1,438 @@
+#include "DeviceConfig.h"
+
+#include "BoardPins.h"
+
+namespace nhos {
+namespace {
+constexpr char kDeviceConfigPath[] = "/config/device.json";
+
+String jsonEscape(const String& value) {
+  String out;
+  out.reserve(value.length());
+  for (size_t i = 0; i < value.length(); ++i) {
+    const char c = value.charAt(i);
+    if (c == '"' || c == '\\') {
+      out += '\\';
+    }
+    out += c;
+  }
+  return out;
+}
+
+String objectForKey(const String& json, const char* key) {
+  const String pattern = "\"" + String(key) + "\"";
+  const int keyIndex = json.indexOf(pattern);
+  if (keyIndex < 0) {
+    return "";
+  }
+  const int start = json.indexOf('{', keyIndex + pattern.length());
+  if (start < 0) {
+    return "";
+  }
+  int depth = 0;
+  for (int i = start; i < json.length(); ++i) {
+    const char c = json.charAt(i);
+    if (c == '{') {
+      ++depth;
+    } else if (c == '}') {
+      --depth;
+      if (depth == 0) {
+        return json.substring(start, i + 1);
+      }
+    }
+  }
+  return "";
+}
+
+String extractString(const String& json, const char* key, const String& fallback) {
+  const String pattern = "\"" + String(key) + "\"";
+  const int keyIndex = json.indexOf(pattern);
+  if (keyIndex < 0) {
+    return fallback;
+  }
+  const int colon = json.indexOf(':', keyIndex + pattern.length());
+  const int start = json.indexOf('"', colon + 1);
+  const int end = json.indexOf('"', start + 1);
+  if (colon < 0 || start < 0 || end < 0) {
+    return fallback;
+  }
+  return json.substring(start + 1, end);
+}
+
+int extractInt(const String& json, const char* key, int fallback) {
+  const String pattern = "\"" + String(key) + "\"";
+  const int keyIndex = json.indexOf(pattern);
+  if (keyIndex < 0) {
+    return fallback;
+  }
+  const int colon = json.indexOf(':', keyIndex + pattern.length());
+  int end = json.indexOf(',', colon + 1);
+  if (end < 0) {
+    end = json.indexOf('}', colon + 1);
+  }
+  if (colon < 0 || end < 0) {
+    return fallback;
+  }
+  return json.substring(colon + 1, end).toInt();
+}
+
+float extractFloat(const String& json, const char* key, float fallback) {
+  const String pattern = "\"" + String(key) + "\"";
+  const int keyIndex = json.indexOf(pattern);
+  if (keyIndex < 0) {
+    return fallback;
+  }
+  const int colon = json.indexOf(':', keyIndex + pattern.length());
+  int end = json.indexOf(',', colon + 1);
+  if (end < 0) {
+    end = json.indexOf('}', colon + 1);
+  }
+  if (colon < 0 || end < 0) {
+    return fallback;
+  }
+  return json.substring(colon + 1, end).toFloat();
+}
+
+bool extractBool(const String& json, const char* key, bool fallback) {
+  const String pattern = "\"" + String(key) + "\"";
+  const int keyIndex = json.indexOf(pattern);
+  if (keyIndex < 0) {
+    return fallback;
+  }
+  const int colon = json.indexOf(':', keyIndex + pattern.length());
+  int end = json.indexOf(',', colon + 1);
+  if (end < 0) {
+    end = json.indexOf('}', colon + 1);
+  }
+  if (colon < 0 || end < 0) {
+    return fallback;
+  }
+  String value = json.substring(colon + 1, end);
+  value.trim();
+  if (value == "true") {
+    return true;
+  }
+  if (value == "false") {
+    return false;
+  }
+  return fallback;
+}
+
+size_t extractArray(const String& json, const char* key, uint8_t* out, size_t maxCount) {
+  const String pattern = "\"" + String(key) + "\"";
+  const int keyIndex = json.indexOf(pattern);
+  if (keyIndex < 0) {
+    return 0;
+  }
+  const int start = json.indexOf('[', keyIndex);
+  const int end = json.indexOf(']', start + 1);
+  if (start < 0 || end < 0) {
+    return 0;
+  }
+  size_t count = 0;
+  int cursor = start + 1;
+  while (cursor < end && count < maxCount) {
+    int sep = json.indexOf(',', cursor);
+    if (sep < 0 || sep > end) {
+      sep = end;
+    }
+    String token = json.substring(cursor, sep);
+    token.trim();
+    if (token.length()) {
+      out[count++] = static_cast<uint8_t>(token.toInt());
+    }
+    cursor = sep + 1;
+  }
+  return count;
+}
+
+void appendArray(String& out, const uint8_t* pins, size_t count) {
+  out += "[";
+  for (size_t i = 0; i < count; ++i) {
+    if (i) {
+      out += ",";
+    }
+    out += static_cast<unsigned int>(pins[i]);
+  }
+  out += "]";
+}
+
+float clampBrightness(float value) {
+  if (value < 0.0f) {
+    return 0.0f;
+  }
+  if (value > 1.0f) {
+    return 1.0f;
+  }
+  return value;
+}
+
+uint8_t clampByte(int value, uint8_t minValue, uint8_t maxValue) {
+  if (value < minValue) {
+    return minValue;
+  }
+  if (value > maxValue) {
+    return maxValue;
+  }
+  return static_cast<uint8_t>(value);
+}
+}  // namespace
+
+bool DeviceConfig::load(Storage& storage) {
+  setDefaults();
+  String json;
+  if (!storage.readTextFile(kDeviceConfigPath, json)) {
+    loaded_ = false;
+    lastError_ = "config_missing";
+    return false;
+  }
+  if (!applyJson(json)) {
+    loaded_ = false;
+    if (lastError_.isEmpty()) {
+      lastError_ = "config_invalid";
+    }
+    setDefaults();
+    return false;
+  }
+  loaded_ = true;
+  lastError_ = "";
+  return true;
+}
+
+bool DeviceConfig::save(Storage& storage) {
+  if (!storage.writeTextFileAtomic(kDeviceConfigPath, toJson())) {
+    lastError_ = "config_write_failed";
+    return false;
+  }
+  loaded_ = true;
+  lastError_ = "";
+  return true;
+}
+
+const DeviceConfigData& DeviceConfig::data() const {
+  return data_;
+}
+
+DeviceConfigData& DeviceConfig::mutableData() {
+  return data_;
+}
+
+bool DeviceConfig::setMatrixLayout(const uint8_t* analogPins, size_t analogCount, const uint8_t* selectPins, size_t selectCount) {
+  if (!analogPins || !selectPins || analogCount == 0 || selectCount == 0 || analogCount > kRows || selectCount > kCols) {
+    return false;
+  }
+  memcpy(data_.matrixLayout.analogPins, analogPins, analogCount);
+  memcpy(data_.matrixLayout.selectPins, selectPins, selectCount);
+  data_.matrixLayout.analogCount = analogCount;
+  data_.matrixLayout.selectCount = selectCount;
+  return true;
+}
+
+bool DeviceConfig::setScanTiming(uint16_t targetFps, uint16_t settleUs, uint16_t sendEveryNFrames) {
+  if (targetFps == 0 || targetFps > kMaxTargetFps || settleUs > 500 || sendEveryNFrames == 0 || sendEveryNFrames > 120) {
+    return false;
+  }
+  data_.scanTiming.targetFps = targetFps;
+  data_.scanTiming.settleUs = settleUs;
+  data_.scanTiming.sendEveryNFrames = sendEveryNFrames;
+  return true;
+}
+
+bool DeviceConfig::setFilterEnabled(bool enabled) {
+  data_.filterEnabled = enabled;
+  return true;
+}
+
+bool DeviceConfig::setImuEnabled(bool enabled) {
+  data_.imuEnabled = enabled;
+  return true;
+}
+
+bool DeviceConfig::setExternalLed(const String& mode, const String& preset, float brightness) {
+  if (!validExternalLedMode(mode)) {
+    return false;
+  }
+  data_.externalLed.mode = mode;
+  if (!preset.isEmpty()) {
+    data_.externalLed.preset = preset;
+  }
+  data_.externalLed.brightness = clampBrightness(brightness);
+  return true;
+}
+
+bool DeviceConfig::setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast) {
+  if (!validOledMode(mode)) {
+    return false;
+  }
+  data_.oled.mode = mode;
+  if (!page.isEmpty()) {
+    data_.oled.page = page;
+  }
+  data_.oled.updateHz = clampByte(updateHz, 1, 5);
+  data_.oled.contrast = contrast;
+  return true;
+}
+
+String DeviceConfig::statusJson() const {
+  String out = "{\"schema_version\":";
+  out += String(static_cast<unsigned int>(data_.schemaVersion));
+  out += ",\"loaded\":";
+  out += loaded_ ? "true" : "false";
+  out += ",\"last_error\":\"";
+  out += jsonEscape(lastError_);
+  out += "\"}";
+  return out;
+}
+
+String DeviceConfig::filterJson() const {
+  String out = "{\"enabled\":";
+  out += data_.filterEnabled ? "true" : "false";
+  out += "}";
+  return out;
+}
+
+String DeviceConfig::imuJson() const {
+  String out = "{\"enabled\":";
+  out += data_.imuEnabled ? "true" : "false";
+  out += ",\"state\":\"";
+  out += data_.imuEnabled ? "deferred" : "disabled";
+  out += "\"}";
+  return out;
+}
+
+String DeviceConfig::configJson() const {
+  return toJson();
+}
+
+bool DeviceConfig::validExternalLedMode(const String& mode) {
+  return mode == "off" || mode == "enabled";
+}
+
+bool DeviceConfig::validOledMode(const String& mode) {
+  return mode == "off" || mode == "auto" || mode == "enabled";
+}
+
+void DeviceConfig::setDefaults() {
+  data_.schemaVersion = 1;
+  memcpy(data_.matrixLayout.analogPins, kRowAdcPins, kRowAdcPinCount);
+  memcpy(data_.matrixLayout.selectPins, kColPins, kColPinCount);
+  data_.matrixLayout.analogCount = kRowAdcPinCount;
+  data_.matrixLayout.selectCount = kColPinCount;
+  data_.scanTiming.targetFps = kDefaultTargetFps;
+  data_.scanTiming.settleUs = kDefaultSettleUs;
+  data_.scanTiming.sendEveryNFrames = kDefaultSendEveryNFrames;
+  data_.filterEnabled = true;
+  data_.imuEnabled = true;
+  data_.externalLed.mode = "off";
+  data_.externalLed.preset = "stream_health";
+  data_.externalLed.brightness = 0.35f;
+  data_.oled.mode = "off";
+  data_.oled.page = "live_status";
+  data_.oled.updateHz = 1;
+  data_.oled.contrast = 128;
+}
+
+bool DeviceConfig::applyJson(const String& json) {
+  if (!json.startsWith("{")) {
+    lastError_ = "config_invalid_json";
+    return false;
+  }
+  data_.schemaVersion = static_cast<uint8_t>(extractInt(json, "schema_version", 1));
+
+  const String matrix = objectForKey(json, "matrix_layout");
+  if (!matrix.isEmpty()) {
+    uint8_t analog[kRows] = {0};
+    uint8_t select[kCols] = {0};
+    const size_t analogCount = extractArray(matrix, "analog_pins", analog, kRows);
+    const size_t selectCount = extractArray(matrix, "select_pins", select, kCols);
+    if (analogCount && selectCount) {
+      setMatrixLayout(analog, analogCount, select, selectCount);
+    }
+  }
+
+  const String timing = objectForKey(json, "scan_timing");
+  if (!timing.isEmpty()) {
+    setScanTiming(
+        static_cast<uint16_t>(extractInt(timing, "target_fps", data_.scanTiming.targetFps)),
+        static_cast<uint16_t>(extractInt(timing, "settle_us", data_.scanTiming.settleUs)),
+        static_cast<uint16_t>(extractInt(timing, "send_every_n_frames", data_.scanTiming.sendEveryNFrames)));
+  }
+
+  const String filter = objectForKey(json, "filter");
+  if (!filter.isEmpty()) {
+    data_.filterEnabled = extractBool(filter, "enabled", data_.filterEnabled);
+  }
+
+  const String imu = objectForKey(json, "imu");
+  if (!imu.isEmpty()) {
+    data_.imuEnabled = extractBool(imu, "enabled", data_.imuEnabled);
+  }
+
+  const String indicators = objectForKey(json, "indicators");
+  const String external = objectForKey(indicators, "external_led");
+  if (!external.isEmpty()) {
+    const String mode = extractString(external, "mode", data_.externalLed.mode);
+    const String preset = extractString(external, "preset", data_.externalLed.preset);
+    if (validExternalLedMode(mode)) {
+      setExternalLed(mode, preset, extractFloat(external, "brightness", data_.externalLed.brightness));
+    }
+  }
+  const String oled = objectForKey(indicators, "oled");
+  if (!oled.isEmpty()) {
+    const String mode = extractString(oled, "mode", data_.oled.mode);
+    if (validOledMode(mode)) {
+      setOled(
+          mode,
+          extractString(oled, "page", data_.oled.page),
+          static_cast<uint8_t>(extractInt(oled, "update_hz", data_.oled.updateHz)),
+          static_cast<uint8_t>(extractInt(oled, "contrast", data_.oled.contrast)));
+    }
+  }
+
+  return true;
+}
+
+String DeviceConfig::toJson() const {
+  String out = "{";
+  out += "\"schema_version\":";
+  out += String(static_cast<unsigned int>(data_.schemaVersion));
+  out += ",\"matrix_layout\":{\"analog_pins\":";
+  appendArray(out, data_.matrixLayout.analogPins, data_.matrixLayout.analogCount);
+  out += ",\"select_pins\":";
+  appendArray(out, data_.matrixLayout.selectPins, data_.matrixLayout.selectCount);
+  out += "},\"scan_timing\":{\"target_fps\":";
+  out += data_.scanTiming.targetFps;
+  out += ",\"settle_us\":";
+  out += data_.scanTiming.settleUs;
+  out += ",\"send_every_n_frames\":";
+  out += data_.scanTiming.sendEveryNFrames;
+  out += "},\"filter\":{\"enabled\":";
+  out += data_.filterEnabled ? "true" : "false";
+  out += "},\"imu\":{\"enabled\":";
+  out += data_.imuEnabled ? "true" : "false";
+  out += "},\"indicators\":{\"external_led\":{\"mode\":\"";
+  out += jsonEscape(data_.externalLed.mode);
+  out += "\",\"preset\":\"";
+  out += jsonEscape(data_.externalLed.preset);
+  out += "\",\"brightness\":";
+  out += String(data_.externalLed.brightness, 2);
+  out += "},\"oled\":{\"mode\":\"";
+  out += jsonEscape(data_.oled.mode);
+  out += "\",\"page\":\"";
+  out += jsonEscape(data_.oled.page);
+  out += "\",\"update_hz\":";
+  out += String(static_cast<unsigned int>(data_.oled.updateHz));
+  out += ",\"contrast\":";
+  out += String(static_cast<unsigned int>(data_.oled.contrast));
+  out += "}}}";
+  return out;
+}
+
+String DeviceConfig::lastErrorJson() const {
+  String out = "\"";
+  out += jsonEscape(lastError_);
+  out += "\"";
+  return out;
+}
+
+}  // namespace nhos

@@ -4,7 +4,18 @@
 
 namespace nhos {
 
-void ControlServer::begin(WifiManager& wifi, MatrixScanner& scanner, Storage& storage, BootModeManager& boot, OtaManager& ota, FindMeClient& findme, PowerManager& power, LedController& leds) {
+void ControlServer::begin(
+    WifiManager& wifi,
+    MatrixScanner& scanner,
+    Storage& storage,
+    BootModeManager& boot,
+    OtaManager& ota,
+    FindMeClient& findme,
+    PowerManager& power,
+    LedController& leds,
+    DeviceConfig& deviceConfig,
+    DisplayManager& display,
+    ExternalLedController& externalLeds) {
   wifi_ = &wifi;
   scanner_ = &scanner;
   storage_ = &storage;
@@ -13,6 +24,9 @@ void ControlServer::begin(WifiManager& wifi, MatrixScanner& scanner, Storage& st
   findme_ = &findme;
   power_ = &power;
   leds_ = &leds;
+  deviceConfig_ = &deviceConfig;
+  display_ = &display;
+  externalLeds_ = &externalLeds;
   streamHost_ = storage.getString("stream_host", "");
   streamPort_ = static_cast<uint16_t>(storage.getUInt("stream_port", kUdpStreamPort));
   server_.begin();
@@ -123,6 +137,14 @@ String ControlServer::processCommand(const String& request) {
     data += wifi_->statusJson();
     data += ",\"battery\":";
     data += power_ ? power_->statusJson() : "{}";
+    data += ",\"config\":";
+    data += deviceConfig_ ? deviceConfig_->statusJson() : "{}";
+    data += ",\"filter\":";
+    data += deviceConfig_ ? deviceConfig_->filterJson() : "{}";
+    data += ",\"imu\":";
+    data += deviceConfig_ ? deviceConfig_->imuJson() : "{}";
+    data += ",\"indicators\":";
+    data += indicatorsStatusJson();
     data += ",\"scan_health\":";
     data += scanner_->healthJson();
     data += ",\"findme\":";
@@ -170,6 +192,12 @@ String ControlServer::processCommand(const String& request) {
     if (!scanner_->setTiming(fps, settle, sendEvery)) {
       return error(cmd, "scan_timing_invalid");
     }
+    if (deviceConfig_) {
+      deviceConfig_->setScanTiming(fps, settle, sendEvery);
+      if (!deviceConfig_->save(*storage_)) {
+        return error(cmd, "config_write_failed");
+      }
+    }
     return ok(cmd, "scan_timing_updated", scanTimingStatusJson());
   }
   if (cmd == "set_matrix_layout") {
@@ -179,6 +207,12 @@ String ControlServer::processCommand(const String& request) {
     size_t colCount = extractArray(request, "select_pins", cols, kCols);
     if (!scanner_->setLayout(rows, rowCount, cols, colCount)) {
       return error(cmd, "matrix_layout_invalid");
+    }
+    if (deviceConfig_) {
+      deviceConfig_->setMatrixLayout(rows, rowCount, cols, colCount);
+      if (!deviceConfig_->save(*storage_)) {
+        return error(cmd, "config_write_failed");
+      }
     }
     return ok(cmd, "matrix_layout_updated", layoutStatusJson());
   }
@@ -229,19 +263,95 @@ String ControlServer::processCommand(const String& request) {
     return ok(cmd, "charge_profile_updated", data);
   }
   if (cmd == "set_filter") {
+    const bool enabled = extractBool(request, "enabled", true);
+    if (deviceConfig_) {
+      deviceConfig_->setFilterEnabled(enabled);
+      if (!deviceConfig_->save(*storage_)) {
+        return error(cmd, "config_write_failed");
+      }
+    }
     String data = "{\"filter\":{\"enabled\":";
-    data += extractBool(request, "enabled", true) ? "true" : "false";
-    data += "}}";
+    data += enabled ? "true" : "false";
+    data += "},\"config\":";
+    data += deviceConfig_ ? deviceConfig_->statusJson() : "{}";
+    data += "}";
     return ok(cmd, "config_stored", data);
   }
   if (cmd == "set_imu") {
+    const bool enabled = extractBool(request, "enabled", true);
+    if (deviceConfig_) {
+      deviceConfig_->setImuEnabled(enabled);
+      if (!deviceConfig_->save(*storage_)) {
+        return error(cmd, "config_write_failed");
+      }
+    }
     String data = "{\"imu\":{\"enabled\":";
-    data += extractBool(request, "enabled", true) ? "true" : "false";
-    data += "}}";
+    data += enabled ? "true" : "false";
+    data += "},\"config\":";
+    data += deviceConfig_ ? deviceConfig_->statusJson() : "{}";
+    data += "}";
     return ok(cmd, "config_stored", data);
   }
   if (cmd == "set_indicators") {
-    return ok(cmd, "config_stored");
+    if (!deviceConfig_) {
+      return error(cmd, "config_unavailable");
+    }
+    DeviceConfigData next = deviceConfig_->data();
+    const String external = extractObject(request, "external_led");
+    if (!external.isEmpty()) {
+      String mode = extractString(external, "mode");
+      if (mode.isEmpty()) {
+        mode = next.externalLed.mode;
+      }
+      if (!DeviceConfig::validExternalLedMode(mode)) {
+        return error(cmd, "external_led_mode_invalid");
+      }
+      String preset = extractString(external, "preset");
+      if (preset.isEmpty()) {
+        preset = next.externalLed.preset;
+      }
+      next.externalLed.mode = mode;
+      next.externalLed.preset = preset;
+      next.externalLed.brightness = extractFloat(external, "brightness", next.externalLed.brightness);
+    }
+    const String oled = extractObject(request, "oled");
+    if (!oled.isEmpty()) {
+      String mode = extractString(oled, "mode");
+      if (mode.isEmpty()) {
+        mode = next.oled.mode;
+      }
+      if (!DeviceConfig::validOledMode(mode)) {
+        return error(cmd, "oled_mode_invalid");
+      }
+      next.oled.mode = mode;
+      String page = extractString(oled, "page");
+      if (!page.isEmpty()) {
+        next.oled.page = page;
+      }
+      next.oled.updateHz = static_cast<uint8_t>(extractInt(oled, "update_hz", next.oled.updateHz));
+      next.oled.contrast = static_cast<uint8_t>(extractInt(oled, "contrast", next.oled.contrast));
+    }
+    if (!deviceConfig_->setExternalLed(next.externalLed.mode, next.externalLed.preset, next.externalLed.brightness)) {
+      return error(cmd, "external_led_config_invalid");
+    }
+    if (!deviceConfig_->setOled(next.oled.mode, next.oled.page, next.oled.updateHz, next.oled.contrast)) {
+      return error(cmd, "oled_config_invalid");
+    }
+    if (!deviceConfig_->save(*storage_)) {
+      return error(cmd, "config_write_failed");
+    }
+    if (externalLeds_) {
+      externalLeds_->apply(deviceConfig_->data().externalLed);
+    }
+    if (display_) {
+      display_->apply(deviceConfig_->data().oled);
+    }
+    String data = "{\"indicators\":";
+    data += indicatorsStatusJson();
+    data += ",\"config\":";
+    data += deviceConfig_->statusJson();
+    data += "}";
+    return ok(cmd, "config_stored", data);
   }
   if (cmd == "calibration_sample_cell" || cmd == "calibration_sample_all" || cmd == "calibration_save" ||
       cmd == "dump_calibration" || cmd == "delete_calibration_level") {
@@ -467,6 +577,15 @@ String ControlServer::layoutStatusJson() const {
   return data;
 }
 
+String ControlServer::indicatorsStatusJson() const {
+  String data = "{\"status_led\":{\"role\":\"system_status\"},\"external_led\":";
+  data += externalLeds_ ? externalLeds_->statusJson() : "{}";
+  data += ",\"oled\":";
+  data += display_ ? display_->statusJson() : "{}";
+  data += "}";
+  return data;
+}
+
 String ControlServer::extractString(const String& request, const char* key) const {
   String pattern = "\"" + String(key) + "\"";
   int keyIndex = request.indexOf(pattern);
@@ -497,6 +616,29 @@ int ControlServer::extractInt(const String& request, const char* key, int fallba
     return fallback;
   }
   return request.substring(colon + 1, end).toInt();
+}
+
+float ControlServer::extractFloat(const String& request, const char* key, float fallback) const {
+  String stringValue = extractString(request, key);
+  if (!stringValue.isEmpty()) {
+    return stringValue.toFloat();
+  }
+  String pattern = "\"" + String(key) + "\"";
+  int keyIndex = request.indexOf(pattern);
+  if (keyIndex < 0) {
+    return fallback;
+  }
+  int colon = request.indexOf(':', keyIndex + pattern.length());
+  int end = request.indexOf(',', colon + 1);
+  if (end < 0) {
+    end = request.indexOf('}', colon + 1);
+  }
+  if (colon < 0 || end < 0) {
+    return fallback;
+  }
+  String value = request.substring(colon + 1, end);
+  value.trim();
+  return value.toFloat();
 }
 
 bool ControlServer::extractBool(const String& request, const char* key, bool fallback) const {
@@ -560,6 +702,31 @@ size_t ControlServer::extractArray(const String& request, const char* key, uint8
     cursor = sep + 1;
   }
   return count;
+}
+
+String ControlServer::extractObject(const String& request, const char* key) const {
+  String pattern = "\"" + String(key) + "\"";
+  int keyIndex = request.indexOf(pattern);
+  if (keyIndex < 0) {
+    return "";
+  }
+  int start = request.indexOf('{', keyIndex + pattern.length());
+  if (start < 0) {
+    return "";
+  }
+  int depth = 0;
+  for (int i = start; i < request.length(); ++i) {
+    const char c = request.charAt(i);
+    if (c == '{') {
+      ++depth;
+    } else if (c == '}') {
+      --depth;
+      if (depth == 0) {
+        return request.substring(start, i + 1);
+      }
+    }
+  }
+  return "";
 }
 
 bool ControlServer::requireMaintenance(const String& command) const {
