@@ -22,6 +22,7 @@ class Storage {
   size_t fileSize(const String& scope, const String& path);
   bool deleteFile(const String& scope, const String& path);
   String listFiles(const String& scope);
+  String storageStatusJson();
 
   void logLine(const String& line);
   String tailLog(size_t maxLines);
@@ -29,6 +30,7 @@ class Storage {
 
  private:
   String scopedPath(const String& scope, const String& path) const;
+  size_t directorySize(const char* path) const;
   bool ensureDirs();
 
   Preferences prefs_;

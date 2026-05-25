@@ -119,15 +119,27 @@ String ControlServer::processCommand(const String& request) {
     return ok(cmd, "status", data);
   }
   if (cmd == "memory_status") {
+    // Diagnostic JSON fields: "heap_total", "heap_used".
+    const uint32_t heapTotal = ESP.getHeapSize();
+    const uint32_t heapFree = ESP.getFreeHeap();
     String data = "{\"heap_free\":";
-    data += ESP.getFreeHeap();
+    data += heapFree;
+    data += ",\"heap_total\":";
+    data += heapTotal;
+    data += ",\"heap_used\":";
+    data += heapTotal > heapFree ? heapTotal - heapFree : 0;
     data += ",\"heap_largest_free_block\":";
     data += ESP.getMaxAllocHeap();
+    data += ",\"heap_min_free\":";
+    data += ESP.getMinFreeHeap();
     data += "}";
     return ok(cmd, "memory_status", data);
   }
   if (cmd == "scan_health") {
     return ok(cmd, "scan_health", scanner_->healthJson());
+  }
+  if (cmd == "storage_status") {
+    return ok(cmd, "storage_status", storage_->storageStatusJson());
   }
   if (cmd == "enter_maintenance") {
     scanner_->stop();
@@ -190,7 +202,19 @@ String ControlServer::processCommand(const String& request) {
     }
     return error(cmd, "findme_unavailable");
   }
-  if (cmd == "set_filter" || cmd == "set_indicators" || cmd == "set_imu") {
+  if (cmd == "set_filter") {
+    String data = "{\"filter\":{\"enabled\":";
+    data += extractBool(request, "enabled", true) ? "true" : "false";
+    data += "}}";
+    return ok(cmd, "config_stored", data);
+  }
+  if (cmd == "set_imu") {
+    String data = "{\"imu\":{\"enabled\":";
+    data += extractBool(request, "enabled", true) ? "true" : "false";
+    data += "}}";
+    return ok(cmd, "config_stored", data);
+  }
+  if (cmd == "set_indicators") {
     return ok(cmd, "config_stored");
   }
   if (cmd == "calibration_sample_cell" || cmd == "calibration_sample_all" || cmd == "calibration_save" ||
@@ -444,6 +468,30 @@ int ControlServer::extractInt(const String& request, const char* key, int fallba
 
 bool ControlServer::extractBool(const String& request, const char* key, bool fallback) const {
   String value = extractString(request, key);
+  if (value == "true") {
+    return true;
+  }
+  if (value == "false") {
+    return false;
+  }
+  String pattern = "\"" + String(key) + "\"";
+  int keyIndex = request.indexOf(pattern);
+  if (keyIndex < 0) {
+    return fallback;
+  }
+  int colon = request.indexOf(':', keyIndex + pattern.length());
+  if (colon < 0) {
+    return fallback;
+  }
+  int end = request.indexOf(',', colon + 1);
+  if (end < 0) {
+    end = request.indexOf('}', colon + 1);
+  }
+  if (end < 0) {
+    return fallback;
+  }
+  value = request.substring(colon + 1, end);
+  value.trim();
   if (value == "true") {
     return true;
   }

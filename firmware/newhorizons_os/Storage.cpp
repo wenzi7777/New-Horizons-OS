@@ -117,6 +117,38 @@ String Storage::listFiles(const String& scope) {
   return out;
 }
 
+String Storage::storageStatusJson() {
+  // Diagnostic JSON field: "categories".
+  const size_t total = SPIFFS.totalBytes();
+  const size_t used = SPIFFS.usedBytes();
+  const size_t userBytes = directorySize("/files");
+  const size_t logBytes = directorySize("/logs");
+  const size_t calibrationBytes = directorySize("/calibration");
+  const size_t offlineBytes = directorySize("/offline");
+  const size_t known = userBytes + logBytes + calibrationBytes + offlineBytes;
+  const size_t otherBytes = used > known ? used - known : 0;
+
+  String out = "{\"total_bytes\":";
+  out += String(static_cast<unsigned int>(total));
+  out += ",\"used_bytes\":";
+  out += String(static_cast<unsigned int>(used));
+  out += ",\"free_bytes\":";
+  out += String(static_cast<unsigned int>(total > used ? total - used : 0));
+  out += ",\"categories\":[";
+  out += "{\"scope\":\"user\",\"bytes\":";
+  out += String(static_cast<unsigned int>(userBytes));
+  out += "},{\"scope\":\"logs\",\"bytes\":";
+  out += String(static_cast<unsigned int>(logBytes));
+  out += "},{\"scope\":\"calibration\",\"bytes\":";
+  out += String(static_cast<unsigned int>(calibrationBytes));
+  out += "},{\"scope\":\"offline\",\"bytes\":";
+  out += String(static_cast<unsigned int>(offlineBytes));
+  out += "},{\"scope\":\"other\",\"bytes\":";
+  out += String(static_cast<unsigned int>(otherBytes));
+  out += "}]}";
+  return out;
+}
+
 void Storage::logLine(const String& line) {
   File current = SPIFFS.open(kLogPath, FILE_APPEND);
   if (!current) {
@@ -182,6 +214,25 @@ String Storage::scopedPath(const String& scope, const String& path) const {
     return root;
   }
   return root + "/" + path;
+}
+
+size_t Storage::directorySize(const char* path) const {
+  File root = SPIFFS.open(path);
+  if (!root || !root.isDirectory()) {
+    File file = SPIFFS.open(path, FILE_READ);
+    return file ? file.size() : 0;
+  }
+  size_t total = 0;
+  File file = root.openNextFile();
+  while (file) {
+    if (file.isDirectory()) {
+      total += directorySize(file.path());
+    } else {
+      total += file.size();
+    }
+    file = root.openNextFile();
+  }
+  return total;
 }
 
 bool Storage::ensureDirs() {

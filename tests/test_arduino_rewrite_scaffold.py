@@ -61,7 +61,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.2"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.3"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -98,6 +98,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
 
         for command in (
+            'cmd == "storage_status"',
             'cmd == "file_read_begin"',
             'cmd == "file_read_chunk"',
             'cmd == "file_write_begin"',
@@ -107,6 +108,19 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         ):
             self.assertIn(command, control)
         self.assertIn("maintenance_required", control)
+
+    def test_diagnostics_commands_report_heap_totals_and_storage_usage(self):
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        storage_header = (ARDUINO_ROOT / "Storage.h").read_text(encoding="utf-8")
+        storage = (ARDUINO_ROOT / "Storage.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("ESP.getHeapSize()", control)
+        self.assertIn('"heap_total"', control)
+        self.assertIn('"heap_used"', control)
+        self.assertIn("String storageStatusJson()", storage_header)
+        self.assertIn("SPIFFS.totalBytes()", storage)
+        self.assertIn("SPIFFS.usedBytes()", storage)
+        self.assertIn('"categories"', storage)
 
     def test_wifi_setup_ssid_matches_legacy_full_device_suffix(self):
         wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
@@ -232,7 +246,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.2}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.3}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
 
