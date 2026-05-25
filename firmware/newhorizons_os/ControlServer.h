@@ -6,8 +6,10 @@
 
 #include "BootModeManager.h"
 #include "FindMeClient.h"
+#include "LedController.h"
 #include "MatrixScanner.h"
 #include "OtaManager.h"
+#include "PowerManager.h"
 #include "Storage.h"
 #include "WifiManager.h"
 
@@ -15,7 +17,7 @@ namespace nhos {
 
 class ControlServer {
  public:
-  void begin(WifiManager& wifi, MatrixScanner& scanner, Storage& storage, BootModeManager& boot, OtaManager& ota, FindMeClient& findme);
+  void begin(WifiManager& wifi, MatrixScanner& scanner, Storage& storage, BootModeManager& boot, OtaManager& ota, FindMeClient& findme, PowerManager& power, LedController& leds);
   void service();
   bool maintenanceMode() const;
   String streamHost() const;
@@ -46,6 +48,8 @@ class ControlServer {
   BootModeManager* boot_ = nullptr;
   OtaManager* ota_ = nullptr;
   FindMeClient* findme_ = nullptr;
+  PowerManager* power_ = nullptr;
+  LedController* leds_ = nullptr;
   bool started_ = false;
   String streamHost_;
   uint16_t streamPort_ = kUdpStreamPort;

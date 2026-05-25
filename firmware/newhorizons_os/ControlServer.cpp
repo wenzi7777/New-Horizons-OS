@@ -4,13 +4,15 @@
 
 namespace nhos {
 
-void ControlServer::begin(WifiManager& wifi, MatrixScanner& scanner, Storage& storage, BootModeManager& boot, OtaManager& ota, FindMeClient& findme) {
+void ControlServer::begin(WifiManager& wifi, MatrixScanner& scanner, Storage& storage, BootModeManager& boot, OtaManager& ota, FindMeClient& findme, PowerManager& power, LedController& leds) {
   wifi_ = &wifi;
   scanner_ = &scanner;
   storage_ = &storage;
   boot_ = &boot;
   ota_ = &ota;
   findme_ = &findme;
+  power_ = &power;
+  leds_ = &leds;
   streamHost_ = storage.getString("stream_host", "");
   streamPort_ = static_cast<uint16_t>(storage.getUInt("stream_port", kUdpStreamPort));
   server_.begin();
@@ -38,6 +40,10 @@ void ControlServer::service() {
   Serial.print(logCmd);
   Serial.print(F(" request_id="));
   Serial.println(requestId);
+  if (leds_) {
+    leds_->showEvent(LedSignal::CommandReceived);
+    leds_->service(millis());
+  }
   Serial.print(F("control_command_executing cmd="));
   Serial.print(logCmd);
   Serial.print(F(" request_id="));
@@ -57,6 +63,10 @@ void ControlServer::service() {
   Serial.print(durationMs);
   Serial.print(F(" message="));
   Serial.println(message);
+  if (leds_) {
+    leds_->showEvent(responseOk ? LedSignal::CommandSuccess : LedSignal::CommandFailed);
+    leds_->service(millis());
+  }
   client.println(response);
   client.stop();
 }
@@ -111,6 +121,8 @@ String ControlServer::processCommand(const String& request) {
     data += "\"}";
     data += ",\"wifi\":";
     data += wifi_->statusJson();
+    data += ",\"battery\":";
+    data += power_ ? power_->statusJson() : "{}";
     data += ",\"scan_health\":";
     data += scanner_->healthJson();
     data += ",\"findme\":";
@@ -201,6 +213,20 @@ String ControlServer::processCommand(const String& request) {
       return ok(cmd, "findme_switch_started", findme_->statusJson());
     }
     return error(cmd, "findme_unavailable");
+  }
+  if (cmd == "set_charge_profile") {
+    if (!power_) {
+      return error(cmd, "power_unavailable");
+    }
+    const String profile = extractString(request, "profile");
+    if (!power_->applyProfileByName(profile)) {
+      return error(cmd, "charge_profile_failed");
+    }
+    storage_->putString("charge_profile", power_->profileName());
+    String data = "{\"battery\":";
+    data += power_->statusJson();
+    data += "}";
+    return ok(cmd, "charge_profile_updated", data);
   }
   if (cmd == "set_filter") {
     String data = "{\"filter\":{\"enabled\":";
@@ -365,7 +391,14 @@ String ControlServer::processCommand(const String& request) {
     return ok(cmd, info.error.isEmpty() ? "update_checked" : "update_check_failed", data);
   }
   if (cmd == "apply_update") {
+    if (leds_) {
+      leds_->setSignal(LedSignal::OtaActive);
+      leds_->service(millis());
+    }
     bool applied = ota_->applyUpdate(extractString(request, "manifest_url"));
+    if (leds_) {
+      leds_->showEvent(applied ? LedSignal::OtaSuccess : LedSignal::OtaError);
+    }
     return applied ? ok(cmd, "update_applied") : error(cmd, "update_failed");
   }
   if (cmd == "reboot") {

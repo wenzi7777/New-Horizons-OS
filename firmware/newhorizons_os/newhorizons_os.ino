@@ -11,6 +11,7 @@
 #include "MatrixScanner.h"
 #include "OtaManager.h"
 #include "PacketBuilder.h"
+#include "PowerManager.h"
 #include "Storage.h"
 #include "WifiManager.h"
 
@@ -22,6 +23,7 @@ nhos::LedController leds;
 nhos::WifiManager wifi;
 nhos::MatrixScanner scanner;
 nhos::PacketBuilder packetBuilder;
+nhos::PowerManager power;
 nhos::FindMeClient findme;
 nhos::ControlServer control;
 nhos::OtaManager ota;
@@ -37,6 +39,10 @@ uint8_t packetBuffer[
 
 uint32_t heartbeatSeq = 1;
 uint32_t lastHeartbeatAttemptMs = 0;
+bool criticalError = false;
+uint32_t lastObservedOverrunFrames = 0;
+uint32_t lastObservedUdpFailures = 0;
+uint32_t scanWarningUntilMs = 0;
 
 void logBoot(const String& message) {
   Serial.println(message);
@@ -105,17 +111,40 @@ void sendHeartbeatIfDue() {
 }
 
 void updateLedState() {
-  if (bootMode.mode() == nhos::RunMode::SafeMaintenance) {
-    leds.setStatus(nhos::LedPalette::SafeMode);
-  } else if (control.maintenanceMode()) {
-    leds.setStatus(nhos::LedPalette::Maintenance);
-  } else if (wifi.setupActive()) {
-    leds.setStatus(nhos::LedPalette::WifiSetup);
-  } else if (wifi.isConnected()) {
-    leds.setStatus(nhos::LedPalette::Online);
-  } else {
-    leds.setStatus(nhos::LedPalette::Boot);
+  const uint32_t nowMs = millis();
+  const nhos::ScanHealth health = scanner.health();
+  if (health.overrunFrames > lastObservedOverrunFrames || health.udpSendFailures > lastObservedUdpFailures) {
+    scanWarningUntilMs = nowMs + 10000;
+    lastObservedOverrunFrames = health.overrunFrames;
+    lastObservedUdpFailures = health.udpSendFailures;
   }
+
+  if (criticalError) {
+    leds.setSignal(nhos::LedSignal::Error);
+  } else if (bootMode.mode() == nhos::RunMode::SafeMaintenance) {
+    leds.setSignal(nhos::LedSignal::SafeMode);
+  } else if (control.maintenanceMode()) {
+    leds.setSignal(nhos::LedSignal::Maintenance);
+  } else if (wifi.setupActive()) {
+    leds.setSignal(nhos::LedSignal::WifiSetup);
+  } else if (!wifi.isConnected()) {
+    leds.setSignal(nhos::LedSignal::WifiConnecting);
+  } else if (!findme.hasGateway()) {
+    leds.setSignal(nhos::LedSignal::FindMePending);
+  } else {
+    if (scanWarningUntilMs && static_cast<int32_t>(nowMs - scanWarningUntilMs) < 0) {
+      leds.setSignal(nhos::LedSignal::ScanWarning);
+    } else if (ESP.getFreeHeap() < 30000 || ESP.getMaxAllocHeap() < 12000) {
+      leds.setSignal(nhos::LedSignal::RamDanger);
+    } else if (power.chargeState() == nhos::ChargeState::ChargingOrMissing) {
+      leds.setSignal(nhos::LedSignal::ChargingOrMissing);
+    } else if (power.chargeState() == nhos::ChargeState::ChargeDone) {
+      leds.setSignal(nhos::LedSignal::ChargeDone);
+    } else {
+      leds.setSignal(nhos::LedSignal::Online);
+    }
+  }
+  leds.service(nowMs);
 }
 
 }  // namespace
@@ -134,10 +163,14 @@ void setup() {
   logBoot(String("boot_stage=boot_mode_ready mode=") + bootMode.modeName());
   Wire.begin(nhos::kI2cSda, nhos::kI2cScl, 400000);
   logBoot(String("boot_stage=i2c_ready sda=") + String(nhos::kI2cSda) + " scl=" + String(nhos::kI2cScl));
+  power.begin(storage.getString("charge_profile", "compatible"));
+  logBoot(String("boot_stage=power_ready ") + power.statusJson());
 
   if (!nhos::validatePinMap()) {
     logBoot("pin_map_invalid");
-    leds.setStatus(nhos::LedPalette::Error);
+    criticalError = true;
+    leds.setSignal(nhos::LedSignal::Error);
+    leds.service(millis());
   }
 
   scanner.begin();
@@ -161,7 +194,7 @@ void setup() {
   logBoot(String("udp_stream_started port=") + String(nhos::kUdpStreamPort));
   ota.begin(storage);
   logBoot("boot_stage=ota_ready");
-  control.begin(wifi, scanner, storage, bootMode, ota, findme);
+  control.begin(wifi, scanner, storage, bootMode, ota, findme, power, leds);
   logBoot(String("boot_stage=control_ready port=") + String(nhos::kControlPort));
 
   logBoot(String("runtime_ready protocol=") + nhos::kProtocolName + " firmware=" + nhos::kFirmwareVersion +
@@ -173,6 +206,7 @@ void setup() {
 
 void loop() {
   wifi.service();
+  power.service(millis());
   findme.setModeName(bootMode.modeName());
   findme.service();
   control.service();

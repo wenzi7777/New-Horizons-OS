@@ -30,6 +30,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             "BoardPins.cpp",
             "LedController.h",
             "LedController.cpp",
+            "PowerManager.h",
+            "PowerManager.cpp",
             "BootModeManager.h",
             "BootModeManager.cpp",
             "MatrixScanner.h",
@@ -61,7 +63,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.3"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.4"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -219,6 +221,65 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("wifi_sta_connected ip=", wifi)
         self.assertIn("control_server_started port=", control)
 
+    def test_sk6812_status_patterns_include_bq25180_background_states(self):
+        header = (ARDUINO_ROOT / "LedController.h").read_text(encoding="utf-8")
+        led = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        self.assertTrue((ARDUINO_ROOT / "PowerManager.h").exists())
+        self.assertTrue((ARDUINO_ROOT / "PowerManager.cpp").exists())
+        power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
+        power = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("enum class LedSignal", header)
+        self.assertIn("ChargeDone", header)
+        self.assertIn("ChargingOrMissing", header)
+        self.assertIn("0x39, 0xc5, 0xbb", header + led)
+        self.assertRegex(led, re.compile(r"ChargeDone.*?5000.*?1", re.S))
+        self.assertRegex(led, re.compile(r"ChargingOrMissing.*?10000.*?2", re.S))
+        self.assertRegex(led, re.compile(r"Online.*?LedPalette::Off", re.S))
+        self.assertIn("showEvent(LedSignal::CommandReceived)", control)
+        self.assertIn("showEvent(responseOk ? LedSignal::CommandSuccess : LedSignal::CommandFailed)", control)
+        self.assertIn("enum class ChargeState", power_header)
+        self.assertIn("kBq25180Address = 0x6A", power)
+        self.assertIn("kBq25180Stat0Register = 0x00", power)
+        self.assertIn("(stat0 >> 5) & 0x03", power)
+        self.assertIn("ChargeState::ChargeDone", power)
+        self.assertIn("power.service(millis())", sketch)
+        self.assertIn("power.statusJson()", sketch)
+        self.assertIn('data += ",\\"battery\\":";', control)
+        self.assertIn("power_->statusJson()", control)
+
+    def test_bq25180_charge_profiles_include_safe_and_fast_modes(self):
+        power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
+        power = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("enum class ChargeProfile", power_header)
+        self.assertIn("Compatible", power_header)
+        self.assertIn("Fast", power_header)
+        self.assertIn("applyProfileByName", power_header)
+        self.assertIn("kBq25180VbatCtrlRegister = 0x03", power)
+        self.assertIn("kBq25180IchgCtrlRegister = 0x04", power)
+        self.assertIn("kBq25180ChargeCtrl0Register = 0x05", power)
+        self.assertIn("kBq25180IcCtrlRegister = 0x07", power)
+        self.assertIn("kBq25180TmrIlimRegister = 0x08", power)
+        self.assertIn('"compatible"', power)
+        self.assertIn('"fast"', power)
+        self.assertIn("250, 500, 0x34, 0x05", power)
+        self.assertIn("300, 500, 0x39, 0x05", power)
+        self.assertNotIn("safe_default", power)
+        self.assertNotIn("fast_800mah_only", power)
+        self.assertIn("updateRegister(kBq25180ChargeCtrl0Register, 0x70, 0x20)", power)
+        self.assertIn("updateRegister(kBq25180IcCtrlRegister, 0x0C, 0x04)", power)
+        self.assertIn('\\"charge_current_ma\\"', power)
+        self.assertIn('\\"input_limit_ma\\"', power)
+        self.assertIn('\\"configured\\"', power)
+        self.assertIn('cmd == "set_charge_profile"', control)
+        self.assertIn('storage_->putString("charge_profile"', control)
+        self.assertIn('storage.getString("charge_profile", "compatible")', sketch)
+
     def test_board_pin_map_matches_new_horizons_hardware(self):
         pins = (ARDUINO_ROOT / "BoardPins.cpp").read_text(encoding="utf-8")
 
@@ -246,7 +307,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.3}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.4}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
 
