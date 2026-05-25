@@ -6,7 +6,19 @@
 namespace nhos {
 namespace {
 constexpr char kLogPath[] = "/logs/device.log";
-constexpr size_t kMaxLogBytes = 32 * 1024;
+
+String jsonEscape(const String& value) {
+  String out;
+  out.reserve(value.length());
+  for (size_t i = 0; i < value.length(); ++i) {
+    const char c = value.charAt(i);
+    if (c == '"' || c == '\\') {
+      out += '\\';
+    }
+    out += c;
+  }
+  return out;
+}
 }
 
 bool Storage::begin() {
@@ -184,19 +196,47 @@ String Storage::storageStatusJson() {
   return out;
 }
 
-void Storage::logLine(const String& line) {
+void Storage::configureLog(bool enabled, size_t maxBytes, const String& level) {
+  logEnabled_ = enabled;
+  logMaxBytes_ = maxBytes > 0 ? maxBytes : kDefaultLogMaxBytes;
+  if (logMaxBytes_ > kExtendedLogMaxBytes) {
+    logMaxBytes_ = kExtendedLogMaxBytes;
+  }
+  logLevel_ = parseLogLevel(level);
+  logLevelName_ = level.isEmpty() ? String("info") : level;
+  rotateLogIfNeeded(0);
+}
+
+String Storage::logStatusJson() const {
+  File file = SPIFFS.open(kLogPath, FILE_READ);
+  String out = "{\"enabled\":";
+  out += logEnabled_ ? "true" : "false";
+  out += ",\"level\":\"";
+  out += jsonEscape(logLevelName_);
+  out += "\",\"mode\":\"";
+  out += logMaxBytes_ > kDefaultLogMaxBytes ? "extended" : "standard";
+  out += "\",\"max_bytes\":";
+  out += String(static_cast<unsigned int>(logMaxBytes_));
+  out += ",\"bytes\":";
+  out += String(static_cast<unsigned int>(file ? file.size() : 0));
+  out += ",\"path\":\"";
+  out += kLogPath;
+  out += "\"}";
+  return out;
+}
+
+void Storage::logLine(const String& line, LogLevel level) {
+  if (!logEnabled_ || static_cast<uint8_t>(level) > static_cast<uint8_t>(logLevel_)) {
+    return;
+  }
+  rotateLogIfNeeded(line.length() + 1);
   File current = SPIFFS.open(kLogPath, FILE_APPEND);
   if (!current) {
     return;
   }
   current.println(line);
   current.close();
-  File check = SPIFFS.open(kLogPath, FILE_READ);
-  if (check && check.size() > kMaxLogBytes) {
-    check.close();
-    SPIFFS.remove("/logs/device.log.1");
-    SPIFFS.rename(kLogPath, "/logs/device.log.1");
-  }
+  rotateLogIfNeeded(0);
 }
 
 String Storage::tailLog(size_t maxLines) {
@@ -231,6 +271,19 @@ String Storage::tailLog(size_t maxLines) {
 void Storage::clearLog() {
   SPIFFS.remove(kLogPath);
   SPIFFS.remove("/logs/device.log.1");
+}
+
+LogLevel Storage::parseLogLevel(const String& level) {
+  if (level == "error") {
+    return LogLevel::Error;
+  }
+  if (level == "warn") {
+    return LogLevel::Warn;
+  }
+  if (level == "debug") {
+    return LogLevel::Debug;
+  }
+  return LogLevel::Info;
 }
 
 String Storage::scopedPath(const String& scope, const String& path) const {
@@ -277,6 +330,20 @@ bool Storage::ensureDirs() {
   SPIFFS.mkdir("/offline");
   SPIFFS.mkdir("/config");
   return true;
+}
+
+void Storage::rotateLogIfNeeded(size_t incomingBytes) {
+  File check = SPIFFS.open(kLogPath, FILE_READ);
+  if (!check) {
+    return;
+  }
+  const size_t currentSize = check.size();
+  check.close();
+  if (currentSize + incomingBytes <= logMaxBytes_) {
+    return;
+  }
+  SPIFFS.remove("/logs/device.log.1");
+  SPIFFS.rename(kLogPath, "/logs/device.log.1");
 }
 
 }  // namespace nhos

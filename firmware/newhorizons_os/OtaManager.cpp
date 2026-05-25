@@ -22,6 +22,11 @@ UpdateInfo OtaManager::checkUpdate(const String& manifestUrl) {
   UpdateInfo info;
   String payload;
   const String url = manifestUrl.isEmpty() ? String(kDefaultUpdateManifestUrl) : manifestUrl;
+  lastManifestUrl_ = url;
+  lastAvailable_ = false;
+  lastVersion_ = "";
+  lastUrl_ = "";
+  lastSize_ = 0;
   lastPhase_ = "manifest";
   lastError_ = "";
   if (!fetchManifest(url, payload)) {
@@ -36,6 +41,10 @@ UpdateInfo OtaManager::checkUpdate(const String& manifestUrl) {
     return info;
   }
   info.available = compareVersion(info.version, kFirmwareVersion) > 0;
+  lastAvailable_ = info.available;
+  lastVersion_ = info.version;
+  lastUrl_ = info.url;
+  lastSize_ = info.size;
   lastPhase_ = info.available ? "ready" : "current";
   return info;
 }
@@ -48,9 +57,36 @@ bool OtaManager::applyUpdate(const String& manifestUrl) {
   return downloadAndApply(info);
 }
 
+bool OtaManager::autoApplyIfNewer(const String& manifestUrl) {
+  Serial.println(F("auto_ota_check_start"));
+  UpdateInfo info = checkUpdate(manifestUrl);
+  if (!info.error.isEmpty()) {
+    Serial.print(F("auto_ota_error error="));
+    Serial.println(info.error);
+    return false;
+  }
+  if (!info.available) {
+    Serial.println(F("auto_ota_no_update"));
+    return false;
+  }
+  Serial.print(F("auto_ota_update_available version="));
+  Serial.println(info.version);
+  return downloadAndApply(info);
+}
+
 String OtaManager::lastStatusJson() const {
   String out = "{\"phase\":\"";
   out += lastPhase_;
+  out += "\",\"available\":";
+  out += lastAvailable_ ? "true" : "false";
+  out += ",\"version\":\"";
+  out += lastVersion_;
+  out += "\",\"url\":\"";
+  out += lastUrl_;
+  out += "\",\"size\":";
+  out += String(static_cast<unsigned int>(lastSize_));
+  out += ",\"manifest_url\":\"";
+  out += lastManifestUrl_;
   out += "\",\"error\":\"";
   out += lastError_;
   out += "\"}";
@@ -62,6 +98,8 @@ bool OtaManager::fetchManifest(const String& url, String& payload) {
   client.setInsecure();
   HTTPClient http;
   http.setTimeout(8000);
+  http.setConnectTimeout(6000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(client, url)) {
     lastError_ = "manifest_http_begin_failed";
     return false;

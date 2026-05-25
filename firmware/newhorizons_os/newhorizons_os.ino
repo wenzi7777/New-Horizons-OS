@@ -55,6 +55,14 @@ void logBoot(const String& message) {
   storage.logLine(String(millis()) + " " + message);
 }
 
+void serviceAutoOta(bool wifiConnected) {
+  if (!wifiConnected || !deviceConfig.data().ota.autoApplyOnBoot) {
+    return;
+  }
+  logBoot("auto_ota_enabled");
+  ota.autoApplyIfNewer(deviceConfig.data().ota.manifestUrl);
+}
+
 String chargeStateName() {
   switch (power.chargeState()) {
     case nhos::ChargeState::ChargingOrMissing:
@@ -179,6 +187,10 @@ void setup() {
   storage.begin();
   logBoot("boot_stage=storage_ready");
   deviceConfig.load(storage);
+  storage.configureLog(
+      deviceConfig.data().logging.enabled,
+      deviceConfig.data().logging.maxBytes,
+      deviceConfig.data().logging.level);
   logBoot(String("boot_stage=config_ready ") + deviceConfig.statusJson());
   leds.begin();
   externalLeds.begin(deviceConfig.data().externalLed);
@@ -233,6 +245,7 @@ void setup() {
   logBoot(String("udp_stream_started port=") + String(nhos::kUdpStreamPort));
   ota.begin(storage);
   logBoot("boot_stage=ota_ready");
+  serviceAutoOta(wifiConnected);
   control.begin(wifi, scanner, storage, bootMode, ota, findme, power, leds, deviceConfig, displayManager, externalLeds);
   logBoot(String("boot_stage=control_ready port=") + String(nhos::kControlPort));
 

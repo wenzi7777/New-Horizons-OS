@@ -139,6 +139,12 @@ String ControlServer::processCommand(const String& request) {
     data += power_ ? power_->statusJson() : "{}";
     data += ",\"config\":";
     data += deviceConfig_ ? deviceConfig_->statusJson() : "{}";
+    data += ",\"logging\":";
+    data += storage_ ? storage_->logStatusJson() : "{}";
+    data += ",\"ota\":";
+    data += deviceConfig_ ? deviceConfig_->otaJson() : "{}";
+    data += ",\"update_state\":";
+    data += ota_ ? ota_->lastStatusJson() : "{}";
     data += ",\"filter\":";
     data += deviceConfig_ ? deviceConfig_->filterJson() : "{}";
     data += ",\"imu\":";
@@ -213,6 +219,10 @@ String ControlServer::processCommand(const String& request) {
       if (!deviceConfig_->save(*storage_)) {
         return error(cmd, "config_write_failed");
       }
+    }
+    if (boot_->mode() == RunMode::Normal && scanner_->hasLayout() && !scanner_->active()) {
+      scanner_->start();
+      Serial.println(F("scan_task_started_by_layout_update"));
     }
     return ok(cmd, "matrix_layout_updated", layoutStatusJson());
   }
@@ -291,6 +301,39 @@ String ControlServer::processCommand(const String& request) {
     data += deviceConfig_ ? deviceConfig_->statusJson() : "{}";
     data += "}";
     return ok(cmd, "config_stored", data);
+  }
+  if (cmd == "set_log") {
+    if (!deviceConfig_) {
+      return error(cmd, "config_unavailable");
+    }
+    const bool enabled = extractBool(request, "enabled", deviceConfig_->data().logging.enabled);
+    String level = extractString(request, "level");
+    if (level.isEmpty()) {
+      level = deviceConfig_->data().logging.level;
+    }
+    String mode = extractString(request, "mode");
+    if (mode.isEmpty()) {
+      mode = deviceConfig_->data().logging.mode;
+    }
+    size_t maxBytes = static_cast<size_t>(extractInt(request, "max_bytes", mode == "extended" ? kExtendedLogMaxBytes : kDefaultLogMaxBytes));
+    if (!deviceConfig_->setLogging(enabled, level, mode, maxBytes)) {
+      return error(cmd, "log_config_invalid");
+    }
+    if (!deviceConfig_->save(*storage_)) {
+      return error(cmd, "config_write_failed");
+    }
+    storage_->configureLog(
+        deviceConfig_->data().logging.enabled,
+        deviceConfig_->data().logging.maxBytes,
+        deviceConfig_->data().logging.level);
+    String data = "{\"logging\":";
+    data += deviceConfig_->loggingJson();
+    data += ",\"log_status\":";
+    data += storage_->logStatusJson();
+    data += ",\"config\":";
+    data += deviceConfig_->statusJson();
+    data += "}";
+    return ok(cmd, "log_config_updated", data);
   }
   if (cmd == "set_indicators") {
     if (!deviceConfig_) {
@@ -487,6 +530,30 @@ String ControlServer::processCommand(const String& request) {
     storage_->clearLog();
     return ok(cmd, "log_cleared");
   }
+  if (cmd == "set_ota_config") {
+    if (!deviceConfig_) {
+      return error(cmd, "config_unavailable");
+    }
+    const bool autoApplyOnBoot = extractBool(request, "auto_apply_on_boot", deviceConfig_->data().ota.autoApplyOnBoot);
+    String manifestUrl = extractString(request, "manifest_url");
+    if (manifestUrl.isEmpty()) {
+      manifestUrl = deviceConfig_->data().ota.manifestUrl;
+    }
+    if (!deviceConfig_->setOtaConfig(autoApplyOnBoot, manifestUrl)) {
+      return error(cmd, "ota_config_invalid");
+    }
+    if (!deviceConfig_->save(*storage_)) {
+      return error(cmd, "config_write_failed");
+    }
+    String data = "{\"ota\":";
+    data += deviceConfig_->otaJson();
+    data += ",\"update_state\":";
+    data += ota_->lastStatusJson();
+    data += ",\"config\":";
+    data += deviceConfig_->statusJson();
+    data += "}";
+    return ok(cmd, "ota_config_updated", data);
+  }
   if (cmd == "check_update") {
     UpdateInfo info = ota_->checkUpdate(extractString(request, "manifest_url"));
     String data = "{\"available\":";
@@ -495,7 +562,13 @@ String ControlServer::processCommand(const String& request) {
     data += info.version;
     data += "\",\"url\":\"";
     data += info.url;
-    data += "\",\"error\":\"";
+    data += "\",\"sha256\":\"";
+    data += info.sha256;
+    data += "\",\"size\":";
+    data += String(static_cast<unsigned int>(info.size));
+    data += ",\"update_state\":";
+    data += ota_->lastStatusJson();
+    data += ",\"error\":\"";
     data += info.error;
     data += "\"}";
     return ok(cmd, info.error.isEmpty() ? "update_checked" : "update_check_failed", data);

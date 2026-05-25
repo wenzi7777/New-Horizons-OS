@@ -258,6 +258,27 @@ bool DeviceConfig::setImuEnabled(bool enabled) {
   return true;
 }
 
+bool DeviceConfig::setLogging(bool enabled, const String& level, const String& mode, size_t maxBytes) {
+  if (!validLogLevel(level) || !validLogMode(mode)) {
+    return false;
+  }
+  data_.logging.enabled = enabled;
+  data_.logging.level = level;
+  data_.logging.mode = mode;
+  if (mode == "extended") {
+    data_.logging.maxBytes = maxBytes > 0 ? min(maxBytes, kExtendedLogMaxBytes) : kExtendedLogMaxBytes;
+  } else {
+    data_.logging.maxBytes = maxBytes > 0 ? min(maxBytes, kDefaultLogMaxBytes) : kDefaultLogMaxBytes;
+  }
+  return true;
+}
+
+bool DeviceConfig::setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl) {
+  data_.ota.autoApplyOnBoot = autoApplyOnBoot;
+  data_.ota.manifestUrl = manifestUrl.isEmpty() ? String(kDefaultUpdateManifestUrl) : manifestUrl;
+  return true;
+}
+
 bool DeviceConfig::setExternalLed(const String& mode, const String& preset, float brightness) {
   if (!validExternalLedMode(mode)) {
     return false;
@@ -310,8 +331,38 @@ String DeviceConfig::imuJson() const {
   return out;
 }
 
+String DeviceConfig::loggingJson() const {
+  String out = "{\"enabled\":";
+  out += data_.logging.enabled ? "true" : "false";
+  out += ",\"level\":\"";
+  out += jsonEscape(data_.logging.level);
+  out += "\",\"mode\":\"";
+  out += jsonEscape(data_.logging.mode);
+  out += "\",\"max_bytes\":";
+  out += String(static_cast<unsigned int>(data_.logging.maxBytes));
+  out += "}";
+  return out;
+}
+
+String DeviceConfig::otaJson() const {
+  String out = "{\"auto_apply_on_boot\":";
+  out += data_.ota.autoApplyOnBoot ? "true" : "false";
+  out += ",\"manifest_url\":\"";
+  out += jsonEscape(data_.ota.manifestUrl);
+  out += "\"}";
+  return out;
+}
+
 String DeviceConfig::configJson() const {
   return toJson();
+}
+
+bool DeviceConfig::validLogLevel(const String& level) {
+  return level == "error" || level == "warn" || level == "info" || level == "debug";
+}
+
+bool DeviceConfig::validLogMode(const String& mode) {
+  return mode == "standard" || mode == "extended";
 }
 
 bool DeviceConfig::validExternalLedMode(const String& mode) {
@@ -333,6 +384,12 @@ void DeviceConfig::setDefaults() {
   data_.scanTiming.sendEveryNFrames = kDefaultSendEveryNFrames;
   data_.filterEnabled = true;
   data_.imuEnabled = true;
+  data_.logging.enabled = true;
+  data_.logging.maxBytes = kDefaultLogMaxBytes;
+  data_.logging.level = "info";
+  data_.logging.mode = "standard";
+  data_.ota.autoApplyOnBoot = false;
+  data_.ota.manifestUrl = kDefaultUpdateManifestUrl;
   data_.externalLed.mode = "off";
   data_.externalLed.preset = "stream_health";
   data_.externalLed.brightness = 0.35f;
@@ -382,6 +439,26 @@ bool DeviceConfig::applyJson(const String& json) {
     data_.imuEnabled = extractBool(imu, "enabled", data_.imuEnabled);
   }
 
+  const String logging = objectForKey(json, "logging");
+  if (!logging.isEmpty()) {
+    const String level = extractString(logging, "level", data_.logging.level);
+    const String mode = extractString(logging, "mode", data_.logging.mode);
+    if (validLogLevel(level) && validLogMode(mode)) {
+      setLogging(
+          extractBool(logging, "enabled", data_.logging.enabled),
+          level,
+          mode,
+          static_cast<size_t>(extractInt(logging, "max_bytes", data_.logging.maxBytes)));
+    }
+  }
+
+  const String ota = objectForKey(json, "ota");
+  if (!ota.isEmpty()) {
+    setOtaConfig(
+        extractBool(ota, "auto_apply_on_boot", data_.ota.autoApplyOnBoot),
+        extractString(ota, "manifest_url", data_.ota.manifestUrl));
+  }
+
   const String indicators = objectForKey(json, "indicators");
   const String external = objectForKey(indicators, "external_led");
   if (!external.isEmpty()) {
@@ -426,7 +503,11 @@ String DeviceConfig::toJson() const {
   out += data_.filterEnabled ? "true" : "false";
   out += "},\"imu\":{\"enabled\":";
   out += data_.imuEnabled ? "true" : "false";
-  out += "},\"indicators\":{\"external_led\":{\"mode\":\"";
+  out += "},\"logging\":";
+  out += loggingJson();
+  out += ",\"ota\":";
+  out += otaJson();
+  out += ",\"indicators\":{\"external_led\":{\"mode\":\"";
   out += jsonEscape(data_.externalLed.mode);
   out += "\",\"preset\":\"";
   out += jsonEscape(data_.externalLed.preset);

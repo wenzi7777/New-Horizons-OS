@@ -7,7 +7,7 @@ namespace nhos {
 static constexpr char kProductName[] = "New Horizons OS Arduino";
 static constexpr char kProtocolName[] = "NHO/Arduino/1";
 static constexpr char kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4";
-static constexpr char kFirmwareVersion[] = "v0.5.6";
+static constexpr char kFirmwareVersion[] = "v0.5.7";
 
 static constexpr uint16_t kRows = 10;
 static constexpr uint16_t kCols = 21;
@@ -36,6 +36,8 @@ static constexpr size_t kScanRingFrames = 2;
 static constexpr uint32_t kWifiReconnectMs = 10000;
 static constexpr uint32_t kBootWifiSetupWindowMs = 3000;
 static constexpr uint8_t kSafeModeBootFailures = 3;
+static constexpr size_t kDefaultLogMaxBytes = 16 * 1024;
+static constexpr size_t kExtendedLogMaxBytes = 32 * 1024;
 
 static constexpr char kDefaultApSsidPrefix[] = "NewHorizonsOS";
 static constexpr char kDefaultApPassword[] = "";

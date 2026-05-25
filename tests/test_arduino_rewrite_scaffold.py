@@ -69,7 +69,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.6"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.7"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -306,6 +306,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             '"scan_timing"',
             '"filter"',
             '"imu"',
+            '"logging"',
+            '"ota"',
             '"indicators"',
             '"external_led"',
             '"oled"',
@@ -338,6 +340,72 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("scanner.hasLayout()", sketch)
         self.assertIn("scan_task_deferred matrix_layout_empty", sketch)
         self.assertIn("scanner.matrixShapeJson()", sketch)
+
+    def test_set_matrix_layout_starts_deferred_scanner_without_reboot(self):
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+
+        self.assertIn('cmd == "set_matrix_layout"', control)
+        self.assertIn("boot_->mode() == RunMode::Normal", control)
+        self.assertIn("scanner_->hasLayout()", control)
+        self.assertIn("!scanner_->active()", control)
+        self.assertIn("scanner_->start()", control)
+        self.assertIn("scan_task_started_by_layout_update", control)
+
+    def test_log_configuration_defaults_to_rolling_16k_and_has_extended_32k_mode(self):
+        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+        device_header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
+        device_config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
+        storage_header = (ARDUINO_ROOT / "Storage.h").read_text(encoding="utf-8")
+        storage = (ARDUINO_ROOT / "Storage.cpp").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("kDefaultLogMaxBytes = 16 * 1024", config)
+        self.assertIn("kExtendedLogMaxBytes = 32 * 1024", config)
+        self.assertIn("struct LogConfig", device_header)
+        self.assertIn("LogConfig logging", device_header)
+        self.assertIn('data_.logging.enabled = true', device_config)
+        self.assertIn('data_.logging.maxBytes = kDefaultLogMaxBytes', device_config)
+        self.assertIn('data_.logging.level = "info"', device_config)
+        self.assertIn('data_.logging.mode = "standard"', device_config)
+        self.assertIn("configureLog", storage_header)
+        self.assertIn("logStatusJson", storage_header)
+        self.assertIn("logMaxBytes_", storage)
+        self.assertIn("rotateLogIfNeeded", storage)
+        self.assertIn('cmd == "set_log"', control)
+        self.assertIn("storage_->configureLog", control)
+        self.assertIn('data += ",\\"logging\\":";', control)
+        self.assertIn("storage.configureLog", sketch)
+
+    def test_boot_auto_ota_is_configurable_and_runs_after_wifi_ready(self):
+        device_header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
+        device_config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
+        ota_header = (ARDUINO_ROOT / "OtaManager.h").read_text(encoding="utf-8")
+        ota = (ARDUINO_ROOT / "OtaManager.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("struct OtaConfig", device_header)
+        self.assertIn("OtaConfig ota", device_header)
+        self.assertIn("autoApplyOnBoot", device_header)
+        self.assertIn("data_.ota.autoApplyOnBoot = false", device_config)
+        self.assertIn('"auto_apply_on_boot"', device_config)
+        self.assertIn("bool autoApplyIfNewer", ota_header)
+        self.assertIn("auto_ota_check_start", ota)
+        self.assertIn("auto_ota_no_update", ota)
+        self.assertIn("serviceAutoOta", sketch)
+        self.assertIn("deviceConfig.data().ota.autoApplyOnBoot", sketch)
+        self.assertIn('cmd == "set_ota_config"', control)
+
+    def test_release_scripts_use_stock_8mb_dual_ota_partition(self):
+        build_script = (SCRIPT_ROOT / "build_arduino_release.sh").read_text(encoding="utf-8")
+        flash_script = (SCRIPT_ROOT / "flash_arduino_firmware.sh").read_text(encoding="utf-8")
+
+        self.assertFalse((ARDUINO_ROOT / "partitions.csv").exists())
+        self.assertIn("PartitionScheme=default_8MB", build_script)
+        self.assertIn("PartitionScheme=default_8MB", flash_script)
+        self.assertNotIn("PartitionScheme=custom", build_script)
+        self.assertNotIn("PartitionScheme=custom", flash_script)
 
     def test_ssd1306_128x32_driver_has_off_auto_enabled_modes(self):
         header = (ARDUINO_ROOT / "DisplayManager.h").read_text(encoding="utf-8")
@@ -415,7 +483,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.6}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.7}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
 

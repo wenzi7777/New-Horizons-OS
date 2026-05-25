@@ -20,6 +20,7 @@ class OtaManager {
   void begin(Storage& storage);
   UpdateInfo checkUpdate(const String& manifestUrl = "");
   bool applyUpdate(const String& manifestUrl = "");
+  bool autoApplyIfNewer(const String& manifestUrl = "");
   String lastStatusJson() const;
 
  private:
@@ -33,6 +34,11 @@ class OtaManager {
   Storage* storage_ = nullptr;
   String lastPhase_ = "idle";
   String lastError_;
+  bool lastAvailable_ = false;
+  String lastVersion_;
+  String lastUrl_;
+  size_t lastSize_ = 0;
+  String lastManifestUrl_;
 };
 
 }  // namespace nhos

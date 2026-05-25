@@ -33,12 +33,26 @@ struct OledConfig {
   uint8_t contrast = 128;
 };
 
+struct LogConfig {
+  bool enabled = true;
+  String level = "info";
+  String mode = "standard";
+  size_t maxBytes = kDefaultLogMaxBytes;
+};
+
+struct OtaConfig {
+  bool autoApplyOnBoot = false;
+  String manifestUrl = kDefaultUpdateManifestUrl;
+};
+
 struct DeviceConfigData {
   uint8_t schemaVersion = 1;
   MatrixLayoutConfig matrixLayout;
   ScanTimingConfig scanTiming;
   bool filterEnabled = true;
   bool imuEnabled = true;
+  LogConfig logging;
+  OtaConfig ota;
   ExternalLedConfig externalLed;
   OledConfig oled;
 };
@@ -55,14 +69,20 @@ class DeviceConfig {
   bool setScanTiming(uint16_t targetFps, uint16_t settleUs, uint16_t sendEveryNFrames);
   bool setFilterEnabled(bool enabled);
   bool setImuEnabled(bool enabled);
+  bool setLogging(bool enabled, const String& level, const String& mode, size_t maxBytes);
+  bool setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl);
   bool setExternalLed(const String& mode, const String& preset, float brightness);
   bool setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast);
 
   String statusJson() const;
   String filterJson() const;
   String imuJson() const;
+  String loggingJson() const;
+  String otaJson() const;
   String configJson() const;
 
+  static bool validLogLevel(const String& level);
+  static bool validLogMode(const String& mode);
   static bool validExternalLedMode(const String& mode);
   static bool validOledMode(const String& mode);
 
