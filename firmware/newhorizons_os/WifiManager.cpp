@@ -2,11 +2,12 @@
 
 #include "Config.h"
 
+#include <esp_mac.h>
+
 namespace nhos {
 
 bool WifiManager::begin(Storage& storage, bool forceSetupPortal) {
   storage_ = &storage;
-  WiFi.mode(WIFI_STA);
   if (forceSetupPortal) {
     Serial.println(F("wifi_setup_requested_by_action_button"));
     startSetupAp();
@@ -94,7 +95,7 @@ String WifiManager::statusJson() const {
 }
 
 void WifiManager::macBytes(uint8_t out[6]) const {
-  WiFi.macAddress(out);
+  esp_read_mac(out, ESP_MAC_WIFI_STA);
 }
 
 bool WifiManager::connectStored() {
@@ -124,7 +125,7 @@ bool WifiManager::connectStored() {
 void WifiManager::startSetupAp() {
   stopSetupPortal();
   uint8_t mac[6] = {0};
-  WiFi.macAddress(mac);
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
   char ssid[48];
   snprintf(
       ssid,
@@ -137,6 +138,7 @@ void WifiManager::startSetupAp() {
       mac[3],
       mac[4],
       mac[5]);
+  Serial.println(F("wifi_setup_ap_starting"));
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
   WiFi.softAP(ssid);
@@ -155,13 +157,16 @@ void WifiManager::startSetupAp() {
 }
 
 void WifiManager::stopSetupPortal() {
+  const bool apWasActive = portalStarted_ || setupActive_;
   if (portalStarted_) {
     portalServer_.stop();
     dnsServer_.stop();
     portalStarted_ = false;
   }
   setupActive_ = false;
-  WiFi.softAPdisconnect(true);
+  if (apWasActive) {
+    WiFi.softAPdisconnect(true);
+  }
 }
 
 void WifiManager::configurePortalRoutes() {

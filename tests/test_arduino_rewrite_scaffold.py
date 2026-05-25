@@ -61,7 +61,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.1"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.2"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -148,6 +148,18 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("wifi_setup_requested_by_action_button", wifi)
         self.assertIn("wifi.begin(storage, bootMode.wifiSetupRequested())", sketch)
 
+    def test_force_setup_portal_does_not_prestart_sta_or_disconnect_missing_ap(self):
+        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
+
+        self.assertLess(wifi.index("if (forceSetupPortal)"), wifi.index("WiFi.mode(WIFI_STA)"))
+        self.assertIn("#include <esp_mac.h>", wifi)
+        self.assertIn("esp_read_mac(mac, ESP_MAC_WIFI_STA)", wifi)
+        self.assertIn("const bool apWasActive = portalStarted_ || setupActive_;", wifi)
+        self.assertRegex(
+            wifi,
+            re.compile(r"if\s*\(apWasActive\)\s*\{\s*WiFi\.softAPdisconnect\(true\);\s*\}", re.S),
+        )
+
     def test_action_button_boot_window_requests_wifi_setup(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
         header = (ARDUINO_ROOT / "BootModeManager.h").read_text(encoding="utf-8")
@@ -220,7 +232,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.1}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.2}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
 

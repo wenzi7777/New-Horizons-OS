@@ -41,7 +41,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=defa
 Or use the release helper:
 
 ```bash
-VERSION=v0.5.1 firmware/scripts/build_arduino_release.sh
+VERSION=v0.5.2 firmware/scripts/build_arduino_release.sh
 ```
 
 ## Flash
@@ -63,10 +63,10 @@ Generate the Arduino OTA manifest from a built firmware binary:
 
 ```bash
 firmware/scripts/generate_arduino_manifest.py \
-  --firmware releases/artifacts/newhorizons-os-v0.5.1.bin \
+  --firmware releases/artifacts/newhorizons-os-v0.5.2.bin \
   --output releases/arduino-latest.json \
-  --version v0.5.1 \
-  --base-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.1/releases/artifacts
+  --version v0.5.2 \
+  --base-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.2/releases/artifacts
 ```
 
 The manifest shape is JSON:
@@ -76,9 +76,9 @@ The manifest shape is JSON:
   "product": "New Horizons OS Arduino",
   "protocol": "NHO/Arduino/1",
   "model": "VD-CTL/R v1.0.F 2026.4",
-  "latest": "v0.5.1",
+  "latest": "v0.5.2",
   "firmware": {
-    "url": "https://example.com/newhorizons-os-v0.5.1.bin",
+    "url": "https://example.com/newhorizons-os-v0.5.2.bin",
     "sha256": "...",
     "size": 1129936
   }
