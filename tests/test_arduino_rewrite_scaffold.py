@@ -69,7 +69,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.7"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.8"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -434,17 +434,29 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
     def test_external_ws2812b_controller_is_separate_from_internal_sk6812_status_led(self):
         status_header = (ARDUINO_ROOT / "LedController.h").read_text(encoding="utf-8")
+        status_impl = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
         external_header = (ARDUINO_ROOT / "ExternalLedController.h").read_text(encoding="utf-8")
         external = (ARDUINO_ROOT / "ExternalLedController.cpp").read_text(encoding="utf-8")
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
         self.assertIn("class LedController", status_header)
+        self.assertIn("kStatusLedPin", status_impl)
+        self.assertNotIn("kExternalLedPin", status_header + status_impl)
+        self.assertNotIn("setExternal", status_header + status_impl)
         self.assertIn("class ExternalLedController", external_header)
         self.assertIn("#include <Adafruit_NeoPixel.h>", external_header)
         self.assertIn("Adafruit_NeoPixel pixels_", external_header)
         self.assertIn("kExternalLedCount", external)
         self.assertIn("kExternalLedPin", external)
+        self.assertIn('"identify"', external + control)
+        self.assertIn("identifyStartedMs_", external_header)
+        self.assertIn("showSolid", external_header + external)
+        self.assertIn("showSolid(LedPalette::FindMePending", external)
+        self.assertIn('pin\\":', external)
+        self.assertIn('initialized\\":', external)
+        self.assertIn('last_show_ms\\":', external)
+        self.assertIn('last_error\\":', external)
         self.assertIn('"off"', external + control)
         self.assertIn('"enabled"', external + control)
         self.assertIn("validExternalLedMode", control)
@@ -483,7 +495,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.7}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.8}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
 

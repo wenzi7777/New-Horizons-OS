@@ -341,6 +341,7 @@ String ControlServer::processCommand(const String& request) {
     }
     DeviceConfigData next = deviceConfig_->data();
     const String external = extractObject(request, "external_led");
+    const bool externalTouched = !external.isEmpty();
     if (!external.isEmpty()) {
       String mode = extractString(external, "mode");
       if (mode.isEmpty()) {
@@ -385,6 +386,9 @@ String ControlServer::processCommand(const String& request) {
     }
     if (externalLeds_) {
       externalLeds_->apply(deviceConfig_->data().externalLed);
+      if (externalTouched && deviceConfig_->data().externalLed.mode == "enabled") {
+        externalLeds_->identify();
+      }
     }
     if (display_) {
       display_->apply(deviceConfig_->data().oled);

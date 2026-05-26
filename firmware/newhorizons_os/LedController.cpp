@@ -6,7 +6,6 @@ namespace nhos {
 
 void LedController::begin() {
   pinMode(kStatusLedPin, OUTPUT);
-  pinMode(kExternalLedPin, OUTPUT);
   setSignal(LedSignal::Boot);
   service(millis());
 }
@@ -44,10 +43,6 @@ void LedController::showEvent(LedSignal signal) {
 void LedController::setStatus(LedColor color) {
   current_ = color;
   writePixel(kStatusLedPin, color);
-}
-
-void LedController::setExternal(uint8_t, LedColor color) {
-  writePixel(kExternalLedPin, color);
 }
 
 void LedController::pulse(LedColor color, uint16_t delayMs) {

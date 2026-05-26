@@ -55,7 +55,6 @@ class LedController {
   void setSignal(LedSignal signal);
   void showEvent(LedSignal signal);
   void setStatus(LedColor color);
-  void setExternal(uint8_t index, LedColor color);
   void pulse(LedColor color, uint16_t delayMs);
 
  private:
