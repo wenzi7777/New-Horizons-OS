@@ -38,6 +38,7 @@ class ControlServer {
   uint16_t streamPort() const;
 
  private:
+  void servicePendingApplyUpdate();
   String processCommand(const String& request);
   String ok(const String& command, const String& message, const String& data = "{}") const;
   String error(const String& command, const String& message) const;
@@ -77,6 +78,8 @@ class ControlServer {
   String writePath_;
   size_t writeExpectedSize_ = 0;
   size_t writeWritten_ = 0;
+  bool otaPending_ = false;
+  String otaPendingManifestUrl_;
 };
 
 }  // namespace nhos

@@ -11,6 +11,8 @@
 namespace nhos {
 namespace {
 constexpr size_t kOtaChunkSize = 4096;
+constexpr uint32_t kOtaDownloadIdleTimeoutMs = 15000;
+constexpr uint32_t kOtaDownloadOverallTimeoutMs = 180000;
 uint8_t gOtaChunk[kOtaChunkSize];
 }
 
@@ -27,10 +29,16 @@ UpdateInfo OtaManager::checkUpdate(const String& manifestUrl) {
   lastVersion_ = "";
   lastUrl_ = "";
   lastSize_ = 0;
+  lastOperation_ = "check_update";
+  lastCurrentFile_ = "";
+  lastResult_ = "";
+  lastRebootRequired_ = false;
   lastPhase_ = "manifest";
   lastError_ = "";
   if (!fetchManifest(url, payload)) {
     info.error = lastError_;
+    lastPhase_ = "error";
+    lastResult_ = "error";
     return info;
   }
   if (!parseManifest(payload, info)) {
@@ -38,6 +46,8 @@ UpdateInfo OtaManager::checkUpdate(const String& manifestUrl) {
       info.error = "manifest_invalid";
     }
     lastError_ = info.error;
+    lastPhase_ = "error";
+    lastResult_ = "error";
     return info;
   }
   info.available = compareVersion(info.version, kFirmwareVersion) > 0;
@@ -46,6 +56,7 @@ UpdateInfo OtaManager::checkUpdate(const String& manifestUrl) {
   lastUrl_ = info.url;
   lastSize_ = info.size;
   lastPhase_ = info.available ? "ready" : "current";
+  lastResult_ = info.available ? "manifest_ready" : "up_to_date";
   return info;
 }
 
@@ -71,12 +82,19 @@ bool OtaManager::autoApplyIfNewer(const String& manifestUrl) {
   }
   Serial.print(F("auto_ota_update_available version="));
   Serial.println(info.version);
-  return downloadAndApply(info);
+  bool applied = downloadAndApply(info);
+  if (!applied) {
+    Serial.print(F("auto_ota_apply_failed error="));
+    Serial.println(lastError_);
+  }
+  return applied;
 }
 
 String OtaManager::lastStatusJson() const {
   String out = "{\"phase\":\"";
   out += lastPhase_;
+  out += "\",\"operation\":\"";
+  out += lastOperation_;
   out += "\",\"available\":";
   out += lastAvailable_ ? "true" : "false";
   out += ",\"version\":\"";
@@ -87,10 +105,24 @@ String OtaManager::lastStatusJson() const {
   out += String(static_cast<unsigned int>(lastSize_));
   out += ",\"manifest_url\":\"";
   out += lastManifestUrl_;
+  out += "\",\"current_file\":\"";
+  out += lastCurrentFile_;
+  out += "\",\"last_result\":\"";
+  out += lastResult_;
   out += "\",\"error\":\"";
   out += lastError_;
-  out += "\"}";
+  out += "\",\"reboot_required\":";
+  out += lastRebootRequired_ ? "true" : "false";
+  out += "}";
   return out;
+}
+
+String OtaManager::lastPhase() const {
+  return lastPhase_;
+}
+
+String OtaManager::lastError() const {
+  return lastError_;
 }
 
 bool OtaManager::fetchManifest(const String& url, String& payload) {
@@ -142,21 +174,33 @@ bool OtaManager::downloadAndApply(const UpdateInfo& info) {
   client.setInsecure();
   HTTPClient http;
   http.setTimeout(12000);
+  http.setConnectTimeout(12000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  lastPhase_ = "download";
+  lastOperation_ = "apply_update";
+  lastPhase_ = "downloading";
+  lastCurrentFile_ = "firmware";
+  lastResult_ = "starting";
+  lastError_ = "";
+  lastRebootRequired_ = true;
   if (!http.begin(client, info.url)) {
     lastError_ = "firmware_http_begin_failed";
+    lastPhase_ = "error";
+    lastResult_ = "error";
     return false;
   }
   int code = http.GET();
   if (code != HTTP_CODE_OK) {
     lastError_ = "firmware_http_" + String(code);
+    lastPhase_ = "error";
+    lastResult_ = "error";
     http.end();
     return false;
   }
   const int total = http.getSize();
   if (!Update.begin(total > 0 ? total : UPDATE_SIZE_UNKNOWN)) {
     lastError_ = "update_begin_failed";
+    lastPhase_ = "error";
+    lastResult_ = "error";
     http.end();
     return false;
   }
@@ -167,11 +211,32 @@ bool OtaManager::downloadAndApply(const UpdateInfo& info) {
 
   NetworkClient* stream = http.getStreamPtr();
   size_t written = 0;
+  const uint32_t downloadStartedMs = millis();
+  uint32_t lastProgressMs = downloadStartedMs;
   while (http.connected()) {
+    const uint32_t now = millis();
+    if (now - downloadStartedMs > kOtaDownloadOverallTimeoutMs) {
+      lastError_ = "firmware_download_overall_timeout";
+      lastPhase_ = "error";
+      lastResult_ = "error";
+      Update.abort();
+      mbedtls_sha256_free(&ctx);
+      http.end();
+      return false;
+    }
     size_t available = stream->available();
     if (!available) {
       if (total > 0 && written >= static_cast<size_t>(total)) {
         break;
+      }
+      if (now - lastProgressMs > kOtaDownloadIdleTimeoutMs) {
+        lastError_ = "firmware_download_timeout";
+        lastPhase_ = "error";
+        lastResult_ = "error";
+        Update.abort();
+        mbedtls_sha256_free(&ctx);
+        http.end();
+        return false;
       }
       delay(1);
       continue;
@@ -181,16 +246,29 @@ bool OtaManager::downloadAndApply(const UpdateInfo& info) {
     }
     int readBytes = stream->readBytes(gOtaChunk, available);
     if (readBytes <= 0) {
+      if (now - lastProgressMs > kOtaDownloadIdleTimeoutMs) {
+        lastError_ = "firmware_download_timeout";
+        lastPhase_ = "error";
+        lastResult_ = "error";
+        Update.abort();
+        mbedtls_sha256_free(&ctx);
+        http.end();
+        return false;
+      }
       continue;
     }
     if (Update.write(gOtaChunk, readBytes) != static_cast<size_t>(readBytes)) {
       lastError_ = "update_write_failed";
+      lastPhase_ = "error";
+      lastResult_ = "error";
+      Update.abort();
       mbedtls_sha256_free(&ctx);
       http.end();
       return false;
     }
     mbedtls_sha256_update(&ctx, gOtaChunk, readBytes);
     written += readBytes;
+    lastProgressMs = millis();
   }
   http.end();
 
@@ -204,15 +282,19 @@ bool OtaManager::downloadAndApply(const UpdateInfo& info) {
   hex[64] = '\0';
   if (!info.sha256.equalsIgnoreCase(hex)) {
     lastError_ = "sha256_mismatch";
+    lastPhase_ = "error";
+    lastResult_ = "error";
     return false;
   }
   if (!Update.end(true) || !Update.isFinished()) {
     lastError_ = "update_end_failed";
+    lastPhase_ = "error";
+    lastResult_ = "error";
     return false;
   }
-  lastPhase_ = "rebooting";
-  delay(100);
-  ESP.restart();
+  lastPhase_ = "applied";
+  lastCurrentFile_ = "";
+  lastResult_ = "applied";
   return true;
 }
 

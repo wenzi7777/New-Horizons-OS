@@ -69,7 +69,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.8"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.10"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -396,6 +396,13 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("serviceAutoOta", sketch)
         self.assertIn("deviceConfig.data().ota.autoApplyOnBoot", sketch)
         self.assertIn('cmd == "set_ota_config"', control)
+        self.assertIn("LedSignal::OtaActive", sketch)
+        self.assertIn("LedSignal::OtaSuccess", sketch)
+        self.assertIn("LedSignal::OtaError", sketch)
+        self.assertIn("auto_ota_apply_failed", sketch)
+        self.assertIn("firmware_download_timeout", ota)
+        self.assertIn("update_started", control)
+        self.assertIn("servicePendingApplyUpdate", control)
 
     def test_release_scripts_use_stock_8mb_dual_ota_partition(self):
         build_script = (SCRIPT_ROOT / "build_arduino_release.sh").read_text(encoding="utf-8")
@@ -506,7 +513,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.8}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.10}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
 

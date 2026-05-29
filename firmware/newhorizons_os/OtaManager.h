@@ -22,6 +22,8 @@ class OtaManager {
   bool applyUpdate(const String& manifestUrl = "");
   bool autoApplyIfNewer(const String& manifestUrl = "");
   String lastStatusJson() const;
+  String lastPhase() const;
+  String lastError() const;
 
  private:
   bool fetchManifest(const String& url, String& payload);
@@ -39,6 +41,10 @@ class OtaManager {
   String lastUrl_;
   size_t lastSize_ = 0;
   String lastManifestUrl_;
+  String lastOperation_;
+  String lastCurrentFile_;
+  String lastResult_;
+  bool lastRebootRequired_ = false;
 };
 
 }  // namespace nhos

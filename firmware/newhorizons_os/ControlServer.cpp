@@ -82,7 +82,9 @@ void ControlServer::service() {
     leds_->service(millis());
   }
   client.println(response);
+  client.flush();
   client.stop();
+  servicePendingApplyUpdate();
 }
 
 bool ControlServer::maintenanceMode() const {
@@ -95,6 +97,36 @@ String ControlServer::streamHost() const {
 
 uint16_t ControlServer::streamPort() const {
   return streamPort_;
+}
+
+void ControlServer::servicePendingApplyUpdate() {
+  if (!otaPending_) {
+    return;
+  }
+  otaPending_ = false;
+  const String manifestUrl = otaPendingManifestUrl_;
+  otaPendingManifestUrl_ = "";
+  Serial.println(F("control_apply_update_started"));
+  if (leds_) {
+    leds_->setSignal(LedSignal::OtaActive);
+    leds_->service(millis());
+  }
+  const bool applied = ota_ && ota_->applyUpdate(manifestUrl);
+  if (!applied) {
+    Serial.print(F("control_apply_update_failed status="));
+    Serial.println(ota_ ? ota_->lastStatusJson() : String("{}"));
+    if (leds_) {
+      leds_->showEvent(LedSignal::OtaError);
+      leds_->service(millis());
+    }
+    return;
+  }
+  if (leds_) {
+    leds_->showEvent(LedSignal::OtaSuccess);
+    leds_->service(millis());
+  }
+  delay(100);
+  ESP.restart();
 }
 
 String ControlServer::processCommand(const String& request) {
@@ -578,15 +610,12 @@ String ControlServer::processCommand(const String& request) {
     return ok(cmd, info.error.isEmpty() ? "update_checked" : "update_check_failed", data);
   }
   if (cmd == "apply_update") {
-    if (leds_) {
-      leds_->setSignal(LedSignal::OtaActive);
-      leds_->service(millis());
-    }
-    bool applied = ota_->applyUpdate(extractString(request, "manifest_url"));
-    if (leds_) {
-      leds_->showEvent(applied ? LedSignal::OtaSuccess : LedSignal::OtaError);
-    }
-    return applied ? ok(cmd, "update_applied") : error(cmd, "update_failed");
+    otaPendingManifestUrl_ = extractString(request, "manifest_url");
+    otaPending_ = true;
+    return ok(
+        cmd,
+        "update_started",
+        "{\"update_state\":{\"phase\":\"downloading\",\"operation\":\"apply_update\",\"current_file\":\"firmware\",\"last_error\":\"\",\"last_result\":\"starting\",\"reboot_required\":true}}");
   }
   if (cmd == "reboot") {
     boot_->requestReboot();

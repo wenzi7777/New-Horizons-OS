@@ -60,7 +60,22 @@ void serviceAutoOta(bool wifiConnected) {
     return;
   }
   logBoot("auto_ota_enabled");
-  ota.autoApplyIfNewer(deviceConfig.data().ota.manifestUrl);
+  leds.setSignal(nhos::LedSignal::OtaActive);
+  leds.service(millis());
+  const bool applied = ota.autoApplyIfNewer(deviceConfig.data().ota.manifestUrl);
+  if (!applied) {
+    if (ota.lastPhase() == "current") {
+      return;
+    }
+    logBoot(String("auto_ota_apply_failed status=") + ota.lastStatusJson());
+    leds.showEvent(nhos::LedSignal::OtaError);
+    leds.service(millis());
+    return;
+  }
+  leds.showEvent(nhos::LedSignal::OtaSuccess);
+  leds.service(millis());
+  delay(100);
+  ESP.restart();
 }
 
 String chargeStateName() {
