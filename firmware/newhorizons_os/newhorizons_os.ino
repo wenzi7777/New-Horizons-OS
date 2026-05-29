@@ -282,11 +282,11 @@ void loop() {
   updateLedState();
   displayManager.service(
       millis(),
-      bootMode.modeName(),
       wifi.isConnected() ? WiFi.localIP().toString() : WiFi.softAPIP().toString(),
+      findme.hasGateway() ? findme.streamHost() : String("-"),
       scanner.health(),
       ESP.getFreeHeap(),
-      chargeStateName());
+      ESP.getHeapSize());
   if (bootMode.rebootRequested()) {
     delay(100);
     ESP.restart();

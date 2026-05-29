@@ -2,6 +2,8 @@
 
 #include <Wire.h>
 
+#include "Config.h"
+
 namespace nhos {
 namespace {
 constexpr int16_t kOledWidth = 128;
@@ -62,7 +64,7 @@ void DisplayManager::apply(const OledConfig& config) {
   }
 }
 
-void DisplayManager::service(uint32_t nowMs, const String& mode, const String& ip, const ScanHealth& health, uint32_t heapFree, const String& batteryState) {
+void DisplayManager::service(uint32_t nowMs, const String& ip, const String& gatewayIp, const ScanHealth& health, uint32_t heapFree, uint32_t heapTotal) {
   if (!enabled_) {
     return;
   }
@@ -82,7 +84,7 @@ void DisplayManager::service(uint32_t nowMs, const String& mode, const String& i
   } else if (config_.page == "recording_status") {
     renderRecordingStatus(health);
   } else {
-    renderLiveStatus(mode, ip, health, heapFree, batteryState);
+    renderLiveStatus(ip, gatewayIp, health, heapFree, heapTotal);
   }
   display_.display();
 }
@@ -160,38 +162,47 @@ OledMode DisplayManager::parseMode(const String& mode) const {
   return OledMode::Off;
 }
 
-void DisplayManager::renderLiveStatus(const String& mode, const String& ip, const ScanHealth& health, uint32_t heapFree, const String& batteryState) {
+void DisplayManager::renderLiveStatus(const String& ip, const String& gatewayIp, const ScanHealth& health, uint32_t heapFree, uint32_t heapTotal) {
   display_.print("NHOS ");
-  display_.println(mode);
+  display_.println(kFirmwareVersion);
   display_.print("IP ");
   display_.println(ip);
-  display_.print("FPS ");
+  display_.print("GW ");
+  display_.println(gatewayIp.isEmpty() ? "-" : gatewayIp);
+  display_.print("FPS");
   display_.print(health.actualScanFps);
   display_.print("/");
-  display_.println(health.targetFps);
-  display_.print("RAM ");
+  display_.print(health.targetFps);
+  display_.print(" RAM");
   display_.print(heapFree / 1024);
-  display_.print("K ");
-  display_.println(batteryState);
+  display_.print("/");
+  display_.print(heapTotal / 1024);
+  display_.println("K");
 }
 
 void DisplayManager::renderSensorSnapshot(const ScanHealth& health) {
   display_.println("Sensor snapshot");
   display_.print("Pts ");
-  display_.println(health.pointCount);
-  display_.print("Last ");
+  display_.print(health.pointCount);
+  display_.print(" Grid ");
+  display_.print(health.rows);
+  display_.print("x");
+  display_.println(health.cols);
+  display_.print("Scan ");
   display_.print(health.lastScanDurationUs);
   display_.println("us");
-  display_.print("Overrun ");
+  display_.print("Over budget ");
   display_.println(health.overrunFrames);
 }
 
 void DisplayManager::renderRecordingStatus(const ScanHealth& health) {
-  display_.println("Stream");
+  display_.println("Stream status");
   display_.print("Sent ");
-  display_.println(health.udpSentFrames);
+  display_.print(health.udpSentFrames);
+  display_.println(" packets");
   display_.print("Fail ");
-  display_.println(health.udpSendFailures);
+  display_.print(health.udpSendFailures);
+  display_.println(" packets");
   display_.print("UDP ");
   display_.print(health.lastUdpSendUs);
   display_.println("us");

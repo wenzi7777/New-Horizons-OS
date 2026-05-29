@@ -69,7 +69,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.10"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.11"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -439,6 +439,28 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("displayManager.service", sketch)
         self.assertIn("display_->statusJson()", control)
 
+    def test_oled_pages_render_operational_labels_and_gateway_metrics(self):
+        header = (ARDUINO_ROOT / "DisplayManager.h").read_text(encoding="utf-8")
+        display = (ARDUINO_ROOT / "DisplayManager.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("gatewayIp", header)
+        self.assertIn("heapTotal", header)
+        self.assertIn("NHOS ", display)
+        self.assertIn("kFirmwareVersion", display)
+        self.assertIn("GW ", display)
+        self.assertIn("RAM", display)
+        self.assertIn("Sensor snapshot", display)
+        self.assertIn("Grid ", display)
+        self.assertIn("Scan ", display)
+        self.assertIn("Over budget ", display)
+        self.assertIn("packets", display)
+        self.assertIn("UDP ", display)
+        self.assertNotIn('display_.print("Last ")', display)
+        self.assertNotIn('display_.print("Overrun ")', display)
+        self.assertIn("findme.hasGateway()", sketch)
+        self.assertIn("ESP.getHeapSize()", sketch)
+
     def test_external_ws2812b_controller_is_separate_from_internal_sk6812_status_led(self):
         status_header = (ARDUINO_ROOT / "LedController.h").read_text(encoding="utf-8")
         status_impl = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
@@ -513,7 +535,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.10}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.11}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
 

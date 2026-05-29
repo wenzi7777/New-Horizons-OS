@@ -162,6 +162,8 @@ void MatrixScanner::recordUdpSend(bool ok, uint32_t durationUs) {
 ScanHealth MatrixScanner::health() const {
   ScanHealth item;
   item.active = running_;
+  item.rows = rowCount_;
+  item.cols = colCount_;
   item.produced = produced_;
   item.consumed = consumed_;
   item.dropped = dropped_;

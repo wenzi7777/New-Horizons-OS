@@ -21,14 +21,14 @@ class DisplayManager {
 
   void begin(const OledConfig& config);
   void apply(const OledConfig& config);
-  void service(uint32_t nowMs, const String& mode, const String& ip, const ScanHealth& health, uint32_t heapFree, const String& batteryState);
+  void service(uint32_t nowMs, const String& ip, const String& gatewayIp, const ScanHealth& health, uint32_t heapFree, uint32_t heapTotal);
   String statusJson() const;
 
  private:
   bool configure();
   bool probeAddress(uint8_t address) const;
   OledMode parseMode(const String& mode) const;
-  void renderLiveStatus(const String& mode, const String& ip, const ScanHealth& health, uint32_t heapFree, const String& batteryState);
+  void renderLiveStatus(const String& ip, const String& gatewayIp, const ScanHealth& health, uint32_t heapFree, uint32_t heapTotal);
   void renderSensorSnapshot(const ScanHealth& health);
   void renderRecordingStatus(const ScanHealth& health);
   String addressString() const;

@@ -17,6 +17,8 @@ struct MatrixFrame {
 
 struct ScanHealth {
   bool active = false;
+  uint16_t rows = 0;
+  uint16_t cols = 0;
   uint32_t produced = 0;
   uint32_t consumed = 0;
   uint32_t dropped = 0;
