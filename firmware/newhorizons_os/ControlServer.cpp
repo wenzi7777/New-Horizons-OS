@@ -696,10 +696,6 @@ int ControlServer::extractInt(const String& request, const char* key, int fallba
 }
 
 float ControlServer::extractFloat(const String& request, const char* key, float fallback) const {
-  String stringValue = extractString(request, key);
-  if (!stringValue.isEmpty()) {
-    return stringValue.toFloat();
-  }
   String pattern = "\"" + String(key) + "\"";
   int keyIndex = request.indexOf(pattern);
   if (keyIndex < 0) {

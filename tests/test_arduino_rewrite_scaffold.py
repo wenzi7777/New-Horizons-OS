@@ -468,6 +468,17 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("external_led", control)
         self.assertIn('storage.getString("charge_profile", "compatible")', sketch)
 
+    def test_control_server_float_parser_reads_numeric_brightness_without_falling_into_next_key(self):
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        start = control.index("float ControlServer::extractFloat")
+        end = control.index("bool ControlServer::extractBool", start)
+        body = control[start:end]
+
+        self.assertNotIn("extractString(request, key)", body)
+        self.assertIn('String value = request.substring(colon + 1, end);', body)
+        self.assertIn("value.trim();", body)
+        self.assertIn("return value.toFloat();", body)
+
     def test_board_pin_map_matches_new_horizons_hardware(self):
         pins = (ARDUINO_ROOT / "BoardPins.cpp").read_text(encoding="utf-8")
 
