@@ -7,6 +7,10 @@ void ImuManager::begin(bool enabled) {
   initialized_ = false;
   sampleValid_ = false;
   lastError_ = "";
+  lastServiceAtUs_ = 0;
+  lastSampleAtUs_ = 0;
+  lastSampleAtMs_ = 0;
+  lastReadDurationUs_ = 0;
   heapBefore_ = ESP.getFreeHeap();
   if (!enabled_) {
     heapAfter_ = ESP.getFreeHeap();
@@ -18,6 +22,7 @@ void ImuManager::begin(bool enabled) {
     heapAfter_ = ESP.getFreeHeap();
     return;
   }
+  IMU.setContinuousMode();
   initialized_ = true;
   heapAfter_ = ESP.getFreeHeap();
 }
@@ -40,10 +45,14 @@ void ImuManager::setEnabled(bool enabled) {
   begin(true);
 }
 
-bool ImuManager::readSample(float out7[7]) {
-  if (!enabled_ || !initialized_ || !out7) {
-    return false;
+void ImuManager::service(uint32_t nowUs) {
+  if (!enabled_ || !initialized_) {
+    return;
   }
+  if (lastServiceAtUs_ && static_cast<uint32_t>(nowUs - lastServiceAtUs_) < serviceIntervalUs_) {
+    return;
+  }
+  lastServiceAtUs_ = nowUs;
 
   float gx = sample_[3];
   float gy = sample_[4];
@@ -52,15 +61,16 @@ bool ImuManager::readSample(float out7[7]) {
   float ay = sample_[1];
   float az = sample_[2];
 
-  bool updated = false;
-  if (IMU.gyroscopeAvailable() && IMU.readGyroscope(gx, gy, gz)) {
-    updated = true;
-  }
-  if (IMU.accelerationAvailable() && IMU.readAcceleration(ax, ay, az)) {
-    updated = true;
-  }
-  if (!updated && !sampleValid_) {
-    return false;
+  const uint32_t readStartedUs = micros();
+  const bool gyroUpdated = IMU.readGyroscope(gx, gy, gz);
+  const bool accelUpdated = IMU.readAcceleration(ax, ay, az);
+  lastReadDurationUs_ = micros() - readStartedUs;
+
+  if (!gyroUpdated && !accelUpdated) {
+    if (!sampleValid_) {
+      lastError_ = "bmi270_sample_unavailable";
+    }
+    return;
   }
 
   sample_[0] = ax;
@@ -71,6 +81,15 @@ bool ImuManager::readSample(float out7[7]) {
   sample_[5] = gz;
   sample_[6] = 0.0f;
   sampleValid_ = true;
+  lastSampleAtUs_ = nowUs;
+  lastSampleAtMs_ = millis();
+  lastError_ = "";
+}
+
+bool ImuManager::copyLatestSample(float out7[7]) const {
+  if (!enabled_ || !initialized_ || !sampleValid_ || !out7) {
+    return false;
+  }
   for (uint8_t i = 0; i < 7; ++i) {
     out7[i] = sample_[i];
   }
@@ -78,6 +97,8 @@ bool ImuManager::readSample(float out7[7]) {
 }
 
 String ImuManager::statusJson() const {
+  const uint32_t nowMs = millis();
+  const uint32_t cacheAgeMs = sampleValid_ ? nowMs - lastSampleAtMs_ : 0;
   String out = "{\"enabled\":";
   out += enabled_ ? "true" : "false";
   out += ",\"runtime_enabled\":";
@@ -99,6 +120,14 @@ String ImuManager::statusJson() const {
   out += heapAfter_;
   out += ",\"sample_cached\":";
   out += sampleValid_ ? "true" : "false";
+  out += ",\"sample_rate_hz\":";
+  out += sampleRateHz_;
+  out += ",\"cache_age_ms\":";
+  out += cacheAgeMs;
+  out += ",\"last_read_duration_us\":";
+  out += lastReadDurationUs_;
+  out += ",\"last_sample_at_ms\":";
+  out += lastSampleAtMs_;
   out += "}";
   return out;
 }

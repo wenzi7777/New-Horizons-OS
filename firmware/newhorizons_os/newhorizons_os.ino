@@ -110,7 +110,7 @@ void scanAndStreamIfDue() {
   }
 
   float imuSample[7] = {0};
-  const bool imuSampleValid = imu.readSample(imuSample);
+  const bool imuSampleValid = imu.copyLatestSample(imuSample);
   size_t len = packetBuilder.buildMatrixPacketHeader(frame, packetBuffer, sizeof(packetBuffer), matrixPayloadLen, imuSampleValid ? imuSample : nullptr);
   if (!len) {
     scanner.recordUdpSend(false, 0);
@@ -283,6 +283,7 @@ void loop() {
   findme.setModeName(bootMode.modeName());
   findme.service();
   control.service();
+  imu.service(micros());
   sendHeartbeatIfDue();
   scanAndStreamIfDue();
   updateLedState();

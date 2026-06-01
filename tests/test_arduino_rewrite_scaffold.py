@@ -69,7 +69,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.12"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.13"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -364,7 +364,14 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("IMU.begin(BOSCH_ACCELEROMETER_ONLY)", imu_impl)
         self.assertNotIn("readMagneticField", imu_impl)
         self.assertIn("boot_stage=imu_ready", sketch)
-        self.assertIn("imu.readSample", sketch)
+        self.assertIn("imu.service", sketch)
+        self.assertNotIn("imu.readSample", sketch)
+        self.assertIn("bool copyLatestSample(float out7[7]) const;", imu_header)
+        self.assertIn("void service(uint32_t nowUs);", imu_header)
+        self.assertIn("IMU.setContinuousMode()", imu_impl)
+        self.assertIn("lastReadDurationUs_", imu_header)
+        self.assertIn("sampleRateHz_", imu_header)
+        self.assertIn("cacheAgeMs", imu_impl)
         self.assertIn("buildMatrixPacketHeader(frame, packetBuffer, sizeof(packetBuffer), matrixPayloadLen, imuSampleValid ? imuSample : nullptr)", sketch)
         self.assertIn("const float* imu7", packet_header)
         self.assertIn("out[3] = imu7 ? kPacketFlagImu : 0", packet_impl)
@@ -556,7 +563,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.12}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.13}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
 
