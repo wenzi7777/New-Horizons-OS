@@ -71,7 +71,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.15"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.16"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -609,8 +609,19 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.15}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.16}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
+
+    def test_latest_manifest_points_to_v0_5_16_artifact(self):
+        latest = (REPO_ROOT / "releases" / "arduino-latest.json").read_text(encoding="utf-8")
+        versioned = (REPO_ROOT / "releases" / "arduino-v0.5.16.json").read_text(encoding="utf-8")
+        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.5.16.bin"
+
+        self.assertIn('"latest": "v0.5.16"', latest)
+        self.assertIn("newhorizons-os-v0.5.16.bin", latest)
+        self.assertIn("v0.5.16/releases/artifacts", latest)
+        self.assertIn('"latest": "v0.5.16"', versioned)
+        self.assertTrue(artifact.exists())
 
 
 if __name__ == "__main__":
