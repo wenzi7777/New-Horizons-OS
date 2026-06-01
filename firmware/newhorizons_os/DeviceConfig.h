@@ -76,7 +76,6 @@ class DeviceConfig {
 
   String statusJson() const;
   String filterJson() const;
-  String imuJson() const;
   String loggingJson() const;
   String otaJson() const;
   String configJson() const;

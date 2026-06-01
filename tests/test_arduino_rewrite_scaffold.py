@@ -69,7 +69,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.11"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.12"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -351,6 +351,27 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("scanner_->start()", control)
         self.assertIn("scan_task_started_by_layout_update", control)
 
+    def test_arduino_runtime_initializes_bmi270_and_streams_imu_payload(self):
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        control_header = (ARDUINO_ROOT / "ControlServer.h").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        imu_header = (ARDUINO_ROOT / "ImuManager.h").read_text(encoding="utf-8")
+        imu_impl = (ARDUINO_ROOT / "ImuManager.cpp").read_text(encoding="utf-8")
+        packet_header = (ARDUINO_ROOT / "PacketBuilder.h").read_text(encoding="utf-8")
+        packet_impl = (ARDUINO_ROOT / "PacketBuilder.cpp").read_text(encoding="utf-8")
+
+        self.assertIn('#include "Arduino_BMI270_BMM150.h"', imu_header)
+        self.assertIn("IMU.begin(BOSCH_ACCELEROMETER_ONLY)", imu_impl)
+        self.assertNotIn("readMagneticField", imu_impl)
+        self.assertIn("boot_stage=imu_ready", sketch)
+        self.assertIn("imu.readSample", sketch)
+        self.assertIn("buildMatrixPacketHeader(frame, packetBuffer, sizeof(packetBuffer), matrixPayloadLen, imuSampleValid ? imuSample : nullptr)", sketch)
+        self.assertIn("const float* imu7", packet_header)
+        self.assertIn("out[3] = imu7 ? kPacketFlagImu : 0", packet_impl)
+        self.assertIn("putFloat(out + offset, imu7[i])", packet_impl)
+        self.assertIn("ImuManager& imu", control_header)
+        self.assertIn("imu_ ? imu_->statusJson()", control)
+
     def test_log_configuration_defaults_to_rolling_16k_and_has_extended_32k_mode(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
         device_header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
@@ -535,7 +556,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.11}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.12}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
 

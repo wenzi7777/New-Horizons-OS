@@ -12,6 +12,7 @@ void ControlServer::begin(
     OtaManager& ota,
     FindMeClient& findme,
     PowerManager& power,
+    ImuManager& imu,
     LedController& leds,
     DeviceConfig& deviceConfig,
     DisplayManager& display,
@@ -23,6 +24,7 @@ void ControlServer::begin(
   ota_ = &ota;
   findme_ = &findme;
   power_ = &power;
+  imu_ = &imu;
   leds_ = &leds;
   deviceConfig_ = &deviceConfig;
   display_ = &display;
@@ -180,7 +182,7 @@ String ControlServer::processCommand(const String& request) {
     data += ",\"filter\":";
     data += deviceConfig_ ? deviceConfig_->filterJson() : "{}";
     data += ",\"imu\":";
-    data += deviceConfig_ ? deviceConfig_->imuJson() : "{}";
+    data += imu_ ? imu_->statusJson() : "{}";
     data += ",\"indicators\":";
     data += indicatorsStatusJson();
     data += ",\"scan_health\":";
@@ -327,9 +329,12 @@ String ControlServer::processCommand(const String& request) {
         return error(cmd, "config_write_failed");
       }
     }
-    String data = "{\"imu\":{\"enabled\":";
-    data += enabled ? "true" : "false";
-    data += "},\"config\":";
+    if (imu_) {
+      imu_->setEnabled(enabled);
+    }
+    String data = "{\"imu\":";
+    data += imu_ ? imu_->statusJson() : "{}";
+    data += ",\"config\":";
     data += deviceConfig_ ? deviceConfig_->statusJson() : "{}";
     data += "}";
     return ok(cmd, "config_stored", data);

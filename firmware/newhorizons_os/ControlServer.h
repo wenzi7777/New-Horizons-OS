@@ -9,6 +9,7 @@
 #include "DisplayManager.h"
 #include "ExternalLedController.h"
 #include "FindMeClient.h"
+#include "ImuManager.h"
 #include "LedController.h"
 #include "MatrixScanner.h"
 #include "OtaManager.h"
@@ -28,6 +29,7 @@ class ControlServer {
       OtaManager& ota,
       FindMeClient& findme,
       PowerManager& power,
+      ImuManager& imu,
       LedController& leds,
       DeviceConfig& deviceConfig,
       DisplayManager& display,
@@ -67,6 +69,7 @@ class ControlServer {
   OtaManager* ota_ = nullptr;
   FindMeClient* findme_ = nullptr;
   PowerManager* power_ = nullptr;
+  ImuManager* imu_ = nullptr;
   LedController* leds_ = nullptr;
   DeviceConfig* deviceConfig_ = nullptr;
   DisplayManager* display_ = nullptr;

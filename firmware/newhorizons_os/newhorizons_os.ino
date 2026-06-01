@@ -10,6 +10,7 @@
 #include "DisplayManager.h"
 #include "ExternalLedController.h"
 #include "FindMeClient.h"
+#include "ImuManager.h"
 #include "LedController.h"
 #include "MatrixScanner.h"
 #include "OtaManager.h"
@@ -30,6 +31,7 @@ nhos::WifiManager wifi;
 nhos::MatrixScanner scanner;
 nhos::PacketBuilder packetBuilder;
 nhos::PowerManager power;
+nhos::ImuManager imu;
 nhos::FindMeClient findme;
 nhos::ControlServer control;
 nhos::OtaManager ota;
@@ -107,7 +109,9 @@ void scanAndStreamIfDue() {
     return;
   }
 
-  size_t len = packetBuilder.buildMatrixPacketHeader(frame, packetBuffer, sizeof(packetBuffer), matrixPayloadLen);
+  float imuSample[7] = {0};
+  const bool imuSampleValid = imu.readSample(imuSample);
+  size_t len = packetBuilder.buildMatrixPacketHeader(frame, packetBuffer, sizeof(packetBuffer), matrixPayloadLen, imuSampleValid ? imuSample : nullptr);
   if (!len) {
     scanner.recordUdpSend(false, 0);
     return;
@@ -218,6 +222,8 @@ void setup() {
   logBoot(String("boot_stage=display_ready ") + displayManager.statusJson());
   power.begin(storage.getString("charge_profile", "compatible"));
   logBoot(String("boot_stage=power_ready ") + power.statusJson());
+  imu.begin(deviceConfig.data().imuEnabled);
+  logBoot(String("boot_stage=imu_ready ") + imu.statusJson());
 
   if (!nhos::validatePinMap()) {
     logBoot("pin_map_invalid");
@@ -261,7 +267,7 @@ void setup() {
   ota.begin(storage);
   logBoot("boot_stage=ota_ready");
   serviceAutoOta(wifiConnected);
-  control.begin(wifi, scanner, storage, bootMode, ota, findme, power, leds, deviceConfig, displayManager, externalLeds);
+  control.begin(wifi, scanner, storage, bootMode, ota, findme, power, imu, leds, deviceConfig, displayManager, externalLeds);
   logBoot(String("boot_stage=control_ready port=") + String(nhos::kControlPort));
 
   logBoot(String("runtime_ready protocol=") + nhos::kProtocolName + " firmware=" + nhos::kFirmwareVersion +

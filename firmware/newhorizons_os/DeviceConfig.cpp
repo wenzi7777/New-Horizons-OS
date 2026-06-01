@@ -322,15 +322,6 @@ String DeviceConfig::filterJson() const {
   return out;
 }
 
-String DeviceConfig::imuJson() const {
-  String out = "{\"enabled\":";
-  out += data_.imuEnabled ? "true" : "false";
-  out += ",\"state\":\"";
-  out += data_.imuEnabled ? "deferred" : "disabled";
-  out += "\"}";
-  return out;
-}
-
 String DeviceConfig::loggingJson() const {
   String out = "{\"enabled\":";
   out += data_.logging.enabled ? "true" : "false";

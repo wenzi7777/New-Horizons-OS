@@ -52,20 +52,29 @@ size_t PacketBuilder::build(const MatrixFrame& frame, uint8_t* out, size_t capac
   return offset;
 }
 
-size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint8_t* out, size_t capacity, size_t matrixPayloadBytes) {
+size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imu7) {
   const size_t expectedMatrixBytes = static_cast<size_t>(frame.pointCount) * sizeof(float);
-  const size_t totalLen = kPacketHeaderLen + matrixPayloadBytes;
+  const size_t imuBytes = imu7 ? 7 * sizeof(float) : 0;
+  const size_t payloadLen = matrixPayloadBytes + imuBytes;
+  const size_t totalLen = kPacketHeaderLen + payloadLen;
   if (!out || capacity < totalLen || frame.pointCount > kMaxSensors || matrixPayloadBytes != expectedMatrixBytes) {
     return 0;
   }
 
   putU16(out, kPacketMagic);
   out[2] = kPacketVersion;
-  out[3] = 0;
+  out[3] = imu7 ? kPacketFlagImu : 0;
   memcpy(out + 4, deviceUid_, 6);
   putU32(out + 10, frame.seq);
   putU32(out + 14, frame.timestampMs);
-  putU16(out + 18, static_cast<uint16_t>(matrixPayloadBytes));
+  putU16(out + 18, static_cast<uint16_t>(payloadLen));
+  size_t offset = kPacketHeaderLen + matrixPayloadBytes;
+  if (imu7) {
+    for (uint8_t i = 0; i < 7; ++i) {
+      putFloat(out + offset, imu7[i]);
+      offset += sizeof(float);
+    }
+  }
   return totalLen;
 }
 
