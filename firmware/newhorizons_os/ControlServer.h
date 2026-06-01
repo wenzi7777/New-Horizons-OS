@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "BootModeManager.h"
+#include "Calibration.h"
 #include "DeviceConfig.h"
 #include "DisplayManager.h"
 #include "ExternalLedController.h"
@@ -32,6 +33,7 @@ class ControlServer {
       ImuManager& imu,
       LedController& leds,
       DeviceConfig& deviceConfig,
+      Calibration& calibration,
       DisplayManager& display,
       ExternalLedController& externalLeds);
   void service();
@@ -72,6 +74,7 @@ class ControlServer {
   ImuManager* imu_ = nullptr;
   LedController* leds_ = nullptr;
   DeviceConfig* deviceConfig_ = nullptr;
+  Calibration* calibration_ = nullptr;
   DisplayManager* display_ = nullptr;
   ExternalLedController* externalLeds_ = nullptr;
   bool started_ = false;

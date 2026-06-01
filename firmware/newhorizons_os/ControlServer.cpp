@@ -1,5 +1,7 @@
 #include "ControlServer.h"
 
+#include <vector>
+
 #include "Config.h"
 
 namespace nhos {
@@ -15,6 +17,7 @@ void ControlServer::begin(
     ImuManager& imu,
     LedController& leds,
     DeviceConfig& deviceConfig,
+    Calibration& calibration,
     DisplayManager& display,
     ExternalLedController& externalLeds) {
   wifi_ = &wifi;
@@ -27,6 +30,7 @@ void ControlServer::begin(
   imu_ = &imu;
   leds_ = &leds;
   deviceConfig_ = &deviceConfig;
+  calibration_ = &calibration;
   display_ = &display;
   externalLeds_ = &externalLeds;
   streamHost_ = storage.getString("stream_host", "");
@@ -183,6 +187,8 @@ String ControlServer::processCommand(const String& request) {
     data += deviceConfig_ ? deviceConfig_->filterJson() : "{}";
     data += ",\"imu\":";
     data += imu_ ? imu_->statusJson() : "{}";
+    data += ",\"calibration\":";
+    data += calibration_ ? calibration_->statusJson(maintenanceMode()) : "{}";
     data += ",\"indicators\":";
     data += indicatorsStatusJson();
     data += ",\"scan_health\":";
@@ -253,6 +259,9 @@ String ControlServer::processCommand(const String& request) {
       if (!deviceConfig_->save(*storage_)) {
         return error(cmd, "config_write_failed");
       }
+    }
+    if (calibration_) {
+      calibration_->setLayout(rows, rowCount, cols, colCount);
     }
     if (boot_->mode() == RunMode::Normal && scanner_->hasLayout() && !scanner_->active()) {
       scanner_->start();
@@ -437,12 +446,127 @@ String ControlServer::processCommand(const String& request) {
     data += "}";
     return ok(cmd, "config_stored", data);
   }
-  if (cmd == "calibration_sample_cell" || cmd == "calibration_sample_all" || cmd == "calibration_save" ||
-      cmd == "dump_calibration" || cmd == "delete_calibration_level") {
+  if (cmd == "calibration_status") {
+    if (!calibration_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    return ok(cmd, "calibration_status", calibration_->statusJson(maintenanceMode()));
+  }
+  if (cmd == "calibration_enable") {
+    if (!calibration_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    String detail;
+    if (!calibration_->setEnabled(true, detail)) {
+      return error(cmd, detail.length() ? detail : "calibration_enable_failed");
+    }
+    return ok(cmd, "calibration_enabled", calibration_->statusJson(maintenanceMode()));
+  }
+  if (cmd == "calibration_disable") {
+    if (!calibration_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    String detail;
+    if (!calibration_->setEnabled(false, detail)) {
+      return error(cmd, detail.length() ? detail : "calibration_disable_failed");
+    }
+    return ok(cmd, "calibration_disabled", calibration_->statusJson(maintenanceMode()));
+  }
+  if (cmd == "calibration_session_begin") {
     if (!maintenanceMode()) {
       return error(cmd, "maintenance_required");
     }
-    return ok(cmd, "calibration_command_accepted");
+    if (!calibration_ || !calibration_->sessionBegin()) {
+      return error(cmd, "calibration_session_begin_failed");
+    }
+    return ok(cmd, "calibration_session_started", calibration_->statusJson(maintenanceMode()));
+  }
+  if (cmd == "calibration_session_abort") {
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    if (!calibration_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    calibration_->sessionAbort();
+    return ok(cmd, "calibration_session_aborted", calibration_->statusJson(maintenanceMode()));
+  }
+  if (cmd == "calibration_session_commit") {
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    if (!calibration_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    String detail;
+    if (!calibration_->sessionCommit(extractBool(request, "auto_enable", false), detail)) {
+      return error(cmd, detail.length() ? detail : "calibration_commit_failed");
+    }
+    return ok(cmd, "calibration_committed", calibration_->statusJson(maintenanceMode()));
+  }
+  if (cmd == "calibration_clear_profile") {
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    if (!calibration_ || !calibration_->clearProfile()) {
+      return error(cmd, "calibration_clear_failed");
+    }
+    return ok(cmd, "calibration_profile_cleared", calibration_->statusJson(maintenanceMode()));
+  }
+  if (cmd == "calibration_dump_level") {
+    if (!calibration_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    String levelJson;
+    if (!calibration_->dumpLevelJson(extractFloat(request, "level", 0), levelJson)) {
+      return error(cmd, "calibration_level_not_found");
+    }
+    return ok(cmd, "calibration_level_dump", levelJson);
+  }
+  if (cmd == "calibration_delete_level") {
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    if (!calibration_ || !calibration_->deleteLevel(extractFloat(request, "level", 0))) {
+      return error(cmd, "calibration_level_delete_failed");
+    }
+    return ok(cmd, "calibration_level_deleted", calibration_->statusJson(maintenanceMode()));
+  }
+  if (cmd == "calibration_capture_cell") {
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    if (!calibration_ || !scanner_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    const uint16_t sensorIndex = static_cast<uint16_t>(extractInt(request, "sensor_index", -1));
+    const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 3000));
+    const float level = extractFloat(request, "level", 0);
+    float value = 0;
+    if (!scanner_->captureCellAverage(sensorIndex, durationMs, value) || !calibration_->captureCell(sensorIndex, level, value)) {
+      return error(cmd, "calibration_capture_failed");
+    }
+    String levelJson;
+    calibration_->dumpLevelJson(level, levelJson);
+    return ok(cmd, "calibration_cell_captured", levelJson);
+  }
+  if (cmd == "calibration_capture_all") {
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    if (!calibration_ || !scanner_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    const ScanHealth health = scanner_->health();
+    std::vector<float> values(health.pointCount, 0);
+    const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 3000));
+    const float level = extractFloat(request, "level", 0);
+    if (!scanner_->captureAllAverages(values.data(), values.size(), durationMs) || !calibration_->captureAll(level, values.data(), values.size())) {
+      return error(cmd, "calibration_capture_failed");
+    }
+    String levelJson;
+    calibration_->dumpLevelJson(level, levelJson);
+    return ok(cmd, "calibration_all_captured", levelJson);
   }
   if (cmd == "file_list") {
     String scope = extractString(request, "scope");

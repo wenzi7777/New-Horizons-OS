@@ -44,6 +44,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             "MatrixScanner.cpp",
             "PacketBuilder.h",
             "PacketBuilder.cpp",
+            "Calibration.h",
+            "Calibration.cpp",
             "FindMeClient.h",
             "FindMeClient.cpp",
             "WifiManager.h",
@@ -69,7 +71,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.13"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.14"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -116,6 +118,44 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         ):
             self.assertIn(command, control)
         self.assertIn("maintenance_required", control)
+
+    def test_manual_calibration_workbench_command_set_exists(self):
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        calibration_header = (ARDUINO_ROOT / "Calibration.h").read_text(encoding="utf-8")
+        calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
+        scanner_header = (ARDUINO_ROOT / "MatrixScanner.h").read_text(encoding="utf-8")
+        scanner_impl = (ARDUINO_ROOT / "MatrixScanner.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        for command in (
+            'cmd == "calibration_status"',
+            'cmd == "calibration_enable"',
+            'cmd == "calibration_disable"',
+            'cmd == "calibration_clear_profile"',
+            'cmd == "calibration_dump_level"',
+            'cmd == "calibration_delete_level"',
+            'cmd == "calibration_session_begin"',
+            'cmd == "calibration_session_abort"',
+            'cmd == "calibration_session_commit"',
+            'cmd == "calibration_capture_cell"',
+            'cmd == "calibration_capture_all"',
+        ):
+            self.assertIn(command, control)
+        self.assertIn('data += ",\\"calibration\\":";', control)
+        self.assertIn("calibration_ ? calibration_->statusJson", control)
+        self.assertIn("bool sessionBegin();", calibration_header)
+        self.assertIn("bool captureCell", calibration_header)
+        self.assertIn("bool captureAll", calibration_header)
+        self.assertIn("bool dumpLevelJson", calibration_header)
+        self.assertIn("bool deleteLevel", calibration_header)
+        self.assertIn("bool apply(float rawMv, uint16_t sensorIndex, float& outValue) const;", calibration_header)
+        self.assertIn('"draft_levels"', calibration_impl)
+        self.assertIn('"metadata"', calibration_impl)
+        self.assertIn("void setCalibration", scanner_header)
+        self.assertIn("bool captureCellAverage", scanner_header)
+        self.assertIn("bool captureAllAverages", scanner_header)
+        self.assertIn("calibration_->apply", scanner_impl)
+        self.assertIn("scanner.setCalibration(&calibration)", sketch)
 
     def test_diagnostics_commands_report_heap_totals_and_storage_usage(self):
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
@@ -563,7 +603,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.13}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.14}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
 

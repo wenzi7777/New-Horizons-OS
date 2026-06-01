@@ -6,6 +6,8 @@
 
 namespace nhos {
 
+class Calibration;
+
 struct MatrixFrame {
   uint32_t seq = 0;
   uint32_t timestampMs = 0;
@@ -45,8 +47,11 @@ class MatrixScanner {
   bool hasLayout() const;
   bool setTiming(uint16_t targetFps, uint16_t settleUs, uint16_t sendEveryNFrames = kDefaultSendEveryNFrames);
   bool setLayout(const uint8_t* rows, size_t rowCount, const uint8_t* cols, size_t colCount);
+  void setCalibration(Calibration* calibration);
   bool scanDue() const;
   size_t scanIntoPacketPayload(uint8_t* out, size_t capacity, MatrixFrame& frame);
+  bool captureCellAverage(uint16_t sensorIndex, uint32_t durationMs, float& outValue);
+  bool captureAllAverages(float* outValues, size_t count, uint32_t durationMs);
   bool shouldSendFrame(const MatrixFrame& frame) const;
   void recordUdpSend(bool ok, uint32_t durationUs);
   ScanHealth health() const;
@@ -55,6 +60,8 @@ class MatrixScanner {
   String matrixLayoutJson() const;
 
  private:
+  bool sampleRawFrame(float* outValues, size_t count);
+  bool sampleRawCell(uint16_t sensorIndex, float& outValue);
   void configurePins();
   void setAllColsInactive();
   uint32_t scanIntervalUs() const;
@@ -85,6 +92,7 @@ class MatrixScanner {
   uint32_t udpSendFailures_ = 0;
   uint32_t lastUdpSendUs_ = 0;
   uint32_t lastPerfLogMs_ = 0;
+  Calibration* calibration_ = nullptr;
 };
 
 }  // namespace nhos

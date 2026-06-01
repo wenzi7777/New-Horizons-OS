@@ -4,6 +4,7 @@
 
 #include "BoardPins.h"
 #include "BootModeManager.h"
+#include "Calibration.h"
 #include "Config.h"
 #include "ControlServer.h"
 #include "DeviceConfig.h"
@@ -29,6 +30,7 @@ nhos::ExternalLedController externalLeds;
 nhos::DisplayManager displayManager;
 nhos::WifiManager wifi;
 nhos::MatrixScanner scanner;
+nhos::Calibration calibration;
 nhos::PacketBuilder packetBuilder;
 nhos::PowerManager power;
 nhos::ImuManager imu;
@@ -244,6 +246,13 @@ void setup() {
       deviceConfig.data().scanTiming.targetFps,
       deviceConfig.data().scanTiming.settleUs,
       deviceConfig.data().scanTiming.sendEveryNFrames);
+  calibration.begin(storage);
+  calibration.setLayout(
+      deviceConfig.data().matrixLayout.analogPins,
+      deviceConfig.data().matrixLayout.analogCount,
+      deviceConfig.data().matrixLayout.selectPins,
+      deviceConfig.data().matrixLayout.selectCount);
+  scanner.setCalibration(&calibration);
   logBoot(String("boot_stage=scanner_ready shape=") + scanner.matrixShapeJson());
   if (bootMode.mode() == nhos::RunMode::Normal && scanner.hasLayout()) {
     scanner.start();
@@ -267,7 +276,7 @@ void setup() {
   ota.begin(storage);
   logBoot("boot_stage=ota_ready");
   serviceAutoOta(wifiConnected);
-  control.begin(wifi, scanner, storage, bootMode, ota, findme, power, imu, leds, deviceConfig, displayManager, externalLeds);
+  control.begin(wifi, scanner, storage, bootMode, ota, findme, power, imu, leds, deviceConfig, calibration, displayManager, externalLeds);
   logBoot(String("boot_stage=control_ready port=") + String(nhos::kControlPort));
 
   logBoot(String("runtime_ready protocol=") + nhos::kProtocolName + " firmware=" + nhos::kFirmwareVersion +

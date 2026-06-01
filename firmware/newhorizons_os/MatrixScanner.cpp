@@ -1,6 +1,9 @@
 #include "MatrixScanner.h"
 
+#include <vector>
+
 #include "BoardPins.h"
+#include "Calibration.h"
 
 namespace nhos {
 
@@ -88,6 +91,10 @@ bool MatrixScanner::setLayout(const uint8_t* rows, size_t rowCount, const uint8_
   return true;
 }
 
+void MatrixScanner::setCalibration(Calibration* calibration) {
+  calibration_ = calibration;
+}
+
 bool MatrixScanner::scanDue() const {
   return running_ && hasLayout() && timeReached(micros(), nextScanDueUs_);
 }
@@ -117,6 +124,11 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
 #else
       float value = static_cast<float>(analogRead(rows_[r]));
 #endif
+      if (calibration_) {
+        float calibratedValue = value;
+        calibration_->apply(value, index, calibratedValue);
+        value = calibratedValue;
+      }
       putFloat(out + offset, value);
       offset += sizeof(float);
       if (index < kMaxSensors) {
@@ -144,6 +156,52 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
   return offset;
 }
 
+bool MatrixScanner::captureCellAverage(uint16_t sensorIndex, uint32_t durationMs, float& outValue) {
+  if (!hasLayout() || sensorIndex >= rowCount_ * colCount_) {
+    return false;
+  }
+  const uint32_t startedMs = millis();
+  float total = 0;
+  uint32_t samples = 0;
+  do {
+    float value = 0;
+    if (!sampleRawCell(sensorIndex, value)) {
+      return false;
+    }
+    total += value;
+    ++samples;
+  } while ((millis() - startedMs) < max<uint32_t>(1, durationMs));
+  outValue = samples ? total / static_cast<float>(samples) : 0;
+  return samples > 0;
+}
+
+bool MatrixScanner::captureAllAverages(float* outValues, size_t count, uint32_t durationMs) {
+  const size_t totalPoints = rowCount_ * colCount_;
+  if (!hasLayout() || !outValues || totalPoints == 0 || count < totalPoints) {
+    return false;
+  }
+  std::vector<float> totals(totalPoints, 0);
+  std::vector<float> sample(totalPoints, 0);
+  const uint32_t startedMs = millis();
+  uint32_t samples = 0;
+  do {
+    if (!sampleRawFrame(sample.data(), sample.size())) {
+      return false;
+    }
+    for (size_t i = 0; i < totalPoints; ++i) {
+      totals[i] += sample[i];
+    }
+    ++samples;
+  } while ((millis() - startedMs) < max<uint32_t>(1, durationMs));
+  if (samples == 0) {
+    return false;
+  }
+  for (size_t i = 0; i < totalPoints; ++i) {
+    outValues[i] = totals[i] / static_cast<float>(samples);
+  }
+  return true;
+}
+
 bool MatrixScanner::shouldSendFrame(const MatrixFrame& frame) const {
   const uint16_t sendEvery = max<uint16_t>(1, sendEveryNFrames_);
   return sendEvery <= 1 || (frame.seq % sendEvery) == 0;
@@ -157,6 +215,49 @@ void MatrixScanner::recordUdpSend(bool ok, uint32_t durationUs) {
   } else {
     ++udpSendFailures_;
   }
+}
+
+bool MatrixScanner::sampleRawFrame(float* outValues, size_t count) {
+  const size_t totalPoints = rowCount_ * colCount_;
+  if (!outValues || count < totalPoints || totalPoints == 0) {
+    return false;
+  }
+  size_t index = 0;
+  for (size_t c = 0; c < colCount_; ++c) {
+    digitalWrite(cols_[c], LOW);
+    delayMicroseconds(settleUs_);
+    for (size_t r = 0; r < rowCount_; ++r) {
+#if defined(ESP_ARDUINO_VERSION_MAJOR)
+      outValues[index++] = static_cast<float>(analogReadMilliVolts(rows_[r]));
+#else
+      outValues[index++] = static_cast<float>(analogRead(rows_[r]));
+#endif
+    }
+    digitalWrite(cols_[c], HIGH);
+  }
+  setAllColsInactive();
+  return true;
+}
+
+bool MatrixScanner::sampleRawCell(uint16_t sensorIndex, float& outValue) {
+  if (rowCount_ == 0) {
+    return false;
+  }
+  const size_t rowIndex = sensorIndex % rowCount_;
+  const size_t colIndex = sensorIndex / rowCount_;
+  if (rowIndex >= rowCount_ || colIndex >= colCount_) {
+    return false;
+  }
+  digitalWrite(cols_[colIndex], LOW);
+  delayMicroseconds(settleUs_);
+#if defined(ESP_ARDUINO_VERSION_MAJOR)
+  outValue = static_cast<float>(analogReadMilliVolts(rows_[rowIndex]));
+#else
+  outValue = static_cast<float>(analogRead(rows_[rowIndex]));
+#endif
+  digitalWrite(cols_[colIndex], HIGH);
+  setAllColsInactive();
+  return true;
 }
 
 ScanHealth MatrixScanner::health() const {
