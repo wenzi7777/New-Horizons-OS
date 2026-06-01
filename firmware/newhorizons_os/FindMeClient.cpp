@@ -26,7 +26,8 @@ void FindMeClient::begin(Storage& storage, WifiManager& wifi, const uint8_t uid[
   streamPort_ = static_cast<uint16_t>(storage.getUInt("findme_udp_port", kUdpStreamPort));
   gatewayId_ = storage.getString("findme_gateway_id", "");
   gatewayName_ = storage.getString("findme_gateway_name", "");
-  state_ = streamHost_.isEmpty() ? "idle" : "attached";
+  attachedThisBoot_ = false;
+  state_ = "idle";
   wasWifiConnected_ = wifi_->isConnected();
   if (wasWifiConnected_) {
     discoverNow();
@@ -65,6 +66,7 @@ void FindMeClient::setModeName(const String& mode) {
 }
 
 void FindMeClient::discoverNow() {
+  attachedThisBoot_ = false;
   nextDiscoverMs_ = 1;
   state_ = "discovering";
 }
@@ -78,7 +80,7 @@ void FindMeClient::switchGateway(const String& preferredGatewayId, const String&
 }
 
 bool FindMeClient::hasGateway() const {
-  return !streamHost_.isEmpty() && streamPort_ > 0;
+  return attachedThisBoot_ && !streamHost_.isEmpty() && streamPort_ > 0;
 }
 
 String FindMeClient::streamHost() const {
@@ -214,6 +216,7 @@ void FindMeClient::acceptOffer(const Offer& offer, const IPAddress& host) {
   streamHost_ = nextHost;
   streamPort_ = nextPort;
   priority_ = offer.priority;
+  attachedThisBoot_ = true;
   state_ = "attached";
   lastError_ = "";
   lastSuccessMs_ = millis();

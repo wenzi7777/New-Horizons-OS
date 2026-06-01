@@ -404,7 +404,7 @@ bool DeviceConfig::applyJson(const String& json) {
     uint8_t select[kCols] = {0};
     const size_t analogCount = extractArray(matrix, "analog_pins", analog, kRows);
     const size_t selectCount = extractArray(matrix, "select_pins", select, kCols);
-    const bool configured = storedSchemaVersion >= 2 && extractBool(matrix, "configured", false);
+    const bool configured = extractBool(matrix, "configured", false) || (storedSchemaVersion < 2 && analogCount && selectCount);
     if (configured && analogCount && selectCount) {
       setMatrixLayout(analog, analogCount, select, selectCount);
     } else {

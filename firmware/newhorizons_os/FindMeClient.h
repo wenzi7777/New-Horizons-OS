@@ -55,6 +55,7 @@ class FindMeClient {
   WiFiUDP udp_;
   bool udpStarted_ = false;
   bool wasWifiConnected_ = false;
+  bool attachedThisBoot_ = false;
   uint8_t uid_[6] = {0};
   String mode_ = "normal";
   String state_ = "idle";

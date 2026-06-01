@@ -71,7 +71,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.14"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.5.15"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -381,6 +381,12 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("scan_task_deferred matrix_layout_empty", sketch)
         self.assertIn("scanner.matrixShapeJson()", sketch)
 
+    def test_legacy_schema_matrix_layout_is_migrated_when_arrays_exist(self):
+        config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
+
+        self.assertIn('const bool configured = extractBool(matrix, "configured", false) || (storedSchemaVersion < 2 && analogCount && selectCount);', config)
+        self.assertNotIn('const bool configured = storedSchemaVersion >= 2 && extractBool(matrix, "configured", false);', config)
+
     def test_set_matrix_layout_starts_deferred_scanner_without_reboot(self):
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
 
@@ -603,7 +609,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.14}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.5.15}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
 
