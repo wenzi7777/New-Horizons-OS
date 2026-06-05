@@ -63,6 +63,18 @@ ChargeState PowerManager::chargeState() const {
   return chargeState_;
 }
 
+bool PowerManager::chargerDetected() const {
+  return detected_ && (stat0_ & 0x01) != 0;
+}
+
+bool PowerManager::softOffRecommended() const {
+  return chargerDetected() || chargeState_ != ChargeState::NotCharging;
+}
+
+uint8_t PowerManager::lastStat0() const {
+  return stat0_;
+}
+
 bool PowerManager::applyProfile(ChargeProfile profile) {
   const ChargeProfileConfig& config = configForProfile(profile);
   lastConfigError_ = "";
@@ -133,8 +145,14 @@ String PowerManager::statusJson() const {
   out += chargeStateName();
   out += "\",\"detail\":\"";
   out += chargeDetailName();
+  out += "\",\"charge_state\":\"";
+  out += chargeStateName();
   out += "\",\"charger\":\"bq25180\",\"detected\":";
   out += detected_ ? "true" : "false";
+  out += ",\"charger_detected\":";
+  out += chargerDetected() ? "true" : "false";
+  out += ",\"soft_off_recommended\":";
+  out += softOffRecommended() ? "true" : "false";
   out += ",\"configured\":";
   out += configured_ ? "true" : "false";
   out += ",\"profile\":\"";
@@ -152,6 +170,8 @@ String PowerManager::statusJson() const {
   out += ",\"safety_timer_hours\":";
   out += String(safetyTimerHours_);
   out += ",\"stat0\":";
+  out += String(stat0_);
+  out += ",\"last_stat0\":";
   out += String(stat0_);
   out += ",\"last_error\":\"";
   out += lastError_;

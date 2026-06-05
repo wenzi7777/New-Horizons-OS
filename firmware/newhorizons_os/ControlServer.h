@@ -15,10 +15,13 @@
 #include "MatrixScanner.h"
 #include "OtaManager.h"
 #include "PowerManager.h"
+#include "PowerStateManager.h"
 #include "Storage.h"
 #include "WifiManager.h"
 
 namespace nhos {
+
+class PowerStateManager;
 
 class ControlServer {
  public:
@@ -30,6 +33,7 @@ class ControlServer {
       OtaManager& ota,
       FindMeClient& findme,
       PowerManager& power,
+      PowerStateManager& powerState,
       ImuManager& imu,
       LedController& leds,
       DeviceConfig& deviceConfig,
@@ -71,6 +75,7 @@ class ControlServer {
   OtaManager* ota_ = nullptr;
   FindMeClient* findme_ = nullptr;
   PowerManager* power_ = nullptr;
+  PowerStateManager* powerState_ = nullptr;
   ImuManager* imu_ = nullptr;
   LedController* leds_ = nullptr;
   DeviceConfig* deviceConfig_ = nullptr;

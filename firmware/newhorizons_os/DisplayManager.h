@@ -21,6 +21,8 @@ class DisplayManager {
 
   void begin(const OledConfig& config);
   void apply(const OledConfig& config);
+  void sleep();
+  void wake();
   void service(uint32_t nowMs, const String& ip, const String& gatewayIp, const ScanHealth& health, uint32_t heapFree, uint32_t heapTotal);
   String statusJson() const;
 
@@ -40,6 +42,7 @@ class DisplayManager {
   bool detected_ = false;
   uint8_t address_ = 0;
   uint32_t lastUpdateMs_ = 0;
+  bool sleeping_ = false;
   String lastError_;
 };
 

@@ -49,6 +49,7 @@ void DisplayManager::apply(const OledConfig& config) {
   if (config_.mode == "off") {
     enabled_ = false;
     detected_ = false;
+    sleeping_ = false;
     lastError_ = "";
     if (initialized_) {
       display_.clearDisplay();
@@ -64,8 +65,29 @@ void DisplayManager::apply(const OledConfig& config) {
   }
 }
 
+void DisplayManager::sleep() {
+  if (!initialized_) {
+    return;
+  }
+  display_.clearDisplay();
+  display_.display();
+  display_.ssd1306_command(SSD1306_DISPLAYOFF);
+  sleeping_ = true;
+}
+
+void DisplayManager::wake() {
+  sleeping_ = false;
+  if (!initialized_ || !enabled_) {
+    return;
+  }
+  display_.ssd1306_command(SSD1306_DISPLAYON);
+  display_.ssd1306_command(SSD1306_SETCONTRAST);
+  display_.ssd1306_command(config_.contrast);
+  lastUpdateMs_ = 0;
+}
+
 void DisplayManager::service(uint32_t nowMs, const String& ip, const String& gatewayIp, const ScanHealth& health, uint32_t heapFree, uint32_t heapTotal) {
-  if (!enabled_) {
+  if (!enabled_ || sleeping_) {
     return;
   }
   const uint8_t hz = config_.updateHz ? config_.updateHz : 1;
@@ -95,6 +117,8 @@ String DisplayManager::statusJson() const {
   out += jsonEscape(config_.mode);
   out += "\",\"enabled\":";
   out += enabled_ ? "true" : "false";
+  out += ",\"sleeping\":";
+  out += sleeping_ ? "true" : "false";
   out += ",\"detected\":";
   out += detected_ ? "true" : "false";
   out += ",\"addr\":\"";
@@ -138,6 +162,7 @@ bool DisplayManager::configure() {
   initialized_ = true;
   enabled_ = true;
   lastError_ = "";
+  sleeping_ = false;
   display_.ssd1306_command(SSD1306_DISPLAYON);
   display_.dim(false);
   display_.ssd1306_command(SSD1306_SETCONTRAST);

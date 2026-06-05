@@ -14,6 +14,7 @@ void ControlServer::begin(
     OtaManager& ota,
     FindMeClient& findme,
     PowerManager& power,
+    PowerStateManager& powerState,
     ImuManager& imu,
     LedController& leds,
     DeviceConfig& deviceConfig,
@@ -27,6 +28,7 @@ void ControlServer::begin(
   ota_ = &ota;
   findme_ = &findme;
   power_ = &power;
+  powerState_ = &powerState;
   imu_ = &imu;
   leds_ = &leds;
   deviceConfig_ = &deviceConfig;
@@ -175,6 +177,8 @@ String ControlServer::processCommand(const String& request) {
     data += wifi_->statusJson();
     data += ",\"battery\":";
     data += power_ ? power_->statusJson() : "{}";
+    data += ",\"power\":";
+    data += powerState_ ? powerState_->statusJson() : "{}";
     data += ",\"config\":";
     data += deviceConfig_ ? deviceConfig_->statusJson() : "{}";
     data += ",\"logging\":";
@@ -314,6 +318,19 @@ String ControlServer::processCommand(const String& request) {
     data += power_->statusJson();
     data += "}";
     return ok(cmd, "charge_profile_updated", data);
+  }
+  if (cmd == "power_set_state") {
+    if (!powerState_) {
+      return error(cmd, "power_state_unavailable");
+    }
+    const String nextState = extractString(request, "state");
+    if (!powerState_->requestStateByName(nextState, power_ && power_->chargerDetected())) {
+      return error(cmd, "power_state_invalid");
+    }
+    String data = "{\"power\":";
+    data += powerState_->statusJson();
+    data += "}";
+    return ok(cmd, "power_state_updated", data);
   }
   if (cmd == "set_filter") {
     const bool enabled = extractBool(request, "enabled", true);

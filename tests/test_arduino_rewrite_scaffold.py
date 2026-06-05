@@ -71,7 +71,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.5.16"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.6.0"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -278,12 +278,18 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
         self.assertIn("enum class LedSignal", header)
+        self.assertIn("enum class PatternMode", header)
         self.assertIn("ChargeDone", header)
         self.assertIn("ChargingOrMissing", header)
         self.assertIn("0x39, 0xc5, 0xbb", header + led)
-        self.assertRegex(led, re.compile(r"ChargeDone.*?5000.*?1", re.S))
-        self.assertRegex(led, re.compile(r"ChargingOrMissing.*?10000.*?2", re.S))
-        self.assertRegex(led, re.compile(r"Online.*?LedPalette::Off", re.S))
+        self.assertIn("PatternMode::Solid", led)
+        self.assertIn("PatternMode::Breathe", led)
+        self.assertIn("PatternMode::BlinkBurst", led)
+        self.assertIn("PatternMode::AlternateBurst", led)
+        self.assertRegex(led, re.compile(r"Online.*?PatternMode::Solid.*?LedPalette::Online", re.S))
+        self.assertRegex(led, re.compile(r"ChargeDone.*?PatternMode::Solid.*?LedPalette::ChargeDone", re.S))
+        self.assertRegex(led, re.compile(r"ChargingOrMissing.*?PatternMode::Solid.*?LedPalette::Maintenance", re.S))
+        self.assertRegex(led, re.compile(r"OtaError.*?1400", re.S))
         self.assertIn("showEvent(LedSignal::CommandReceived)", control)
         self.assertIn("showEvent(responseOk ? LedSignal::CommandSuccess : LedSignal::CommandFailed)", control)
         self.assertIn("enum class ChargeState", power_header)
@@ -295,6 +301,17 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("power.statusJson()", sketch)
         self.assertIn('data += ",\\"battery\\":";', control)
         self.assertIn("power_->statusJson()", control)
+
+    def test_sk6812_runtime_status_uses_solid_base_states_and_event_overlays(self):
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("leds.showEvent(nhos::LedSignal::ScanWarning)", sketch)
+        self.assertNotIn("scanWarningUntilMs", sketch)
+        self.assertIn("LedSignal::Online", sketch)
+        self.assertIn("LedSignal::ChargeDone", sketch)
+        self.assertIn("LedSignal::ChargingOrMissing", sketch)
+        self.assertIn("LedSignal::SoftOffCharging", sketch)
+        self.assertIn("LedSignal::SoftOffChargeDone", sketch)
 
     def test_bq25180_charge_profiles_include_safe_and_fast_modes(self):
         power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
@@ -609,19 +626,80 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.5.16}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.6.0}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
-    def test_latest_manifest_points_to_v0_5_16_artifact(self):
+    def test_latest_manifest_points_to_v0_6_0_artifact(self):
         latest = (REPO_ROOT / "releases" / "arduino-latest.json").read_text(encoding="utf-8")
-        versioned = (REPO_ROOT / "releases" / "arduino-v0.5.16.json").read_text(encoding="utf-8")
-        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.5.16.bin"
+        versioned = (REPO_ROOT / "releases" / "arduino-v0.6.0.json").read_text(encoding="utf-8")
+        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.6.0.bin"
 
-        self.assertIn('"latest": "v0.5.16"', latest)
-        self.assertIn("newhorizons-os-v0.5.16.bin", latest)
-        self.assertIn("v0.5.16/releases/artifacts", latest)
-        self.assertIn('"latest": "v0.5.16"', versioned)
+        self.assertIn('"latest": "v0.6.0"', latest)
+        self.assertIn("newhorizons-os-v0.6.0.bin", latest)
+        self.assertIn("v0.6.0/releases/artifacts", latest)
+        self.assertIn('"latest": "v0.6.0"', versioned)
         self.assertTrue(artifact.exists())
+
+    def test_power_state_manager_scaffold_exists_and_tracks_soft_off_states(self):
+        header = (ARDUINO_ROOT / "PowerStateManager.h").read_text(encoding="utf-8")
+        impl = (ARDUINO_ROOT / "PowerStateManager.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("enum class PowerState", header)
+        self.assertIn("SoftOffBattery", header)
+        self.assertIn("SoftOffCharging", header)
+        self.assertIn("class PowerStateManager", header)
+        self.assertIn("void begin();", header)
+        self.assertIn("void service", header)
+        self.assertIn("bool shouldRunServices() const;", header)
+        self.assertIn("String statusJson", header)
+        self.assertIn("PowerState::SoftOffBattery", impl)
+        self.assertIn("PowerState::SoftOffCharging", impl)
+        self.assertIn("powerState.begin()", sketch)
+        self.assertIn("powerState.service", sketch)
+
+    def test_soft_off_path_uses_gpio46_light_sleep_and_subsystem_suspend(self):
+        header = (ARDUINO_ROOT / "WifiManager.h").read_text(encoding="utf-8")
+        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
+        display = (ARDUINO_ROOT / "DisplayManager.cpp").read_text(encoding="utf-8")
+        external = (ARDUINO_ROOT / "ExternalLedController.cpp").read_text(encoding="utf-8")
+        power_state = (ARDUINO_ROOT / "PowerStateManager.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("void suspend();", header)
+        self.assertIn("void resume();", header)
+        self.assertIn("WiFi.mode(WIFI_OFF);", wifi)
+        self.assertIn("void DisplayManager::sleep()", display)
+        self.assertIn("void DisplayManager::wake()", display)
+        self.assertIn("void ExternalLedController::sleep()", external)
+        self.assertIn("void ExternalLedController::wake()", external)
+        self.assertIn("gpio_wakeup_enable", power_state)
+        self.assertIn("esp_sleep_enable_gpio_wakeup", power_state)
+        self.assertIn("esp_sleep_enable_timer_wakeup", power_state)
+        self.assertIn("esp_light_sleep_start()", power_state)
+        self.assertIn("kActionButtonPin", power_state)
+        self.assertIn("scanner.stop()", sketch)
+        self.assertIn("wifi.suspend()", sketch)
+        self.assertIn("displayManager.sleep()", sketch)
+        self.assertIn("externalLeds.sleep()", sketch)
+
+    def test_power_status_and_control_surface_include_soft_off_state(self):
+        power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
+        power_impl = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
+        control_header = (ARDUINO_ROOT / "ControlServer.h").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("bool chargerDetected() const;", power_header)
+        self.assertIn("bool softOffRecommended() const;", power_header)
+        self.assertIn("uint8_t lastStat0() const;", power_header)
+        self.assertIn('\\"charger_detected\\":', power_impl)
+        self.assertIn('\\"soft_off_recommended\\":', power_impl)
+        self.assertIn('\\"last_stat0\\":', power_impl)
+        self.assertIn("class PowerStateManager", control_header)
+        self.assertIn('cmd == "power_set_state"', control)
+        self.assertIn('data += ",\\"power\\":";', control)
+        self.assertIn("powerState.statusJson()", sketch)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ namespace nhos {
 
 bool WifiManager::begin(Storage& storage, bool forceSetupPortal) {
   storage_ = &storage;
+  suspended_ = false;
   if (forceSetupPortal) {
     Serial.println(F("wifi_setup_requested_by_action_button"));
     startSetupAp();
@@ -29,6 +30,9 @@ bool WifiManager::begin(Storage& storage, bool forceSetupPortal) {
 }
 
 void WifiManager::service() {
+  if (suspended_) {
+    return;
+  }
   if (setupActive_) {
     serviceSetupPortal();
     return;
@@ -38,6 +42,27 @@ void WifiManager::service() {
   }
   lastReconnectMs_ = millis();
   connectStored();
+}
+
+void WifiManager::suspend() {
+  stopSetupPortal();
+  WiFi.disconnect(true, false);
+  WiFi.mode(WIFI_OFF);
+  suspended_ = true;
+}
+
+void WifiManager::resume() {
+  if (!suspended_ || !storage_) {
+    return;
+  }
+  suspended_ = false;
+  if (!hasCredentials()) {
+    startSetupAp();
+    return;
+  }
+  if (!connectStored()) {
+    startSetupAp();
+  }
 }
 
 bool WifiManager::isConnected() const {
@@ -86,6 +111,8 @@ String WifiManager::statusJson() const {
   out += isConnected() ? "true" : "false";
   out += ",\"setup_active\":";
   out += setupActive_ ? "true" : "false";
+  out += ",\"suspended\":";
+  out += suspended_ ? "true" : "false";
   out += ",\"rssi\":";
   out += isConnected() ? WiFi.RSSI() : 0;
   out += ",\"ip\":\"";
