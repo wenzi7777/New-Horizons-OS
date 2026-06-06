@@ -96,6 +96,72 @@ void ControlServer::service() {
   servicePendingApplyUpdate();
 }
 
+void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
+  if (!started_) {
+    return;
+  }
+  const int pktSize = udp.parsePacket();
+  if (pktSize <= 0) {
+    return;
+  }
+  const IPAddress senderIp = udp.remoteIP();
+  const uint16_t senderPort = udp.remotePort();
+  constexpr int kMaxSize = 512;
+  static char buf[kMaxSize];
+  const int len = udp.read(buf, kMaxSize - 1);
+  if (len <= 0 || buf[0] != '{') {
+    return;
+  }
+  buf[len] = '\0';
+  const String frame(buf, len);
+
+  String typeStr;
+  if (!jsonExtractString(frame, "type", typeStr) || typeStr != "command") {
+    return;
+  }
+
+  long seq = 0;
+  jsonExtractInt(frame, "seq", seq);
+  const String requestId = jsonExtractString(frame, "request_id");
+  String payloadStr;
+  if (!jsonExtractObject(frame, "payload", payloadStr) || payloadStr.isEmpty()) {
+    return;
+  }
+
+  const String uid = deviceUidString();
+  const String sender = senderIp.toString();
+
+  // ACK
+  String ack;
+  ack.reserve(100);
+  bool af = true;
+  ack += '{';
+  jsonStringField(ack, "type", "ack", af);
+  jsonStringField(ack, "device_uid", uid, af);
+  jsonSignedField(ack, "ack", seq, af);
+  jsonStringField(ack, "request_id", requestId, af);
+  ack += '}';
+  udp.beginPacket(sender.c_str(), senderPort);
+  udp.print(ack);
+  udp.endPacket();
+
+  const String response = processCommand(payloadStr);
+
+  // Result
+  String result;
+  result.reserve(response.length() + 120);
+  bool rf = true;
+  result += '{';
+  jsonStringField(result, "type", "result", rf);
+  jsonStringField(result, "device_uid", uid, rf);
+  jsonStringField(result, "request_id", requestId, rf);
+  jsonRawField(result, "payload", response, rf);
+  result += '}';
+  udp.beginPacket(sender.c_str(), senderPort);
+  udp.print(result);
+  udp.endPacket();
+}
+
 bool ControlServer::maintenanceMode() const {
   return boot_ && boot_->mode() != RunMode::Normal;
 }

@@ -376,6 +376,7 @@ void loop() {
     findme.setModeName(bootMode.modeName());
     findme.service();
     control.service();
+    control.serviceUdpCommand(streamUdp);
     imu.service(micros());
     sendHeartbeatIfDue();
     scanAndStreamIfDue();

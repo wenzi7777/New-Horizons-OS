@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <WiFiServer.h>
+#include <WiFiUDP.h>
 #include <vector>
 
 #include "BootModeManager.h"
@@ -41,6 +42,7 @@ class ControlServer {
       DisplayManager& display,
       ExternalLedController& externalLeds);
   void service();
+  void serviceUdpCommand(WiFiUDP& udp);
   bool maintenanceMode() const;
   const String& streamHost() const;
   uint16_t streamPort() const;

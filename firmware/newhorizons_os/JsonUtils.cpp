@@ -132,7 +132,7 @@ int findKeyColon(const String& source, const char* key) {
     String currentKey;
     int nextIndex = i;
     if (!parseJsonStringToken(source, i, currentKey, nextIndex)) {
-      return -1;
+      continue;
     }
     if (currentKey == key) {
       const int colon = skipWhitespace(source, nextIndex);
