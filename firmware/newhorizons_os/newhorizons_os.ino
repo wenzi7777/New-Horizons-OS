@@ -163,17 +163,17 @@ void scanAndStreamIfDue() {
     scanner.recordUdpSend(false, 0);
     return;
   }
-  String host = control.streamHost();
+  const String* host = &control.streamHost();
   uint16_t port = control.streamPort();
   if (findme.hasGateway()) {
-    host = findme.streamHost();
+    host = &findme.streamHost();
     port = findme.streamPort();
   }
-  if (host.isEmpty()) {
+  if (host->isEmpty()) {
     return;
   }
   const uint32_t udpStartUs = micros();
-  streamUdp.beginPacket(host.c_str(), port);
+  streamUdp.beginPacket(host->c_str(), port);
   streamUdp.write(packetBuffer, len);
   const bool sent = streamUdp.endPacket() == 1;
   scanner.recordUdpSend(sent, micros() - udpStartUs);

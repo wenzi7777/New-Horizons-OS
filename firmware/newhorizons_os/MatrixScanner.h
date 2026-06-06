@@ -92,6 +92,8 @@ class MatrixScanner {
   uint32_t udpSendFailures_ = 0;
   uint32_t lastUdpSendUs_ = 0;
   uint32_t lastPerfLogMs_ = 0;
+  float captureTotalsScratch_[kMaxSensors] = {0};
+  float captureSampleScratch_[kMaxSensors] = {0};
   Calibration* calibration_ = nullptr;
 };
 

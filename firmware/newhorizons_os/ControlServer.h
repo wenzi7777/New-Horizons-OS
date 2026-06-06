@@ -42,7 +42,7 @@ class ControlServer {
       ExternalLedController& externalLeds);
   void service();
   bool maintenanceMode() const;
-  String streamHost() const;
+  const String& streamHost() const;
   uint16_t streamPort() const;
 
  private:

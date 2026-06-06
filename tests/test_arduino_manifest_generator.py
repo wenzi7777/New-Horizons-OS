@@ -29,12 +29,14 @@ class ArduinoManifestGeneratorTests(unittest.TestCase):
                 model="VD-CTL/R v1.0.F 2026.4",
                 version="v1.2.3",
                 base_url="https://example.com/releases/v1.2.3",
+                changelog_url="https://example.com/notes/v1.2.3.md",
             )
 
             self.assertEqual(manifest["product"], "New Horizons OS Arduino")
             self.assertEqual(manifest["protocol"], "NHO/Arduino/1")
             self.assertEqual(manifest["model"], "VD-CTL/R v1.0.F 2026.4")
             self.assertEqual(manifest["latest"], "v1.2.3")
+            self.assertEqual(manifest["changelog_url"], "https://example.com/notes/v1.2.3.md")
             self.assertEqual(manifest["firmware"]["size"], len(b"arduino-firmware"))
             self.assertEqual(
                 manifest["firmware"]["url"],
@@ -56,12 +58,14 @@ class ArduinoManifestGeneratorTests(unittest.TestCase):
                 model="VD-CTL/R v1.0.F 2026.4",
                 version="v9.9.9",
                 base_url="https://example.com",
+                changelog_url="https://example.com/notes/v9.9.9.md",
             )
 
             raw = output.read_text(encoding="utf-8")
             self.assertTrue(raw.endswith("\n"))
             decoded = json.loads(raw)
             self.assertEqual(decoded["latest"], "v9.9.9")
+            self.assertEqual(decoded["changelog_url"], "https://example.com/notes/v9.9.9.md")
             self.assertEqual(decoded["firmware"]["size"], 8)
 
 

@@ -83,7 +83,7 @@ bool FindMeClient::hasGateway() const {
   return attachedThisBoot_ && !streamHost_.isEmpty() && streamPort_ > 0;
 }
 
-String FindMeClient::streamHost() const {
+const String& FindMeClient::streamHost() const {
   return streamHost_;
 }
 

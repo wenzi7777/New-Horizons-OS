@@ -20,12 +20,12 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def build_manifest(*, firmware_path: Path, model: str, version: str, base_url: str) -> dict[str, Any]:
+def build_manifest(*, firmware_path: Path, model: str, version: str, base_url: str, changelog_url: str = "") -> dict[str, Any]:
     firmware_path = Path(firmware_path)
     if not firmware_path.is_file():
         raise FileNotFoundError(str(firmware_path))
     base = str(base_url).rstrip("/")
-    return {
+    manifest = {
         "product": PRODUCT,
         "protocol": PROTOCOL,
         "model": model,
@@ -36,14 +36,18 @@ def build_manifest(*, firmware_path: Path, model: str, version: str, base_url: s
             "size": firmware_path.stat().st_size,
         },
     }
+    if changelog_url:
+        manifest["changelog_url"] = str(changelog_url).strip()
+    return manifest
 
 
-def write_manifest(*, output_path: Path, firmware_path: Path, model: str, version: str, base_url: str) -> dict[str, Any]:
+def write_manifest(*, output_path: Path, firmware_path: Path, model: str, version: str, base_url: str, changelog_url: str = "") -> dict[str, Any]:
     manifest = build_manifest(
         firmware_path=firmware_path,
         model=model,
         version=version,
         base_url=base_url,
+        changelog_url=changelog_url,
     )
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,6 +62,7 @@ def main() -> None:
     parser.add_argument("--model", default="VD-CTL/R v1.0.F 2026.4")
     parser.add_argument("--version", required=True)
     parser.add_argument("--base-url", required=True)
+    parser.add_argument("--changelog-url", default="")
     args = parser.parse_args()
     write_manifest(
         output_path=args.output,
@@ -65,6 +70,7 @@ def main() -> None:
         model=args.model,
         version=args.version,
         base_url=args.base_url,
+        changelog_url=args.changelog_url,
     )
 
 

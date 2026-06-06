@@ -1,7 +1,5 @@
 #include "MatrixScanner.h"
 
-#include <vector>
-
 #include "BoardPins.h"
 #include "Calibration.h"
 
@@ -180,16 +178,17 @@ bool MatrixScanner::captureAllAverages(float* outValues, size_t count, uint32_t 
   if (!hasLayout() || !outValues || totalPoints == 0 || count < totalPoints) {
     return false;
   }
-  std::vector<float> totals(totalPoints, 0);
-  std::vector<float> sample(totalPoints, 0);
+  for (size_t i = 0; i < totalPoints; ++i) {
+    captureTotalsScratch_[i] = 0;
+  }
   const uint32_t startedMs = millis();
   uint32_t samples = 0;
   do {
-    if (!sampleRawFrame(sample.data(), sample.size())) {
+    if (!sampleRawFrame(captureSampleScratch_, totalPoints)) {
       return false;
     }
     for (size_t i = 0; i < totalPoints; ++i) {
-      totals[i] += sample[i];
+      captureTotalsScratch_[i] += captureSampleScratch_[i];
     }
     ++samples;
   } while ((millis() - startedMs) < max<uint32_t>(1, durationMs));
@@ -197,7 +196,7 @@ bool MatrixScanner::captureAllAverages(float* outValues, size_t count, uint32_t 
     return false;
   }
   for (size_t i = 0; i < totalPoints; ++i) {
-    outValues[i] = totals[i] / static_cast<float>(samples);
+    outValues[i] = captureTotalsScratch_[i] / static_cast<float>(samples);
   }
   return true;
 }
@@ -286,6 +285,7 @@ ScanHealth MatrixScanner::health() const {
 String MatrixScanner::healthJson() const {
   ScanHealth h = health();
   String out = "{";
+  out.reserve(320);
   out += "\"scan_active\":";
   out += h.active ? "true" : "false";
   out += ",\"requested_target_fps\":";

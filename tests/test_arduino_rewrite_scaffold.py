@@ -1,3 +1,4 @@
+import json
 import re
 import unittest
 from pathlib import Path
@@ -71,7 +72,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.6.0"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.6.1"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -101,7 +102,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn('host = "255.255.255.255"', sketch)
         self.assertIn('cmd == "findme_discover"', control)
         self.assertIn('cmd == "findme_switch_gateway"', control)
-        self.assertIn('data += ",\\"findme\\":";', control)
+        self.assertIn('jsonRawField(data, "findme"', control)
         self.assertIn("findme_->statusJson()", control)
 
     def test_arduino_file_management_uses_read_write_command_contract(self):
@@ -141,7 +142,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             'cmd == "calibration_capture_all"',
         ):
             self.assertIn(command, control)
-        self.assertIn('data += ",\\"calibration\\":";', control)
+        self.assertIn('jsonRawField(data, "calibration"', control)
         self.assertIn("calibration_ ? calibration_->statusJson", control)
         self.assertIn("bool sessionBegin();", calibration_header)
         self.assertIn("bool captureCell", calibration_header)
@@ -299,7 +300,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("ChargeState::ChargeDone", power)
         self.assertIn("power.service(millis())", sketch)
         self.assertIn("power.statusJson()", sketch)
-        self.assertIn('data += ",\\"battery\\":";', control)
+        self.assertIn('jsonRawField(data, "battery"', control)
         self.assertIn("power_->statusJson()", control)
 
     def test_sk6812_runtime_status_uses_solid_base_states_and_event_overlays(self):
@@ -465,7 +466,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("rotateLogIfNeeded", storage)
         self.assertIn('cmd == "set_log"', control)
         self.assertIn("storage_->configureLog", control)
-        self.assertIn('data += ",\\"logging\\":";', control)
+        self.assertIn('jsonRawField(data, "logging"', control)
         self.assertIn("storage.configureLog", sketch)
 
     def test_boot_auto_ota_is_configurable_and_runs_after_wifi_ready(self):
@@ -595,9 +596,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         body = control[start:end]
 
         self.assertNotIn("extractString(request, key)", body)
-        self.assertIn('String value = request.substring(colon + 1, end);', body)
-        self.assertIn("value.trim();", body)
-        self.assertIn("return value.toFloat();", body)
+        self.assertIn("jsonExtractFloat(request, key, value)", body)
+        self.assertIn("return jsonExtractFloat(request, key, value) ? value : fallback;", body)
 
     def test_board_pin_map_matches_new_horizons_hardware(self):
         pins = (ARDUINO_ROOT / "BoardPins.cpp").read_text(encoding="utf-8")
@@ -626,19 +626,78 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.6.0}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.6.1}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
-    def test_latest_manifest_points_to_v0_6_0_artifact(self):
+    def test_latest_manifest_points_to_v0_6_1_artifact(self):
         latest = (REPO_ROOT / "releases" / "arduino-latest.json").read_text(encoding="utf-8")
-        versioned = (REPO_ROOT / "releases" / "arduino-v0.6.0.json").read_text(encoding="utf-8")
-        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.6.0.bin"
+        versioned = (REPO_ROOT / "releases" / "arduino-v0.6.1.json").read_text(encoding="utf-8")
+        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.6.1.bin"
 
-        self.assertIn('"latest": "v0.6.0"', latest)
-        self.assertIn("newhorizons-os-v0.6.0.bin", latest)
-        self.assertIn("v0.6.0/releases/artifacts", latest)
-        self.assertIn('"latest": "v0.6.0"', versioned)
+        self.assertIn('"latest": "v0.6.1"', latest)
+        self.assertIn("newhorizons-os-v0.6.1.bin", latest)
+        self.assertIn("v0.6.1/releases/artifacts", latest)
+        self.assertIn("v0.6.1.md", latest)
+        self.assertIn('"latest": "v0.6.1"', versioned)
         self.assertTrue(artifact.exists())
+
+    def test_ota_manifest_and_status_include_changelog_url(self):
+        script = (REPO_ROOT / "firmware" / "scripts" / "generate_arduino_manifest.py").read_text(encoding="utf-8")
+        ota_header = (ARDUINO_ROOT / "OtaManager.h").read_text(encoding="utf-8")
+        ota_impl = (ARDUINO_ROOT / "OtaManager.cpp").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("changelog_url", script)
+        self.assertIn("String changelogUrl", ota_header)
+        self.assertIn('jsonStringField(out, "changelog_url"', ota_impl)
+        self.assertIn('out.changelogUrl = extractString(payload, "changelog_url")', ota_impl)
+        self.assertIn('jsonStringField(data, "changelog_url"', control)
+
+    def test_control_and_ota_use_shared_json_helpers(self):
+        json_header = ARDUINO_ROOT / "JsonUtils.h"
+        json_impl = ARDUINO_ROOT / "JsonUtils.cpp"
+        control_header = (ARDUINO_ROOT / "ControlServer.h").read_text(encoding="utf-8")
+        control_impl = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        ota_impl = (ARDUINO_ROOT / "OtaManager.cpp").read_text(encoding="utf-8")
+
+        self.assertTrue(json_header.exists())
+        self.assertTrue(json_impl.exists())
+        self.assertIn("jsonExtractString", json_header.read_text(encoding="utf-8"))
+        self.assertIn("jsonExtractObject", json_header.read_text(encoding="utf-8"))
+        self.assertIn("jsonStringField", json_header.read_text(encoding="utf-8"))
+        self.assertIn('#include "JsonUtils.h"', control_impl)
+        self.assertIn('#include "JsonUtils.h"', ota_impl)
+        self.assertIn("jsonExtractString(", control_impl)
+        self.assertIn("jsonExtractObject(", control_impl)
+        self.assertIn("jsonStringField(", control_impl)
+        self.assertIn("jsonExtractString(", ota_impl)
+        self.assertNotIn('String pattern = "\\"" + String(key) + "\\"";', control_impl)
+        self.assertNotIn('String pattern = "\\"" + String(key) + "\\"";', ota_impl)
+        self.assertIn("const String& streamHost() const;", control_header)
+
+    def test_control_and_ota_json_contract_text_is_parseable(self):
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        ota_impl = (ARDUINO_ROOT / "OtaManager.cpp").read_text(encoding="utf-8")
+
+        self.assertIn('jsonRawField(data, "update_state"', control)
+        self.assertIn('jsonStringField(out, "manifest_url"', ota_impl)
+
+    def test_readme_uses_unittest_verification_command(self):
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("python3 -m unittest discover -s tests -q", readme)
+        self.assertNotIn("python3 -m pytest tests -q", readme)
+
+    def test_matrix_scanner_reuses_fixed_average_buffers(self):
+        header = (ARDUINO_ROOT / "MatrixScanner.h").read_text(encoding="utf-8")
+        impl = (ARDUINO_ROOT / "MatrixScanner.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("float captureTotalsScratch_[kMaxSensors] = {0};", header)
+        self.assertIn("float captureSampleScratch_[kMaxSensors] = {0};", header)
+        self.assertNotIn("std::vector<float> totals(totalPoints, 0);", impl)
+        self.assertNotIn("std::vector<float> sample(totalPoints, 0);", impl)
+        self.assertIn("captureTotalsScratch_[i] = 0;", impl)
+        self.assertIn("sampleRawFrame(captureSampleScratch_, totalPoints)", impl)
 
     def test_power_state_manager_scaffold_exists_and_tracks_soft_off_states(self):
         header = (ARDUINO_ROOT / "PowerStateManager.h").read_text(encoding="utf-8")
@@ -698,7 +757,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('\\"last_stat0\\":', power_impl)
         self.assertIn("class PowerStateManager", control_header)
         self.assertIn('cmd == "power_set_state"', control)
-        self.assertIn('data += ",\\"power\\":";', control)
+        self.assertIn('jsonRawField(data, "power"', control)
         self.assertIn("powerState.statusJson()", sketch)
 
 
