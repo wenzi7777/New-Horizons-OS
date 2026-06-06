@@ -176,6 +176,13 @@ uint8_t clampByte(int value, uint8_t minValue, uint8_t maxValue) {
   }
   return static_cast<uint8_t>(value);
 }
+
+uint8_t streamBufferDepthForMode(const String& mode) {
+  if (mode == "extended") {
+    return kExtendedScanRingFrames;
+  }
+  return kStandardScanRingFrames;
+}
 }  // namespace
 
 bool DeviceConfig::load(Storage& storage) {
@@ -245,6 +252,16 @@ bool DeviceConfig::setScanTiming(uint16_t targetFps, uint16_t settleUs, uint16_t
   data_.scanTiming.targetFps = targetFps;
   data_.scanTiming.settleUs = settleUs;
   data_.scanTiming.sendEveryNFrames = sendEveryNFrames;
+  return true;
+}
+
+bool DeviceConfig::setStreamBuffer(bool enabled, const String& mode) {
+  if (!validStreamBufferMode(mode)) {
+    return false;
+  }
+  data_.streamBuffer.enabled = enabled;
+  data_.streamBuffer.mode = mode;
+  data_.streamBuffer.depthFrames = enabled ? streamBufferDepthForMode(mode) : 0;
   return true;
 }
 
@@ -344,6 +361,17 @@ String DeviceConfig::otaJson() const {
   return out;
 }
 
+String DeviceConfig::streamBufferJson() const {
+  String out = "{\"enabled\":";
+  out += data_.streamBuffer.enabled ? "true" : "false";
+  out += ",\"mode\":\"";
+  out += jsonEscape(data_.streamBuffer.mode);
+  out += "\",\"depth_frames\":";
+  out += String(static_cast<unsigned int>(data_.streamBuffer.depthFrames));
+  out += "}";
+  return out;
+}
+
 String DeviceConfig::configJson() const {
   return toJson();
 }
@@ -356,6 +384,10 @@ bool DeviceConfig::validLogMode(const String& mode) {
   return mode == "standard" || mode == "extended";
 }
 
+bool DeviceConfig::validStreamBufferMode(const String& mode) {
+  return mode == "standard" || mode == "extended";
+}
+
 bool DeviceConfig::validExternalLedMode(const String& mode) {
   return mode == "off" || mode == "enabled";
 }
@@ -365,7 +397,7 @@ bool DeviceConfig::validOledMode(const String& mode) {
 }
 
 void DeviceConfig::setDefaults() {
-  data_.schemaVersion = 2;
+  data_.schemaVersion = 3;
   memset(data_.matrixLayout.analogPins, 0, sizeof(data_.matrixLayout.analogPins));
   memset(data_.matrixLayout.selectPins, 0, sizeof(data_.matrixLayout.selectPins));
   data_.matrixLayout.analogCount = 0;
@@ -373,6 +405,9 @@ void DeviceConfig::setDefaults() {
   data_.scanTiming.targetFps = kDefaultTargetFps;
   data_.scanTiming.settleUs = kDefaultSettleUs;
   data_.scanTiming.sendEveryNFrames = kDefaultSendEveryNFrames;
+  data_.streamBuffer.enabled = true;
+  data_.streamBuffer.mode = "standard";
+  data_.streamBuffer.depthFrames = 3;
   data_.filterEnabled = true;
   data_.imuEnabled = true;
   data_.logging.enabled = true;
@@ -396,7 +431,7 @@ bool DeviceConfig::applyJson(const String& json) {
     return false;
   }
   const uint8_t storedSchemaVersion = static_cast<uint8_t>(extractInt(json, "schema_version", 1));
-  data_.schemaVersion = 2;
+  data_.schemaVersion = 3;
 
   const String matrix = objectForKey(json, "matrix_layout");
   if (!matrix.isEmpty()) {
@@ -418,6 +453,17 @@ bool DeviceConfig::applyJson(const String& json) {
         static_cast<uint16_t>(extractInt(timing, "target_fps", data_.scanTiming.targetFps)),
         static_cast<uint16_t>(extractInt(timing, "settle_us", data_.scanTiming.settleUs)),
         static_cast<uint16_t>(extractInt(timing, "send_every_n_frames", data_.scanTiming.sendEveryNFrames)));
+  }
+
+  const String streamBuffer = objectForKey(json, "stream_buffer");
+  if (!streamBuffer.isEmpty()) {
+    const bool enabled = extractBool(streamBuffer, "enabled", data_.streamBuffer.enabled);
+    String mode = extractString(streamBuffer, "mode", data_.streamBuffer.mode);
+    if (validStreamBufferMode(mode)) {
+      setStreamBuffer(enabled, mode);
+    }
+  } else if (storedSchemaVersion < 3) {
+    setStreamBuffer(true, "standard");
   }
 
   const String filter = objectForKey(json, "filter");
@@ -490,6 +536,12 @@ String DeviceConfig::toJson() const {
   out += data_.scanTiming.settleUs;
   out += ",\"send_every_n_frames\":";
   out += data_.scanTiming.sendEveryNFrames;
+  out += "},\"stream_buffer\":{\"enabled\":";
+  out += data_.streamBuffer.enabled ? "true" : "false";
+  out += ",\"mode\":\"";
+  out += jsonEscape(data_.streamBuffer.mode);
+  out += "\",\"depth_frames\":";
+  out += String(static_cast<unsigned int>(data_.streamBuffer.depthFrames));
   out += "},\"filter\":{\"enabled\":";
   out += data_.filterEnabled ? "true" : "false";
   out += "},\"imu\":{\"enabled\":";

@@ -42,11 +42,7 @@ nhos::OtaManager ota;
 WiFiUDP streamUdp;
 
 uint8_t packetBuffer[
-    nhos::kPacketHeaderLen +
-    (nhos::kMaxSensors * sizeof(float)) +
-    (7 * sizeof(float)) +
-    4 +
-    nhos::kPacketHmacLen
+    nhos::kMaxPacketBytes
 ];
 
 uint32_t heartbeatSeq = 1;
@@ -172,11 +168,33 @@ void scanAndStreamIfDue() {
   if (host->isEmpty()) {
     return;
   }
+  if (scanner.streamBufferEnabled()) {
+    if (!scanner.enqueuePacket(packetBuffer, len, frame.seq, frame.timestampMs, packetBuffer[3])) {
+      scanner.recordUdpSend(false, 0);
+    }
+    return;
+  }
   const uint32_t udpStartUs = micros();
   streamUdp.beginPacket(host->c_str(), port);
   streamUdp.write(packetBuffer, len);
   const bool sent = streamUdp.endPacket() == 1;
   scanner.recordUdpSend(sent, micros() - udpStartUs);
+}
+
+void sendQueuedPacketIfAny() {
+  if (!wifi.isConnected() || control.maintenanceMode() || !scanner.streamBufferEnabled()) {
+    return;
+  }
+  const String* host = &control.streamHost();
+  uint16_t port = control.streamPort();
+  if (findme.hasGateway()) {
+    host = &findme.streamHost();
+    port = findme.streamPort();
+  }
+  if (host->isEmpty()) {
+    return;
+  }
+  scanner.sendQueuedPacket(streamUdp, *host, port);
 }
 
 void sendHeartbeatIfDue() {
@@ -307,6 +325,9 @@ void setup() {
       deviceConfig.data().scanTiming.targetFps,
       deviceConfig.data().scanTiming.settleUs,
       deviceConfig.data().scanTiming.sendEveryNFrames);
+  scanner.setStreamBufferConfig(
+      deviceConfig.data().streamBuffer.enabled,
+      deviceConfig.data().streamBuffer.depthFrames);
   calibration.begin(storage);
   calibration.setLayout(
       deviceConfig.data().matrixLayout.analogPins,
@@ -358,6 +379,7 @@ void loop() {
     imu.service(micros());
     sendHeartbeatIfDue();
     scanAndStreamIfDue();
+    sendQueuedPacketIfAny();
     updateLedState();
     displayManager.service(
         millis(),

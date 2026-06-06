@@ -7,7 +7,7 @@ namespace nhos {
 static constexpr char kProductName[] = "New Horizons OS Arduino";
 static constexpr char kProtocolName[] = "NHO/Arduino/1";
 static constexpr char kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4";
-static constexpr char kFirmwareVersion[] = "v0.6.1";
+static constexpr char kFirmwareVersion[] = "v0.6.2";
 
 static constexpr uint16_t kRows = 10;
 static constexpr uint16_t kCols = 21;
@@ -25,13 +25,22 @@ static constexpr uint8_t kPacketFlagHmac = 0x40;
 static constexpr uint8_t kPacketFlagHeartbeat = 0x80;
 static constexpr size_t kPacketHeaderLen = 20;
 static constexpr size_t kPacketHmacLen = 16;
+static constexpr size_t kMaxPacketBytes =
+    kPacketHeaderLen +
+    (kMaxSensors * sizeof(float)) +
+    (7 * sizeof(float)) +
+    4 +
+    kPacketHmacLen;
 static constexpr uint32_t kHeartbeatIntervalMs = 5000;
 
 static constexpr uint16_t kDefaultTargetFps = 60;
 static constexpr uint16_t kMaxTargetFps = 90;
 static constexpr uint16_t kDefaultSettleUs = 20;
 static constexpr uint8_t kDefaultSendEveryNFrames = 1;
-static constexpr size_t kScanRingFrames = 2;
+static constexpr uint8_t kStandardScanRingFrames = 3;
+static constexpr uint8_t kExtendedScanRingFrames = 5;
+static constexpr size_t kScanRingFrames = kStandardScanRingFrames;
+static constexpr size_t kMaxScanRingFrames = kExtendedScanRingFrames;
 
 static constexpr uint32_t kWifiReconnectMs = 10000;
 static constexpr uint32_t kBootWifiSetupWindowMs = 3000;

@@ -20,6 +20,12 @@ struct ScanTimingConfig {
   uint16_t sendEveryNFrames = kDefaultSendEveryNFrames;
 };
 
+struct StreamBufferConfig {
+  bool enabled = true;
+  String mode = "standard";
+  uint8_t depthFrames = 3;
+};
+
 struct ExternalLedConfig {
   String mode = "off";
   String preset = "stream_health";
@@ -49,6 +55,7 @@ struct DeviceConfigData {
   uint8_t schemaVersion = 1;
   MatrixLayoutConfig matrixLayout;
   ScanTimingConfig scanTiming;
+  StreamBufferConfig streamBuffer;
   bool filterEnabled = true;
   bool imuEnabled = true;
   LogConfig logging;
@@ -67,6 +74,7 @@ class DeviceConfig {
 
   bool setMatrixLayout(const uint8_t* analogPins, size_t analogCount, const uint8_t* selectPins, size_t selectCount);
   bool setScanTiming(uint16_t targetFps, uint16_t settleUs, uint16_t sendEveryNFrames);
+  bool setStreamBuffer(bool enabled, const String& mode);
   bool setFilterEnabled(bool enabled);
   bool setImuEnabled(bool enabled);
   bool setLogging(bool enabled, const String& level, const String& mode, size_t maxBytes);
@@ -78,10 +86,12 @@ class DeviceConfig {
   String filterJson() const;
   String loggingJson() const;
   String otaJson() const;
+  String streamBufferJson() const;
   String configJson() const;
 
   static bool validLogLevel(const String& level);
   static bool validLogMode(const String& mode);
+  static bool validStreamBufferMode(const String& mode);
   static bool validExternalLedMode(const String& mode);
   static bool validOledMode(const String& mode);
 

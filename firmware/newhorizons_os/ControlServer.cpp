@@ -153,11 +153,13 @@ String ControlServer::processCommand(const String& request) {
     jsonUnsignedField(scanTiming, "settle_us", health.settleUs, scanTimingFirst);
     jsonUnsignedField(scanTiming, "send_every_n_frames", health.sendEveryNFrames, scanTimingFirst);
     scanTiming += "}";
+    const String streamBuffer = deviceConfig_ ? deviceConfig_->streamBufferJson() : String("{\"enabled\":false,\"mode\":\"standard\",\"depth_frames\":0}");
 
     String runtime = "{";
     runtime.reserve(160);
     bool runtimeFirst = true;
     jsonRawField(runtime, "scan_timing", scanTiming, runtimeFirst);
+    jsonRawField(runtime, "stream_buffer", streamBuffer, runtimeFirst);
     jsonStringField(runtime, "protocol", kProtocolName, runtimeFirst);
     jsonStringField(runtime, "mode", boot_->modeName(), runtimeFirst);
     runtime += "}";
@@ -183,6 +185,7 @@ String ControlServer::processCommand(const String& request) {
     jsonRawField(data, "update_state", ota_ ? ota_->lastStatusJson() : "{}", first);
     jsonRawField(data, "filter", deviceConfig_ ? deviceConfig_->filterJson() : "{}", first);
     jsonRawField(data, "imu", imu_ ? imu_->statusJson() : "{}", first);
+    jsonRawField(data, "stream_buffer", streamBuffer, first);
     jsonRawField(data, "calibration", calibration_ ? calibration_->statusJson(maintenanceMode()) : "{}", first);
     jsonRawField(data, "indicators", indicatorsStatusJson(), first);
     jsonRawField(data, "scan_health", scanner_->healthJson(), first);
@@ -237,6 +240,36 @@ String ControlServer::processCommand(const String& request) {
       }
     }
     return ok(cmd, "scan_timing_updated", scanTimingStatusJson());
+  }
+  if (cmd == "set_stream_buffer") {
+    if (!deviceConfig_) {
+      return error(cmd, "config_unavailable");
+    }
+    const bool enabled = extractBool(request, "enabled", deviceConfig_->data().streamBuffer.enabled);
+    String mode = extractString(request, "mode");
+    if (mode.isEmpty()) {
+      mode = deviceConfig_->data().streamBuffer.mode;
+    }
+    if (!deviceConfig_->setStreamBuffer(enabled, mode)) {
+      return error(cmd, "stream_buffer_invalid");
+    }
+    if (!scanner_->setStreamBufferConfig(deviceConfig_->data().streamBuffer.enabled, deviceConfig_->data().streamBuffer.depthFrames)) {
+      return error(cmd, "stream_buffer_invalid");
+    }
+    if (!deviceConfig_->save(*storage_)) {
+      return error(cmd, "config_write_failed");
+    }
+    String data = "{";
+    bool first = true;
+    jsonRawField(data, "stream_buffer", deviceConfig_->streamBufferJson(), first);
+    jsonRawField(data, "scan_health", scanner_->healthJson(), first);
+    String runtime = "{";
+    bool runtimeFirst = true;
+    jsonRawField(runtime, "stream_buffer", deviceConfig_->streamBufferJson(), runtimeFirst);
+    runtime += "}";
+    jsonRawField(data, "runtime", runtime, first);
+    data += "}";
+    return ok(cmd, "stream_buffer_updated", data);
   }
   if (cmd == "set_matrix_layout") {
     uint8_t rows[kRows];
@@ -795,6 +828,7 @@ String ControlServer::commandName(const String& request) const {
 
 String ControlServer::scanTimingStatusJson() const {
   const ScanHealth health = scanner_->health();
+  const String streamBuffer = deviceConfig_ ? deviceConfig_->streamBufferJson() : String("{\"enabled\":false,\"mode\":\"standard\",\"depth_frames\":0}");
   String scanTiming = "{";
   scanTiming.reserve(64);
   bool scanTimingFirst = true;
@@ -806,12 +840,14 @@ String ControlServer::scanTimingStatusJson() const {
   String runtime = "{";
   bool runtimeFirst = true;
   jsonRawField(runtime, "scan_timing", scanTiming, runtimeFirst);
+  jsonRawField(runtime, "stream_buffer", streamBuffer, runtimeFirst);
   runtime += "}";
 
   String data = "{";
   data.reserve(256);
   bool first = true;
   jsonRawField(data, "runtime", runtime, first);
+  jsonRawField(data, "stream_buffer", streamBuffer, first);
   jsonRawField(data, "scan_health", scanner_->healthJson(), first);
   data += "}";
   return data;

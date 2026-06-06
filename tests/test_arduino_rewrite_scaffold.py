@@ -72,7 +72,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.6.1"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.6.2"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -384,7 +384,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         defaults_body = re.search(r"void DeviceConfig::setDefaults\(\) \{(?P<body>.*?)\n\}", config, re.S)
         self.assertIsNotNone(defaults_body)
-        self.assertIn("data_.schemaVersion = 2", defaults_body.group("body"))
+        self.assertIn("data_.schemaVersion = 3", defaults_body.group("body"))
         self.assertIn("data_.matrixLayout.analogCount = 0", defaults_body.group("body"))
         self.assertIn("data_.matrixLayout.selectCount = 0", defaults_body.group("body"))
         self.assertNotIn("kRowAdcPins", defaults_body.group("body"))
@@ -626,19 +626,19 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.6.1}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.6.2}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
     def test_latest_manifest_points_to_v0_6_1_artifact(self):
         latest = (REPO_ROOT / "releases" / "arduino-latest.json").read_text(encoding="utf-8")
-        versioned = (REPO_ROOT / "releases" / "arduino-v0.6.1.json").read_text(encoding="utf-8")
-        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.6.1.bin"
+        versioned = (REPO_ROOT / "releases" / "arduino-v0.6.2.json").read_text(encoding="utf-8")
+        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.6.2.bin"
 
-        self.assertIn('"latest": "v0.6.1"', latest)
-        self.assertIn("newhorizons-os-v0.6.1.bin", latest)
-        self.assertIn("v0.6.1/releases/artifacts", latest)
-        self.assertIn("v0.6.1.md", latest)
-        self.assertIn('"latest": "v0.6.1"', versioned)
+        self.assertIn('"latest": "v0.6.2"', latest)
+        self.assertIn("newhorizons-os-v0.6.2.bin", latest)
+        self.assertIn("v0.6.2/releases/artifacts", latest)
+        self.assertIn("v0.6.2.md", latest)
+        self.assertIn('"latest": "v0.6.2"', versioned)
         self.assertTrue(artifact.exists())
 
     def test_ota_manifest_and_status_include_changelog_url(self):
@@ -698,6 +698,52 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("std::vector<float> sample(totalPoints, 0);", impl)
         self.assertIn("captureTotalsScratch_[i] = 0;", impl)
         self.assertIn("sampleRawFrame(captureSampleScratch_, totalPoints)", impl)
+
+    def test_stream_buffer_config_and_control_surface_exist(self):
+        config_h = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
+        config_cpp = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
+        control_cpp = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("struct StreamBufferConfig", config_h)
+        self.assertIn("bool enabled = true;", config_h)
+        self.assertIn('String mode = "standard";', config_h)
+        self.assertIn("uint8_t depthFrames = 3;", config_h)
+        self.assertIn("bool setStreamBuffer(bool enabled, const String& mode);", config_h)
+        self.assertIn("String streamBufferJson() const;", config_h)
+        self.assertIn('data_.streamBuffer.enabled = true;', config_cpp)
+        self.assertIn('data_.streamBuffer.mode = "standard";', config_cpp)
+        self.assertIn("data_.streamBuffer.depthFrames = 3;", config_cpp)
+        self.assertIn('const String streamBuffer = objectForKey(json, "stream_buffer");', config_cpp)
+        self.assertIn('extractBool(streamBuffer, "enabled"', config_cpp)
+        self.assertIn('extractString(streamBuffer, "mode"', config_cpp)
+        self.assertIn('\\"stream_buffer\\":{\\"enabled\\":', config_cpp)
+        self.assertIn('cmd == "set_stream_buffer"', control_cpp)
+        self.assertIn('return error(cmd, "stream_buffer_invalid")', control_cpp)
+        self.assertIn('jsonRawField(data, "stream_buffer"', control_cpp)
+
+    def test_stream_buffer_queue_runtime_and_health_metrics_exist(self):
+        header = (ARDUINO_ROOT / "MatrixScanner.h").read_text(encoding="utf-8")
+        impl = (ARDUINO_ROOT / "MatrixScanner.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("queueEnabled", header)
+        self.assertIn("queueDepthFrames", header)
+        self.assertIn("queueCapacityFrames", header)
+        self.assertIn("queueOccupiedFrames", header)
+        self.assertIn("queueDroppedFrames", header)
+        self.assertIn("queueMaxOccupiedFrames", header)
+        self.assertIn("bool setStreamBufferConfig(bool enabled, uint8_t depthFrames);", header)
+        self.assertIn("bool enqueuePacket(", header)
+        self.assertIn("bool sendQueuedPacket(", header)
+        self.assertIn('\\"queue_enabled\\":', impl)
+        self.assertIn('\\"queue_depth_frames\\":', impl)
+        self.assertIn('\\"queue_capacity_frames\\":', impl)
+        self.assertIn('\\"queue_occupied_frames\\":', impl)
+        self.assertIn('\\"queue_dropped_frames\\":', impl)
+        self.assertIn('\\"queue_max_occupied_frames\\":', impl)
+        self.assertIn("scanner.setStreamBufferConfig(", sketch)
+        self.assertIn("scanner.enqueuePacket(", sketch)
+        self.assertIn("scanner.sendQueuedPacket(", sketch)
 
     def test_power_state_manager_scaffold_exists_and_tracks_soft_off_states(self):
         header = (ARDUINO_ROOT / "PowerStateManager.h").read_text(encoding="utf-8")
