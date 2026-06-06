@@ -64,7 +64,20 @@ void ExternalLedController::identify() {
   identifyStartedMs_ = millis();
 }
 
+void ExternalLedController::sleep() {
+  sleeping_ = true;
+  clear();
+}
+
+void ExternalLedController::wake() {
+  sleeping_ = false;
+}
+
 void ExternalLedController::service(uint32_t nowMs, const ScanHealth& health, LedSignal systemSignal) {
+  if (sleeping_) {
+    activePreset_ = "off";
+    return;
+  }
   if (!initialized_ || config_.mode != "enabled") {
     activePreset_ = "off";
     return;
@@ -131,6 +144,8 @@ String ExternalLedController::statusJson() const {
   out += String(static_cast<unsigned int>(kExternalLedPin));
   out += ",\"initialized\":";
   out += initialized_ ? "true" : "false";
+  out += ",\"sleeping\":";
+  out += sleeping_ ? "true" : "false";
   out += ",\"last_show_ms\":";
   out += String(static_cast<unsigned long>(lastShowMs_));
   out += ",\"last_error\":\"";

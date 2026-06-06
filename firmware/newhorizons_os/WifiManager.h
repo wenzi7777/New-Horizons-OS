@@ -14,6 +14,8 @@ class WifiManager {
  public:
   bool begin(Storage& storage, bool forceSetupPortal = false);
   void service();
+  void suspend();
+  void resume();
   bool isConnected() const;
   bool setupActive() const;
   bool hasCredentials() const;
@@ -37,6 +39,7 @@ class WifiManager {
 
   Storage* storage_ = nullptr;
   bool setupActive_ = false;
+  bool suspended_ = false;
   bool portalStarted_ = false;
   bool portalRoutesConfigured_ = false;
   uint32_t lastReconnectMs_ = 0;

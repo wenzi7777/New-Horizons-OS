@@ -18,7 +18,7 @@ class FindMeClient {
   void switchGateway(const String& preferredGatewayId, const String& claimId, uint32_t ttlMs);
 
   bool hasGateway() const;
-  String streamHost() const;
+  const String& streamHost() const;
   uint16_t streamPort() const;
   String statusJson() const;
   void recordHeartbeat(uint32_t sentMs, const String& error);

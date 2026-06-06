@@ -12,6 +12,7 @@ struct UpdateInfo {
   String url;
   String sha256;
   size_t size = 0;
+  String changelogUrl;
   String error;
 };
 
@@ -40,6 +41,7 @@ class OtaManager {
   String lastVersion_;
   String lastUrl_;
   size_t lastSize_ = 0;
+  String lastChangelogUrl_;
   String lastManifestUrl_;
   String lastOperation_;
   String lastCurrentFile_;

@@ -16,6 +16,8 @@ class ExternalLedController {
   void begin(const ExternalLedConfig& config);
   void apply(const ExternalLedConfig& config);
   void identify();
+  void sleep();
+  void wake();
   void service(uint32_t nowMs, const ScanHealth& health, LedSignal systemSignal);
   String statusJson() const;
 
@@ -30,6 +32,7 @@ class ExternalLedController {
   Adafruit_NeoPixel pixels_;
   ExternalLedConfig config_;
   bool initialized_ = false;
+  bool sleeping_ = false;
   String activePreset_ = "off";
   uint32_t identifyStartedMs_ = 0;
   uint32_t lastShowMs_ = 0;

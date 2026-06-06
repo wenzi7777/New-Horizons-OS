@@ -7,6 +7,7 @@
 #include "mbedtls/sha256.h"
 
 #include "Config.h"
+#include "JsonUtils.h"
 
 namespace nhos {
 namespace {
@@ -29,6 +30,7 @@ UpdateInfo OtaManager::checkUpdate(const String& manifestUrl) {
   lastVersion_ = "";
   lastUrl_ = "";
   lastSize_ = 0;
+  lastChangelogUrl_ = "";
   lastOperation_ = "check_update";
   lastCurrentFile_ = "";
   lastResult_ = "";
@@ -55,6 +57,7 @@ UpdateInfo OtaManager::checkUpdate(const String& manifestUrl) {
   lastVersion_ = info.version;
   lastUrl_ = info.url;
   lastSize_ = info.size;
+  lastChangelogUrl_ = info.changelogUrl;
   lastPhase_ = info.available ? "ready" : "current";
   lastResult_ = info.available ? "manifest_ready" : "up_to_date";
   return info;
@@ -91,28 +94,21 @@ bool OtaManager::autoApplyIfNewer(const String& manifestUrl) {
 }
 
 String OtaManager::lastStatusJson() const {
-  String out = "{\"phase\":\"";
-  out += lastPhase_;
-  out += "\",\"operation\":\"";
-  out += lastOperation_;
-  out += "\",\"available\":";
-  out += lastAvailable_ ? "true" : "false";
-  out += ",\"version\":\"";
-  out += lastVersion_;
-  out += "\",\"url\":\"";
-  out += lastUrl_;
-  out += "\",\"size\":";
-  out += String(static_cast<unsigned int>(lastSize_));
-  out += ",\"manifest_url\":\"";
-  out += lastManifestUrl_;
-  out += "\",\"current_file\":\"";
-  out += lastCurrentFile_;
-  out += "\",\"last_result\":\"";
-  out += lastResult_;
-  out += "\",\"error\":\"";
-  out += lastError_;
-  out += "\",\"reboot_required\":";
-  out += lastRebootRequired_ ? "true" : "false";
+  String out = "{";
+  out.reserve(384);
+  bool first = true;
+  jsonStringField(out, "phase", lastPhase_, first);
+  jsonStringField(out, "operation", lastOperation_, first);
+  jsonBoolField(out, "available", lastAvailable_, first);
+  jsonStringField(out, "version", lastVersion_, first);
+  jsonStringField(out, "url", lastUrl_, first);
+  jsonUnsignedField(out, "size", static_cast<unsigned long>(lastSize_), first);
+  jsonStringField(out, "changelog_url", lastChangelogUrl_, first);
+  jsonStringField(out, "manifest_url", lastManifestUrl_, first);
+  jsonStringField(out, "current_file", lastCurrentFile_, first);
+  jsonStringField(out, "last_result", lastResult_, first);
+  jsonStringField(out, "error", lastError_, first);
+  jsonBoolField(out, "reboot_required", lastRebootRequired_, first);
   out += "}";
   return out;
 }
@@ -154,6 +150,7 @@ bool OtaManager::parseManifest(const String& payload, UpdateInfo& out) {
   out.url = extractString(payload, "url");
   out.sha256 = extractString(payload, "sha256");
   out.size = extractSize(payload, "size");
+  out.changelogUrl = extractString(payload, "changelog_url");
   if (protocol != kProtocolName) {
     out.error = "protocol_mismatch";
     return false;
@@ -299,35 +296,12 @@ bool OtaManager::downloadAndApply(const UpdateInfo& info) {
 }
 
 String OtaManager::extractString(const String& source, const char* key) const {
-  String pattern = "\"" + String(key) + "\"";
-  int keyIndex = source.indexOf(pattern);
-  if (keyIndex < 0) {
-    return "";
-  }
-  int colon = source.indexOf(':', keyIndex + pattern.length());
-  int start = source.indexOf('"', colon + 1);
-  int end = source.indexOf('"', start + 1);
-  if (colon < 0 || start < 0 || end < 0) {
-    return "";
-  }
-  return source.substring(start + 1, end);
+  return jsonExtractString(source, key, "");
 }
 
 size_t OtaManager::extractSize(const String& source, const char* key) const {
-  String pattern = "\"" + String(key) + "\"";
-  int keyIndex = source.indexOf(pattern);
-  if (keyIndex < 0) {
-    return 0;
-  }
-  int colon = source.indexOf(':', keyIndex + pattern.length());
-  int end = source.indexOf(',', colon + 1);
-  if (end < 0) {
-    end = source.indexOf('}', colon + 1);
-  }
-  if (colon < 0 || end < 0) {
-    return 0;
-  }
-  return static_cast<size_t>(source.substring(colon + 1, end).toInt());
+  long value = 0;
+  return jsonExtractInt(source, key, value) && value >= 0 ? static_cast<size_t>(value) : 0;
 }
 
 int OtaManager::compareVersion(const String& remote, const String& local) const {

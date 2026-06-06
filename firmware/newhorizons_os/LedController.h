@@ -43,9 +43,21 @@ enum class LedSignal : uint8_t {
   RamDanger,
   ChargingOrMissing,
   ChargeDone,
+  SoftOffTransition,
+  SoftOffCharging,
+  SoftOffChargeDone,
+  SoftOffChargeIdle,
   CommandReceived,
   CommandSuccess,
   CommandFailed,
+};
+
+enum class PatternMode : uint8_t {
+  Off = 0,
+  Solid,
+  Breathe,
+  BlinkBurst,
+  AlternateBurst,
 };
 
 class LedController {
@@ -59,6 +71,7 @@ class LedController {
 
  private:
   struct Pattern {
+    PatternMode mode;
     LedColor color;
     LedColor alternate;
     uint16_t intervalMs;
@@ -66,11 +79,13 @@ class LedController {
     uint16_t gapMs;
     uint8_t flashes;
     uint16_t eventDurationMs;
-    bool alternateColor;
+    uint8_t minLevel;
+    uint8_t maxLevel;
   };
 
   Pattern patternFor(LedSignal signal) const;
   LedColor colorFor(LedSignal signal, uint32_t nowMs) const;
+  LedColor scaleColor(LedColor color, uint8_t level) const;
   void writePixel(uint8_t pin, LedColor color);
 
   LedSignal baseSignal_ = LedSignal::Boot;

@@ -1,7 +1,5 @@
 #include "MatrixScanner.h"
 
-#include <vector>
-
 #include "BoardPins.h"
 #include "Calibration.h"
 
@@ -22,6 +20,7 @@ void putFloat(uint8_t* out, float value) {
 bool MatrixScanner::begin() {
   rowCount_ = 0;
   colCount_ = 0;
+  clearPacketQueue();
   configurePins();
   return validatePinMap();
 }
@@ -31,11 +30,13 @@ bool MatrixScanner::start() {
   nextScanDueUs_ = 0;
   scanWindowStartedMs_ = millis();
   scanWindowFrames_ = 0;
+  clearPacketQueue();
   return true;
 }
 
 void MatrixScanner::stop() {
   running_ = false;
+  clearPacketQueue();
   setAllColsInactive();
 }
 
@@ -55,6 +56,22 @@ bool MatrixScanner::setTiming(uint16_t targetFps, uint16_t settleUs, uint16_t se
   settleUs_ = settleUs;
   sendEveryNFrames_ = sendEveryNFrames;
   nextScanDueUs_ = 0;
+  return true;
+}
+
+bool MatrixScanner::setStreamBufferConfig(bool enabled, uint8_t depthFrames) {
+  if (!enabled) {
+    queueEnabled_ = false;
+    queueDepthFrames_ = 0;
+    clearPacketQueue();
+    return true;
+  }
+  if (depthFrames != kStandardScanRingFrames && depthFrames != kExtendedScanRingFrames) {
+    return false;
+  }
+  queueEnabled_ = true;
+  queueDepthFrames_ = min<uint8_t>(depthFrames, static_cast<uint8_t>(kMaxScanRingFrames));
+  clearPacketQueue();
   return true;
 }
 
@@ -93,6 +110,10 @@ bool MatrixScanner::setLayout(const uint8_t* rows, size_t rowCount, const uint8_
 
 void MatrixScanner::setCalibration(Calibration* calibration) {
   calibration_ = calibration;
+}
+
+bool MatrixScanner::streamBufferEnabled() const {
+  return queueEnabled_ && queueDepthFrames_ > 0;
 }
 
 bool MatrixScanner::scanDue() const {
@@ -180,16 +201,17 @@ bool MatrixScanner::captureAllAverages(float* outValues, size_t count, uint32_t 
   if (!hasLayout() || !outValues || totalPoints == 0 || count < totalPoints) {
     return false;
   }
-  std::vector<float> totals(totalPoints, 0);
-  std::vector<float> sample(totalPoints, 0);
+  for (size_t i = 0; i < totalPoints; ++i) {
+    captureTotalsScratch_[i] = 0;
+  }
   const uint32_t startedMs = millis();
   uint32_t samples = 0;
   do {
-    if (!sampleRawFrame(sample.data(), sample.size())) {
+    if (!sampleRawFrame(captureSampleScratch_, totalPoints)) {
       return false;
     }
     for (size_t i = 0; i < totalPoints; ++i) {
-      totals[i] += sample[i];
+      captureTotalsScratch_[i] += captureSampleScratch_[i];
     }
     ++samples;
   } while ((millis() - startedMs) < max<uint32_t>(1, durationMs));
@@ -197,7 +219,7 @@ bool MatrixScanner::captureAllAverages(float* outValues, size_t count, uint32_t 
     return false;
   }
   for (size_t i = 0; i < totalPoints; ++i) {
-    outValues[i] = totals[i] / static_cast<float>(samples);
+    outValues[i] = captureTotalsScratch_[i] / static_cast<float>(samples);
   }
   return true;
 }
@@ -205,6 +227,68 @@ bool MatrixScanner::captureAllAverages(float* outValues, size_t count, uint32_t 
 bool MatrixScanner::shouldSendFrame(const MatrixFrame& frame) const {
   const uint16_t sendEvery = max<uint16_t>(1, sendEveryNFrames_);
   return sendEvery <= 1 || (frame.seq % sendEvery) == 0;
+}
+
+bool MatrixScanner::enqueuePacket(const uint8_t* data, size_t len, uint32_t seq, uint32_t timestampMs, uint8_t flags) {
+  if (!streamBufferEnabled() || !data || len == 0 || len > kMaxPacketBytes) {
+    return false;
+  }
+  if (queueCount_ >= queueDepthFrames_) {
+    packetQueue_[queueTail_].occupied = false;
+    queueTail_ = static_cast<uint8_t>((queueTail_ + 1) % queueDepthFrames_);
+    if (queueCount_ > 0) {
+      --queueCount_;
+    }
+    ++queueDroppedFrames_;
+    ++dropped_;
+  }
+
+  PacketSlot& slot = packetQueue_[queueHead_];
+  slot.occupied = true;
+  slot.len = len;
+  slot.seq = seq;
+  slot.timestampMs = timestampMs;
+  slot.flags = flags;
+  memcpy(slot.bytes, data, len);
+
+  queueHead_ = static_cast<uint8_t>((queueHead_ + 1) % queueDepthFrames_);
+  if (queueCount_ < queueDepthFrames_) {
+    ++queueCount_;
+  }
+  if (queueCount_ > queueMaxOccupiedFrames_) {
+    queueMaxOccupiedFrames_ = queueCount_;
+  }
+  return true;
+}
+
+bool MatrixScanner::sendQueuedPacket(WiFiUDP& udp, const String& host, uint16_t port) {
+  if (!streamBufferEnabled() || queueCount_ == 0 || host.isEmpty()) {
+    return false;
+  }
+
+  PacketSlot& slot = packetQueue_[queueTail_];
+  if (!slot.occupied || slot.len == 0) {
+    slot.occupied = false;
+    queueTail_ = static_cast<uint8_t>((queueTail_ + 1) % max<uint8_t>(1, queueDepthFrames_));
+    if (queueCount_ > 0) {
+      --queueCount_;
+    }
+    return false;
+  }
+
+  const uint32_t udpStartUs = micros();
+  udp.beginPacket(host.c_str(), port);
+  udp.write(slot.bytes, slot.len);
+  const bool sent = udp.endPacket() == 1;
+  recordUdpSend(sent, micros() - udpStartUs);
+
+  slot.occupied = false;
+  slot.len = 0;
+  queueTail_ = static_cast<uint8_t>((queueTail_ + 1) % queueDepthFrames_);
+  if (queueCount_ > 0) {
+    --queueCount_;
+  }
+  return sent;
 }
 
 void MatrixScanner::recordUdpSend(bool ok, uint32_t durationUs) {
@@ -276,6 +360,12 @@ ScanHealth MatrixScanner::health() const {
   item.udpSentFrames = udpSentFrames_;
   item.udpSendFailures = udpSendFailures_;
   item.lastUdpSendUs = lastUdpSendUs_;
+  item.queueEnabled = queueEnabled_;
+  item.queueDepthFrames = queueEnabled_ ? queueDepthFrames_ : 0;
+  item.queueCapacityFrames = queueEnabled_ ? queueDepthFrames_ : 0;
+  item.queueOccupiedFrames = queueEnabled_ ? queueCount_ : 0;
+  item.queueDroppedFrames = queueDroppedFrames_;
+  item.queueMaxOccupiedFrames = queueMaxOccupiedFrames_;
   item.targetFps = targetFps_;
   item.settleUs = settleUs_;
   item.sendEveryNFrames = sendEveryNFrames_;
@@ -286,6 +376,7 @@ ScanHealth MatrixScanner::health() const {
 String MatrixScanner::healthJson() const {
   ScanHealth h = health();
   String out = "{";
+  out.reserve(320);
   out += "\"scan_active\":";
   out += h.active ? "true" : "false";
   out += ",\"requested_target_fps\":";
@@ -318,6 +409,18 @@ String MatrixScanner::healthJson() const {
   out += h.udpSendFailures;
   out += ",\"last_udp_send_us\":";
   out += h.lastUdpSendUs;
+  out += ",\"queue_enabled\":";
+  out += h.queueEnabled ? "true" : "false";
+  out += ",\"queue_depth_frames\":";
+  out += h.queueDepthFrames;
+  out += ",\"queue_capacity_frames\":";
+  out += h.queueCapacityFrames;
+  out += ",\"queue_occupied_frames\":";
+  out += h.queueOccupiedFrames;
+  out += ",\"queue_dropped_frames\":";
+  out += h.queueDroppedFrames;
+  out += ",\"queue_max_occupied_frames\":";
+  out += h.queueMaxOccupiedFrames;
   out += "}";
   return out;
 }
@@ -377,6 +480,20 @@ void MatrixScanner::configurePins() {
 void MatrixScanner::setAllColsInactive() {
   for (size_t i = 0; i < colCount_; ++i) {
     digitalWrite(cols_[i], HIGH);
+  }
+}
+
+void MatrixScanner::clearPacketQueue() {
+  queueHead_ = 0;
+  queueTail_ = 0;
+  queueCount_ = 0;
+  queueMaxOccupiedFrames_ = 0;
+  for (size_t i = 0; i < kMaxScanRingFrames; ++i) {
+    packetQueue_[i].occupied = false;
+    packetQueue_[i].len = 0;
+    packetQueue_[i].seq = 0;
+    packetQueue_[i].timestampMs = 0;
+    packetQueue_[i].flags = 0;
   }
 }
 

@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <WiFiServer.h>
+#include <WiFiUDP.h>
 #include <vector>
 
 #include "BootModeManager.h"
@@ -15,10 +16,13 @@
 #include "MatrixScanner.h"
 #include "OtaManager.h"
 #include "PowerManager.h"
+#include "PowerStateManager.h"
 #include "Storage.h"
 #include "WifiManager.h"
 
 namespace nhos {
+
+class PowerStateManager;
 
 class ControlServer {
  public:
@@ -30,6 +34,7 @@ class ControlServer {
       OtaManager& ota,
       FindMeClient& findme,
       PowerManager& power,
+      PowerStateManager& powerState,
       ImuManager& imu,
       LedController& leds,
       DeviceConfig& deviceConfig,
@@ -37,8 +42,9 @@ class ControlServer {
       DisplayManager& display,
       ExternalLedController& externalLeds);
   void service();
+  void serviceUdpCommand(WiFiUDP& udp);
   bool maintenanceMode() const;
-  String streamHost() const;
+  const String& streamHost() const;
   uint16_t streamPort() const;
 
  private:
@@ -71,6 +77,7 @@ class ControlServer {
   OtaManager* ota_ = nullptr;
   FindMeClient* findme_ = nullptr;
   PowerManager* power_ = nullptr;
+  PowerStateManager* powerState_ = nullptr;
   ImuManager* imu_ = nullptr;
   LedController* leds_ = nullptr;
   DeviceConfig* deviceConfig_ = nullptr;

@@ -66,7 +66,8 @@ firmware/scripts/generate_arduino_manifest.py \
   --firmware releases/artifacts/newhorizons-os-v0.5.4.bin \
   --output releases/arduino-latest.json \
   --version v0.5.4 \
-  --base-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/artifacts
+  --base-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/artifacts \
+  --changelog-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/notes/v0.5.4.md
 ```
 
 The manifest shape is JSON:
@@ -77,6 +78,7 @@ The manifest shape is JSON:
   "protocol": "NHO/Arduino/1",
   "model": "VD-CTL/R v1.0.F 2026.4",
   "latest": "v0.5.4",
+  "changelog_url": "https://example.com/releases/notes/v0.5.4.md",
   "firmware": {
     "url": "https://example.com/newhorizons-os-v0.5.4.bin",
     "sha256": "...",
@@ -88,7 +90,7 @@ The manifest shape is JSON:
 ## Verification
 
 ```bash
-python3 -m pytest tests -q
+python3 -m unittest discover -s tests -q
 arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB firmware/newhorizons_os
 ```
 

@@ -1,0 +1,12 @@
+{
+  "firmware": {
+    "sha256": "ff10f0ef35a60486b8dd6372f1f28734f8d390f7744451fa09871e3d33e9d2ee",
+    "size": 1314080,
+    "url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.6.0/releases/artifacts/newhorizons-os-v0.6.0.bin"
+  },
+  "latest": "v0.6.0",
+  "changelog_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.6.0/releases/notes/v0.6.0.md",
+  "model": "VD-CTL/R v1.0.F 2026.4",
+  "product": "New Horizons OS Arduino",
+  "protocol": "NHO/Arduino/1"
+}

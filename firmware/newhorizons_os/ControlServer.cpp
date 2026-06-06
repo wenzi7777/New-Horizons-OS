@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "Config.h"
+#include "JsonUtils.h"
 
 namespace nhos {
 
@@ -14,6 +15,7 @@ void ControlServer::begin(
     OtaManager& ota,
     FindMeClient& findme,
     PowerManager& power,
+    PowerStateManager& powerState,
     ImuManager& imu,
     LedController& leds,
     DeviceConfig& deviceConfig,
@@ -27,6 +29,7 @@ void ControlServer::begin(
   ota_ = &ota;
   findme_ = &findme;
   power_ = &power;
+  powerState_ = &powerState;
   imu_ = &imu;
   leds_ = &leds;
   deviceConfig_ = &deviceConfig;
@@ -93,11 +96,77 @@ void ControlServer::service() {
   servicePendingApplyUpdate();
 }
 
+void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
+  if (!started_) {
+    return;
+  }
+  const int pktSize = udp.parsePacket();
+  if (pktSize <= 0) {
+    return;
+  }
+  const IPAddress senderIp = udp.remoteIP();
+  const uint16_t senderPort = udp.remotePort();
+  constexpr int kMaxSize = 512;
+  static char buf[kMaxSize];
+  const int len = udp.read(buf, kMaxSize - 1);
+  if (len <= 0 || buf[0] != '{') {
+    return;
+  }
+  buf[len] = '\0';
+  const String frame(buf, len);
+
+  String typeStr;
+  if (!jsonExtractString(frame, "type", typeStr) || typeStr != "command") {
+    return;
+  }
+
+  long seq = 0;
+  jsonExtractInt(frame, "seq", seq);
+  const String requestId = jsonExtractString(frame, "request_id");
+  String payloadStr;
+  if (!jsonExtractObject(frame, "payload", payloadStr) || payloadStr.isEmpty()) {
+    return;
+  }
+
+  const String uid = deviceUidString();
+  const String sender = senderIp.toString();
+
+  // ACK
+  String ack;
+  ack.reserve(100);
+  bool af = true;
+  ack += '{';
+  jsonStringField(ack, "type", "ack", af);
+  jsonStringField(ack, "device_uid", uid, af);
+  jsonSignedField(ack, "ack", seq, af);
+  jsonStringField(ack, "request_id", requestId, af);
+  ack += '}';
+  udp.beginPacket(sender.c_str(), senderPort);
+  udp.print(ack);
+  udp.endPacket();
+
+  const String response = processCommand(payloadStr);
+
+  // Result
+  String result;
+  result.reserve(response.length() + 120);
+  bool rf = true;
+  result += '{';
+  jsonStringField(result, "type", "result", rf);
+  jsonStringField(result, "device_uid", uid, rf);
+  jsonStringField(result, "request_id", requestId, rf);
+  jsonRawField(result, "payload", response, rf);
+  result += '}';
+  udp.beginPacket(sender.c_str(), senderPort);
+  udp.print(result);
+  udp.endPacket();
+}
+
 bool ControlServer::maintenanceMode() const {
   return boot_ && boot_->mode() != RunMode::Normal;
 }
 
-String ControlServer::streamHost() const {
+const String& ControlServer::streamHost() const {
   return streamHost_;
 }
 
@@ -143,58 +212,50 @@ String ControlServer::processCommand(const String& request) {
   if (cmd == "status" || cmd == "query") {
     const ScanHealth health = scanner_->health();
     const String uid = deviceUidString();
+    String scanTiming = "{";
+    scanTiming.reserve(64);
+    bool scanTimingFirst = true;
+    jsonUnsignedField(scanTiming, "target_fps", health.targetFps, scanTimingFirst);
+    jsonUnsignedField(scanTiming, "settle_us", health.settleUs, scanTimingFirst);
+    jsonUnsignedField(scanTiming, "send_every_n_frames", health.sendEveryNFrames, scanTimingFirst);
+    scanTiming += "}";
+    const String streamBuffer = deviceConfig_ ? deviceConfig_->streamBufferJson() : String("{\"enabled\":false,\"mode\":\"standard\",\"depth_frames\":0}");
+
+    String runtime = "{";
+    runtime.reserve(160);
+    bool runtimeFirst = true;
+    jsonRawField(runtime, "scan_timing", scanTiming, runtimeFirst);
+    jsonRawField(runtime, "stream_buffer", streamBuffer, runtimeFirst);
+    jsonStringField(runtime, "protocol", kProtocolName, runtimeFirst);
+    jsonStringField(runtime, "mode", boot_->modeName(), runtimeFirst);
+    runtime += "}";
+
     String data = "{";
-    data += "\"device_uid\":\"";
-    data += uid;
-    data += "\",\"device_name\":\"New Horizons OS-";
-    data += uid;
-    data += "\",\"protocol\":\"";
-    data += kProtocolName;
-    data += "\",\"mode\":\"";
-    data += boot_->modeName();
-    data += "\",\"firmware_version\":\"";
-    data += kFirmwareVersion;
-    data += "\",\"hardware_model\":\"";
-    data += kHardwareModel;
-    data += "\",\"matrix_shape\":";
-    data += scanner_->matrixShapeJson();
-    data += ",\"matrix_layout\":";
-    data += scanner_->matrixLayoutJson();
-    data += ",\"runtime\":{\"scan_timing\":{\"target_fps\":";
-    data += health.targetFps;
-    data += ",\"settle_us\":";
-    data += health.settleUs;
-    data += ",\"send_every_n_frames\":";
-    data += health.sendEveryNFrames;
-    data += "},\"protocol\":\"";
-    data += kProtocolName;
-    data += "\",\"mode\":\"";
-    data += boot_->modeName();
-    data += "\"}";
-    data += ",\"wifi\":";
-    data += wifi_->statusJson();
-    data += ",\"battery\":";
-    data += power_ ? power_->statusJson() : "{}";
-    data += ",\"config\":";
-    data += deviceConfig_ ? deviceConfig_->statusJson() : "{}";
-    data += ",\"logging\":";
-    data += storage_ ? storage_->logStatusJson() : "{}";
-    data += ",\"ota\":";
-    data += deviceConfig_ ? deviceConfig_->otaJson() : "{}";
-    data += ",\"update_state\":";
-    data += ota_ ? ota_->lastStatusJson() : "{}";
-    data += ",\"filter\":";
-    data += deviceConfig_ ? deviceConfig_->filterJson() : "{}";
-    data += ",\"imu\":";
-    data += imu_ ? imu_->statusJson() : "{}";
-    data += ",\"calibration\":";
-    data += calibration_ ? calibration_->statusJson(maintenanceMode()) : "{}";
-    data += ",\"indicators\":";
-    data += indicatorsStatusJson();
-    data += ",\"scan_health\":";
-    data += scanner_->healthJson();
-    data += ",\"findme\":";
-    data += findme_ ? findme_->statusJson() : "{}";
+    data.reserve(1536);
+    bool first = true;
+    jsonStringField(data, "device_uid", uid, first);
+    jsonStringField(data, "device_name", String("New Horizons OS-") + uid, first);
+    jsonStringField(data, "protocol", kProtocolName, first);
+    jsonStringField(data, "mode", boot_->modeName(), first);
+    jsonStringField(data, "firmware_version", kFirmwareVersion, first);
+    jsonStringField(data, "hardware_model", kHardwareModel, first);
+    jsonRawField(data, "matrix_shape", scanner_->matrixShapeJson(), first);
+    jsonRawField(data, "matrix_layout", scanner_->matrixLayoutJson(), first);
+    jsonRawField(data, "runtime", runtime, first);
+    jsonRawField(data, "wifi", wifi_->statusJson(), first);
+    jsonRawField(data, "battery", power_ ? power_->statusJson() : "{}", first);
+    jsonRawField(data, "power", powerState_ ? powerState_->statusJson() : "{}", first);
+    jsonRawField(data, "config", deviceConfig_ ? deviceConfig_->statusJson() : "{}", first);
+    jsonRawField(data, "logging", storage_ ? storage_->logStatusJson() : "{}", first);
+    jsonRawField(data, "ota", deviceConfig_ ? deviceConfig_->otaJson() : "{}", first);
+    jsonRawField(data, "update_state", ota_ ? ota_->lastStatusJson() : "{}", first);
+    jsonRawField(data, "filter", deviceConfig_ ? deviceConfig_->filterJson() : "{}", first);
+    jsonRawField(data, "imu", imu_ ? imu_->statusJson() : "{}", first);
+    jsonRawField(data, "stream_buffer", streamBuffer, first);
+    jsonRawField(data, "calibration", calibration_ ? calibration_->statusJson(maintenanceMode()) : "{}", first);
+    jsonRawField(data, "indicators", indicatorsStatusJson(), first);
+    jsonRawField(data, "scan_health", scanner_->healthJson(), first);
+    jsonRawField(data, "findme", findme_ ? findme_->statusJson() : "{}", first);
     data += "}";
     return ok(cmd, "status", data);
   }
@@ -245,6 +306,36 @@ String ControlServer::processCommand(const String& request) {
       }
     }
     return ok(cmd, "scan_timing_updated", scanTimingStatusJson());
+  }
+  if (cmd == "set_stream_buffer") {
+    if (!deviceConfig_) {
+      return error(cmd, "config_unavailable");
+    }
+    const bool enabled = extractBool(request, "enabled", deviceConfig_->data().streamBuffer.enabled);
+    String mode = extractString(request, "mode");
+    if (mode.isEmpty()) {
+      mode = deviceConfig_->data().streamBuffer.mode;
+    }
+    if (!deviceConfig_->setStreamBuffer(enabled, mode)) {
+      return error(cmd, "stream_buffer_invalid");
+    }
+    if (!scanner_->setStreamBufferConfig(deviceConfig_->data().streamBuffer.enabled, deviceConfig_->data().streamBuffer.depthFrames)) {
+      return error(cmd, "stream_buffer_invalid");
+    }
+    if (!deviceConfig_->save(*storage_)) {
+      return error(cmd, "config_write_failed");
+    }
+    String data = "{";
+    bool first = true;
+    jsonRawField(data, "stream_buffer", deviceConfig_->streamBufferJson(), first);
+    jsonRawField(data, "scan_health", scanner_->healthJson(), first);
+    String runtime = "{";
+    bool runtimeFirst = true;
+    jsonRawField(runtime, "stream_buffer", deviceConfig_->streamBufferJson(), runtimeFirst);
+    runtime += "}";
+    jsonRawField(data, "runtime", runtime, first);
+    data += "}";
+    return ok(cmd, "stream_buffer_updated", data);
   }
   if (cmd == "set_matrix_layout") {
     uint8_t rows[kRows];
@@ -314,6 +405,19 @@ String ControlServer::processCommand(const String& request) {
     data += power_->statusJson();
     data += "}";
     return ok(cmd, "charge_profile_updated", data);
+  }
+  if (cmd == "power_set_state") {
+    if (!powerState_) {
+      return error(cmd, "power_state_unavailable");
+    }
+    const String nextState = extractString(request, "state");
+    if (!powerState_->requestStateByName(nextState, power_ && power_->chargerDetected())) {
+      return error(cmd, "power_state_invalid");
+    }
+    String data = "{\"power\":";
+    data += powerState_->statusJson();
+    data += "}";
+    return ok(cmd, "power_state_updated", data);
   }
   if (cmd == "set_filter") {
     const bool enabled = extractBool(request, "enabled", true);
@@ -721,21 +825,18 @@ String ControlServer::processCommand(const String& request) {
   }
   if (cmd == "check_update") {
     UpdateInfo info = ota_->checkUpdate(extractString(request, "manifest_url"));
-    String data = "{\"available\":";
-    data += info.available ? "true" : "false";
-    data += ",\"version\":\"";
-    data += info.version;
-    data += "\",\"url\":\"";
-    data += info.url;
-    data += "\",\"sha256\":\"";
-    data += info.sha256;
-    data += "\",\"size\":";
-    data += String(static_cast<unsigned int>(info.size));
-    data += ",\"update_state\":";
-    data += ota_->lastStatusJson();
-    data += ",\"error\":\"";
-    data += info.error;
-    data += "\"}";
+    String data = "{";
+    data.reserve(512);
+    bool first = true;
+    jsonBoolField(data, "available", info.available, first);
+    jsonStringField(data, "version", info.version, first);
+    jsonStringField(data, "url", info.url, first);
+    jsonStringField(data, "sha256", info.sha256, first);
+    jsonUnsignedField(data, "size", static_cast<unsigned long>(info.size), first);
+    jsonStringField(data, "changelog_url", info.changelogUrl, first);
+    jsonRawField(data, "update_state", ota_->lastStatusJson(), first);
+    jsonStringField(data, "error", info.error, first);
+    data += "}";
     return ok(cmd, info.error.isEmpty() ? "update_checked" : "update_check_failed", data);
   }
   if (cmd == "apply_update") {
@@ -754,24 +855,28 @@ String ControlServer::processCommand(const String& request) {
 }
 
 String ControlServer::ok(const String& command, const String& message, const String& data) const {
-  String out = "{\"ok\":true,\"cmd\":\"";
-  out += command;
-  out += "\",\"message\":\"";
-  out += message;
-  out += "\",\"data\":";
-  out += data;
-  out += ",\"error\":\"\"}";
+  String out = "{";
+  out.reserve(data.length() + command.length() + message.length() + 64);
+  bool first = true;
+  jsonBoolField(out, "ok", true, first);
+  jsonStringField(out, "cmd", command, first);
+  jsonStringField(out, "message", message, first);
+  jsonRawField(out, "data", data, first);
+  jsonStringField(out, "error", "", first);
+  out += "}";
   return out;
 }
 
 String ControlServer::error(const String& command, const String& message) const {
-  String out = "{\"ok\":false,\"cmd\":\"";
-  out += command;
-  out += "\",\"message\":\"";
-  out += message;
-  out += "\",\"data\":{},\"error\":\"";
-  out += message;
-  out += "\"}";
+  String out = "{";
+  out.reserve(command.length() + message.length() * 2 + 48);
+  bool first = true;
+  jsonBoolField(out, "ok", false, first);
+  jsonStringField(out, "cmd", command, first);
+  jsonStringField(out, "message", message, first);
+  jsonRawField(out, "data", "{}", first);
+  jsonStringField(out, "error", message, first);
+  out += "}";
   return out;
 }
 
@@ -789,175 +894,79 @@ String ControlServer::commandName(const String& request) const {
 
 String ControlServer::scanTimingStatusJson() const {
   const ScanHealth health = scanner_->health();
-  String data = "{\"runtime\":{\"scan_timing\":{\"target_fps\":";
-  data += health.targetFps;
-  data += ",\"settle_us\":";
-  data += health.settleUs;
-  data += ",\"send_every_n_frames\":";
-  data += health.sendEveryNFrames;
-  data += "}},\"scan_health\":";
-  data += scanner_->healthJson();
+  const String streamBuffer = deviceConfig_ ? deviceConfig_->streamBufferJson() : String("{\"enabled\":false,\"mode\":\"standard\",\"depth_frames\":0}");
+  String scanTiming = "{";
+  scanTiming.reserve(64);
+  bool scanTimingFirst = true;
+  jsonUnsignedField(scanTiming, "target_fps", health.targetFps, scanTimingFirst);
+  jsonUnsignedField(scanTiming, "settle_us", health.settleUs, scanTimingFirst);
+  jsonUnsignedField(scanTiming, "send_every_n_frames", health.sendEveryNFrames, scanTimingFirst);
+  scanTiming += "}";
+
+  String runtime = "{";
+  bool runtimeFirst = true;
+  jsonRawField(runtime, "scan_timing", scanTiming, runtimeFirst);
+  jsonRawField(runtime, "stream_buffer", streamBuffer, runtimeFirst);
+  runtime += "}";
+
+  String data = "{";
+  data.reserve(256);
+  bool first = true;
+  jsonRawField(data, "runtime", runtime, first);
+  jsonRawField(data, "stream_buffer", streamBuffer, first);
+  jsonRawField(data, "scan_health", scanner_->healthJson(), first);
   data += "}";
   return data;
 }
 
 String ControlServer::layoutStatusJson() const {
-  String data = "{\"matrix_shape\":";
-  data += scanner_->matrixShapeJson();
-  data += ",\"matrix_layout\":";
-  data += scanner_->matrixLayoutJson();
-  data += ",\"scan_health\":";
-  data += scanner_->healthJson();
+  String data = "{";
+  data.reserve(384);
+  bool first = true;
+  jsonRawField(data, "matrix_shape", scanner_->matrixShapeJson(), first);
+  jsonRawField(data, "matrix_layout", scanner_->matrixLayoutJson(), first);
+  jsonRawField(data, "scan_health", scanner_->healthJson(), first);
   data += "}";
   return data;
 }
 
 String ControlServer::indicatorsStatusJson() const {
-  String data = "{\"status_led\":{\"role\":\"system_status\"},\"external_led\":";
-  data += externalLeds_ ? externalLeds_->statusJson() : "{}";
-  data += ",\"oled\":";
-  data += display_ ? display_->statusJson() : "{}";
+  String data = "{";
+  data.reserve(256);
+  bool first = true;
+  jsonRawField(data, "status_led", "{\"role\":\"system_status\"}", first);
+  jsonRawField(data, "external_led", externalLeds_ ? externalLeds_->statusJson() : "{}", first);
+  jsonRawField(data, "oled", display_ ? display_->statusJson() : "{}", first);
   data += "}";
   return data;
 }
 
 String ControlServer::extractString(const String& request, const char* key) const {
-  String pattern = "\"" + String(key) + "\"";
-  int keyIndex = request.indexOf(pattern);
-  if (keyIndex < 0) {
-    return "";
-  }
-  int colon = request.indexOf(':', keyIndex + pattern.length());
-  int start = request.indexOf('"', colon + 1);
-  int end = request.indexOf('"', start + 1);
-  if (colon < 0 || start < 0 || end < 0) {
-    return "";
-  }
-  return request.substring(start + 1, end);
+  return jsonExtractString(request, key, "");
 }
 
 int ControlServer::extractInt(const String& request, const char* key, int fallback) const {
-  String pattern = "\"" + String(key) + "\"";
-  int keyIndex = request.indexOf(pattern);
-  if (keyIndex < 0) {
-    return fallback;
-  }
-  int colon = request.indexOf(':', keyIndex + pattern.length());
-  int end = request.indexOf(',', colon + 1);
-  if (end < 0) {
-    end = request.indexOf('}', colon + 1);
-  }
-  if (colon < 0 || end < 0) {
-    return fallback;
-  }
-  return request.substring(colon + 1, end).toInt();
+  long value = 0;
+  return jsonExtractInt(request, key, value) ? static_cast<int>(value) : fallback;
 }
 
 float ControlServer::extractFloat(const String& request, const char* key, float fallback) const {
-  String pattern = "\"" + String(key) + "\"";
-  int keyIndex = request.indexOf(pattern);
-  if (keyIndex < 0) {
-    return fallback;
-  }
-  int colon = request.indexOf(':', keyIndex + pattern.length());
-  int end = request.indexOf(',', colon + 1);
-  if (end < 0) {
-    end = request.indexOf('}', colon + 1);
-  }
-  if (colon < 0 || end < 0) {
-    return fallback;
-  }
-  String value = request.substring(colon + 1, end);
-  value.trim();
-  return value.toFloat();
+  float value = 0;
+  return jsonExtractFloat(request, key, value) ? value : fallback;
 }
 
 bool ControlServer::extractBool(const String& request, const char* key, bool fallback) const {
-  String value = extractString(request, key);
-  if (value == "true") {
-    return true;
-  }
-  if (value == "false") {
-    return false;
-  }
-  String pattern = "\"" + String(key) + "\"";
-  int keyIndex = request.indexOf(pattern);
-  if (keyIndex < 0) {
-    return fallback;
-  }
-  int colon = request.indexOf(':', keyIndex + pattern.length());
-  if (colon < 0) {
-    return fallback;
-  }
-  int end = request.indexOf(',', colon + 1);
-  if (end < 0) {
-    end = request.indexOf('}', colon + 1);
-  }
-  if (end < 0) {
-    return fallback;
-  }
-  value = request.substring(colon + 1, end);
-  value.trim();
-  if (value == "true") {
-    return true;
-  }
-  if (value == "false") {
-    return false;
-  }
-  return fallback;
+  bool value = false;
+  return jsonExtractBool(request, key, value) ? value : fallback;
 }
 
 size_t ControlServer::extractArray(const String& request, const char* key, uint8_t* out, size_t maxCount) const {
-  String pattern = "\"" + String(key) + "\"";
-  int keyIndex = request.indexOf(pattern);
-  if (keyIndex < 0) {
-    return 0;
-  }
-  int start = request.indexOf('[', keyIndex);
-  int end = request.indexOf(']', start + 1);
-  if (start < 0 || end < 0) {
-    return 0;
-  }
-  size_t count = 0;
-  int cursor = start + 1;
-  while (cursor < end && count < maxCount) {
-    int sep = request.indexOf(',', cursor);
-    if (sep < 0 || sep > end) {
-      sep = end;
-    }
-    String token = request.substring(cursor, sep);
-    token.trim();
-    if (token.length()) {
-      out[count++] = static_cast<uint8_t>(token.toInt());
-    }
-    cursor = sep + 1;
-  }
-  return count;
+  return jsonExtractUInt8Array(request, key, out, maxCount);
 }
 
 String ControlServer::extractObject(const String& request, const char* key) const {
-  String pattern = "\"" + String(key) + "\"";
-  int keyIndex = request.indexOf(pattern);
-  if (keyIndex < 0) {
-    return "";
-  }
-  int start = request.indexOf('{', keyIndex + pattern.length());
-  if (start < 0) {
-    return "";
-  }
-  int depth = 0;
-  for (int i = start; i < request.length(); ++i) {
-    const char c = request.charAt(i);
-    if (c == '{') {
-      ++depth;
-    } else if (c == '}') {
-      --depth;
-      if (depth == 0) {
-        return request.substring(start, i + 1);
-      }
-    }
-  }
-  return "";
+  String value;
+  return jsonExtractObject(request, key, value) ? value : "";
 }
 
 bool ControlServer::requireMaintenance(const String& command) const {
@@ -974,12 +983,12 @@ String ControlServer::fileSizeJson(const String& command, const String& scopeVal
     return error(command, "invalid_path");
   }
   const size_t size = storage_->fileSize(scope, path);
-  String data = "{\"scope\":\"";
-  data += scope;
-  data += "\",\"path\":\"";
-  data += path;
-  data += "\",\"size\":";
-  data += String(static_cast<unsigned int>(size));
+  String data = "{";
+  data.reserve(path.length() + scope.length() + 64);
+  bool first = true;
+  jsonStringField(data, "scope", scope, first);
+  jsonStringField(data, "path", path, first);
+  jsonUnsignedField(data, "size", static_cast<unsigned long>(size), first);
   data += "}";
   return ok(command, "file_read_ready", data);
 }
@@ -994,19 +1003,16 @@ String ControlServer::fileChunkJson(const String& command, const String& scope, 
   }
   size_t nextOffset = offset + bytes.size();
   size_t totalSize = storage_->fileSize(scope, path);
-  String data = "{\"scope\":\"";
-  data += scope;
-  data += "\",\"path\":\"";
-  data += path;
-  data += "\",\"offset\":";
-  data += String(static_cast<unsigned int>(offset));
-  data += ",\"next_offset\":";
-  data += String(static_cast<unsigned int>(nextOffset));
-  data += ",\"has_more\":";
-  data += nextOffset < totalSize ? "true" : "false";
-  data += ",\"data\":\"";
-  data += encodeHex(bytes);
-  data += "\"}";
+  String data = "{";
+  data.reserve(path.length() + scope.length() + (bytes.size() * 2) + 96);
+  bool first = true;
+  jsonStringField(data, "scope", scope, first);
+  jsonStringField(data, "path", path, first);
+  jsonUnsignedField(data, "offset", static_cast<unsigned long>(offset), first);
+  jsonUnsignedField(data, "next_offset", static_cast<unsigned long>(nextOffset), first);
+  jsonBoolField(data, "has_more", nextOffset < totalSize, first);
+  jsonStringField(data, "data", encodeHex(bytes), first);
+  data += "}";
   return ok(command, "file_read_chunk", data);
 }
 
