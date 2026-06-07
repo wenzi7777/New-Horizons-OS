@@ -1,7 +1,7 @@
 {
   "changelog_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.6.3/releases/notes/v0.6.3.md",
   "firmware": {
-    "sha256": "ee73d1a70ba0585a1a637a9823432d805c7705d4e631b53d094cfb1aff2fd707",
+    "sha256": "879690bcca39bb974abb0c5c505ca98631f8f55c1048ae2d6f91b5f786d407ee",
     "size": 1327360,
     "url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.6.3/releases/artifacts/newhorizons-os-v0.6.3.bin"
   },
