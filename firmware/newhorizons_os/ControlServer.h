@@ -49,6 +49,7 @@ class ControlServer {
 
  private:
   void servicePendingApplyUpdate();
+  void sendUdpResult(WiFiUDP& udp, const String& host, uint16_t port, const String& uid, const String& requestId, const String& response);
   String processCommand(const String& request);
   String ok(const String& command, const String& message, const String& data = "{}") const;
   String error(const String& command, const String& message) const;

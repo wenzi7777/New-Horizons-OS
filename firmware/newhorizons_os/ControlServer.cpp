@@ -180,20 +180,61 @@ void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
     leds_->service(millis());
   }
 
-  // Send result
-  String result;
-  result.reserve(response.length() + 120);
-  bool rf = true;
-  result += '{';
-  jsonStringField(result, "type", "result", rf);
-  jsonStringField(result, "device_uid", uid, rf);
-  jsonStringField(result, "request_id", requestId, rf);
-  jsonRawField(result, "payload", response, rf);
-  result += '}';
-  udp.beginPacket(sender.c_str(), senderPort);
-  udp.print(result);
-  udp.endPacket();
+  // Send result (split into chunks if it exceeds a single UDP datagram).
+  sendUdpResult(udp, sender, senderPort, uid, requestId, response);
   servicePendingApplyUpdate();
+}
+
+// Large command responses (e.g. "status", ~2.5 KB) exceed a single UDP
+// datagram and get lost to IP fragmentation over WiFi/Docker bridges. Split
+// any oversized response into application-level chunks that each fit inside one
+// datagram; the gateway reassembles them by request_id before forwarding.
+void ControlServer::sendUdpResult(WiFiUDP& udp, const String& host, uint16_t port, const String& uid, const String& requestId, const String& response) {
+  // Threshold and chunk size leave headroom for JSON-string escaping and the
+  // envelope so every datagram stays under the ~1472-byte UDP payload limit.
+  constexpr size_t kInlineLimit = 1200;
+  if (response.length() <= kInlineLimit) {
+    String result;
+    result.reserve(response.length() + 120);
+    bool rf = true;
+    result += '{';
+    jsonStringField(result, "type", "result", rf);
+    jsonStringField(result, "device_uid", uid, rf);
+    jsonStringField(result, "request_id", requestId, rf);
+    jsonRawField(result, "payload", response, rf);
+    result += '}';
+    udp.beginPacket(host.c_str(), port);
+    udp.print(result);
+    udp.endPacket();
+    return;
+  }
+
+  constexpr size_t kChunkRaw = 700;
+  const size_t total = (response.length() + kChunkRaw - 1) / kChunkRaw;
+  for (size_t i = 0; i < total; i++) {
+    const size_t start = i * kChunkRaw;
+    size_t end = start + kChunkRaw;
+    if (end > static_cast<size_t>(response.length())) {
+      end = static_cast<size_t>(response.length());
+    }
+    const String fragment = response.substring(start, end);
+    String chunk;
+    chunk.reserve(fragment.length() * 2 + 140);
+    bool cf = true;
+    chunk += '{';
+    jsonStringField(chunk, "type", "result_chunk", cf);
+    jsonStringField(chunk, "device_uid", uid, cf);
+    jsonStringField(chunk, "request_id", requestId, cf);
+    jsonUnsignedField(chunk, "chunk", static_cast<unsigned long>(i), cf);
+    jsonUnsignedField(chunk, "chunks", static_cast<unsigned long>(total), cf);
+    jsonStringField(chunk, "data", fragment, cf);
+    chunk += '}';
+    udp.beginPacket(host.c_str(), port);
+    udp.print(chunk);
+    udp.endPacket();
+    // Small gap so the ESP32 WiFi stack does not drop back-to-back datagrams.
+    delay(3);
+  }
 }
 
 bool ControlServer::maintenanceMode() const {
