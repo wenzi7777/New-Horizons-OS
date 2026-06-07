@@ -128,10 +128,21 @@ void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
     return;
   }
 
+  String cmd = commandName(payloadStr);
+  String logCmd = cmd.isEmpty() ? String("missing") : cmd;
+  Serial.print(F("control_command_received cmd="));
+  Serial.print(logCmd);
+  Serial.print(F(" request_id="));
+  Serial.println(requestId);
+  if (leds_) {
+    leds_->showEvent(LedSignal::CommandReceived);
+    leds_->service(millis());
+  }
+
   const String uid = deviceUidString();
   const String sender = senderIp.toString();
 
-  // ACK
+  // Send ACK before executing so the gateway stops retrying
   String ack;
   ack.reserve(100);
   bool af = true;
@@ -145,9 +156,31 @@ void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
   udp.print(ack);
   udp.endPacket();
 
+  Serial.print(F("control_command_executing cmd="));
+  Serial.print(logCmd);
+  Serial.print(F(" request_id="));
+  Serial.println(requestId);
+  const uint32_t startedMs = millis();
   const String response = processCommand(payloadStr);
+  const uint32_t durationMs = millis() - startedMs;
+  const bool responseOk = response.indexOf("\"ok\":true") >= 0;
+  const String message = extractString(response, "message");
+  Serial.print(F("control_command_finished cmd="));
+  Serial.print(logCmd);
+  Serial.print(F(" request_id="));
+  Serial.print(requestId);
+  Serial.print(F(" ok="));
+  Serial.print(responseOk ? F("true") : F("false"));
+  Serial.print(F(" duration_ms="));
+  Serial.print(durationMs);
+  Serial.print(F(" message="));
+  Serial.println(message);
+  if (leds_) {
+    leds_->showEvent(responseOk ? LedSignal::CommandSuccess : LedSignal::CommandFailed);
+    leds_->service(millis());
+  }
 
-  // Result
+  // Send result
   String result;
   result.reserve(response.length() + 120);
   bool rf = true;
@@ -160,6 +193,7 @@ void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
   udp.beginPacket(sender.c_str(), senderPort);
   udp.print(result);
   udp.endPacket();
+  servicePendingApplyUpdate();
 }
 
 bool ControlServer::maintenanceMode() const {
