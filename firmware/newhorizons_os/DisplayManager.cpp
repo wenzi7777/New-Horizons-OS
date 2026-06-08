@@ -129,6 +129,8 @@ String DisplayManager::statusJson() const {
   out += String(static_cast<unsigned int>(config_.updateHz));
   out += ",\"contrast\":";
   out += String(static_cast<unsigned int>(config_.contrast));
+  out += ",\"rotation\":";
+  out += String(static_cast<unsigned int>(config_.rotation));
   out += ",\"last_error\":\"";
   out += jsonEscape(lastError_);
   out += "\"}";
@@ -163,6 +165,7 @@ bool DisplayManager::configure() {
   enabled_ = true;
   lastError_ = "";
   sleeping_ = false;
+  display_.setRotation(config_.rotation);
   display_.ssd1306_command(SSD1306_DISPLAYON);
   display_.dim(false);
   display_.ssd1306_command(SSD1306_SETCONTRAST);

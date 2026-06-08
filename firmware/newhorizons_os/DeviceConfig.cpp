@@ -308,7 +308,7 @@ bool DeviceConfig::setExternalLed(const String& mode, const String& preset, floa
   return true;
 }
 
-bool DeviceConfig::setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast) {
+bool DeviceConfig::setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast, uint8_t rotation) {
   if (!validOledMode(mode)) {
     return false;
   }
@@ -318,6 +318,7 @@ bool DeviceConfig::setOled(const String& mode, const String& page, uint8_t updat
   }
   data_.oled.updateHz = clampByte(updateHz, 1, 5);
   data_.oled.contrast = contrast;
+  data_.oled.rotation = clampByte(rotation, 0, 3);
   return true;
 }
 
@@ -423,6 +424,7 @@ void DeviceConfig::setDefaults() {
   data_.oled.page = "live_status";
   data_.oled.updateHz = 1;
   data_.oled.contrast = 128;
+  data_.oled.rotation = 0;
 }
 
 bool DeviceConfig::applyJson(const String& json) {
@@ -513,7 +515,8 @@ bool DeviceConfig::applyJson(const String& json) {
           mode,
           extractString(oled, "page", data_.oled.page),
           static_cast<uint8_t>(extractInt(oled, "update_hz", data_.oled.updateHz)),
-          static_cast<uint8_t>(extractInt(oled, "contrast", data_.oled.contrast)));
+          static_cast<uint8_t>(extractInt(oled, "contrast", data_.oled.contrast)),
+          static_cast<uint8_t>(extractInt(oled, "rotation", data_.oled.rotation)));
     }
   }
 
@@ -564,6 +567,8 @@ String DeviceConfig::toJson() const {
   out += String(static_cast<unsigned int>(data_.oled.updateHz));
   out += ",\"contrast\":";
   out += String(static_cast<unsigned int>(data_.oled.contrast));
+  out += ",\"rotation\":";
+  out += String(static_cast<unsigned int>(data_.oled.rotation));
   out += "}}}";
   return out;
 }

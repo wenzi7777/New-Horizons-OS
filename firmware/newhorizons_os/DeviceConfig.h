@@ -37,6 +37,7 @@ struct OledConfig {
   String page = "live_status";
   uint8_t updateHz = 1;
   uint8_t contrast = 128;
+  uint8_t rotation = 0;
 };
 
 struct LogConfig {
@@ -80,7 +81,7 @@ class DeviceConfig {
   bool setLogging(bool enabled, const String& level, const String& mode, size_t maxBytes);
   bool setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl);
   bool setExternalLed(const String& mode, const String& preset, float brightness);
-  bool setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast);
+  bool setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast, uint8_t rotation);
 
   String statusJson() const;
   String filterJson() const;

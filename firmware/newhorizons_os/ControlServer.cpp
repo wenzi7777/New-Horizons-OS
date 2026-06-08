@@ -599,11 +599,14 @@ String ControlServer::processCommand(const String& request) {
       }
       next.oled.updateHz = static_cast<uint8_t>(extractInt(oled, "update_hz", next.oled.updateHz));
       next.oled.contrast = static_cast<uint8_t>(extractInt(oled, "contrast", next.oled.contrast));
+      uint8_t oledRotation = static_cast<uint8_t>(extractInt(oled, "rotation", next.oled.rotation));
+      if (oledRotation > 3) oledRotation = 0;
+      next.oled.rotation = oledRotation;
     }
     if (!deviceConfig_->setExternalLed(next.externalLed.mode, next.externalLed.preset, next.externalLed.brightness)) {
       return error(cmd, "external_led_config_invalid");
     }
-    if (!deviceConfig_->setOled(next.oled.mode, next.oled.page, next.oled.updateHz, next.oled.contrast)) {
+    if (!deviceConfig_->setOled(next.oled.mode, next.oled.page, next.oled.updateHz, next.oled.contrast, next.oled.rotation)) {
       return error(cmd, "oled_config_invalid");
     }
     if (!deviceConfig_->save(*storage_)) {
