@@ -397,5 +397,5 @@ void loop() {
     delay(100);
     ESP.restart();
   }
-  delay(1);
+  yield();
 }

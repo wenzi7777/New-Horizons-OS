@@ -72,7 +72,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.6.6"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.6.7"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -626,19 +626,19 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.6.6}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.6.7}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
     def test_latest_manifest_points_to_current_artifact(self):
         latest = (REPO_ROOT / "releases" / "arduino-latest.json").read_text(encoding="utf-8")
-        versioned = (REPO_ROOT / "releases" / "arduino-v0.6.6.json").read_text(encoding="utf-8")
-        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.6.6.bin"
+        versioned = (REPO_ROOT / "releases" / "arduino-v0.6.7.json").read_text(encoding="utf-8")
+        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.6.7.bin"
 
-        self.assertIn('"latest": "v0.6.6"', latest)
-        self.assertIn("newhorizons-os-v0.6.6.bin", latest)
-        self.assertIn("v0.6.6/releases/artifacts", latest)
-        self.assertIn("v0.6.6.md", latest)
-        self.assertIn('"latest": "v0.6.6"', versioned)
+        self.assertIn('"latest": "v0.6.7"', latest)
+        self.assertIn("newhorizons-os-v0.6.7.bin", latest)
+        self.assertIn("v0.6.7/releases/artifacts", latest)
+        self.assertIn("v0.6.7.md", latest)
+        self.assertIn('"latest": "v0.6.7"', versioned)
         self.assertTrue(artifact.exists())
 
     def test_ota_manifest_and_status_include_changelog_url(self):
