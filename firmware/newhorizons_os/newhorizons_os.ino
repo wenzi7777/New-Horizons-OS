@@ -372,6 +372,8 @@ void loop() {
   power.service(millis());
   servicePowerState();
   if (powerState.shouldRunServices()) {
+    scanAndStreamIfDue();
+    sendQueuedPacketIfAny();
     wifi.service();
     findme.setModeName(bootMode.modeName());
     findme.service();
@@ -379,8 +381,6 @@ void loop() {
     control.serviceUdpCommand(streamUdp);
     imu.service(micros());
     sendHeartbeatIfDue();
-    scanAndStreamIfDue();
-    sendQueuedPacketIfAny();
     updateLedState();
     displayManager.service(
         millis(),

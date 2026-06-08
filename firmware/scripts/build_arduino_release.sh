@@ -6,7 +6,7 @@ SKETCH="${ROOT}/firmware/newhorizons_os"
 OUT_DIR="${ROOT}/firmware/build"
 RELEASE_DIR="${ROOT}/releases/artifacts"
 FQBN="${FQBN:-esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB}"
-VERSION="${VERSION:-v0.6.7}"
+VERSION="${VERSION:-v0.6.8}"
 
 mkdir -p "${OUT_DIR}" "${RELEASE_DIR}"
 
