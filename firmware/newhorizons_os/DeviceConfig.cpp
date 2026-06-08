@@ -415,7 +415,7 @@ void DeviceConfig::setDefaults() {
   data_.logging.maxBytes = kDefaultLogMaxBytes;
   data_.logging.level = "info";
   data_.logging.mode = "standard";
-  data_.ota.autoApplyOnBoot = false;
+  data_.ota.autoApplyOnBoot = true;
   data_.ota.manifestUrl = kDefaultUpdateManifestUrl;
   data_.externalLed.mode = "off";
   data_.externalLed.preset = "stream_health";

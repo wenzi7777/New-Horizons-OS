@@ -48,7 +48,7 @@ struct LogConfig {
 };
 
 struct OtaConfig {
-  bool autoApplyOnBoot = false;
+  bool autoApplyOnBoot = true;
   String manifestUrl = kDefaultUpdateManifestUrl;
 };
 

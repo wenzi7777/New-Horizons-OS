@@ -72,7 +72,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.6.8"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.6.9"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -480,7 +480,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("struct OtaConfig", device_header)
         self.assertIn("OtaConfig ota", device_header)
         self.assertIn("autoApplyOnBoot", device_header)
-        self.assertIn("data_.ota.autoApplyOnBoot = false", device_config)
+        self.assertIn("data_.ota.autoApplyOnBoot = true", device_config)
         self.assertIn('"auto_apply_on_boot"', device_config)
         self.assertIn("bool autoApplyIfNewer", ota_header)
         self.assertIn("auto_ota_check_start", ota)
@@ -495,6 +495,27 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("firmware_download_timeout", ota)
         self.assertIn("update_started", control)
         self.assertIn("servicePendingApplyUpdate", control)
+
+    def test_main_loop_prioritizes_scan_before_other_runtime_services_and_uses_yield(self):
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        loop_match = re.search(r"void loop\(\) \{(?P<body>.*?)\n\}", sketch, re.S)
+        self.assertIsNotNone(loop_match)
+        body = loop_match.group("body")
+
+        self.assertRegex(body, re.compile(r"scanAndStreamIfDue\(\);\s+sendQueuedPacketIfAny\(\);", re.S))
+        self.assertIn("yield();", body)
+        self.assertNotIn("delay(1);", body)
+        self.assertLess(body.index("scanAndStreamIfDue();"), body.index("wifi.service();"))
+        self.assertLess(body.index("sendQueuedPacketIfAny();"), body.index("wifi.service();"))
+        self.assertLess(body.index("scanAndStreamIfDue();"), body.index("findme.service();"))
+        self.assertLess(body.index("sendQueuedPacketIfAny();"), body.index("findme.service();"))
+        self.assertLess(body.index("scanAndStreamIfDue();"), body.index("control.service();"))
+        self.assertLess(body.index("sendQueuedPacketIfAny();"), body.index("control.service();"))
+        self.assertLess(body.index("scanAndStreamIfDue();"), body.index("imu.service(micros());"))
+        self.assertLess(body.index("sendQueuedPacketIfAny();"), body.index("imu.service(micros());"))
+        self.assertLess(body.index("scanAndStreamIfDue();"), body.index("displayManager.service("))
+        self.assertLess(body.index("sendQueuedPacketIfAny();"), body.index("displayManager.service("))
 
     def test_release_scripts_use_stock_8mb_dual_ota_partition(self):
         build_script = (SCRIPT_ROOT / "build_arduino_release.sh").read_text(encoding="utf-8")
@@ -626,7 +647,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.6.8}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.6.9}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
     def test_latest_manifest_points_to_current_artifact(self):
