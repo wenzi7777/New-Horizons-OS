@@ -16,6 +16,7 @@
 #include "MatrixScanner.h"
 #include "OtaManager.h"
 #include "PacketBuilder.h"
+#include "PowerAnimation.h"
 #include "PowerManager.h"
 #include "PowerStateManager.h"
 #include "Storage.h"
@@ -51,10 +52,15 @@ bool criticalError = false;
 uint32_t lastObservedOverrunFrames = 0;
 uint32_t lastObservedUdpFailures = 0;
 bool runtimeServicesSuspended = false;
+bool softOffOutputsSleeping = false;
 
 void logBoot(const String& message) {
   Serial.println(message);
   storage.logLine(String(millis()) + " " + message);
+}
+
+void logPowerEvent(const String& message) {
+  Serial.println(message);
 }
 
 void serviceAutoOta(bool wifiConnected) {
@@ -92,16 +98,28 @@ String chargeStateName() {
   }
 }
 
-void applySoftOffState() {
+String powerAnimationOutputs() {
+  String outputs = "board_led";
+  if (externalLeds.powerAnimationActive()) {
+    outputs += ",external_led";
+  }
+  if (displayManager.powerAnimationActive()) {
+    outputs += ",oled";
+  }
+  return outputs;
+}
+
+void suspendRuntimeServicesForSoftOff() {
   if (!runtimeServicesSuspended) {
     scanner.stop();
     wifi.suspend();
-    externalLeds.sleep();
-    displayManager.sleep();
     imu.setEnabled(false);
     runtimeServicesSuspended = true;
-    leds.showEvent(nhos::LedSignal::SoftOffTransition);
+    logPowerEvent("runtime_services_suspended");
   }
+}
+
+void applySoftOffIndicators() {
   if (powerState.state() == nhos::PowerState::SoftOffCharging && power.chargeState() == nhos::ChargeState::NotCharging) {
     leds.setSignal(nhos::LedSignal::Off);
     leds.showEvent(nhos::LedSignal::SoftOffChargeIdle);
@@ -110,17 +128,64 @@ void applySoftOffState() {
 }
 
 void applyNormalRuntimeState() {
+  if (softOffOutputsSleeping) {
+    externalLeds.wake();
+    displayManager.wake();
+    softOffOutputsSleeping = false;
+  }
   if (!runtimeServicesSuspended) {
     return;
   }
   wifi.resume();
-  externalLeds.wake();
-  displayManager.wake();
   imu.setEnabled(deviceConfig.data().imuEnabled);
   if (bootMode.mode() == nhos::RunMode::Normal && scanner.hasLayout() && !scanner.active()) {
     scanner.start();
   }
   runtimeServicesSuspended = false;
+  logPowerEvent("runtime_services_resumed");
+}
+
+void servicePowerTransition() {
+  const uint32_t nowMs = millis();
+  switch (powerState.transitionPhase()) {
+    case nhos::PowerTransitionPhase::ShutdownAnimationPending:
+      suspendRuntimeServicesForSoftOff();
+      leds.setSignal(nhos::LedSignal::Off);
+      leds.showEvent(nhos::LedSignal::PowerTransitionShutdown);
+      powerState.beginShutdownAnimation();
+      externalLeds.startPowerAnimation(nhos::PowerAnimation::Shutdown);
+      displayManager.startPowerAnimation(nhos::PowerAnimation::Shutdown);
+      logPowerEvent(String("shutdown_anim_start outputs=") + powerAnimationOutputs() + " duration_ms=600");
+      break;
+    case nhos::PowerTransitionPhase::ShutdownAnimationRunning:
+      leds.service(nowMs);
+      externalLeds.servicePowerAnimation(nowMs);
+      displayManager.servicePowerAnimation(nowMs);
+      if (powerState.transitionTimedOut(nowMs) &&
+          !externalLeds.powerAnimationActive() &&
+          !displayManager.powerAnimationActive()) {
+        externalLeds.sleep();
+        displayManager.sleep();
+        softOffOutputsSleeping = true;
+        powerState.finishPowerTransition();
+        logPowerEvent("shutdown_anim_done");
+      }
+      break;
+    case nhos::PowerTransitionPhase::WakeAnimationRunning:
+      leds.service(nowMs);
+      externalLeds.servicePowerAnimation(nowMs);
+      displayManager.servicePowerAnimation(nowMs);
+      if (powerState.transitionTimedOut(nowMs) &&
+          !externalLeds.powerAnimationActive() &&
+          !displayManager.powerAnimationActive()) {
+        powerState.finishPowerTransition();
+        logPowerEvent("wake_anim_done");
+      }
+      break;
+    case nhos::PowerTransitionPhase::None:
+    default:
+      break;
+  }
 }
 
 void servicePowerState() {
@@ -129,9 +194,20 @@ void servicePowerState() {
     return;
   }
   if (powerState.shouldRunServices()) {
+    if (softOffOutputsSleeping) {
+      externalLeds.wake();
+      displayManager.wake();
+      softOffOutputsSleeping = false;
+    }
+    leds.setSignal(nhos::LedSignal::Off);
+    leds.showEvent(nhos::LedSignal::PowerTransitionWake);
+    powerState.beginWakeAnimation();
+    externalLeds.startPowerAnimation(nhos::PowerAnimation::Wake);
+    displayManager.startPowerAnimation(nhos::PowerAnimation::Wake);
+    logPowerEvent(String("wake_anim_start outputs=") + powerAnimationOutputs() + " duration_ms=500");
     applyNormalRuntimeState();
   } else {
-    applySoftOffState();
+    suspendRuntimeServicesForSoftOff();
   }
 }
 
@@ -383,6 +459,7 @@ void loop() {
     imu.service(micros());
     sendHeartbeatIfDue();
     updateLedState();
+    servicePowerTransition();
     displayManager.service(
         millis(),
         wifi.isConnected() ? WiFi.localIP().toString() : WiFi.softAPIP().toString(),
@@ -391,8 +468,16 @@ void loop() {
         ESP.getFreeHeap(),
         ESP.getHeapSize());
   } else {
-    updateLedState();
-    powerState.lightSleep();
+    if (powerState.transitionPhase() != nhos::PowerTransitionPhase::None) {
+      servicePowerTransition();
+    } else {
+      applySoftOffIndicators();
+      updateLedState();
+      // powerState.lightSleep() emits:
+      // soft_off_sleep_enter state=
+      // soft_off_wake cause=
+      powerState.lightSleep();
+    }
   }
   if (bootMode.rebootRequested()) {
     delay(100);

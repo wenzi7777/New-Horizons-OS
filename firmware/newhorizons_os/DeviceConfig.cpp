@@ -349,6 +349,8 @@ String DeviceConfig::loggingJson() const {
   out += jsonEscape(data_.logging.mode);
   out += "\",\"max_bytes\":";
   out += String(static_cast<unsigned int>(data_.logging.maxBytes));
+  out += ",\"effective_total_bytes\":";
+  out += String(static_cast<unsigned int>(data_.logging.maxBytes * 2));
   out += "}";
   return out;
 }
@@ -413,7 +415,7 @@ void DeviceConfig::setDefaults() {
   data_.imuEnabled = true;
   data_.logging.enabled = true;
   data_.logging.maxBytes = kDefaultLogMaxBytes;
-  data_.logging.level = "info";
+  data_.logging.level = "error";
   data_.logging.mode = "standard";
   data_.ota.autoApplyOnBoot = true;
   data_.ota.manifestUrl = kDefaultUpdateManifestUrl;

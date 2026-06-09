@@ -9,6 +9,8 @@
 
 namespace nhos {
 
+enum class PowerAnimation : uint8_t;
+
 class ExternalLedController {
  public:
   ExternalLedController();
@@ -16,6 +18,9 @@ class ExternalLedController {
   void begin(const ExternalLedConfig& config);
   void apply(const ExternalLedConfig& config);
   void identify();
+  void startPowerAnimation(PowerAnimation animation);
+  void servicePowerAnimation(uint32_t nowMs);
+  bool powerAnimationActive() const;
   void sleep();
   void wake();
   void service(uint32_t nowMs, const ScanHealth& health, LedSignal systemSignal);
@@ -33,6 +38,8 @@ class ExternalLedController {
   ExternalLedConfig config_;
   bool initialized_ = false;
   bool sleeping_ = false;
+  uint8_t powerAnimation_ = 0;
+  uint32_t powerAnimationStartedMs_ = 0;
   String activePreset_ = "off";
   uint32_t identifyStartedMs_ = 0;
   uint32_t lastShowMs_ = 0;

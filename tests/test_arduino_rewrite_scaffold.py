@@ -72,7 +72,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.6.10"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.6.11"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -446,7 +446,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("imu.setServiceIntervalUs(scanner.scanIntervalUs())", sketch)
         self.assertIn("imu_->setServiceIntervalUs(scanner_->scanIntervalUs())", control)
 
-    def test_log_configuration_defaults_to_rolling_16k_and_has_extended_32k_mode(self):
+    def test_log_configuration_defaults_to_rolling_12k_and_has_extended_24k_mode(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
         device_header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
         device_config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
@@ -455,17 +455,18 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
-        self.assertIn("kDefaultLogMaxBytes = 16 * 1024", config)
-        self.assertIn("kExtendedLogMaxBytes = 32 * 1024", config)
+        self.assertIn("kDefaultLogMaxBytes = 12 * 1024", config)
+        self.assertIn("kExtendedLogMaxBytes = 24 * 1024", config)
         self.assertIn("struct LogConfig", device_header)
         self.assertIn("LogConfig logging", device_header)
         self.assertIn('data_.logging.enabled = true', device_config)
         self.assertIn('data_.logging.maxBytes = kDefaultLogMaxBytes', device_config)
-        self.assertIn('data_.logging.level = "info"', device_config)
+        self.assertIn('data_.logging.level = "error"', device_config)
         self.assertIn('data_.logging.mode = "standard"', device_config)
         self.assertIn("configureLog", storage_header)
         self.assertIn("logStatusJson", storage_header)
         self.assertIn("logMaxBytes_", storage)
+        self.assertIn("effective_total_bytes", storage)
         self.assertIn("rotateLogIfNeeded", storage)
         self.assertIn('cmd == "set_log"', control)
         self.assertIn("storage_->configureLog", control)
@@ -650,19 +651,19 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.6.10}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.6.11}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
     def test_latest_manifest_points_to_current_artifact(self):
         latest = (REPO_ROOT / "releases" / "arduino-latest.json").read_text(encoding="utf-8")
-        versioned = (REPO_ROOT / "releases" / "arduino-v0.6.10.json").read_text(encoding="utf-8")
-        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.6.10.bin"
+        versioned = (REPO_ROOT / "releases" / "arduino-v0.6.11.json").read_text(encoding="utf-8")
+        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.6.11.bin"
 
-        self.assertIn('"latest": "v0.6.10"', latest)
-        self.assertIn("newhorizons-os-v0.6.10.bin", latest)
-        self.assertIn("v0.6.10/releases/artifacts", latest)
-        self.assertIn("v0.6.10.md", latest)
-        self.assertIn('"latest": "v0.6.10"', versioned)
+        self.assertIn('"latest": "v0.6.11"', latest)
+        self.assertIn("newhorizons-os-v0.6.11.bin", latest)
+        self.assertIn("v0.6.11/releases/artifacts", latest)
+        self.assertIn("v0.6.11.md", latest)
+        self.assertIn('"latest": "v0.6.11"', versioned)
         self.assertTrue(artifact.exists())
 
     def test_ota_manifest_and_status_include_changelog_url(self):
@@ -831,6 +832,60 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('cmd == "power_set_state"', control)
         self.assertIn('jsonRawField(data, "power"', control)
         self.assertIn("powerState.statusJson()", sketch)
+
+    def test_power_transition_animation_hooks_exist_for_display_and_external_leds(self):
+        display_header = (ARDUINO_ROOT / "DisplayManager.h").read_text(encoding="utf-8")
+        display_impl = (ARDUINO_ROOT / "DisplayManager.cpp").read_text(encoding="utf-8")
+        external_header = (ARDUINO_ROOT / "ExternalLedController.h").read_text(encoding="utf-8")
+        external_impl = (ARDUINO_ROOT / "ExternalLedController.cpp").read_text(encoding="utf-8")
+        led_header = (ARDUINO_ROOT / "LedController.h").read_text(encoding="utf-8")
+        led_impl = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("enum class PowerAnimation", display_header)
+        self.assertIn("void startPowerAnimation(", display_header)
+        self.assertIn("bool powerAnimationActive() const;", display_header)
+        self.assertIn("void servicePowerAnimation(uint32_t nowMs);", display_header)
+        self.assertIn('config_.mode == "enabled"', display_impl)
+        self.assertIn('label == "Powering off"', display_impl)
+        self.assertIn('label == "Waking"', display_impl)
+        self.assertIn("enum class PowerAnimation", external_header)
+        self.assertIn("void startPowerAnimation(", external_header)
+        self.assertIn("bool powerAnimationActive() const;", external_header)
+        self.assertIn("void servicePowerAnimation(uint32_t nowMs);", external_header)
+        self.assertIn("PowerAnimation::Shutdown", external_impl)
+        self.assertIn("PowerAnimation::Wake", external_impl)
+        self.assertIn("PowerTransitionShutdown", led_header)
+        self.assertIn("PowerTransitionWake", led_header)
+        self.assertIn("case LedSignal::PowerTransitionShutdown:", led_impl)
+        self.assertIn("case LedSignal::PowerTransitionWake:", led_impl)
+
+    def test_power_transition_flow_and_serial_logs_are_wired_in_main_loop(self):
+        power_header = (ARDUINO_ROOT / "PowerStateManager.h").read_text(encoding="utf-8")
+        power_impl = (ARDUINO_ROOT / "PowerStateManager.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("enum class PowerTransitionPhase", power_header)
+        self.assertIn("PowerTransitionPhase transitionPhase() const;", power_header)
+        self.assertIn("void beginShutdownAnimation();", power_header)
+        self.assertIn("void beginWakeAnimation();", power_header)
+        self.assertIn("power_button_down", power_impl)
+        self.assertIn("power_button_up held_ms=", power_impl)
+        self.assertIn("power_transition_requested from=", power_impl)
+        self.assertIn("shutdown_anim_start outputs=", sketch)
+        self.assertIn("shutdown_anim_done", sketch)
+        self.assertIn("runtime_services_suspended", sketch)
+        self.assertIn("soft_off_sleep_enter state=", sketch)
+        self.assertIn("soft_off_wake cause=", sketch)
+        self.assertIn("wake_anim_start outputs=", sketch)
+        self.assertIn("wake_anim_done", sketch)
+        self.assertIn("runtime_services_resumed", sketch)
+        self.assertIn("servicePowerTransition()", sketch)
+        self.assertIn("powerState.beginShutdownAnimation()", sketch)
+        self.assertIn("powerState.beginWakeAnimation()", sketch)
+        self.assertIn("displayManager.startPowerAnimation(", sketch)
+        self.assertIn("externalLeds.startPowerAnimation(", sketch)
+        self.assertIn("displayManager.servicePowerAnimation(", sketch)
+        self.assertIn("externalLeds.servicePowerAnimation(", sketch)
 
 
 if __name__ == "__main__":

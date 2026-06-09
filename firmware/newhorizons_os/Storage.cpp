@@ -203,7 +203,7 @@ void Storage::configureLog(bool enabled, size_t maxBytes, const String& level) {
     logMaxBytes_ = kExtendedLogMaxBytes;
   }
   logLevel_ = parseLogLevel(level);
-  logLevelName_ = level.isEmpty() ? String("info") : level;
+  logLevelName_ = level.isEmpty() ? String("error") : level;
   rotateLogIfNeeded(0);
 }
 
@@ -217,6 +217,8 @@ String Storage::logStatusJson() const {
   out += logMaxBytes_ > kDefaultLogMaxBytes ? "extended" : "standard";
   out += "\",\"max_bytes\":";
   out += String(static_cast<unsigned int>(logMaxBytes_));
+  out += ",\"effective_total_bytes\":";
+  out += String(static_cast<unsigned int>(logMaxBytes_ * 2));
   out += ",\"bytes\":";
   out += String(static_cast<unsigned int>(file ? file.size() : 0));
   out += ",\"path\":\"";

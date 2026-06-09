@@ -47,6 +47,8 @@ enum class LedSignal : uint8_t {
   SoftOffCharging,
   SoftOffChargeDone,
   SoftOffChargeIdle,
+  PowerTransitionShutdown,
+  PowerTransitionWake,
   CommandReceived,
   CommandSuccess,
   CommandFailed,

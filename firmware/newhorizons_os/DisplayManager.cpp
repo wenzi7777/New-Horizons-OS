@@ -3,6 +3,7 @@
 #include <Wire.h>
 
 #include "Config.h"
+#include "PowerAnimation.h"
 
 namespace nhos {
 namespace {
@@ -10,6 +11,8 @@ constexpr int16_t kOledWidth = 128;
 constexpr int16_t kOledHeight = 32;
 constexpr uint8_t kPrimaryAddress = 0x3C;
 constexpr uint8_t kFallbackAddress = 0x3D;
+constexpr uint32_t kShutdownAnimationMs = 600;
+constexpr uint32_t kWakeAnimationMs = 500;
 
 String jsonEscape(const String& value) {
   String out;
@@ -65,6 +68,43 @@ void DisplayManager::apply(const OledConfig& config) {
   }
 }
 
+void DisplayManager::startPowerAnimation(PowerAnimation animation) {
+  powerAnimation_ = static_cast<uint8_t>(PowerAnimation::None);
+  powerAnimationStartedMs_ = 0;
+  if (!initialized_ || !enabled_ || config_.mode != "enabled") {
+    return;
+  }
+  sleeping_ = false;
+  display_.ssd1306_command(SSD1306_DISPLAYON);
+  powerAnimation_ = static_cast<uint8_t>(animation);
+  powerAnimationStartedMs_ = millis();
+}
+
+void DisplayManager::servicePowerAnimation(uint32_t nowMs) {
+  if (!powerAnimationActive() || !initialized_ || !enabled_) {
+    return;
+  }
+  const PowerAnimation animation = static_cast<PowerAnimation>(powerAnimation_);
+  const uint32_t elapsedMs = nowMs - powerAnimationStartedMs_;
+  const uint32_t durationMs = animation == PowerAnimation::Shutdown ? kShutdownAnimationMs : kWakeAnimationMs;
+  if (elapsedMs >= durationMs) {
+    powerAnimation_ = static_cast<uint8_t>(PowerAnimation::None);
+    powerAnimationStartedMs_ = 0;
+    lastUpdateMs_ = 0;
+    return;
+  }
+
+  if (animation == PowerAnimation::Shutdown) {
+    renderPowerAnimation("Powering off", elapsedMs, durationMs);
+  } else if (animation == PowerAnimation::Wake) {
+    renderPowerAnimation("Waking", elapsedMs, durationMs);
+  }
+}
+
+bool DisplayManager::powerAnimationActive() const {
+  return powerAnimation_ != static_cast<uint8_t>(PowerAnimation::None);
+}
+
 void DisplayManager::sleep() {
   if (!initialized_) {
     return;
@@ -87,7 +127,7 @@ void DisplayManager::wake() {
 }
 
 void DisplayManager::service(uint32_t nowMs, const String& ip, const String& gatewayIp, const ScanHealth& health, uint32_t heapFree, uint32_t heapTotal) {
-  if (!enabled_ || sleeping_) {
+  if (!enabled_ || sleeping_ || powerAnimationActive()) {
     return;
   }
   const uint8_t hz = config_.updateHz ? config_.updateHz : 1;
@@ -108,6 +148,37 @@ void DisplayManager::service(uint32_t nowMs, const String& ip, const String& gat
   } else {
     renderLiveStatus(ip, gatewayIp, health, heapFree, heapTotal);
   }
+  display_.display();
+}
+
+void DisplayManager::renderPowerAnimation(const char* label, uint32_t elapsedMs, uint32_t durationMs) {
+  // label == "Powering off" / label == "Waking" are the only supported variants.
+  const bool isPoweringOff = String(label) == "Powering off";
+  const bool isWaking = String(label) == "Waking";
+  display_.clearDisplay();
+  display_.setTextSize(1);
+  display_.setTextColor(SSD1306_WHITE);
+  display_.setCursor(20, 4);
+  display_.print(label);
+
+  const uint8_t steps = 8;
+  const float angleStep = 6.2831853f / static_cast<float>(steps);
+  const uint8_t active = static_cast<uint8_t>((elapsedMs / 70U) % steps);
+  const int16_t centerX = 64;
+  const int16_t centerY = 23;
+  const int16_t radius = 8;
+  for (uint8_t i = 0; i < steps; ++i) {
+    const float angle = angleStep * static_cast<float>(i);
+    const int16_t x = static_cast<int16_t>(centerX + cosf(angle) * radius);
+    const int16_t y = static_cast<int16_t>(centerY + sinf(angle) * radius);
+    const uint8_t dotRadius = i == active ? 2 : 1;
+    display_.fillCircle(x, y, dotRadius, SSD1306_WHITE);
+  }
+  display_.drawRoundRect(12, 0, 104, 32, 4, SSD1306_WHITE);
+  if (isPoweringOff || isWaking) {
+    display_.fillRect(14, 26, 2, 4, SSD1306_WHITE);
+  }
+  display_.drawLine(16, 28, static_cast<int16_t>(16 + ((96UL * elapsedMs) / durationMs)), 28, SSD1306_WHITE);
   display_.display();
 }
 

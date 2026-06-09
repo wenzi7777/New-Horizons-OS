@@ -92,6 +92,10 @@ LedController::Pattern LedController::patternFor(LedSignal signal) const {
       return {PatternMode::Solid, LedPalette::ChargeDone, LedPalette::Off, 0, 0, 0, 0, 0, 0, 255};
     case LedSignal::SoftOffChargeIdle:
       return {PatternMode::BlinkBurst, LedPalette::White, LedPalette::Off, 1000, 80, 0, 1, 500, 0, 255};
+    case LedSignal::PowerTransitionShutdown:
+      return {PatternMode::BlinkBurst, LedPalette::White, LedPalette::Off, 1000, 90, 0, 1, 600, 0, 255};
+    case LedSignal::PowerTransitionWake:
+      return {PatternMode::BlinkBurst, LedPalette::Online, LedPalette::Off, 1000, 140, 0, 1, 500, 0, 255};
     case LedSignal::CommandReceived:
       return {PatternMode::BlinkBurst, LedPalette::White, LedPalette::Off, 1000, 30, 0, 1, 150, 0, 255};
     case LedSignal::CommandSuccess:

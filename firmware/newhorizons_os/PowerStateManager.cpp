@@ -20,6 +20,7 @@ void PowerStateManager::service(uint32_t nowMs, bool chargerDetected, ChargeStat
     buttonDown_ = true;
     buttonPressedAtMs_ = nowMs;
     longPressHandled_ = false;
+    logButtonDown();
   }
 
   if (state_ == PowerState::Normal) {
@@ -38,6 +39,7 @@ void PowerStateManager::service(uint32_t nowMs, bool chargerDetected, ChargeStat
   }
 
   if (!pressed && buttonDown_) {
+    logButtonUp(nowMs - buttonPressedAtMs_);
     buttonDown_ = false;
     buttonPressedAtMs_ = 0;
     longPressHandled_ = false;
@@ -56,9 +58,19 @@ void PowerStateManager::requestState(PowerState nextState, const String& reason)
   if (state_ == nextState && softOffReason_ == reason) {
     return;
   }
+  const PowerState previousState = state_;
   state_ = nextState;
   transitionPending_ = true;
   softOffReason_ = reason;
+  logTransitionRequested(previousState, nextState, reason);
+  if (previousState == PowerState::Normal && nextState != PowerState::Normal) {
+    transitionPhase_ = PowerTransitionPhase::ShutdownAnimationPending;
+    transitionStartedMs_ = 0;
+    sleepLogPending_ = true;
+  } else if (previousState != PowerState::Normal && nextState == PowerState::Normal) {
+    transitionPhase_ = PowerTransitionPhase::WakeAnimationRunning;
+    transitionStartedMs_ = 0;
+  }
 }
 
 bool PowerStateManager::requestStateByName(const String& name, bool chargerDetected) {
@@ -89,6 +101,10 @@ PowerState PowerStateManager::state() const {
   return state_;
 }
 
+PowerTransitionPhase PowerStateManager::transitionPhase() const {
+  return transitionPhase_;
+}
+
 bool PowerStateManager::shouldRunServices() const {
   return state_ == PowerState::Normal;
 }
@@ -99,9 +115,48 @@ bool PowerStateManager::consumeTransition() {
   return pending;
 }
 
+void PowerStateManager::beginShutdownAnimation() {
+  transitionPhase_ = PowerTransitionPhase::ShutdownAnimationRunning;
+  transitionStartedMs_ = millis();
+}
+
+void PowerStateManager::beginWakeAnimation() {
+  transitionPhase_ = PowerTransitionPhase::WakeAnimationRunning;
+  transitionStartedMs_ = millis();
+}
+
+void PowerStateManager::finishPowerTransition() {
+  transitionPhase_ = PowerTransitionPhase::None;
+  transitionStartedMs_ = 0;
+}
+
+uint32_t PowerStateManager::transitionDurationMs() const {
+  switch (transitionPhase_) {
+    case PowerTransitionPhase::ShutdownAnimationPending:
+    case PowerTransitionPhase::ShutdownAnimationRunning:
+      return 600;
+    case PowerTransitionPhase::WakeAnimationRunning:
+      return 500;
+    case PowerTransitionPhase::None:
+    default:
+      return 0;
+  }
+}
+
+bool PowerStateManager::transitionTimedOut(uint32_t nowMs) const {
+  const uint32_t durationMs = transitionDurationMs();
+  return durationMs && (nowMs - transitionStartedMs_ >= durationMs);
+}
+
 void PowerStateManager::lightSleep() {
   if (state_ == PowerState::Normal) {
     return;
+  }
+  const bool logThisCycle = sleepLogPending_;
+  if (sleepLogPending_) {
+    Serial.print(F("soft_off_sleep_enter state="));
+    Serial.println(stateName());
+    sleepLogPending_ = false;
   }
   const uint64_t timerUs = buttonDown_ ? kButtonTrackSleepUs
       : (state_ == PowerState::SoftOffCharging ? kSoftOffChargingSleepUs : kSoftOffBatterySleepUs);
@@ -117,6 +172,10 @@ void PowerStateManager::lightSleep() {
     setWakeSource("timer");
   } else {
     setWakeSource("unknown");
+  }
+  if (logThisCycle || cause != ESP_SLEEP_WAKEUP_TIMER) {
+    Serial.print(F("soft_off_wake cause="));
+    Serial.println(wakeSourceName());
   }
 }
 
@@ -136,8 +195,8 @@ String PowerStateManager::statusJson() const {
   return out;
 }
 
-const char* PowerStateManager::stateName() const {
-  switch (state_) {
+const char* PowerStateManager::stateName(PowerState state) const {
+  switch (state) {
     case PowerState::SoftOffBattery:
       return "soft_off_battery";
     case PowerState::SoftOffCharging:
@@ -148,11 +207,21 @@ const char* PowerStateManager::stateName() const {
   }
 }
 
+const char* PowerStateManager::stateName() const {
+  return stateName(state_);
+}
+
 const char* PowerStateManager::wakeSourceName() const {
   return wakeSource_.c_str();
 }
 
 const char* PowerStateManager::chargeStateName() const {
+  switch (state_) {
+    case PowerState::SoftOffBattery:
+    case PowerState::SoftOffCharging:
+    case PowerState::Normal:
+      break;
+  }
   switch (chargeState_) {
     case ChargeState::ChargingOrMissing:
       return "charging";
@@ -166,6 +235,24 @@ const char* PowerStateManager::chargeStateName() const {
 
 void PowerStateManager::setWakeSource(const char* source) {
   wakeSource_ = source;
+}
+
+void PowerStateManager::logButtonDown() const {
+  Serial.println(F("power_button_down"));
+}
+
+void PowerStateManager::logButtonUp(uint32_t heldMs) const {
+  Serial.print(F("power_button_up held_ms="));
+  Serial.println(heldMs);
+}
+
+void PowerStateManager::logTransitionRequested(PowerState from, PowerState to, const String& reason) const {
+  Serial.print(F("power_transition_requested from="));
+  Serial.print(stateName(from));
+  Serial.print(F(" to="));
+  Serial.print(stateName(to));
+  Serial.print(F(" reason="));
+  Serial.println(reason);
 }
 
 }  // namespace nhos

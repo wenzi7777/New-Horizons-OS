@@ -1,6 +1,7 @@
 #include "ExternalLedController.h"
 
 #include "BoardPins.h"
+#include "PowerAnimation.h"
 
 namespace nhos {
 
@@ -9,6 +10,8 @@ constexpr uint16_t kIdentifyStepMs = 220;
 constexpr uint16_t kIdentifyOnMs = 150;
 constexpr uint16_t kIdentifyHoldOffMs = 420;
 constexpr float kExternalLedMaxChannel = 96.0f;
+constexpr uint32_t kShutdownAnimationMs = 600;
+constexpr uint32_t kWakeAnimationMs = 500;
 
 uint16_t identifyDurationMs() {
   return static_cast<uint16_t>((static_cast<uint16_t>(kExternalLedCount) * kIdentifyStepMs) + kIdentifyHoldOffMs);
@@ -64,6 +67,51 @@ void ExternalLedController::identify() {
   identifyStartedMs_ = millis();
 }
 
+void ExternalLedController::startPowerAnimation(PowerAnimation animation) {
+  powerAnimation_ = static_cast<uint8_t>(PowerAnimation::None);
+  powerAnimationStartedMs_ = 0;
+  if (!initialized_ || config_.mode != "enabled") {
+    return;
+  }
+  sleeping_ = false;
+  powerAnimation_ = static_cast<uint8_t>(animation);
+  powerAnimationStartedMs_ = millis();
+}
+
+void ExternalLedController::servicePowerAnimation(uint32_t nowMs) {
+  if (!powerAnimationActive() || !initialized_) {
+    return;
+  }
+  const PowerAnimation animation = static_cast<PowerAnimation>(powerAnimation_);
+  const uint32_t elapsedMs = nowMs - powerAnimationStartedMs_;
+  const uint32_t durationMs = animation == PowerAnimation::Shutdown ? kShutdownAnimationMs : kWakeAnimationMs;
+  if (elapsedMs >= durationMs) {
+    powerAnimation_ = static_cast<uint8_t>(PowerAnimation::None);
+    powerAnimationStartedMs_ = 0;
+    clear();
+    return;
+  }
+
+  pixels_.clear();
+  if (animation == PowerAnimation::Shutdown) {
+    const uint16_t index = static_cast<uint16_t>((elapsedMs / 200U) % kExternalLedCount);
+    pixels_.setPixelColor(index, color(LedPalette::White));
+  } else if (animation == PowerAnimation::Wake) {
+    const uint16_t lit = static_cast<uint16_t>((elapsedMs * (kExternalLedCount + 1)) / durationMs);
+    for (uint16_t i = 0; i < kExternalLedCount; ++i) {
+      if (i <= lit) {
+        pixels_.setPixelColor(i, color(LedPalette::FindMePending));
+      }
+    }
+  }
+  pixels_.show();
+  lastShowMs_ = nowMs;
+}
+
+bool ExternalLedController::powerAnimationActive() const {
+  return powerAnimation_ != static_cast<uint8_t>(PowerAnimation::None);
+}
+
 void ExternalLedController::sleep() {
   sleeping_ = true;
   clear();
@@ -76,6 +124,10 @@ void ExternalLedController::wake() {
 void ExternalLedController::service(uint32_t nowMs, const ScanHealth& health, LedSignal systemSignal) {
   if (sleeping_) {
     activePreset_ = "off";
+    return;
+  }
+  if (powerAnimationActive()) {
+    activePreset_ = "power_transition";
     return;
   }
   if (!initialized_ || config_.mode != "enabled") {
