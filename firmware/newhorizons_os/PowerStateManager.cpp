@@ -103,7 +103,8 @@ void PowerStateManager::lightSleep() {
   if (state_ == PowerState::Normal) {
     return;
   }
-  const uint64_t timerUs = state_ == PowerState::SoftOffCharging ? kSoftOffChargingSleepUs : kSoftOffBatterySleepUs;
+  const uint64_t timerUs = buttonDown_ ? kButtonTrackSleepUs
+      : (state_ == PowerState::SoftOffCharging ? kSoftOffChargingSleepUs : kSoftOffBatterySleepUs);
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
   gpio_wakeup_enable(static_cast<gpio_num_t>(kActionButtonPin), GPIO_INTR_LOW_LEVEL);
   esp_sleep_enable_gpio_wakeup();

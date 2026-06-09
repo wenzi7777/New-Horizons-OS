@@ -69,6 +69,8 @@ class MatrixScanner {
   String healthJson() const;
   String matrixShapeJson() const;
   String matrixLayoutJson() const;
+  uint32_t scanIntervalUs() const;
+  uint32_t nextScanDueUs() const { return nextScanDueUs_; }
 
  private:
   bool sampleRawFrame(float* outValues, size_t count);
@@ -76,7 +78,6 @@ class MatrixScanner {
   void configurePins();
   void setAllColsInactive();
   void clearPacketQueue();
-  uint32_t scanIntervalUs() const;
   void scheduleNextScan(uint32_t scanStartUs, uint32_t scanEndUs);
   void updateScanFps(uint32_t nowMs);
   void logPerformanceIfDue(uint32_t nowMs);

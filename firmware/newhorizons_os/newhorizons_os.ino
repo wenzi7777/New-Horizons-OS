@@ -325,6 +325,7 @@ void setup() {
       deviceConfig.data().scanTiming.targetFps,
       deviceConfig.data().scanTiming.settleUs,
       deviceConfig.data().scanTiming.sendEveryNFrames);
+  imu.setServiceIntervalUs(scanner.scanIntervalUs());
   scanner.setStreamBufferConfig(
       deviceConfig.data().streamBuffer.enabled,
       deviceConfig.data().streamBuffer.depthFrames);
@@ -397,5 +398,8 @@ void loop() {
     delay(100);
     ESP.restart();
   }
-  yield();
+  if (!scanner.active() || !scanner.hasLayout() ||
+      static_cast<int32_t>(scanner.nextScanDueUs() - micros()) > 2000) {
+    yield();
+  }
 }

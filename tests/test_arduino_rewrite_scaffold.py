@@ -72,7 +72,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.6.9"', config)
+        self.assertIn('kFirmwareVersion[] = "v0.6.10"', config)
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -442,6 +442,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("putFloat(out + offset, imu7[i])", packet_impl)
         self.assertIn("ImuManager& imu", control_header)
         self.assertIn("imu_ ? imu_->statusJson()", control)
+        self.assertIn("void setServiceIntervalUs(uint32_t us)", imu_header)
+        self.assertIn("imu.setServiceIntervalUs(scanner.scanIntervalUs())", sketch)
+        self.assertIn("imu_->setServiceIntervalUs(scanner_->scanIntervalUs())", control)
 
     def test_log_configuration_defaults_to_rolling_16k_and_has_extended_32k_mode(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
@@ -647,19 +650,19 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.6.9}"', script)
+        self.assertIn('VERSION="${VERSION:-v0.6.10}"', script)
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
     def test_latest_manifest_points_to_current_artifact(self):
         latest = (REPO_ROOT / "releases" / "arduino-latest.json").read_text(encoding="utf-8")
-        versioned = (REPO_ROOT / "releases" / "arduino-v0.6.8.json").read_text(encoding="utf-8")
-        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.6.8.bin"
+        versioned = (REPO_ROOT / "releases" / "arduino-v0.6.10.json").read_text(encoding="utf-8")
+        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.6.10.bin"
 
-        self.assertIn('"latest": "v0.6.8"', latest)
-        self.assertIn("newhorizons-os-v0.6.8.bin", latest)
-        self.assertIn("v0.6.8/releases/artifacts", latest)
-        self.assertIn("v0.6.8.md", latest)
-        self.assertIn('"latest": "v0.6.8"', versioned)
+        self.assertIn('"latest": "v0.6.10"', latest)
+        self.assertIn("newhorizons-os-v0.6.10.bin", latest)
+        self.assertIn("v0.6.10/releases/artifacts", latest)
+        self.assertIn("v0.6.10.md", latest)
+        self.assertIn('"latest": "v0.6.10"', versioned)
         self.assertTrue(artifact.exists())
 
     def test_ota_manifest_and_status_include_changelog_url(self):
@@ -804,6 +807,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("esp_sleep_enable_timer_wakeup", power_state)
         self.assertIn("esp_light_sleep_start()", power_state)
         self.assertIn("kActionButtonPin", power_state)
+        self.assertIn("kButtonTrackSleepUs", power_state)
+        self.assertIn("buttonDown_", power_state)
         self.assertIn("scanner.stop()", sketch)
         self.assertIn("wifi.suspend()", sketch)
         self.assertIn("displayManager.sleep()", sketch)

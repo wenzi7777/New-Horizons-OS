@@ -13,6 +13,7 @@ class ImuManager {
   void service(uint32_t nowUs);
   bool copyLatestSample(float out7[7]) const;
   String statusJson() const;
+  void setServiceIntervalUs(uint32_t us) { serviceIntervalUs_ = us; }
 
  private:
   static constexpr uint32_t kDefaultServiceIntervalUs = 10000;

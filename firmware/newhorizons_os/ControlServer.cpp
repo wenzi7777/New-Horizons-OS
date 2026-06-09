@@ -374,6 +374,7 @@ String ControlServer::processCommand(const String& request) {
     if (!scanner_->setTiming(fps, settle, sendEvery)) {
       return error(cmd, "scan_timing_invalid");
     }
+    if (imu_) imu_->setServiceIntervalUs(scanner_->scanIntervalUs());
     if (deviceConfig_) {
       deviceConfig_->setScanTiming(fps, settle, sendEvery);
       if (!deviceConfig_->save(*storage_)) {
