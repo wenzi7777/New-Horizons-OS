@@ -98,17 +98,6 @@ String chargeStateName() {
   }
 }
 
-String powerAnimationOutputs() {
-  String outputs = "board_led";
-  if (externalLeds.powerAnimationActive()) {
-    outputs += ",external_led";
-  }
-  if (displayManager.powerAnimationActive()) {
-    outputs += ",oled";
-  }
-  return outputs;
-}
-
 void suspendRuntimeServicesForSoftOff() {
   if (!runtimeServicesSuspended) {
     scanner.stop();
@@ -146,41 +135,18 @@ void applyNormalRuntimeState() {
 }
 
 void servicePowerTransition() {
-  const uint32_t nowMs = millis();
   switch (powerState.transitionPhase()) {
     case nhos::PowerTransitionPhase::ShutdownAnimationPending:
       suspendRuntimeServicesForSoftOff();
-      leds.setSignal(nhos::LedSignal::Off);
-      leds.showEvent(nhos::LedSignal::PowerTransitionShutdown);
-      powerState.beginShutdownAnimation();
-      externalLeds.startPowerAnimation(nhos::PowerAnimation::Shutdown);
-      displayManager.startPowerAnimation(nhos::PowerAnimation::Shutdown);
-      logPowerEvent(String("shutdown_anim_start outputs=") + powerAnimationOutputs() + " duration_ms=600");
+      externalLeds.sleep();
+      displayManager.sleep();
+      softOffOutputsSleeping = true;
+      powerState.finishPowerTransition();
+      logPowerEvent("shutdown_done");
       break;
     case nhos::PowerTransitionPhase::ShutdownAnimationRunning:
-      leds.service(nowMs);
-      externalLeds.servicePowerAnimation(nowMs);
-      displayManager.servicePowerAnimation(nowMs);
-      if (powerState.transitionTimedOut(nowMs) &&
-          !externalLeds.powerAnimationActive() &&
-          !displayManager.powerAnimationActive()) {
-        externalLeds.sleep();
-        displayManager.sleep();
-        softOffOutputsSleeping = true;
-        powerState.finishPowerTransition();
-        logPowerEvent("shutdown_anim_done");
-      }
-      break;
     case nhos::PowerTransitionPhase::WakeAnimationRunning:
-      leds.service(nowMs);
-      externalLeds.servicePowerAnimation(nowMs);
-      displayManager.servicePowerAnimation(nowMs);
-      if (powerState.transitionTimedOut(nowMs) &&
-          !externalLeds.powerAnimationActive() &&
-          !displayManager.powerAnimationActive()) {
-        powerState.finishPowerTransition();
-        logPowerEvent("wake_anim_done");
-      }
+      powerState.finishPowerTransition();
       break;
     case nhos::PowerTransitionPhase::None:
     default:
@@ -199,12 +165,6 @@ void servicePowerState() {
       displayManager.wake();
       softOffOutputsSleeping = false;
     }
-    leds.setSignal(nhos::LedSignal::Off);
-    leds.showEvent(nhos::LedSignal::PowerTransitionWake);
-    powerState.beginWakeAnimation();
-    externalLeds.startPowerAnimation(nhos::PowerAnimation::Wake);
-    displayManager.startPowerAnimation(nhos::PowerAnimation::Wake);
-    logPowerEvent(String("wake_anim_start outputs=") + powerAnimationOutputs() + " duration_ms=500");
     applyNormalRuntimeState();
   } else {
     suspendRuntimeServicesForSoftOff();
