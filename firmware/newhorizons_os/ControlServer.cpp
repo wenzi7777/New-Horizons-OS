@@ -759,15 +759,9 @@ String ControlServer::processCommand(const String& request) {
     return ok(cmd, "file_list", storage_->listFiles(scope));
   }
   if (cmd == "file_read_begin") {
-    if (!requireMaintenance(cmd)) {
-      return error(cmd, "maintenance_required");
-    }
     return fileSizeJson(cmd, extractString(request, "scope"), extractString(request, "path"));
   }
   if (cmd == "file_read_chunk") {
-    if (!requireMaintenance(cmd)) {
-      return error(cmd, "maintenance_required");
-    }
     String scope = extractString(request, "scope");
     if (scope.isEmpty()) {
       scope = "user";
