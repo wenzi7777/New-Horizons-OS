@@ -71,7 +71,7 @@ void DisplayManager::apply(const OledConfig& config) {
 void DisplayManager::startPowerAnimation(PowerAnimation animation) {
   powerAnimation_ = static_cast<uint8_t>(PowerAnimation::None);
   powerAnimationStartedMs_ = 0;
-  if (!initialized_ || !enabled_ || config_.mode != "enabled") {
+  if (!initialized_ || !enabled_) {
     return;
   }
   sleeping_ = false;
