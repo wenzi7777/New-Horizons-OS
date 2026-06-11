@@ -303,7 +303,12 @@ String Storage::scopedPath(const String& scope, const String& path) const {
   if (path.isEmpty()) {
     return root;
   }
-  return root + "/" + path;
+  String full = root + "/" + path;
+  // SPIFFS_OBJ_NAME_LEN = 32 (includes null terminator), so max usable = 31 chars.
+  if (full.length() > 31) {
+    return "";
+  }
+  return full;
 }
 
 size_t Storage::directorySize(const char* path) const {
