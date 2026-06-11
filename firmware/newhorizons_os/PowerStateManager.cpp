@@ -164,6 +164,7 @@ void PowerStateManager::lightSleep() {
   gpio_wakeup_enable(static_cast<gpio_num_t>(kActionButtonPin), GPIO_INTR_LOW_LEVEL);
   esp_sleep_enable_gpio_wakeup();
   esp_sleep_enable_timer_wakeup(timerUs);
+  Serial.flush();
   esp_light_sleep_start();
   const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
   if (cause == ESP_SLEEP_WAKEUP_GPIO) {

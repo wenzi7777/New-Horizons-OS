@@ -787,7 +787,7 @@ String ControlServer::processCommand(const String& request) {
     if (writePath_.isEmpty() || !storage_->validUserPath(writePath_)) {
       return error(cmd, "invalid_path");
     }
-    if (storage_->scopedPath(writeScope_, writePath_).isEmpty()) {
+    if (storage_->isPathTooLong(writeScope_, writePath_)) {
       return error(cmd, "path_too_long");
     }
     if (writeExpectedSize_ == 0 && !storage_->writeFile(writeScope_, writePath_, nullptr, 0, false)) {

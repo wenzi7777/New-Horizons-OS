@@ -58,6 +58,10 @@ bool Storage::validUserPath(const String& path) const {
   return path.indexOf('\\') < 0;
 }
 
+bool Storage::isPathTooLong(const String& scope, const String& path) const {
+  return scopedPath(scope, path).isEmpty();
+}
+
 bool Storage::writeFile(const String& scope, const String& path, const uint8_t* data, size_t len, bool append) {
   const String full = scopedPath(scope, path);
   if (full.isEmpty()) {

@@ -103,6 +103,7 @@ void suspendRuntimeServicesForSoftOff() {
     scanner.stop();
     wifi.suspend();
     imu.setEnabled(false);
+    setCpuFrequencyMhz(80);
     runtimeServicesSuspended = true;
     logPowerEvent("runtime_services_suspended");
   }
@@ -125,6 +126,7 @@ void applyNormalRuntimeState() {
   if (!runtimeServicesSuspended) {
     return;
   }
+  setCpuFrequencyMhz(240);
   wifi.resume();
   imu.setEnabled(deviceConfig.data().imuEnabled);
   if (bootMode.mode() == nhos::RunMode::Normal && scanner.hasLayout() && !scanner.active()) {

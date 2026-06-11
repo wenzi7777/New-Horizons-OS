@@ -41,7 +41,7 @@ class PowerStateManager {
   static constexpr uint32_t kLongPressMs = 1500;
   static constexpr uint32_t kShortPressMinMs = 50;
   static constexpr uint32_t kShortPressMaxMs = 500;
-  static constexpr uint64_t kSoftOffBatterySleepUs = 2000000ULL;
+  static constexpr uint64_t kSoftOffBatterySleepUs = 5000000ULL;
   static constexpr uint64_t kSoftOffChargingSleepUs = 300000ULL;
   static constexpr uint64_t kButtonTrackSleepUs = 50000ULL;
 

@@ -26,6 +26,7 @@ class Storage {
   void putUInt(const char* key, uint32_t value);
 
   bool validUserPath(const String& path) const;
+  bool isPathTooLong(const String& scope, const String& path) const;
   bool writeFile(const String& scope, const String& path, const uint8_t* data, size_t len, bool append = false);
   bool readFile(const String& scope, const String& path, std::vector<uint8_t>& out, size_t offset = 0, size_t length = 1024);
   bool readTextFile(const String& path, String& out) const;
