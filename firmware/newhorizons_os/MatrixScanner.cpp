@@ -38,6 +38,9 @@ void MatrixScanner::stop() {
   running_ = false;
   clearPacketQueue();
   setAllColsInactive();
+  for (size_t i = 0; i < rowCount_; ++i) {
+    pinMode(rows_[i], INPUT_PULLDOWN);
+  }
 }
 
 bool MatrixScanner::active() const {

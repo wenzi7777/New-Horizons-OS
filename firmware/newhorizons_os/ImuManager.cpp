@@ -1,6 +1,13 @@
 #include "ImuManager.h"
 
+#include <Wire.h>
+
 namespace nhos {
+
+namespace {
+constexpr uint8_t kBmi270I2cAddr = 0x68;
+constexpr uint8_t kBmi270PwrCtrlReg = 0x7D;
+}  // namespace
 
 void ImuManager::begin(bool enabled) {
   enabled_ = enabled;
@@ -35,6 +42,12 @@ void ImuManager::setEnabled(bool enabled) {
     return;
   }
   if (!enabled) {
+    if (initialized_) {
+      Wire.beginTransmission(kBmi270I2cAddr);
+      Wire.write(kBmi270PwrCtrlReg);
+      Wire.write(0x00);
+      Wire.endTransmission();
+    }
     enabled_ = false;
     initialized_ = false;
     sampleValid_ = false;

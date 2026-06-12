@@ -103,7 +103,7 @@ void suspendRuntimeServicesForSoftOff() {
     scanner.stop();
     wifi.suspend();
     imu.setEnabled(false);
-    setCpuFrequencyMhz(80);
+    setCpuFrequencyMhz(40);
     runtimeServicesSuspended = true;
     logPowerEvent("runtime_services_suspended");
   }
