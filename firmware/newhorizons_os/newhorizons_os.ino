@@ -190,7 +190,7 @@ void scanAndStreamIfDue() {
     return;
   }
 
-  float imuSample[7] = {0};
+  float imuSample[nhos::kImuSampleFloats] = {0};
   const bool imuSampleValid = imu.copyLatestSample(imuSample);
   size_t len = packetBuilder.buildMatrixPacketHeader(frame, packetBuffer, sizeof(packetBuffer), matrixPayloadLen, imuSampleValid ? imuSample : nullptr);
   if (!len) {
@@ -335,7 +335,7 @@ void setup() {
   logBoot(String("boot_stage=boot_mode_ready mode=") + bootMode.modeName());
   powerState.begin();
   logBoot(String("boot_stage=power_state_ready ") + powerState.statusJson());
-  Wire.begin(nhos::kI2cSda, nhos::kI2cScl, 400000);
+  Wire.begin(nhos::kI2cSda, nhos::kI2cScl, NHOS_BOARD_I2C_HZ);
   logBoot(String("boot_stage=i2c_ready sda=") + String(nhos::kI2cSda) + " scl=" + String(nhos::kI2cScl));
   displayManager.begin(deviceConfig.data().oled);
   logBoot(String("boot_stage=display_ready ") + displayManager.statusJson());
@@ -385,6 +385,9 @@ void setup() {
   }
 
   bool wifiConnected = wifi.begin(storage, bootMode.wifiSetupRequested());
+  if (wifiConnected) {
+    bootMode.markWifiConnected();
+  }
   logBoot(String("boot_stage=wifi_ready connected=") + (wifiConnected ? "true" : "false") +
           " setup_active=" + (wifi.setupActive() ? "true" : "false"));
   uint8_t uid[6] = {0};

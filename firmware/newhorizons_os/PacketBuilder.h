@@ -16,8 +16,8 @@ struct BatterySample {
 class PacketBuilder {
  public:
   void setDeviceUid(const uint8_t uid[6]);
-  size_t build(const MatrixFrame& frame, uint8_t* out, size_t capacity, const float* imu7 = nullptr, const BatterySample* battery = nullptr);
-  size_t buildMatrixPacketHeader(const MatrixFrame& frame, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imu7 = nullptr);
+  size_t build(const MatrixFrame& frame, uint8_t* out, size_t capacity, const float* imuData = nullptr, const BatterySample* battery = nullptr);
+  size_t buildMatrixPacketHeader(const MatrixFrame& frame, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imuData = nullptr);
   size_t buildHeartbeat(uint32_t seq, uint32_t timestampMs, uint8_t* out, size_t capacity);
 
  private:

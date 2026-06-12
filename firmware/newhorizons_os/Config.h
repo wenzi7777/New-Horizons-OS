@@ -2,16 +2,19 @@
 
 #include <Arduino.h>
 
+#include "BoardConfig.h"
+
 namespace nhos {
 
 static constexpr char kProductName[] = "New Horizons OS Arduino";
 static constexpr char kProtocolName[] = "NHO/Arduino/1";
-static constexpr char kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4";
-static constexpr char kFirmwareVersion[] = "v0.7.4";
+static constexpr char kHardwareModel[] = NHOS_BOARD_NAME;
+static constexpr char kFirmwareVersion[] = "v0.7.5";
 
-static constexpr uint16_t kRows = 10;
-static constexpr uint16_t kCols = 21;
+static constexpr uint16_t kRows = NHOS_BOARD_ROWS;
+static constexpr uint16_t kCols = NHOS_BOARD_COLS;
 static constexpr uint16_t kMaxSensors = kRows * kCols;
+static constexpr uint8_t kImuSampleFloats = 7 + (NHOS_BOARD_HAS_MAG ? 3 : 0);
 
 static constexpr uint16_t kUdpStreamPort = 13250;
 static constexpr uint16_t kDiscoveryPort = 22346;
@@ -21,6 +24,7 @@ static constexpr uint16_t kPacketMagic = 0xA55A;
 static constexpr uint8_t kPacketVersion = 3;
 static constexpr uint8_t kPacketFlagImu = 0x01;
 static constexpr uint8_t kPacketFlagBattery = 0x02;
+static constexpr uint8_t kPacketFlagMag = 0x04;
 static constexpr uint8_t kPacketFlagHmac = 0x40;
 static constexpr uint8_t kPacketFlagHeartbeat = 0x80;
 static constexpr size_t kPacketHeaderLen = 20;
@@ -28,7 +32,7 @@ static constexpr size_t kPacketHmacLen = 16;
 static constexpr size_t kMaxPacketBytes =
     kPacketHeaderLen +
     (kMaxSensors * sizeof(float)) +
-    (7 * sizeof(float)) +
+    (kImuSampleFloats * sizeof(float)) +
     4 +
     kPacketHmacLen;
 static constexpr uint32_t kHeartbeatIntervalMs = 5000;
@@ -53,7 +57,7 @@ static constexpr char kDefaultApPassword[] = "";
 static constexpr char kSetupPortalDomain[] = "newhorizons.os";
 static constexpr uint16_t kSetupPortalPort = 80;
 static constexpr char kDefaultUpdateManifestUrl[] =
-    "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-latest.json";
+    NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL;
 
 enum class RunMode : uint8_t {
   Normal = 0,

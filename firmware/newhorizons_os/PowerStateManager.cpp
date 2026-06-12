@@ -3,18 +3,22 @@
 #include <driver/gpio.h>
 #include <esp_sleep.h>
 
+#include "BoardConfig.h"
 #include "BoardPins.h"
 
 namespace nhos {
 
 void PowerStateManager::begin() {
+#if NHOS_BOARD_HAS_BUTTON
   pinMode(kActionButtonPin, INPUT_PULLUP);
+#endif
 }
 
 void PowerStateManager::service(uint32_t nowMs, bool chargerDetected, ChargeState chargeState) {
   chargerDetected_ = chargerDetected;
   chargeState_ = chargeState;
 
+#if NHOS_BOARD_HAS_BUTTON
   const bool pressed = digitalRead(kActionButtonPin) == LOW;
   if (pressed && !buttonDown_) {
     buttonDown_ = true;
@@ -44,6 +48,7 @@ void PowerStateManager::service(uint32_t nowMs, bool chargerDetected, ChargeStat
     buttonPressedAtMs_ = 0;
     longPressHandled_ = false;
   }
+#endif
 
   if (state_ == PowerState::SoftOffBattery && chargerDetected_) {
     requestState(PowerState::SoftOffCharging, "charger_connected");
@@ -158,11 +163,17 @@ void PowerStateManager::lightSleep() {
     Serial.println(stateName());
     sleepLogPending_ = false;
   }
-  const uint64_t timerUs = buttonDown_ ? kButtonTrackSleepUs
-      : (state_ == PowerState::SoftOffCharging ? kSoftOffChargingSleepUs : kSoftOffBatterySleepUs);
+  uint64_t timerUs = state_ == PowerState::SoftOffCharging ? kSoftOffChargingSleepUs : kSoftOffBatterySleepUs;
+#if NHOS_BOARD_HAS_BUTTON
+  if (buttonDown_) {
+    timerUs = kButtonTrackSleepUs;
+  }
+#endif
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+#if NHOS_BOARD_SUPPORTS_GPIO_WAKE && NHOS_BOARD_HAS_BUTTON
   gpio_wakeup_enable(static_cast<gpio_num_t>(kActionButtonPin), GPIO_INTR_LOW_LEVEL);
   esp_sleep_enable_gpio_wakeup();
+#endif
   esp_sleep_enable_timer_wakeup(timerUs);
   Serial.flush();
   esp_light_sleep_start();

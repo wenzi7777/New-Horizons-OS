@@ -2,6 +2,7 @@
 
 #include <Wire.h>
 
+#include "BoardConfig.h"
 #include "Config.h"
 #include "PowerAnimation.h"
 
@@ -37,6 +38,14 @@ void DisplayManager::begin(const OledConfig& config) {
 
 void DisplayManager::apply(const OledConfig& config) {
   config_ = config;
+#if !NHOS_BOARD_HAS_OLED
+  enabled_ = false;
+  detected_ = false;
+  initialized_ = false;
+  sleeping_ = false;
+  lastError_ = "";
+  return;
+#endif
   if (!DeviceConfig::validOledMode(config_.mode)) {
     config_.mode = "off";
   }
@@ -209,6 +218,9 @@ String DisplayManager::statusJson() const {
 }
 
 bool DisplayManager::configure() {
+#if !NHOS_BOARD_HAS_OLED
+  return false;
+#endif
   uint8_t nextAddress = 0;
   if (probeAddress(kPrimaryAddress)) {
     nextAddress = kPrimaryAddress;

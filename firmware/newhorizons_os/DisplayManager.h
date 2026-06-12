@@ -1,11 +1,45 @@
 #pragma once
 
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 #include <Arduino.h>
+#include <Wire.h>
 
+#include "BoardConfig.h"
 #include "DeviceConfig.h"
 #include "MatrixScanner.h"
+
+#if NHOS_BOARD_HAS_OLED
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#else
+class Adafruit_SSD1306 {
+ public:
+  Adafruit_SSD1306(int16_t, int16_t, TwoWire*, int8_t) {}
+
+  bool begin(uint8_t, uint8_t) { return false; }
+  void clearDisplay() {}
+  void display() {}
+  void ssd1306_command(uint8_t) {}
+  void setTextSize(uint8_t) {}
+  void setTextColor(uint16_t) {}
+  void setCursor(int16_t, int16_t) {}
+  void setRotation(uint8_t) {}
+  void dim(bool) {}
+  void fillCircle(int16_t, int16_t, int16_t, uint16_t) {}
+  void drawRoundRect(int16_t, int16_t, int16_t, int16_t, int16_t, uint16_t) {}
+  void fillRect(int16_t, int16_t, int16_t, int16_t, uint16_t) {}
+  void drawLine(int16_t, int16_t, int16_t, int16_t, uint16_t) {}
+  template <typename T>
+  size_t print(const T&) { return 0; }
+  template <typename T>
+  size_t println(const T&) { return 0; }
+};
+
+static constexpr uint8_t SSD1306_SWITCHCAPVCC = 0;
+static constexpr uint8_t SSD1306_DISPLAYOFF = 0;
+static constexpr uint8_t SSD1306_DISPLAYON = 0;
+static constexpr uint8_t SSD1306_SETCONTRAST = 0;
+static constexpr uint16_t SSD1306_WHITE = 1;
+#endif
 
 namespace nhos {
 

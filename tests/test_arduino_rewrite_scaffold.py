@@ -25,6 +25,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_required_arduino_modules_exist(self):
         expected = {
             "newhorizons_os.ino",
+            "BoardConfig.h",
             "Config.h",
             "Config.cpp",
             "BoardPins.h",
@@ -66,14 +67,35 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_config_declares_new_protocol_packet_version_and_ports(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
 
+        self.assertIn('#include "BoardConfig.h"', config)
         self.assertIn('kProtocolName[] = "NHO/Arduino/1"', config)
         self.assertIn("kPacketVersion = 3", config)
         self.assertIn("kUdpStreamPort = 13250", config)
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
-        self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
+        self.assertIn("kHardwareModel[] = NHOS_BOARD_NAME", config)
+        self.assertIn("kRows = NHOS_BOARD_ROWS", config)
+        self.assertIn("kCols = NHOS_BOARD_COLS", config)
+        self.assertIn("kDefaultUpdateManifestUrl[] =", config)
         self.assertRegex(config, r'kFirmwareVersion\[\] = "v\d+\.\d+\.\d+"')
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
+
+    def test_board_config_declares_dual_board_capabilities(self):
+        config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
+
+        self.assertIn("NHOS_BOARD_GCU_V23D_LTS", config)
+        self.assertIn('NHOS_BOARD_NAME         "VD-CTL/R v2.3.D GCU LTS"', config)
+        self.assertIn('NHOS_BOARD_NAME         "VD-CTL/R v1.0.F 2026.4"', config)
+        self.assertIn("NHOS_BOARD_ROWS         15", config)
+        self.assertIn("NHOS_BOARD_COLS         15", config)
+        self.assertIn("NHOS_BOARD_HAS_MAG      1", config)
+        self.assertIn("NHOS_BOARD_HAS_BUTTON   0", config)
+        self.assertIn("NHOS_BOARD_HAS_EXT_LED  0", config)
+        self.assertIn("NHOS_BOARD_HAS_OLED     0", config)
+        self.assertIn("NHOS_BOARD_SUPPORTS_GPIO_WAKE 0", config)
+        self.assertIn("NHOS_BOARD_I2C_HZ       1000000", config)
+        self.assertIn("NHOS_BOARD_BQ25180_I2C_HZ 400000", config)
+        self.assertIn("NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL", config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
@@ -393,7 +415,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("deviceConfig_->statusJson()", control)
         self.assertNotIn("manual_preset", config + control)
 
-    def test_missing_device_config_leaves_matrix_layout_empty_and_scan_stopped(self):
+    def test_missing_device_config_falls_back_to_board_default_matrix_layout(self):
         config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
         scanner_header = (ARDUINO_ROOT / "MatrixScanner.h").read_text(encoding="utf-8")
         scanner = (ARDUINO_ROOT / "MatrixScanner.cpp").read_text(encoding="utf-8")
@@ -402,18 +424,19 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         defaults_body = re.search(r"void DeviceConfig::setDefaults\(\) \{(?P<body>.*?)\n\}", config, re.S)
         self.assertIsNotNone(defaults_body)
         self.assertIn("data_.schemaVersion = 3", defaults_body.group("body"))
-        self.assertIn("data_.matrixLayout.analogCount = 0", defaults_body.group("body"))
-        self.assertIn("data_.matrixLayout.selectCount = 0", defaults_body.group("body"))
-        self.assertNotIn("kRowAdcPins", defaults_body.group("body"))
-        self.assertNotIn("kColPins", defaults_body.group("body"))
+        self.assertIn("defaultMatrixLayout(data_.matrixLayout);", defaults_body.group("body"))
+        self.assertIn("memcpy(layout.analogPins, kRowAdcPins, kRowAdcPinCount);", config)
+        self.assertIn("memcpy(layout.selectPins, kColPins, kColPinCount);", config)
+        self.assertIn("layout.analogCount = kRowAdcPinCount;", config)
+        self.assertIn("layout.selectCount = kColPinCount;", config)
         self.assertIn('extractBool(matrix, "configured", false)', config)
+        self.assertIn('lastError_ = "matrix_layout_invalid_fallback_default";', config)
         self.assertIn("bool hasLayout() const;", scanner_header)
         self.assertIn("size_t rowCount_ = 0", scanner_header)
         self.assertIn("size_t colCount_ = 0", scanner_header)
         self.assertNotIn("memcpy(rows_, kRowAdcPins", scanner)
         self.assertNotIn("rowCount_ = kRowAdcPinCount", scanner)
         self.assertIn("scanner.hasLayout()", sketch)
-        self.assertIn("scan_task_deferred matrix_layout_empty", sketch)
         self.assertIn("scanner.matrixShapeJson()", sketch)
 
     def test_legacy_schema_matrix_layout_is_migrated_when_arrays_exist(self):
@@ -436,27 +459,30 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
         control_header = (ARDUINO_ROOT / "ControlServer.h").read_text(encoding="utf-8")
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        board_config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
         imu_header = (ARDUINO_ROOT / "ImuManager.h").read_text(encoding="utf-8")
         imu_impl = (ARDUINO_ROOT / "ImuManager.cpp").read_text(encoding="utf-8")
         packet_header = (ARDUINO_ROOT / "PacketBuilder.h").read_text(encoding="utf-8")
         packet_impl = (ARDUINO_ROOT / "PacketBuilder.cpp").read_text(encoding="utf-8")
 
         self.assertIn('#include "Arduino_BMI270_BMM150.h"', imu_header)
+        self.assertIn("#if NHOS_BOARD_HAS_MAG", board_config + imu_impl)
+        self.assertIn("IMU.begin()", imu_impl)
         self.assertIn("IMU.begin(BOSCH_ACCELEROMETER_ONLY)", imu_impl)
-        self.assertNotIn("readMagneticField", imu_impl)
+        self.assertIn("IMU.readMagneticField", imu_impl)
         self.assertIn("boot_stage=imu_ready", sketch)
         self.assertIn("imu.service", sketch)
         self.assertNotIn("imu.readSample", sketch)
-        self.assertIn("bool copyLatestSample(float out7[7]) const;", imu_header)
+        self.assertIn("bool copyLatestSample(float out[kImuSampleFloats]) const;", imu_header)
         self.assertIn("void service(uint32_t nowUs);", imu_header)
         self.assertIn("IMU.setContinuousMode()", imu_impl)
         self.assertIn("lastReadDurationUs_", imu_header)
         self.assertIn("sampleRateHz_", imu_header)
         self.assertIn("cacheAgeMs", imu_impl)
         self.assertIn("buildMatrixPacketHeader(frame, packetBuffer, sizeof(packetBuffer), matrixPayloadLen, imuSampleValid ? imuSample : nullptr)", sketch)
-        self.assertIn("const float* imu7", packet_header)
-        self.assertIn("out[3] = imu7 ? kPacketFlagImu : 0", packet_impl)
-        self.assertIn("putFloat(out + offset, imu7[i])", packet_impl)
+        self.assertIn("const float* imuData", packet_header)
+        self.assertIn("flags |= kPacketFlagImu;", packet_impl)
+        self.assertIn("putFloat(out + offset, imuData[i])", packet_impl)
         self.assertIn("ImuManager& imu", control_header)
         self.assertIn("imu_ ? imu_->statusJson()", control)
         self.assertIn("void setServiceIntervalUs(uint32_t us)", imu_header)
@@ -642,19 +668,30 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("return jsonExtractFloat(request, key, value) ? value : fallback;", body)
 
     def test_board_pin_map_matches_new_horizons_hardware(self):
+        header = (ARDUINO_ROOT / "BoardPins.h").read_text(encoding="utf-8")
         pins = (ARDUINO_ROOT / "BoardPins.cpp").read_text(encoding="utf-8")
 
+        self.assertIn('#include "BoardConfig.h"', header)
+        self.assertIn("#if NHOS_BOARD_HAS_EXT_LED", header)
+        self.assertIn("#if NHOS_BOARD_HAS_BUTTON", header)
         self.assertRegex(pins, re.compile(r"kRowAdcPins\[\].*=\s*\{\s*1,\s*2,\s*3,\s*4,\s*5,\s*6,\s*7,\s*8,\s*9,\s*10\s*\}", re.S))
         self.assertRegex(pins, re.compile(r"kColPins\[\].*=\s*\{\s*13,\s*14,\s*15,\s*16,\s*17,\s*18,\s*19,\s*20,\s*21,\s*26,\s*47,\s*33,\s*34,\s*48,\s*35,\s*36,\s*37,\s*38,\s*39,\s*40,\s*41\s*\}", re.S))
+        self.assertRegex(pins, re.compile(r"kRowAdcPins\[\].*=\s*\{\s*1,\s*2,\s*3,\s*4,\s*5,\s*6,\s*7,\s*8,\s*9,\s*10,\s*11,\s*12,\s*13,\s*14,\s*15\s*\}", re.S))
+        self.assertRegex(pins, re.compile(r"kColPins\[\].*=\s*\{\s*16,\s*17,\s*18,\s*19,\s*20,\s*21,\s*35,\s*36,\s*37,\s*39,\s*40,\s*41,\s*42,\s*45,\s*46\s*\}", re.S))
         self.assertIn("kI2cScl = 42", pins)
         self.assertIn("kI2cSda = 45", pins)
         self.assertIn("kStatusLedPin = 11", pins)
         self.assertIn("kExternalLedPin = 12", pins)
         self.assertIn("kActionButtonPin = 46", pins)
+        self.assertIn("kI2cScl = 47", pins)
+        self.assertIn("kI2cSda = 48", pins)
+        self.assertIn("kStatusLedPin = 38", pins)
+        self.assertIn("!isAllowedBoardPin", pins)
 
     def test_release_scripts_exist(self):
         expected = {
             "build_arduino_release.sh",
+            "build_arduino_release_gcu_lts.sh",
             "flash_arduino_firmware.sh",
             "generate_arduino_manifest.py",
         }
@@ -665,11 +702,14 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
     def test_release_script_publishes_trackable_artifacts(self):
         script = (SCRIPT_ROOT / "build_arduino_release.sh").read_text(encoding="utf-8")
+        gcu_script = (SCRIPT_ROOT / "build_arduino_release_gcu_lts.sh").read_text(encoding="utf-8")
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
         self.assertRegex(script, r'VERSION="\$\{VERSION:-v\d+\.\d+\.\d+\}"')
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
+        self.assertIn('target="${RELEASE_DIR}/newhorizons-os-gcu-lts-${VERSION}.bin"', gcu_script)
+        self.assertIn('--build-property "build.extra_flags=-DNHOS_BOARD_GCU_V23D_LTS"', gcu_script)
 
     def test_latest_manifest_points_to_current_artifact(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
@@ -791,6 +831,16 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("scanner.enqueuePacket(", sketch)
         self.assertIn("scanner.sendQueuedPacket(", sketch)
 
+    def test_device_config_defaults_board_aware_layout_and_ota_manifest(self):
+        header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
+        config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("uint8_t analogPins[kRows] = {0};", header)
+        self.assertIn("uint8_t selectPins[kCols] = {0};", header)
+        self.assertIn("defaultMatrixLayout", config)
+        self.assertIn("matrix_layout_invalid_fallback_default", config)
+        self.assertIn("data_.ota.manifestUrl = kDefaultUpdateManifestUrl;", config)
+
     def test_power_state_manager_scaffold_exists_and_tracks_soft_off_states(self):
         header = (ARDUINO_ROOT / "PowerStateManager.h").read_text(encoding="utf-8")
         impl = (ARDUINO_ROOT / "PowerStateManager.cpp").read_text(encoding="utf-8")
@@ -809,7 +859,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("powerState.begin()", sketch)
         self.assertIn("powerState.service", sketch)
 
-    def test_soft_off_path_uses_gpio46_light_sleep_and_subsystem_suspend(self):
+    def test_soft_off_path_is_board_aware_for_gpio_wake_and_subsystem_suspend(self):
         header = (ARDUINO_ROOT / "WifiManager.h").read_text(encoding="utf-8")
         wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
         display = (ARDUINO_ROOT / "DisplayManager.cpp").read_text(encoding="utf-8")
@@ -828,9 +878,10 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("esp_sleep_enable_gpio_wakeup", power_state)
         self.assertIn("esp_sleep_enable_timer_wakeup", power_state)
         self.assertIn("esp_light_sleep_start()", power_state)
+        self.assertIn("NHOS_BOARD_SUPPORTS_GPIO_WAKE", power_state)
+        self.assertIn("NHOS_BOARD_HAS_BUTTON", power_state)
         self.assertIn("kActionButtonPin", power_state)
-        self.assertIn("kButtonTrackSleepUs", power_state)
-        self.assertIn("buttonDown_", power_state)
+        self.assertIn('setWakeSource("command")', power_state)
         self.assertIn("scanner.stop()", sketch)
         self.assertIn("wifi.suspend()", sketch)
         self.assertIn("displayManager.sleep()", sketch)
@@ -904,6 +955,36 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('logPowerEvent("shutdown_done")', sketch)
         self.assertNotIn("powerState.beginShutdownAnimation()", sketch)
         self.assertNotIn("powerState.beginWakeAnimation()", sketch)
+
+    def test_boot_mode_manager_supports_buttonless_multi_cycle_wifi_setup(self):
+        header = (ARDUINO_ROOT / "BootModeManager.h").read_text(encoding="utf-8")
+        impl = (ARDUINO_ROOT / "BootModeManager.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("void markWifiConnected();", header)
+        self.assertIn("sampleMultiCycleSetupTrigger", header + impl)
+        self.assertIn("kMultiCycleSetupCount = 5", header + impl)
+        self.assertIn('prefs_.getUChar("prov_cnt", 0)', impl)
+        self.assertIn('prefs_.putUChar("prov_cnt", 0)', impl)
+        self.assertIn("boot_multi_cycle_setup_requested", impl)
+        self.assertIn("bootMode.markWifiConnected()", sketch)
+
+    def test_packet_builder_and_imu_manager_support_magnetometer_extension(self):
+        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+        imu_header = (ARDUINO_ROOT / "ImuManager.h").read_text(encoding="utf-8")
+        imu_impl = (ARDUINO_ROOT / "ImuManager.cpp").read_text(encoding="utf-8")
+        packet_header = (ARDUINO_ROOT / "PacketBuilder.h").read_text(encoding="utf-8")
+        packet_impl = (ARDUINO_ROOT / "PacketBuilder.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("kPacketFlagMag = 0x04", config)
+        self.assertIn("kImuSampleFloats", config)
+        self.assertIn("copyLatestSample(float out[kImuSampleFloats]) const;", imu_header)
+        self.assertIn("IMU.readMagneticField", imu_impl)
+        self.assertIn("BMI270+BMM150", imu_impl)
+        self.assertIn("const float* imuData", packet_header)
+        self.assertIn("kPacketFlagMag", packet_impl)
+        self.assertIn("kImuBaseFloatCount", packet_impl)
+        self.assertIn("kMagFloatCount", packet_impl)
 
 
 if __name__ == "__main__":

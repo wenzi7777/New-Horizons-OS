@@ -1,11 +1,31 @@
 #pragma once
 
-#include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
 
+#include "BoardConfig.h"
 #include "DeviceConfig.h"
 #include "LedController.h"
 #include "MatrixScanner.h"
+
+#if NHOS_BOARD_HAS_EXT_LED
+#include <Adafruit_NeoPixel.h>
+#else
+using neoPixelType = uint16_t;
+
+class Adafruit_NeoPixel {
+ public:
+  Adafruit_NeoPixel(uint16_t, int16_t, neoPixelType) {}
+
+  void begin() {}
+  void clear() {}
+  void show() {}
+  void setPixelColor(uint16_t, uint32_t) {}
+  uint32_t Color(uint8_t, uint8_t, uint8_t) const { return 0; }
+};
+
+static constexpr neoPixelType NEO_GRB = 0;
+static constexpr neoPixelType NEO_KHZ800 = 0;
+#endif
 
 namespace nhos {
 

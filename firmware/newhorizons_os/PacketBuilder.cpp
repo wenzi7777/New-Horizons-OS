@@ -2,23 +2,32 @@
 
 namespace nhos {
 
+namespace {
+constexpr uint8_t kImuBaseFloatCount = 7;
+constexpr uint8_t kMagFloatCount = 3;
+}  // namespace
+
 void PacketBuilder::setDeviceUid(const uint8_t uid[6]) {
   memcpy(deviceUid_, uid, 6);
 }
 
-size_t PacketBuilder::build(const MatrixFrame& frame, uint8_t* out, size_t capacity, const float* imu7, const BatterySample* battery) {
+size_t PacketBuilder::build(const MatrixFrame& frame, uint8_t* out, size_t capacity, const float* imuData, const BatterySample* battery) {
   const size_t matrixBytes = static_cast<size_t>(frame.pointCount) * sizeof(float);
-  const size_t imuBytes = imu7 ? 7 * sizeof(float) : 0;
+  const size_t imuBytes = imuData ? kImuBaseFloatCount * sizeof(float) : 0;
+  const size_t magBytes = imuData && NHOS_BOARD_HAS_MAG ? kMagFloatCount * sizeof(float) : 0;
   const size_t batteryBytes = battery ? 4 : 0;
-  const size_t payloadLen = matrixBytes + imuBytes + batteryBytes;
+  const size_t payloadLen = matrixBytes + imuBytes + magBytes + batteryBytes;
   const size_t totalLen = kPacketHeaderLen + payloadLen;
   if (!out || capacity < totalLen || frame.pointCount > kMaxSensors) {
     return 0;
   }
 
   uint8_t flags = 0;
-  if (imu7) {
+  if (imuData) {
     flags |= kPacketFlagImu;
+#if NHOS_BOARD_HAS_MAG
+    flags |= kPacketFlagMag;
+#endif
   }
   if (battery) {
     flags |= kPacketFlagBattery;
@@ -37,11 +46,17 @@ size_t PacketBuilder::build(const MatrixFrame& frame, uint8_t* out, size_t capac
     putFloat(out + offset, frame.values[i]);
     offset += sizeof(float);
   }
-  if (imu7) {
-    for (uint8_t i = 0; i < 7; ++i) {
-      putFloat(out + offset, imu7[i]);
+  if (imuData) {
+    for (uint8_t i = 0; i < kImuBaseFloatCount; ++i) {
+      putFloat(out + offset, imuData[i]);
       offset += sizeof(float);
     }
+#if NHOS_BOARD_HAS_MAG
+    for (uint8_t i = 0; i < kMagFloatCount; ++i) {
+      putFloat(out + offset, imuData[kImuBaseFloatCount + i]);
+      offset += sizeof(float);
+    }
+#endif
   }
   if (battery) {
     out[offset++] = battery->status;
@@ -52,10 +67,11 @@ size_t PacketBuilder::build(const MatrixFrame& frame, uint8_t* out, size_t capac
   return offset;
 }
 
-size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imu7) {
+size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imuData) {
   const size_t expectedMatrixBytes = static_cast<size_t>(frame.pointCount) * sizeof(float);
-  const size_t imuBytes = imu7 ? 7 * sizeof(float) : 0;
-  const size_t payloadLen = matrixPayloadBytes + imuBytes;
+  const size_t imuBytes = imuData ? kImuBaseFloatCount * sizeof(float) : 0;
+  const size_t magBytes = imuData && NHOS_BOARD_HAS_MAG ? kMagFloatCount * sizeof(float) : 0;
+  const size_t payloadLen = matrixPayloadBytes + imuBytes + magBytes;
   const size_t totalLen = kPacketHeaderLen + payloadLen;
   if (!out || capacity < totalLen || frame.pointCount > kMaxSensors || matrixPayloadBytes != expectedMatrixBytes) {
     return 0;
@@ -63,17 +79,30 @@ size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint8_t*
 
   putU16(out, kPacketMagic);
   out[2] = kPacketVersion;
-  out[3] = imu7 ? kPacketFlagImu : 0;
+  uint8_t flags = 0;
+  if (imuData) {
+    flags |= kPacketFlagImu;
+#if NHOS_BOARD_HAS_MAG
+    flags |= kPacketFlagMag;
+#endif
+  }
+  out[3] = flags;
   memcpy(out + 4, deviceUid_, 6);
   putU32(out + 10, frame.seq);
   putU32(out + 14, frame.timestampMs);
   putU16(out + 18, static_cast<uint16_t>(payloadLen));
   size_t offset = kPacketHeaderLen + matrixPayloadBytes;
-  if (imu7) {
-    for (uint8_t i = 0; i < 7; ++i) {
-      putFloat(out + offset, imu7[i]);
+  if (imuData) {
+    for (uint8_t i = 0; i < kImuBaseFloatCount; ++i) {
+      putFloat(out + offset, imuData[i]);
       offset += sizeof(float);
     }
+#if NHOS_BOARD_HAS_MAG
+    for (uint8_t i = 0; i < kMagFloatCount; ++i) {
+      putFloat(out + offset, imuData[kImuBaseFloatCount + i]);
+      offset += sizeof(float);
+    }
+#endif
   }
   return totalLen;
 }

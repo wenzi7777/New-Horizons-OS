@@ -1,18 +1,26 @@
 #include "BootModeManager.h"
 
+#include "BoardConfig.h"
 #include "BoardPins.h"
 
 namespace nhos {
 
 void BootModeManager::begin() {
-  pinMode(kActionButtonPin, INPUT_PULLUP);
   prefs_.begin("nhos_boot", false);
   uint8_t bootFailures = prefs_.getUChar("boot_fail", 0);
   prefs_.putUChar("boot_fail", static_cast<uint8_t>(bootFailures + 1));
+#if NHOS_BOARD_HAS_BUTTON
+  pinMode(kActionButtonPin, INPUT_PULLUP);
   wifiSetupRequested_ = sampleWifiSetupButtonWindow();
   if (wifiSetupRequested_) {
     Serial.println(F("boot_action_button_setup_requested"));
   }
+#else
+  wifiSetupRequested_ = sampleMultiCycleSetupTrigger();
+  if (wifiSetupRequested_) {
+    Serial.println(F("boot_multi_cycle_setup_requested"));
+  }
+#endif
   if (bootFailures + 1 >= kSafeModeBootFailures) {
     mode_ = RunMode::SafeMaintenance;
   } else if (prefs_.getBool("maint", false)) {
@@ -50,6 +58,12 @@ void BootModeManager::markBootOk() {
   prefs_.putUChar("boot_fail", 0);
 }
 
+void BootModeManager::markWifiConnected() {
+#if !NHOS_BOARD_HAS_BUTTON
+  prefs_.putUChar("prov_cnt", 0);
+#endif
+}
+
 void BootModeManager::requestReboot() {
   rebootRequested_ = true;
 }
@@ -62,6 +76,7 @@ bool BootModeManager::wifiSetupRequested() const {
   return wifiSetupRequested_;
 }
 
+#if NHOS_BOARD_HAS_BUTTON
 bool BootModeManager::sampleWifiSetupButtonWindow() const {
   const uint32_t started = millis();
   while (millis() - started < kBootWifiSetupWindowMs) {
@@ -72,5 +87,17 @@ bool BootModeManager::sampleWifiSetupButtonWindow() const {
   }
   return false;
 }
+#else
+bool BootModeManager::sampleMultiCycleSetupTrigger() {
+  uint8_t count = prefs_.getUChar("prov_cnt", 0);
+  ++count;
+  if (count >= kMultiCycleSetupCount) {
+    prefs_.putUChar("prov_cnt", 0);
+    return true;
+  }
+  prefs_.putUChar("prov_cnt", count);
+  return false;
+}
+#endif
 
 }  // namespace nhos

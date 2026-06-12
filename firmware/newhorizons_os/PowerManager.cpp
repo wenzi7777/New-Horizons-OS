@@ -2,6 +2,8 @@
 
 #include <Wire.h>
 
+#include "BoardConfig.h"
+
 namespace nhos {
 namespace {
 constexpr uint8_t kBq25180Address = 0x6A;
@@ -45,6 +47,14 @@ constexpr PowerManager::ChargeProfileConfig kMaxProfile = {
     "max",
     350, 500, 0x3E, 0x05,
 };
+
+void setPowerBusClock() {
+  Wire.setClock(NHOS_BOARD_BQ25180_I2C_HZ);
+}
+
+void restoreBoardBusClock() {
+  Wire.setClock(NHOS_BOARD_I2C_HZ);
+}
 }
 
 void PowerManager::begin(const String& profileName) {
@@ -231,30 +241,37 @@ const PowerManager::ChargeProfileConfig& PowerManager::configForProfile(ChargePr
 }
 
 bool PowerManager::readRegister(uint8_t reg, uint8_t& value) {
+  setPowerBusClock();
   Wire.beginTransmission(kBq25180Address);
   Wire.write(reg);
   if (Wire.endTransmission(false) != 0) {
+    restoreBoardBusClock();
     lastError_ = "bq25180_register_select_failed";
     return false;
   }
 
   const uint8_t read = Wire.requestFrom(kBq25180Address, static_cast<uint8_t>(1));
   if (read != 1 || !Wire.available()) {
+    restoreBoardBusClock();
     lastError_ = "bq25180_register_read_failed";
     return false;
   }
   value = Wire.read();
+  restoreBoardBusClock();
   return true;
 }
 
 bool PowerManager::writeRegister(uint8_t reg, uint8_t value) {
+  setPowerBusClock();
   Wire.beginTransmission(kBq25180Address);
   Wire.write(reg);
   Wire.write(value);
   if (Wire.endTransmission(true) != 0) {
+    restoreBoardBusClock();
     lastError_ = "bq25180_register_write_failed";
     return false;
   }
+  restoreBoardBusClock();
   return true;
 }
 

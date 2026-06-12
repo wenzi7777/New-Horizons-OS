@@ -1,5 +1,6 @@
 #include "ExternalLedController.h"
 
+#include "BoardConfig.h"
 #include "BoardPins.h"
 #include "PowerAnimation.h"
 
@@ -14,7 +15,11 @@ constexpr uint32_t kShutdownAnimationMs = 600;
 constexpr uint32_t kWakeAnimationMs = 500;
 
 uint16_t identifyDurationMs() {
+#if NHOS_BOARD_HAS_EXT_LED
   return static_cast<uint16_t>((static_cast<uint16_t>(kExternalLedCount) * kIdentifyStepMs) + kIdentifyHoldOffMs);
+#else
+  return 0;
+#endif
 }
 
 String jsonEscape(const String& value) {
@@ -32,9 +37,20 @@ String jsonEscape(const String& value) {
 }  // namespace
 
 ExternalLedController::ExternalLedController()
+#if NHOS_BOARD_HAS_EXT_LED
     : pixels_(kExternalLedCount, kExternalLedPin, NEO_GRB + NEO_KHZ800) {}
+#else
+    : pixels_(0, 0, NEO_GRB + NEO_KHZ800) {}
+#endif
 
 void ExternalLedController::begin(const ExternalLedConfig& config) {
+#if !NHOS_BOARD_HAS_EXT_LED
+  initialized_ = false;
+  sleeping_ = false;
+  activePreset_ = "off";
+  config_ = config;
+  return;
+#endif
   pinMode(kExternalLedPin, OUTPUT);
   pixels_.begin();
   initialized_ = true;
@@ -191,9 +207,17 @@ String ExternalLedController::statusJson() const {
   out += "\",\"brightness\":";
   out += String(config_.brightness, 2);
   out += ",\"count\":";
+#if NHOS_BOARD_HAS_EXT_LED
   out += String(static_cast<unsigned int>(kExternalLedCount));
+#else
+  out += "0";
+#endif
   out += ",\"pin\":";
+#if NHOS_BOARD_HAS_EXT_LED
   out += String(static_cast<unsigned int>(kExternalLedPin));
+#else
+  out += "0";
+#endif
   out += ",\"initialized\":";
   out += initialized_ ? "true" : "false";
   out += ",\"sleeping\":";

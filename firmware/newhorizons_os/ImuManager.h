@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "Arduino_BMI270_BMM150.h"
+#include "Config.h"
 
 namespace nhos {
 
@@ -11,7 +12,7 @@ class ImuManager {
   void begin(bool enabled);
   void setEnabled(bool enabled);
   void service(uint32_t nowUs);
-  bool copyLatestSample(float out7[7]) const;
+  bool copyLatestSample(float out[kImuSampleFloats]) const;
   String statusJson() const;
   void setServiceIntervalUs(uint32_t us) { serviceIntervalUs_ = us; }
 
@@ -29,7 +30,7 @@ class ImuManager {
   uint32_t lastSampleAtMs_ = 0;
   uint32_t lastReadDurationUs_ = 0;
   uint16_t sampleRateHz_ = 100;
-  float sample_[7] = {0};
+  float sample_[kImuSampleFloats] = {0};
   bool sampleValid_ = false;
 };
 

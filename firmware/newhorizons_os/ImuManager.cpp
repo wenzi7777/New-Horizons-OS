@@ -2,6 +2,8 @@
 
 #include <Wire.h>
 
+#include "BoardConfig.h"
+
 namespace nhos {
 
 namespace {
@@ -24,8 +26,13 @@ void ImuManager::begin(bool enabled) {
     return;
   }
 
+#if NHOS_BOARD_HAS_MAG
+  if (!IMU.begin()) {
+    lastError_ = "bmi270_bmm150_init_failed";
+#else
   if (!IMU.begin(BOSCH_ACCELEROMETER_ONLY)) {
     lastError_ = "bmi270_init_failed";
+#endif
     heapAfter_ = ESP.getFreeHeap();
     return;
   }
@@ -77,6 +84,12 @@ void ImuManager::service(uint32_t nowUs) {
   const uint32_t readStartedUs = micros();
   const bool gyroUpdated = IMU.readGyroscope(gx, gy, gz);
   const bool accelUpdated = IMU.readAcceleration(ax, ay, az);
+#if NHOS_BOARD_HAS_MAG
+  float mx = sample_[7];
+  float my = sample_[8];
+  float mz = sample_[9];
+  IMU.readMagneticField(mx, my, mz);
+#endif
   lastReadDurationUs_ = micros() - readStartedUs;
 
   if (!gyroUpdated && !accelUpdated) {
@@ -93,18 +106,23 @@ void ImuManager::service(uint32_t nowUs) {
   sample_[4] = gy;
   sample_[5] = gz;
   sample_[6] = 0.0f;
+#if NHOS_BOARD_HAS_MAG
+  sample_[7] = mx;
+  sample_[8] = my;
+  sample_[9] = mz;
+#endif
   sampleValid_ = true;
   lastSampleAtUs_ = nowUs;
   lastSampleAtMs_ = millis();
   lastError_ = "";
 }
 
-bool ImuManager::copyLatestSample(float out7[7]) const {
-  if (!enabled_ || !initialized_ || !sampleValid_ || !out7) {
+bool ImuManager::copyLatestSample(float out[kImuSampleFloats]) const {
+  if (!enabled_ || !initialized_ || !sampleValid_ || !out) {
     return false;
   }
-  for (uint8_t i = 0; i < 7; ++i) {
-    out7[i] = sample_[i];
+  for (uint8_t i = 0; i < kImuSampleFloats; ++i) {
+    out[i] = sample_[i];
   }
   return true;
 }
@@ -124,7 +142,11 @@ String ImuManager::statusJson() const {
   } else {
     out += "error";
   }
+#if NHOS_BOARD_HAS_MAG
+  out += "\",\"chip\":\"BMI270+BMM150\"";
+#else
   out += "\",\"chip\":\"BMI270\"";
+#endif
   out += ",\"last_error\":\"";
   out += lastError_;
   out += "\",\"heap_before\":";

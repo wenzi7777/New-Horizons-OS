@@ -42,6 +42,7 @@ Or use the release helper:
 
 ```bash
 VERSION=v0.5.4 firmware/scripts/build_arduino_release.sh
+VERSION=v0.5.4 firmware/scripts/build_arduino_release_gcu_lts.sh
 ```
 
 ## Flash
@@ -62,10 +63,21 @@ arduino-cli board list
 Generate the Arduino OTA manifest from a built firmware binary:
 
 ```bash
+# VD-CTL/R v1.0.F 2026.4
 firmware/scripts/generate_arduino_manifest.py \
   --firmware releases/artifacts/newhorizons-os-v0.5.4.bin \
   --output releases/arduino-latest.json \
   --version v0.5.4 \
+  --model "VD-CTL/R v1.0.F 2026.4" \
+  --base-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/artifacts \
+  --changelog-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/notes/v0.5.4.md
+
+# VD-CTL/R v2.3.D GCU LTS
+firmware/scripts/generate_arduino_manifest.py \
+  --firmware releases/artifacts/newhorizons-os-gcu-lts-v0.5.4.bin \
+  --output releases/arduino-gcu-lts-latest.json \
+  --version v0.5.4 \
+  --model "VD-CTL/R v2.3.D GCU LTS" \
   --base-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/artifacts \
   --changelog-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/notes/v0.5.4.md
 ```

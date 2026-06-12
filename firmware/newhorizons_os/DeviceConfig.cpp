@@ -183,6 +183,15 @@ uint8_t streamBufferDepthForMode(const String& mode) {
   }
   return kStandardScanRingFrames;
 }
+
+void defaultMatrixLayout(MatrixLayoutConfig& layout) {
+  memset(layout.analogPins, 0, sizeof(layout.analogPins));
+  memset(layout.selectPins, 0, sizeof(layout.selectPins));
+  memcpy(layout.analogPins, kRowAdcPins, kRowAdcPinCount);
+  memcpy(layout.selectPins, kColPins, kColPinCount);
+  layout.analogCount = kRowAdcPinCount;
+  layout.selectCount = kColPinCount;
+}
 }  // namespace
 
 bool DeviceConfig::load(Storage& storage) {
@@ -237,6 +246,16 @@ bool DeviceConfig::setMatrixLayout(const uint8_t* analogPins, size_t analogCount
   }
   if (!analogPins || !selectPins || analogCount > kRows || selectCount > kCols) {
     return false;
+  }
+  for (size_t i = 0; i < analogCount; ++i) {
+    if (!isAllowedRowPin(analogPins[i])) {
+      return false;
+    }
+  }
+  for (size_t i = 0; i < selectCount; ++i) {
+    if (!isAllowedColPin(selectPins[i])) {
+      return false;
+    }
   }
   memcpy(data_.matrixLayout.analogPins, analogPins, analogCount);
   memcpy(data_.matrixLayout.selectPins, selectPins, selectCount);
@@ -401,10 +420,7 @@ bool DeviceConfig::validOledMode(const String& mode) {
 
 void DeviceConfig::setDefaults() {
   data_.schemaVersion = 3;
-  memset(data_.matrixLayout.analogPins, 0, sizeof(data_.matrixLayout.analogPins));
-  memset(data_.matrixLayout.selectPins, 0, sizeof(data_.matrixLayout.selectPins));
-  data_.matrixLayout.analogCount = 0;
-  data_.matrixLayout.selectCount = 0;
+  defaultMatrixLayout(data_.matrixLayout);
   data_.scanTiming.targetFps = kDefaultTargetFps;
   data_.scanTiming.settleUs = kDefaultSettleUs;
   data_.scanTiming.sendEveryNFrames = kDefaultSendEveryNFrames;
@@ -445,9 +461,12 @@ bool DeviceConfig::applyJson(const String& json) {
     const size_t selectCount = extractArray(matrix, "select_pins", select, kCols);
     const bool configured = extractBool(matrix, "configured", false) || (storedSchemaVersion < 2 && analogCount && selectCount);
     if (configured && analogCount && selectCount) {
-      setMatrixLayout(analog, analogCount, select, selectCount);
+      if (!setMatrixLayout(analog, analogCount, select, selectCount)) {
+        defaultMatrixLayout(data_.matrixLayout);
+        lastError_ = "matrix_layout_invalid_fallback_default";
+      }
     } else {
-      setMatrixLayout(nullptr, 0, nullptr, 0);
+      defaultMatrixLayout(data_.matrixLayout);
     }
   }
 
