@@ -13,6 +13,9 @@ enum class ChargeState : uint8_t {
 enum class ChargeProfile : uint8_t {
   Compatible = 0,
   Fast,
+  Tiny,
+  Small,
+  Max,
 };
 
 class PowerManager {

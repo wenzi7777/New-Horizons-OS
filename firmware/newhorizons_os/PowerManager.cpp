@@ -14,6 +14,20 @@ constexpr uint8_t kBq25180TmrIlimRegister = 0x08;
 constexpr uint8_t kBq25180Vbat4200Mv = 0x46;
 constexpr uint32_t kPowerStatusPollMs = 1000;
 
+// ICHG register encoding derived from known data points:
+// 0x34 -> 250mA, 0x39 -> 300mA (BQ25180 measured), linear interpolation 10mA/step
+constexpr PowerManager::ChargeProfileConfig kTinyProfile = {
+    ChargeProfile::Tiny,
+    "tiny",
+    100, 500, 0x25, 0x05,
+};
+
+constexpr PowerManager::ChargeProfileConfig kSmallProfile = {
+    ChargeProfile::Small,
+    "small",
+    200, 500, 0x2F, 0x05,
+};
+
 constexpr PowerManager::ChargeProfileConfig kCompatibleProfile = {
     ChargeProfile::Compatible,
     "compatible",
@@ -24,6 +38,12 @@ constexpr PowerManager::ChargeProfileConfig kFastProfile = {
     ChargeProfile::Fast,
     "fast",
     300, 500, 0x39, 0x05,
+};
+
+constexpr PowerManager::ChargeProfileConfig kMaxProfile = {
+    ChargeProfile::Max,
+    "max",
+    350, 500, 0x3E, 0x05,
 };
 }
 
@@ -126,8 +146,17 @@ bool PowerManager::applyProfile(ChargeProfile profile) {
 }
 
 bool PowerManager::applyProfileByName(const String& profileName) {
-  if (profileName == "fast") {
+  if (profileName == "tiny") {
+    return applyProfile(ChargeProfile::Tiny);
+  }
+  if (profileName == "small") {
+    return applyProfile(ChargeProfile::Small);
+  }
+  if (profileName == "fast" || profileName == "standard") {
     return applyProfile(ChargeProfile::Fast);
+  }
+  if (profileName == "max") {
+    return applyProfile(ChargeProfile::Max);
   }
   if (profileName == "compatible" || profileName.isEmpty()) {
     return applyProfile(ChargeProfile::Compatible);
@@ -187,8 +216,14 @@ const PowerManager::ChargeProfileConfig& PowerManager::profileConfig() const {
 
 const PowerManager::ChargeProfileConfig& PowerManager::configForProfile(ChargeProfile profile) const {
   switch (profile) {
+    case ChargeProfile::Tiny:
+      return kTinyProfile;
+    case ChargeProfile::Small:
+      return kSmallProfile;
     case ChargeProfile::Fast:
       return kFastProfile;
+    case ChargeProfile::Max:
+      return kMaxProfile;
     case ChargeProfile::Compatible:
     default:
       return kCompatibleProfile;
