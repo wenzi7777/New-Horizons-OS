@@ -49,8 +49,15 @@ void FindMeClient::service() {
   if (!ensureUdp()) {
     return;
   }
-  readOffers();
   uint32_t now = millis();
+  if (transferActive() && transferRemainingMs(now) == 0) {
+    preferredGatewayId_ = "";
+    claimId_ = "";
+    transferDeadlineMs_ = 0;
+    lastError_ = "findme_transfer_timeout";
+    discoverNow();
+  }
+  readOffers();
   if (now < cooldownUntilMs_) {
     return;
   }
@@ -72,9 +79,24 @@ void FindMeClient::discoverNow() {
 }
 
 void FindMeClient::switchGateway(const String& preferredGatewayId, const String& claimId, uint32_t ttlMs) {
-  (void)ttlMs;
+  const uint32_t effectiveTtlMs = ttlMs ? ttlMs : 30000;
+  const bool alreadyAttached = hasGateway() &&
+                               gatewayId_ == preferredGatewayId &&
+                               claimId_ == claimId;
+  if (alreadyAttached) {
+    return;
+  }
+  const bool sameTransfer = transferActive() &&
+                            preferredGatewayId_ == preferredGatewayId &&
+                            claimId_ == claimId;
   preferredGatewayId_ = preferredGatewayId;
   claimId_ = claimId;
+  if (!sameTransfer) {
+    transferDeadlineMs_ = millis() + effectiveTtlMs;
+    if (transferDeadlineMs_ == 0) {
+      transferDeadlineMs_ = 1;
+    }
+  }
   cooldownUntilMs_ = 0;
   discoverNow();
 }
@@ -92,6 +114,7 @@ uint16_t FindMeClient::streamPort() const {
 }
 
 String FindMeClient::statusJson() const {
+  const uint32_t now = millis();
   String out = "{";
   out += "\"state\":\"";
   out += jsonEscape(state_);
@@ -107,7 +130,13 @@ String FindMeClient::statusJson() const {
   out += String(priority_);
   out += ",\"claim_id\":\"";
   out += jsonEscape(claimId_);
-  out += "\",\"last_success_ms\":";
+  out += "\",\"preferred_gateway_id\":\"";
+  out += jsonEscape(preferredGatewayId_);
+  out += "\",\"transfer_active\":";
+  out += transferActive() ? "true" : "false";
+  out += ",\"transfer_remaining_ms\":";
+  out += String(transferRemainingMs(now));
+  out += ",\"last_success_ms\":";
   out += String(lastSuccessMs_);
   out += ",\"last_error\":\"";
   out += jsonEscape(lastError_);
@@ -192,9 +221,17 @@ void FindMeClient::readOffers() {
     if (!offer.valid) {
       continue;
     }
+    const bool transferring = transferActive();
+    if (transferring && offer.gatewayId != preferredGatewayId_) {
+      continue;
+    }
     if (!offer.accept) {
       lastError_ = offer.reason.isEmpty() ? "findme_offer_rejected" : offer.reason;
       state_ = "rejected";
+      continue;
+    }
+    if (transferring && offer.claimId != claimId_) {
+      lastError_ = "findme_transfer_offer_mismatch";
       continue;
     }
     if (!hasGateway() || offer.priority >= priority_ || (millis() - lastDiscoverMs_) <= kOfferReadWindowMs) {
@@ -223,6 +260,7 @@ void FindMeClient::acceptOffer(const Offer& offer, const IPAddress& host) {
   nextDiscoverMs_ = 0;
   cooldownUntilMs_ = 0;
   preferredGatewayId_ = "";
+  transferDeadlineMs_ = 0;
   if (storage_) {
     storage_->putString("findme_host", streamHost_);
     storage_->putUInt("findme_udp_port", streamPort_);
@@ -237,6 +275,17 @@ void FindMeClient::acceptOffer(const Offer& offer, const IPAddress& host) {
     Serial.print(F(" udp_port="));
     Serial.println(streamPort_);
   }
+}
+
+bool FindMeClient::transferActive() const {
+  return !preferredGatewayId_.isEmpty() && transferDeadlineMs_ != 0;
+}
+
+uint32_t FindMeClient::transferRemainingMs(uint32_t now) const {
+  if (!transferActive() || static_cast<int32_t>(now - transferDeadlineMs_) >= 0) {
+    return 0;
+  }
+  return transferDeadlineMs_ - now;
 }
 
 FindMeClient::Offer FindMeClient::decodeOffer(const uint8_t* data, size_t len) const {

@@ -42,6 +42,8 @@ class FindMeClient {
   IPAddress directedBroadcast() const;
   void readOffers();
   void acceptOffer(const Offer& offer, const IPAddress& host);
+  bool transferActive() const;
+  uint32_t transferRemainingMs(uint32_t now) const;
   Offer decodeOffer(const uint8_t* data, size_t len) const;
   String deviceUidString() const;
   String jsonEscape(const String& value) const;
@@ -64,6 +66,7 @@ class FindMeClient {
   String streamHost_;
   String claimId_;
   String preferredGatewayId_;
+  uint32_t transferDeadlineMs_ = 0;
   String lastError_;
   uint16_t streamPort_ = kUdpStreamPort;
   int priority_ = 0;

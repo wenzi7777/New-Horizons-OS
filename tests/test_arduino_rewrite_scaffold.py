@@ -72,7 +72,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
         self.assertIn('kHardwareModel[] = "VD-CTL/R v1.0.F 2026.4"', config)
-        self.assertIn('kFirmwareVersion[] = "v0.6.11"', config)
+        self.assertRegex(config, r'kFirmwareVersion\[\] = "v\d+\.\d+\.\d+"')
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
@@ -104,6 +104,23 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('cmd == "findme_switch_gateway"', control)
         self.assertIn('jsonRawField(data, "findme"', control)
         self.assertIn("findme_->statusJson()", control)
+
+    def test_findme_gateway_transfer_expires_and_requires_matching_offer(self):
+        header = (ARDUINO_ROOT / "FindMeClient.h").read_text(encoding="utf-8")
+        findme = (ARDUINO_ROOT / "FindMeClient.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("transferDeadlineMs_", header)
+        self.assertIn("transferActive() const", header)
+        self.assertIn("transferRemainingMs(uint32_t now) const", header)
+        self.assertIn("findme_transfer_timeout", findme)
+        self.assertIn("offer.gatewayId != preferredGatewayId_", findme)
+        self.assertIn("offer.claimId != claimId_", findme)
+        self.assertIn("sameTransfer", findme)
+        self.assertIn("alreadyAttached", findme)
+        self.assertIn("transferDeadlineMs_ = millis() + effectiveTtlMs", findme)
+        self.assertIn("preferred_gateway_id", findme)
+        self.assertIn("transfer_active", findme)
+        self.assertIn("transfer_remaining_ms", findme)
 
     def test_arduino_file_management_uses_read_write_command_contract(self):
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
@@ -651,19 +668,23 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn('RELEASE_DIR="${ROOT}/releases/artifacts"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"', script)
-        self.assertIn('VERSION="${VERSION:-v0.6.11}"', script)
+        self.assertRegex(script, r'VERSION="\$\{VERSION:-v\d+\.\d+\.\d+\}"')
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
 
     def test_latest_manifest_points_to_current_artifact(self):
-        latest = (REPO_ROOT / "releases" / "arduino-latest.json").read_text(encoding="utf-8")
-        versioned = (REPO_ROOT / "releases" / "arduino-v0.6.11.json").read_text(encoding="utf-8")
-        artifact = REPO_ROOT / "releases" / "artifacts" / "newhorizons-os-v0.6.11.bin"
+        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+        version_match = re.search(r'kFirmwareVersion\[\] = "(v\d+\.\d+\.\d+)"', config)
+        self.assertIsNotNone(version_match)
+        version = version_match.group(1)
+        latest = json.loads((REPO_ROOT / "releases" / "arduino-latest.json").read_text(encoding="utf-8"))
+        versioned = json.loads((REPO_ROOT / "releases" / f"arduino-{version}.json").read_text(encoding="utf-8"))
+        artifact = REPO_ROOT / "releases" / "artifacts" / f"newhorizons-os-{version}.bin"
 
-        self.assertIn('"latest": "v0.6.11"', latest)
-        self.assertIn("newhorizons-os-v0.6.11.bin", latest)
-        self.assertIn("v0.6.11/releases/artifacts", latest)
-        self.assertIn("v0.6.11.md", latest)
-        self.assertIn('"latest": "v0.6.11"', versioned)
+        self.assertEqual(latest["latest"], version)
+        self.assertEqual(versioned["latest"], version)
+        self.assertIn(f"newhorizons-os-{version}.bin", latest["firmware"]["url"])
+        self.assertIn(f"/{version}/releases/artifacts", latest["firmware"]["url"])
+        self.assertIn(f"/{version}.md", latest["changelog_url"])
         self.assertTrue(artifact.exists())
 
     def test_ota_manifest_and_status_include_changelog_url(self):
@@ -859,7 +880,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("case LedSignal::PowerTransitionShutdown:", led_impl)
         self.assertIn("case LedSignal::PowerTransitionWake:", led_impl)
 
-    def test_power_transition_flow_and_serial_logs_are_wired_in_main_loop(self):
+    def test_power_transition_flow_uses_immediate_sleep_and_wake(self):
         power_header = (ARDUINO_ROOT / "PowerStateManager.h").read_text(encoding="utf-8")
         power_impl = (ARDUINO_ROOT / "PowerStateManager.cpp").read_text(encoding="utf-8")
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
@@ -871,21 +892,18 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("power_button_down", power_impl)
         self.assertIn("power_button_up held_ms=", power_impl)
         self.assertIn("power_transition_requested from=", power_impl)
-        self.assertIn("shutdown_anim_start outputs=", sketch)
-        self.assertIn("shutdown_anim_done", sketch)
         self.assertIn("runtime_services_suspended", sketch)
         self.assertIn("soft_off_sleep_enter state=", sketch)
         self.assertIn("soft_off_wake cause=", sketch)
-        self.assertIn("wake_anim_start outputs=", sketch)
-        self.assertIn("wake_anim_done", sketch)
         self.assertIn("runtime_services_resumed", sketch)
         self.assertIn("servicePowerTransition()", sketch)
-        self.assertIn("powerState.beginShutdownAnimation()", sketch)
-        self.assertIn("powerState.beginWakeAnimation()", sketch)
-        self.assertIn("displayManager.startPowerAnimation(", sketch)
-        self.assertIn("externalLeds.startPowerAnimation(", sketch)
-        self.assertIn("displayManager.servicePowerAnimation(", sketch)
-        self.assertIn("externalLeds.servicePowerAnimation(", sketch)
+        self.assertIn("externalLeds.sleep();", sketch)
+        self.assertIn("displayManager.sleep();", sketch)
+        self.assertIn("externalLeds.wake();", sketch)
+        self.assertIn("displayManager.wake();", sketch)
+        self.assertIn('logPowerEvent("shutdown_done")', sketch)
+        self.assertNotIn("powerState.beginShutdownAnimation()", sketch)
+        self.assertNotIn("powerState.beginWakeAnimation()", sketch)
 
 
 if __name__ == "__main__":
