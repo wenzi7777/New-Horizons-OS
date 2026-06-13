@@ -59,11 +59,36 @@ void restoreBoardBusClock() {
 
 void PowerManager::begin(const String& profileName) {
   lastReadMs_ = 0;
+  stat0_ = 0;
+  chargeState_ = ChargeState::NotCharging;
+  detected_ = false;
+  configured_ = false;
+  lastError_ = "";
+  lastConfigError_ = "";
+  if (!supportsChargeProfiles()) {
+    profile_ = ChargeProfile::Compatible;
+    chargeCurrentMa_ = 0;
+    inputLimitMa_ = 0;
+    vbatRegMv_ = 0;
+    terminationPercent_ = 0;
+    prechargePercent_ = 0;
+    safetyTimerHours_ = 0;
+    service(millis());
+    return;
+  }
   applyProfileByName(profileName);
   service(millis());
 }
 
 void PowerManager::service(uint32_t nowMs) {
+  if (!supportsChargeProfiles()) {
+    lastReadMs_ = nowMs;
+    detected_ = false;
+    chargeState_ = ChargeState::NotCharging;
+    stat0_ = 0;
+    lastError_ = "";
+    return;
+  }
   if (lastReadMs_ != 0 && nowMs - lastReadMs_ < kPowerStatusPollMs) {
     return;
   }
@@ -101,11 +126,18 @@ bool PowerManager::softOffRecommended() const {
   return chargerDetected() || chargeState_ != ChargeState::NotCharging;
 }
 
+bool PowerManager::supportsChargeProfiles() const {
+  return NHOS_BOARD_HAS_BQ25180 != 0;
+}
+
 uint8_t PowerManager::lastStat0() const {
   return stat0_;
 }
 
 bool PowerManager::applyProfile(ChargeProfile profile) {
+  if (!supportsChargeProfiles()) {
+    return failProfile("charge_profile_unsupported");
+  }
   const ChargeProfileConfig& config = configForProfile(profile);
   lastConfigError_ = "";
 
@@ -186,7 +218,12 @@ String PowerManager::statusJson() const {
   out += chargeDetailName();
   out += "\",\"charge_state\":\"";
   out += chargeStateName();
-  out += "\",\"charger\":\"bq25180\",\"detected\":";
+  if (supportsChargeProfiles()) {
+    out += "\",\"charger\":\"bq25180\",\"supported\":true";
+  } else {
+    out += "\",\"charger\":\"none\",\"supported\":false";
+  }
+  out += ",\"detected\":";
   out += detected_ ? "true" : "false";
   out += ",\"charger_detected\":";
   out += chargerDetected() ? "true" : "false";

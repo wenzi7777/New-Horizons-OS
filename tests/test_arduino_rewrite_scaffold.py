@@ -80,12 +80,16 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertRegex(config, r'kFirmwareVersion\[\] = "v\d+\.\d+\.\d+"')
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
-    def test_board_config_declares_dual_board_capabilities(self):
+    def test_board_config_declares_three_board_capabilities(self):
         config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
 
+        self.assertIn("NHOS_BOARD_GCU_V21_LTS", config)
         self.assertIn("NHOS_BOARD_GCU_V23D_LTS", config)
+        self.assertIn('NHOS_BOARD_NAME         "VD-CTL/R v2.1 GCU LTS"', config)
         self.assertIn('NHOS_BOARD_NAME         "VD-CTL/R v2.3.D GCU LTS"', config)
         self.assertIn('NHOS_BOARD_NAME         "VD-CTL/R v1.0.F 2026.4"', config)
+        self.assertIn("NHOS_BOARD_ROWS         10", config)
+        self.assertIn("NHOS_BOARD_COLS         12", config)
         self.assertIn("NHOS_BOARD_ROWS         15", config)
         self.assertIn("NHOS_BOARD_COLS         15", config)
         self.assertIn("NHOS_BOARD_HAS_MAG      1", config)
@@ -94,8 +98,11 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("NHOS_BOARD_HAS_OLED     0", config)
         self.assertIn("NHOS_BOARD_SUPPORTS_GPIO_WAKE 0", config)
         self.assertIn("NHOS_BOARD_I2C_HZ       1000000", config)
+        self.assertIn("NHOS_BOARD_HAS_BQ25180  0", config)
+        self.assertIn("NHOS_BOARD_HAS_BQ25180  1", config)
         self.assertIn("NHOS_BOARD_BQ25180_I2C_HZ 400000", config)
         self.assertIn("NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL", config)
+        self.assertIn("arduino-gcu-v21-lts-latest.json", config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
@@ -381,6 +388,44 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('\\"configured\\"', power)
         self.assertIn('cmd == "set_charge_profile"', control)
         self.assertIn('storage_->putString("charge_profile"', control)
+
+    def test_v21_lts_release_track_uses_4m_flash_and_distinct_manifest_names(self):
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        releases = (REPO_ROOT / "releases" / "README.md").read_text(encoding="utf-8")
+        script = (SCRIPT_ROOT / "build_arduino_release_gcu_v21_lts.sh").read_text(encoding="utf-8")
+
+        self.assertIn('VERSION=v0.5.4 firmware/scripts/build_arduino_release_gcu_v21_lts.sh', readme)
+        self.assertIn('releases/arduino-gcu-v21-lts-latest.json', readme)
+        self.assertIn('releases/arduino-gcu-v21-lts-latest.json', releases)
+        self.assertIn('releases/arduino-gcu-v21-lts-vX.Y.Z.json', releases)
+        self.assertIn('VD-CTL/R v2.1 GCU LTS', releases)
+        self.assertIn('FlashSize=4M,PartitionScheme=min_spiffs', script)
+        self.assertIn('-DNHOS_BOARD_GCU_V21_LTS', script)
+        self.assertIn('newhorizons-os-gcu-v21-lts-${VERSION}.bin', script)
+
+    def test_v21_lts_board_pins_and_packet_shape_follow_legacy_v21_whitelist(self):
+        board_pins = (ARDUINO_ROOT / "BoardPins.cpp").read_text(encoding="utf-8")
+        config = (ARDUINO_ROOT / "Config.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("#if defined(NHOS_BOARD_GCU_V21_LTS)", board_pins)
+        self.assertIn("{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}", board_pins)
+        self.assertIn("{18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45}", board_pins)
+        self.assertIn("const uint8_t kI2cScl = 47;", board_pins)
+        self.assertIn("const uint8_t kI2cSda = 48;", board_pins)
+        self.assertIn("const uint8_t kStatusLedPin = 38;", board_pins)
+        self.assertIn("static_assert(kMaxSensors == 120", config)
+
+    def test_v21_lts_power_path_reports_non_bq25180_fallback(self):
+        power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
+        power_impl = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("bool supportsChargeProfiles() const;", power_header)
+        self.assertIn("NHOS_BOARD_HAS_BQ25180", power_impl)
+        self.assertIn('\\"charger\\":\\"none\\"', power_impl)
+        self.assertIn('\\"supported\\":false', power_impl)
+        self.assertIn("charge_profile_unsupported", control)
+        self.assertNotIn('return error(cmd, "charge_profile_failed");', control)
 
     def test_device_config_persists_webui_runtime_settings_to_spiffs(self):
         header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
@@ -710,6 +755,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-gcu-lts-${VERSION}.bin"', gcu_script)
         self.assertIn('--build-property "build.extra_flags=-DNHOS_BOARD_GCU_V23D_LTS"', gcu_script)
+        self.assertIn('FlashSize=4M,PartitionScheme=min_spiffs', gcu_script)
+        self.assertNotIn('FlashSize=8M', gcu_script)
 
     def test_latest_manifest_points_to_current_artifact(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
@@ -900,6 +947,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('\\"charger_detected\\":', power_impl)
         self.assertIn('\\"soft_off_recommended\\":', power_impl)
         self.assertIn('\\"last_stat0\\":', power_impl)
+        self.assertIn('\\"supported\\":', power_impl)
         self.assertIn("class PowerStateManager", control_header)
         self.assertIn('cmd == "power_set_state"', control)
         self.assertIn('jsonRawField(data, "power"', control)

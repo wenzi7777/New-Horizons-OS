@@ -472,9 +472,16 @@ String ControlServer::processCommand(const String& request) {
     if (!power_) {
       return error(cmd, "power_unavailable");
     }
+    if (!power_->supportsChargeProfiles()) {
+      String data = "{\"battery\":";
+      data += power_->statusJson();
+      data += "}";
+      return ok(cmd, "charge_profile_unsupported", data);
+    }
     const String profile = extractString(request, "profile");
     if (!power_->applyProfileByName(profile)) {
-      return error(cmd, "charge_profile_failed");
+      String reason = power_->supportsChargeProfiles() ? "charge_profile_failed" : "charge_profile_unsupported";
+      return error(cmd, reason);
     }
     storage_->putString("charge_profile", power_->profileName());
     String data = "{\"battery\":";

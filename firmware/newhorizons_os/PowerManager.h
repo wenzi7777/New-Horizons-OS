@@ -25,6 +25,7 @@ class PowerManager {
   ChargeState chargeState() const;
   bool chargerDetected() const;
   bool softOffRecommended() const;
+  bool supportsChargeProfiles() const;
   uint8_t lastStat0() const;
   bool applyProfile(ChargeProfile profile);
   bool applyProfileByName(const String& profileName);

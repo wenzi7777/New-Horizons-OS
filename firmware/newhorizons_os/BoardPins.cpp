@@ -2,7 +2,17 @@
 
 namespace nhos {
 
-#if defined(NHOS_BOARD_GCU_V23D_LTS)
+#if defined(NHOS_BOARD_GCU_V21_LTS)
+
+const uint8_t kRowAdcPins[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+
+const uint8_t kColPins[] = {18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45};
+
+const uint8_t kI2cScl = 47;
+const uint8_t kI2cSda = 48;
+const uint8_t kStatusLedPin = 38;
+
+#elif defined(NHOS_BOARD_GCU_V23D_LTS)
 
 const uint8_t kRowAdcPins[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
 
@@ -14,7 +24,7 @@ const uint8_t kStatusLedPin = 38;
 
 #else
 
-const uint8_t kRowAdcPins[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+const uint8_t kRowAdcPins[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
 const uint8_t kColPins[] = {
   13, 14, 15, 16, 17, 18, 19, 20, 21, 26,
