@@ -209,6 +209,22 @@ IPAddress FindMeClient::directedBroadcast() const {
       static_cast<uint8_t>(local[3] | (0xff ^ mask[3])));
 }
 
+void FindMeClient::respondToProbe(const IPAddress& host) {
+  const uint32_t now = millis();
+  if (now - lastProbeResponseMs_ < 5000) {
+    return;
+  }
+  lastProbeResponseMs_ = now;
+  const String payload = encodeDiscoverJsonWithCurrentGateway();
+  if (payload.isEmpty()) {
+    return;
+  }
+  if (udp_.beginPacket(host, kDiscoveryPort)) {
+    udp_.write(reinterpret_cast<const uint8_t*>(payload.c_str()), payload.length());
+    udp_.endPacket();
+  }
+}
+
 void FindMeClient::readOffers() {
   uint8_t packet[512];
   while (true) {
@@ -217,6 +233,18 @@ void FindMeClient::readOffers() {
       break;
     }
     size_t len = udp_.read(packet, min(packetLen, static_cast<int>(sizeof(packet))));
+
+    // Handle findme_probe: gateway asks devices to announce themselves.
+    // Respond without changing attach state.
+    if (len > 2) {
+      String raw = bytesToString(packet, len);
+      raw.trim();
+      if (raw.startsWith("{") && extractJsonString(raw, "type") == "findme_probe") {
+        respondToProbe(udp_.remoteIP());
+        continue;
+      }
+    }
+
     Offer offer = decodeOffer(packet, len);
     if (!offer.valid) {
       continue;
@@ -364,6 +392,21 @@ String FindMeClient::encodeDiscoverJson() const {
     out += "\"";
   }
   out += "}";
+  return out;
+}
+
+String FindMeClient::encodeDiscoverJsonWithCurrentGateway() const {
+  String out = encodeDiscoverJson();
+  if (out.isEmpty() || !attachedThisBoot_ || gatewayId_.isEmpty()) {
+    return out;
+  }
+  // Remove closing brace and append current_gateway_id before closing.
+  if (out.endsWith("}")) {
+    out.remove(out.length() - 1);
+    out += ",\"current_gateway_id\":\"";
+    out += jsonEscape(gatewayId_);
+    out += "\"}";
+  }
   return out;
 }
 

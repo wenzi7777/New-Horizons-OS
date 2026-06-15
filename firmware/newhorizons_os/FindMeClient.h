@@ -52,6 +52,9 @@ class FindMeClient {
   int32_t extractJsonInt(const String& json, const char* key, int32_t fallback) const;
   bool extractJsonBool(const String& json, const char* key, bool fallback) const;
 
+  void respondToProbe(const IPAddress& host);
+  String encodeDiscoverJsonWithCurrentGateway() const;
+
   Storage* storage_ = nullptr;
   WifiManager* wifi_ = nullptr;
   WiFiUDP udp_;
@@ -76,6 +79,7 @@ class FindMeClient {
   uint32_t lastSuccessMs_ = 0;
   uint32_t lastHeartbeatMs_ = 0;
   uint32_t cooldownUntilMs_ = 0;
+  uint32_t lastProbeResponseMs_ = 0;
   String heartbeatLastError_;
 };
 
