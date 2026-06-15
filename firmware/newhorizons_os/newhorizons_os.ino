@@ -367,12 +367,12 @@ void setup() {
   scanner.setStreamBufferConfig(
       deviceConfig.data().streamBuffer.enabled,
       deviceConfig.data().streamBuffer.depthFrames);
-  calibration.begin(storage);
   calibration.setLayout(
       deviceConfig.data().matrixLayout.analogPins,
       deviceConfig.data().matrixLayout.analogCount,
       deviceConfig.data().matrixLayout.selectPins,
       deviceConfig.data().matrixLayout.selectCount);
+  calibration.begin(storage);
   scanner.setCalibration(&calibration);
   logBoot(String("boot_stage=scanner_ready shape=") + scanner.matrixShapeJson());
   if (bootMode.mode() == nhos::RunMode::Normal && scanner.hasLayout()) {

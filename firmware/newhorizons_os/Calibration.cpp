@@ -347,6 +347,20 @@ bool Calibration::captureAll(float level, const float* values, size_t count) {
   return true;
 }
 
+bool Calibration::applyTareDirect(const float* values, size_t count) {
+  const size_t total = totalPointCount();
+  if (total == 0 || !values || count < total) {
+    return false;
+  }
+  tare_.assign(values, values + total);
+  legacyMissingTare_ = !levels_.empty() && !tareComplete(tare_);
+  if (!complete()) {
+    enabled_ = false;
+  }
+  updatedAtMs_ = millis();
+  return saveToStorage();
+}
+
 bool Calibration::apply(float rawMv, uint16_t sensorIndex, float& outValue) const {
   outValue = rawMv;
   if (!enabled_ || !complete() || sensorIndex >= totalPointCount() || sensorIndex >= tare_.size()) {
@@ -518,9 +532,9 @@ bool Calibration::loadFromStorage() {
           createdAtMs_ = static_cast<uint32_t>(value.toInt());
         } else if (key == "updated_at_ms") {
           updatedAtMs_ = static_cast<uint32_t>(value.toInt());
-        } else if (key == "analog_pins") {
+        } else if (key == "analog_pins" && analogCount_ == 0) {
           parsePinCsv(value, analogPins_, analogCount_, kRows);
-        } else if (key == "select_pins") {
+        } else if (key == "select_pins" && selectCount_ == 0) {
           parsePinCsv(value, selectPins_, selectCount_, kCols);
         }
       }

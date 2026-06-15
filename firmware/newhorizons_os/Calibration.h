@@ -29,6 +29,7 @@ class Calibration {
   bool captureTare(const float* values, size_t count);
   bool captureCell(uint16_t sensorIndex, float level, float value);
   bool captureAll(float level, const float* values, size_t count);
+  bool applyTareDirect(const float* values, size_t count);
   bool apply(float rawMv, uint16_t sensorIndex, float& outValue) const;
 
  private:

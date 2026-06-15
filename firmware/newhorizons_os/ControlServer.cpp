@@ -749,6 +749,21 @@ String ControlServer::processCommand(const String& request) {
     calibration_->dumpTareJson(tareJson);
     return ok(cmd, "calibration_tare_captured", tareJson);
   }
+  if (cmd == "calibration_tare_capture") {
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    if (!calibration_ || !scanner_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    const ScanHealth health = scanner_->health();
+    std::vector<float> values(health.pointCount, 0);
+    const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 1000));
+    if (!scanner_->captureAllAverages(values.data(), values.size(), durationMs) || !calibration_->applyTareDirect(values.data(), values.size())) {
+      return error(cmd, "calibration_tare_capture_failed");
+    }
+    return ok(cmd, "calibration_tare_captured", calibration_->statusJson(maintenanceMode()));
+  }
   if (cmd == "calibration_capture_cell") {
     if (!maintenanceMode()) {
       return error(cmd, "maintenance_required");
