@@ -1,6 +1,6 @@
 # New Horizons OS Arduino
 
-This repository is now the Arduino/C++ edition of New Horizons OS for the VD-CTL/R product line, including the mainline `VD-CTL/R v1.0.F 2026.4`, `VD-CTL/R v2.3.D GCU LTS`, and `VD-CTL/R v2.1 GCU LTS`.
+This repository is now the Arduino/C++ edition of New Horizons OS for the VD-CTL/R product line, including the mainline `VD-CTL/R v1.0.F 2026.4`, `VD-CTL/R v2.3.D GCU LTS`, `VD-CTL/R v2.2.C GCU LTS`, and `VD-CTL/R v2.1 GCU LTS`.
 
 The previous MicroPython New Horizons OS tree was archived outside this repository before the reset:
 
@@ -18,9 +18,13 @@ The previous MicroPython New Horizons OS tree was archived outside this reposito
   - Matrix: `10 x 21`
   - Arduino FQBN: `esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB`
 - `VD-CTL/R v2.3.D GCU LTS`
-  - Flash: 8 MB
+  - Flash: 4 MB
   - Matrix: `15 x 15`
-  - Arduino FQBN: `esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB`
+  - Arduino FQBN: `esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs`
+- `VD-CTL/R v2.2.C GCU LTS`
+  - Flash: 4 MB
+  - Matrix: `11 x 13`
+  - Arduino FQBN: `esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs`
 - `VD-CTL/R v2.1 GCU LTS`
   - Flash: 4 MB
   - Matrix: `10 x 12`
@@ -52,6 +56,7 @@ Or use the release helper:
 ```bash
 VERSION=v0.5.4 firmware/scripts/build_arduino_release.sh
 VERSION=v0.5.4 firmware/scripts/build_arduino_release_gcu_lts.sh
+VERSION=v0.5.4 firmware/scripts/build_arduino_release_gcu_v22c_lts.sh
 VERSION=v0.5.4 firmware/scripts/build_arduino_release_gcu_v21_lts.sh
 ```
 
@@ -91,6 +96,15 @@ firmware/scripts/generate_arduino_manifest.py \
   --base-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/artifacts \
   --changelog-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/notes/v0.5.4.md
 
+# VD-CTL/R v2.2.C GCU LTS
+firmware/scripts/generate_arduino_manifest.py \
+  --firmware releases/artifacts/newhorizons-os-gcu-v22c-lts-v0.5.4.bin \
+  --output releases/arduino-gcu-v22c-lts-latest.json \
+  --version v0.5.4 \
+  --model "VD-CTL/R v2.2.C GCU LTS" \
+  --base-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/artifacts \
+  --changelog-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/notes/v0.5.4.md
+
 # VD-CTL/R v2.1 GCU LTS
 firmware/scripts/generate_arduino_manifest.py \
   --firmware releases/artifacts/newhorizons-os-gcu-v21-lts-v0.5.4.bin \
@@ -123,6 +137,7 @@ The manifest shape is JSON:
 ```bash
 python3 -m unittest discover -s tests -q
 arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB firmware/newhorizons_os
+arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "build.extra_flags=-DNHOS_BOARD_GCU_V22C_LTS" firmware/newhorizons_os
 arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "build.extra_flags=-DNHOS_BOARD_GCU_V21_LTS" firmware/newhorizons_os
 ```
 

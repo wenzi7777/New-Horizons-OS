@@ -4,6 +4,8 @@ namespace nhos {
 
 #if defined(NHOS_BOARD_GCU_V21_LTS)
 static_assert(kMaxSensors == 120, "GCU v2.1 LTS matrix must stay 10x12");
+#elif defined(NHOS_BOARD_GCU_V22C_LTS)
+static_assert(kMaxSensors == 143, "GCU v2.2.C LTS matrix must stay 11x13");
 #elif defined(NHOS_BOARD_GCU_V23D_LTS)
 static_assert(kMaxSensors == 225, "GCU LTS matrix must stay 15x15");
 #else

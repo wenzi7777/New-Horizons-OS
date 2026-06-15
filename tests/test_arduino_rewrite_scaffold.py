@@ -179,11 +179,13 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             'cmd == "calibration_enable"',
             'cmd == "calibration_disable"',
             'cmd == "calibration_clear_profile"',
+            'cmd == "calibration_dump_tare"',
             'cmd == "calibration_dump_level"',
             'cmd == "calibration_delete_level"',
             'cmd == "calibration_session_begin"',
             'cmd == "calibration_session_abort"',
             'cmd == "calibration_session_commit"',
+            'cmd == "calibration_capture_tare"',
             'cmd == "calibration_capture_cell"',
             'cmd == "calibration_capture_all"',
         ):
@@ -191,12 +193,18 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('jsonRawField(data, "calibration"', control)
         self.assertIn("calibration_ ? calibration_->statusJson", control)
         self.assertIn("bool sessionBegin();", calibration_header)
+        self.assertIn("bool dumpTareJson", calibration_header)
         self.assertIn("bool captureCell", calibration_header)
         self.assertIn("bool captureAll", calibration_header)
+        self.assertIn("bool captureTare", calibration_header)
         self.assertIn("bool dumpLevelJson", calibration_header)
         self.assertIn("bool deleteLevel", calibration_header)
         self.assertIn("bool apply(float rawMv, uint16_t sensorIndex, float& outValue) const;", calibration_header)
         self.assertIn('"draft_levels"', calibration_impl)
+        self.assertIn('"draft_tare"', calibration_impl)
+        self.assertIn('"legacy_missing_tare"', calibration_impl)
+        self.assertIn("tare_", calibration_impl)
+        self.assertIn("draftTare_", calibration_impl)
         self.assertIn('"metadata"', calibration_impl)
         self.assertIn("void setCalibration", scanner_header)
         self.assertIn("bool captureCellAverage", scanner_header)
@@ -402,6 +410,48 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('FlashSize=4M,PartitionScheme=min_spiffs', script)
         self.assertIn('-DNHOS_BOARD_GCU_V21_LTS', script)
         self.assertIn('newhorizons-os-gcu-v21-lts-${VERSION}.bin', script)
+
+    def test_v22c_lts_board_config_declares_correct_capabilities(self):
+        config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
+
+        self.assertIn("NHOS_BOARD_GCU_V22C_LTS", config)
+        self.assertIn('NHOS_BOARD_NAME         "VD-CTL/R v2.2.C GCU LTS"', config)
+        self.assertIn("NHOS_BOARD_ROWS         11", config)
+        self.assertIn("NHOS_BOARD_COLS         13", config)
+        self.assertIn("NHOS_BOARD_I2C_HZ       1000000", config)
+        self.assertIn("NHOS_BOARD_HAS_MAG      1", config)
+        self.assertIn("NHOS_BOARD_HAS_BQ25180  0", config)
+        self.assertIn("NHOS_BOARD_HAS_BUTTON   0", config)
+        self.assertIn("NHOS_BOARD_HAS_EXT_LED  0", config)
+        self.assertIn("NHOS_BOARD_HAS_OLED     0", config)
+        self.assertIn("NHOS_BOARD_SUPPORTS_GPIO_WAKE 0", config)
+        self.assertIn("arduino-gcu-v22c-lts-latest.json", config)
+
+    def test_v22c_lts_board_pins_follow_reference_implementation(self):
+        board_pins = (ARDUINO_ROOT / "BoardPins.cpp").read_text(encoding="utf-8")
+        config_cpp = (ARDUINO_ROOT / "Config.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("#elif defined(NHOS_BOARD_GCU_V22C_LTS)", board_pins)
+        self.assertIn("{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}", board_pins)
+        self.assertIn("{17, 18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45}", board_pins)
+        self.assertIn("const uint8_t kI2cScl = 47;", board_pins)
+        self.assertIn("const uint8_t kI2cSda = 48;", board_pins)
+        self.assertIn("const uint8_t kStatusLedPin = 38;", board_pins)
+        self.assertIn("static_assert(kMaxSensors == 143", config_cpp)
+
+    def test_v22c_lts_release_track_uses_4m_flash_and_distinct_manifest_names(self):
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        releases = (REPO_ROOT / "releases" / "README.md").read_text(encoding="utf-8")
+        script = (SCRIPT_ROOT / "build_arduino_release_gcu_v22c_lts.sh").read_text(encoding="utf-8")
+
+        self.assertIn('build_arduino_release_gcu_v22c_lts.sh', readme)
+        self.assertIn('releases/arduino-gcu-v22c-lts-latest.json', readme)
+        self.assertIn('releases/arduino-gcu-v22c-lts-latest.json', releases)
+        self.assertIn('releases/arduino-gcu-v22c-lts-vX.Y.Z.json', releases)
+        self.assertIn('VD-CTL/R v2.2.C GCU LTS', releases)
+        self.assertIn('FlashSize=4M,PartitionScheme=min_spiffs', script)
+        self.assertIn('-DNHOS_BOARD_GCU_V22C_LTS', script)
+        self.assertIn('newhorizons-os-gcu-v22c-lts-${VERSION}.bin', script)
 
     def test_v21_lts_board_pins_and_packet_shape_follow_legacy_v21_whitelist(self):
         board_pins = (ARDUINO_ROOT / "BoardPins.cpp").read_text(encoding="utf-8")
