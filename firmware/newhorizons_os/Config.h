@@ -9,7 +9,7 @@ namespace nhos {
 static constexpr char kProductName[] = "New Horizons OS Arduino";
 static constexpr char kProtocolName[] = "NHO/Arduino/1";
 static constexpr char kHardwareModel[] = NHOS_BOARD_NAME;
-static constexpr char kFirmwareVersion[] = "v0.7.7";
+static constexpr char kFirmwareVersion[] = "v0.7.8";
 
 static constexpr uint16_t kRows = NHOS_BOARD_ROWS;
 static constexpr uint16_t kCols = NHOS_BOARD_COLS;
