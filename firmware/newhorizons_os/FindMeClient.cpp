@@ -24,8 +24,8 @@ void FindMeClient::begin(Storage& storage, WifiManager& wifi, const uint8_t uid[
   memcpy(uid_, uid, sizeof(uid_));
   streamHost_ = storage.getString("findme_host", "");
   streamPort_ = static_cast<uint16_t>(storage.getUInt("findme_udp_port", kUdpStreamPort));
-  gatewayId_ = storage.getString("findme_gateway_id", "");
-  gatewayName_ = storage.getString("findme_gateway_name", "");
+  gatewayId_ = storage.getString("findme_gw_id", "");
+  gatewayName_ = storage.getString("findme_gw_name", "");
   attachedThisBoot_ = false;
   state_ = "idle";
   wasWifiConnected_ = wifi_->isConnected();
@@ -264,8 +264,8 @@ void FindMeClient::acceptOffer(const Offer& offer, const IPAddress& host) {
   if (storage_) {
     storage_->putString("findme_host", streamHost_);
     storage_->putUInt("findme_udp_port", streamPort_);
-    storage_->putString("findme_gateway_id", gatewayId_);
-    storage_->putString("findme_gateway_name", gatewayName_);
+    storage_->putString("findme_gw_id", gatewayId_);
+    storage_->putString("findme_gw_name", gatewayName_);
   }
   if (!isSameGateway) {
     Serial.print(F("findme_offer_accepted gateway="));
