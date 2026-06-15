@@ -7,7 +7,7 @@ OUT_DIR="${ROOT}/firmware/build_gcu_lts"
 BUILD_PATH="${OUT_DIR}/compile"
 RELEASE_DIR="${ROOT}/releases/artifacts"
 FQBN="${FQBN:-esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs}"
-VERSION="${VERSION:-v0.7.6}"
+VERSION="${VERSION:-v0.7.7}"
 
 mkdir -p "${OUT_DIR}" "${BUILD_PATH}" "${RELEASE_DIR}"
 

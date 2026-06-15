@@ -7,7 +7,7 @@ OUT_DIR="${ROOT}/firmware/build"
 BUILD_PATH="${OUT_DIR}/compile"
 RELEASE_DIR="${ROOT}/releases/artifacts"
 FQBN="${FQBN:-esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB}"
-VERSION="${VERSION:-v0.7.6}"
+VERSION="${VERSION:-v0.7.7}"
 
 mkdir -p "${OUT_DIR}" "${BUILD_PATH}" "${RELEASE_DIR}"
 

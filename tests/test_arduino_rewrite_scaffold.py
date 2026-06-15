@@ -375,7 +375,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
         self.assertIn("enum class ChargeProfile", power_header)
-        self.assertIn("Compatible", power_header)
+        self.assertIn("Balanced", power_header)
         self.assertIn("Fast", power_header)
         self.assertIn("applyProfileByName", power_header)
         self.assertIn("kBq25180VbatCtrlRegister = 0x03", power)
@@ -383,7 +383,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kBq25180ChargeCtrl0Register = 0x05", power)
         self.assertIn("kBq25180IcCtrlRegister = 0x07", power)
         self.assertIn("kBq25180TmrIlimRegister = 0x08", power)
-        self.assertIn('"compatible"', power)
+        self.assertIn('"balanced"', power)
+        self.assertIn('"ultra_slow"', power)
+        self.assertIn('"extreme"', power)
         self.assertIn('"fast"', power)
         self.assertIn("250, 500, 0x34, 0x05", power)
         self.assertIn("300, 500, 0x39, 0x05", power)
@@ -750,7 +752,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("externalLeds_->statusJson()", control)
         self.assertIn("status_led", control)
         self.assertIn("external_led", control)
-        self.assertIn('storage.getString("charge_profile", "compatible")', sketch)
+        self.assertIn('storage.getString("charge_profile", "balanced")', sketch)
 
     def test_control_server_float_parser_reads_numeric_brightness_without_falling_into_next_key(self):
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")

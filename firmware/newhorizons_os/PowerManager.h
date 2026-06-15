@@ -11,16 +11,16 @@ enum class ChargeState : uint8_t {
 };
 
 enum class ChargeProfile : uint8_t {
-  Compatible = 0,
+  Balanced = 0,
   Fast,
-  Tiny,
-  Small,
-  Max,
+  UltraSlow,
+  Slow,
+  Extreme,
 };
 
 class PowerManager {
  public:
-  void begin(const String& profileName = "compatible");
+  void begin(const String& profileName = "balanced");
   void service(uint32_t nowMs);
   ChargeState chargeState() const;
   bool chargerDetected() const;
@@ -53,7 +53,7 @@ class PowerManager {
   const char* chargeDetailName() const;
 
   ChargeState chargeState_ = ChargeState::NotCharging;
-  ChargeProfile profile_ = ChargeProfile::Compatible;
+  ChargeProfile profile_ = ChargeProfile::Balanced;
   bool detected_ = false;
   bool configured_ = false;
   uint16_t chargeCurrentMa_ = 250;

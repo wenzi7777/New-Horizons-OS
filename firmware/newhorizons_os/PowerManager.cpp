@@ -18,21 +18,21 @@ constexpr uint32_t kPowerStatusPollMs = 1000;
 
 // ICHG register encoding derived from known data points:
 // 0x34 -> 250mA, 0x39 -> 300mA (BQ25180 measured), linear interpolation 10mA/step
-constexpr PowerManager::ChargeProfileConfig kTinyProfile = {
-    ChargeProfile::Tiny,
-    "tiny",
+constexpr PowerManager::ChargeProfileConfig kUltraSlowProfile = {
+    ChargeProfile::UltraSlow,
+    "ultra_slow",
     100, 500, 0x25, 0x05,
 };
 
-constexpr PowerManager::ChargeProfileConfig kSmallProfile = {
-    ChargeProfile::Small,
-    "small",
+constexpr PowerManager::ChargeProfileConfig kSlowProfile = {
+    ChargeProfile::Slow,
+    "slow",
     200, 500, 0x2F, 0x05,
 };
 
-constexpr PowerManager::ChargeProfileConfig kCompatibleProfile = {
-    ChargeProfile::Compatible,
-    "compatible",
+constexpr PowerManager::ChargeProfileConfig kBalancedProfile = {
+    ChargeProfile::Balanced,
+    "balanced",
     250, 500, 0x34, 0x05,
 };
 
@@ -42,9 +42,9 @@ constexpr PowerManager::ChargeProfileConfig kFastProfile = {
     300, 500, 0x39, 0x05,
 };
 
-constexpr PowerManager::ChargeProfileConfig kMaxProfile = {
-    ChargeProfile::Max,
-    "max",
+constexpr PowerManager::ChargeProfileConfig kExtremeProfile = {
+    ChargeProfile::Extreme,
+    "extreme",
     350, 500, 0x3E, 0x05,
 };
 
@@ -66,7 +66,7 @@ void PowerManager::begin(const String& profileName) {
   lastError_ = "";
   lastConfigError_ = "";
   if (!supportsChargeProfiles()) {
-    profile_ = ChargeProfile::Compatible;
+    profile_ = ChargeProfile::Balanced;
     chargeCurrentMa_ = 0;
     inputLimitMa_ = 0;
     vbatRegMv_ = 0;
@@ -188,20 +188,20 @@ bool PowerManager::applyProfile(ChargeProfile profile) {
 }
 
 bool PowerManager::applyProfileByName(const String& profileName) {
-  if (profileName == "tiny") {
-    return applyProfile(ChargeProfile::Tiny);
+  if (profileName == "ultra_slow") {
+    return applyProfile(ChargeProfile::UltraSlow);
   }
-  if (profileName == "small") {
-    return applyProfile(ChargeProfile::Small);
+  if (profileName == "slow") {
+    return applyProfile(ChargeProfile::Slow);
   }
-  if (profileName == "fast" || profileName == "standard") {
+  if (profileName == "fast") {
     return applyProfile(ChargeProfile::Fast);
   }
-  if (profileName == "max") {
-    return applyProfile(ChargeProfile::Max);
+  if (profileName == "extreme") {
+    return applyProfile(ChargeProfile::Extreme);
   }
-  if (profileName == "compatible" || profileName.isEmpty()) {
-    return applyProfile(ChargeProfile::Compatible);
+  if (profileName == "balanced" || profileName.isEmpty()) {
+    return applyProfile(ChargeProfile::Balanced);
   }
   return failProfile("invalid_charge_profile");
 }
@@ -263,17 +263,17 @@ const PowerManager::ChargeProfileConfig& PowerManager::profileConfig() const {
 
 const PowerManager::ChargeProfileConfig& PowerManager::configForProfile(ChargeProfile profile) const {
   switch (profile) {
-    case ChargeProfile::Tiny:
-      return kTinyProfile;
-    case ChargeProfile::Small:
-      return kSmallProfile;
+    case ChargeProfile::UltraSlow:
+      return kUltraSlowProfile;
+    case ChargeProfile::Slow:
+      return kSlowProfile;
     case ChargeProfile::Fast:
       return kFastProfile;
-    case ChargeProfile::Max:
-      return kMaxProfile;
-    case ChargeProfile::Compatible:
+    case ChargeProfile::Extreme:
+      return kExtremeProfile;
+    case ChargeProfile::Balanced:
     default:
-      return kCompatibleProfile;
+      return kBalancedProfile;
   }
 }
 

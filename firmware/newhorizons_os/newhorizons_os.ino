@@ -339,7 +339,7 @@ void setup() {
   logBoot(String("boot_stage=i2c_ready sda=") + String(nhos::kI2cSda) + " scl=" + String(nhos::kI2cScl));
   displayManager.begin(deviceConfig.data().oled);
   logBoot(String("boot_stage=display_ready ") + displayManager.statusJson());
-  power.begin(storage.getString("charge_profile", "compatible"));
+  power.begin(storage.getString("charge_profile", "balanced"));
   logBoot(String("boot_stage=power_ready ") + power.statusJson());
   imu.begin(deviceConfig.data().imuEnabled);
   logBoot(String("boot_stage=imu_ready ") + imu.statusJson());
