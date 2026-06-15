@@ -137,8 +137,7 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
   frame.cols = static_cast<uint16_t>(colCount_);
   frame.pointCount = pointCount;
 
-  size_t offset = 0;
-  uint16_t index = 0;
+  uint16_t colMajorIdx = 0;
   for (size_t c = 0; c < colCount_; ++c) {
     digitalWrite(cols_[c], LOW);
     delayMicroseconds(settleUs_);
@@ -150,14 +149,13 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
 #endif
       if (calibration_) {
         float calibratedValue = value;
-        calibration_->apply(value, index, calibratedValue);
+        calibration_->apply(value, colMajorIdx, calibratedValue);
         value = calibratedValue;
       }
-      putFloat(out + offset, value);
-      offset += sizeof(float);
-      if (index < kMaxSensors) {
-        frame.values[index++] = value;
-      }
+      const uint16_t rowMajorIdx = static_cast<uint16_t>(r * colCount_ + c);
+      putFloat(out + rowMajorIdx * sizeof(float), value);
+      frame.values[rowMajorIdx] = value;
+      ++colMajorIdx;
     }
     digitalWrite(cols_[c], HIGH);
   }
@@ -177,7 +175,7 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
   updateScanFps(millis());
   scheduleNextScan(scanStartUs, scanEndUs);
   logPerformanceIfDue(millis());
-  return offset;
+  return payloadBytes;
 }
 
 bool MatrixScanner::captureCellAverage(uint16_t sensorIndex, uint32_t durationMs, float& outValue) {

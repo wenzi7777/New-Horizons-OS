@@ -703,6 +703,16 @@ String ControlServer::processCommand(const String& request) {
     }
     return ok(cmd, "calibration_profile_cleared", calibration_->statusJson(maintenanceMode()));
   }
+  if (cmd == "calibration_dump_tare") {
+    if (!calibration_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    String tareJson;
+    if (!calibration_->dumpTareJson(tareJson)) {
+      return error(cmd, "calibration_tare_not_found");
+    }
+    return ok(cmd, "calibration_tare_dump", tareJson);
+  }
   if (cmd == "calibration_dump_level") {
     if (!calibration_) {
       return error(cmd, "calibration_unavailable");
@@ -721,6 +731,23 @@ String ControlServer::processCommand(const String& request) {
       return error(cmd, "calibration_level_delete_failed");
     }
     return ok(cmd, "calibration_level_deleted", calibration_->statusJson(maintenanceMode()));
+  }
+  if (cmd == "calibration_capture_tare") {
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    if (!calibration_ || !scanner_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    const ScanHealth health = scanner_->health();
+    std::vector<float> values(health.pointCount, 0);
+    const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 3000));
+    if (!scanner_->captureAllAverages(values.data(), values.size(), durationMs) || !calibration_->captureTare(values.data(), values.size())) {
+      return error(cmd, "calibration_capture_failed");
+    }
+    String tareJson;
+    calibration_->dumpTareJson(tareJson);
+    return ok(cmd, "calibration_tare_captured", tareJson);
   }
   if (cmd == "calibration_capture_cell") {
     if (!maintenanceMode()) {
