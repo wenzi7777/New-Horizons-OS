@@ -3,7 +3,7 @@
   "firmware": {
     "sha256": "82076ca8bb9b0aa8c4e6b8d831f9b17abafe08325bdd2b43d773c29bf8b6ba40",
     "size": 1362000,
-    "url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.7.6/releases/artifacts/newhorizons-os-gcu-lts-v0.7.6.bin"
+    "url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.7.6/releases/artifacts/newhorizons-os-gcu-v23d-lts-v0.7.6.bin"
   },
   "latest": "v0.7.6",
   "model": "VD-CTL/R v2.3.D GCU LTS",

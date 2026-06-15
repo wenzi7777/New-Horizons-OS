@@ -23,6 +23,6 @@ if [[ -z "${main_bin}" ]]; then
   exit 1
 fi
 
-target="${RELEASE_DIR}/newhorizons-os-${VERSION}.bin"
+target="${RELEASE_DIR}/newhorizons-os-v10f-${VERSION}.bin"
 cp "${main_bin}" "${target}"
 echo "${target}"

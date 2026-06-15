@@ -46,7 +46,7 @@
 #define NHOS_BOARD_HAS_OLED     0
 #define NHOS_BOARD_SUPPORTS_GPIO_WAKE 0
 #define NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL \
-  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-lts-latest.json"
+  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v23d-lts-latest.json"
 
 #else
 
@@ -62,6 +62,6 @@
 #define NHOS_BOARD_HAS_OLED     1
 #define NHOS_BOARD_SUPPORTS_GPIO_WAKE 1
 #define NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL \
-  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-latest.json"
+  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v10f-latest.json"
 
 #endif

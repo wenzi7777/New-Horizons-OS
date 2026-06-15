@@ -24,6 +24,6 @@ if [[ -z "${main_bin}" ]]; then
   exit 1
 fi
 
-target="${RELEASE_DIR}/newhorizons-os-gcu-lts-${VERSION}.bin"
+target="${RELEASE_DIR}/newhorizons-os-gcu-v23d-lts-${VERSION}.bin"
 cp "${main_bin}" "${target}"
 echo "${target}"
