@@ -415,22 +415,42 @@ bool Calibration::apply(float rawMv, uint16_t sensorIndex, float& outValue) cons
     outValue = points.back().level;
     return true;
   }
-  for (size_t i = 1; i < points.size(); ++i) {
+  // PCHIP (monotone cubic Hermite) interpolation.
+  // Reduces to linear for n==2; preserves monotonicity and avoids overshoot.
+  const size_t n = points.size();
+  std::vector<float> d(n - 1);
+  for (size_t i = 0; i < n - 1; ++i) {
+    const float dx = points[i + 1].raw - points[i].raw;
+    d[i] = (dx < 0.0001f) ? 0.0f : (points[i + 1].level - points[i].level) / dx;
+  }
+  std::vector<float> m(n, 0.0f);
+  m[0] = d[0];
+  m[n - 1] = d[n - 2];
+  for (size_t i = 1; i < n - 1; ++i) {
+    if (d[i - 1] * d[i] <= 0.0f) {
+      m[i] = 0.0f;
+    } else {
+      m[i] = 2.0f / (1.0f / d[i - 1] + 1.0f / d[i]);
+    }
+  }
+  for (size_t i = 1; i < n; ++i) {
     if (adjustedRaw > points[i].raw) {
       continue;
     }
-    const float x0 = points[i - 1].raw;
-    const float x1 = points[i].raw;
-    const float y0 = points[i - 1].level;
-    const float y1 = points[i].level;
-    if (std::fabs(x1 - x0) < 0.0001f) {
-      outValue = std::min(y0, y1);
+    const float h = points[i].raw - points[i - 1].raw;
+    if (h < 0.0001f) {
+      outValue = std::min(points[i - 1].level, points[i].level);
       return true;
     }
-    const float ratio = (adjustedRaw - x0) / (x1 - x0);
-    outValue = y0 + (y1 - y0) * ratio;
-    if (outValue < 0) {
-      outValue = 0;
+    const float t = (adjustedRaw - points[i - 1].raw) / h;
+    const float t2 = t * t;
+    const float t3 = t2 * t;
+    outValue = (2.0f * t3 - 3.0f * t2 + 1.0f) * points[i - 1].level
+             + (t3 - 2.0f * t2 + t) * h * m[i - 1]
+             + (-2.0f * t3 + 3.0f * t2) * points[i].level
+             + (t3 - t2) * h * m[i];
+    if (outValue < 0.0f) {
+      outValue = 0.0f;
     }
     return true;
   }
