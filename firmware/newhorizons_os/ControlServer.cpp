@@ -503,19 +503,24 @@ String ControlServer::processCommand(const String& request) {
     return ok(cmd, "power_state_updated", data);
   }
   if (cmd == "set_filter") {
-    const bool enabled = extractBool(request, "enabled", true);
-    if (deviceConfig_) {
-      deviceConfig_->setFilterEnabled(enabled);
-      if (!deviceConfig_->save(*storage_)) {
-        return error(cmd, "config_write_failed");
-      }
+    if (!deviceConfig_ || !scanner_) {
+      return error(cmd, "config_unavailable");
     }
-    String data = "{\"filter\":{\"enabled\":";
-    data += enabled ? "true" : "false";
-    data += "},\"config\":";
-    data += deviceConfig_ ? deviceConfig_->statusJson() : "{}";
+    const bool enabled = extractBool(request, "enabled", deviceConfig_->data().filter.enabled);
+    const uint8_t median = static_cast<uint8_t>(extractInt(request, "median", deviceConfig_->data().filter.median));
+    const float alpha = extractFloat(request, "alpha", deviceConfig_->data().filter.alpha);
+    if (!deviceConfig_->setFilter(enabled, median, alpha) || !scanner_->setFilterConfig(deviceConfig_->data().filter)) {
+      return error(cmd, "filter_invalid");
+    }
+    if (!deviceConfig_->save(*storage_)) {
+      return error(cmd, "config_write_failed");
+    }
+    String data = "{";
+    bool first = true;
+    jsonRawField(data, "filter", deviceConfig_->filterJson(), first);
+    jsonRawField(data, "config", deviceConfig_->statusJson(), first);
     data += "}";
-    return ok(cmd, "config_stored", data);
+    return ok(cmd, "filter_updated", data);
   }
   if (cmd == "set_imu") {
     const bool enabled = extractBool(request, "enabled", true);

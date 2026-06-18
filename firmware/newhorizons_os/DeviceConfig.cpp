@@ -184,6 +184,10 @@ uint8_t streamBufferDepthForMode(const String& mode) {
   return kStandardScanRingFrames;
 }
 
+bool validFilterMedian(uint8_t median) {
+  return median == 1 || median == 3 || median == 5;
+}
+
 void defaultMatrixLayout(MatrixLayoutConfig& layout) {
   memset(layout.analogPins, 0, sizeof(layout.analogPins));
   memset(layout.selectPins, 0, sizeof(layout.selectPins));
@@ -284,8 +288,13 @@ bool DeviceConfig::setStreamBuffer(bool enabled, const String& mode) {
   return true;
 }
 
-bool DeviceConfig::setFilterEnabled(bool enabled) {
-  data_.filterEnabled = enabled;
+bool DeviceConfig::setFilter(bool enabled, uint8_t median, float alpha) {
+  if (!validFilterMedian(median) || alpha < kFilterAlphaMin || alpha > kFilterAlphaMax) {
+    return false;
+  }
+  data_.filter.enabled = enabled;
+  data_.filter.median = median;
+  data_.filter.alpha = alpha;
   return true;
 }
 
@@ -354,7 +363,11 @@ String DeviceConfig::statusJson() const {
 
 String DeviceConfig::filterJson() const {
   String out = "{\"enabled\":";
-  out += data_.filterEnabled ? "true" : "false";
+  out += data_.filter.enabled ? "true" : "false";
+  out += ",\"median\":";
+  out += String(static_cast<unsigned int>(data_.filter.median));
+  out += ",\"alpha\":";
+  out += String(data_.filter.alpha, 3);
   out += "}";
   return out;
 }
@@ -427,7 +440,9 @@ void DeviceConfig::setDefaults() {
   data_.streamBuffer.enabled = true;
   data_.streamBuffer.mode = "standard";
   data_.streamBuffer.depthFrames = 3;
-  data_.filterEnabled = true;
+  data_.filter.enabled = false;
+  data_.filter.median = kFilterDefaultMedian;
+  data_.filter.alpha = kFilterDefaultAlpha;
   data_.imuEnabled = true;
   data_.logging.enabled = true;
   data_.logging.maxBytes = kDefaultLogMaxBytes;
@@ -491,7 +506,13 @@ bool DeviceConfig::applyJson(const String& json) {
 
   const String filter = objectForKey(json, "filter");
   if (!filter.isEmpty()) {
-    data_.filterEnabled = extractBool(filter, "enabled", data_.filterEnabled);
+    const bool enabled = extractBool(filter, "enabled", data_.filter.enabled);
+    const uint8_t median = static_cast<uint8_t>(extractInt(filter, "median", data_.filter.median));
+    const float alpha = extractFloat(filter, "alpha", data_.filter.alpha);
+    if (!setFilter(enabled, median, alpha)) {
+      setFilter(false, kFilterDefaultMedian, kFilterDefaultAlpha);
+      lastError_ = "filter_invalid_fallback_default";
+    }
   }
 
   const String imu = objectForKey(json, "imu");
@@ -566,9 +587,9 @@ String DeviceConfig::toJson() const {
   out += jsonEscape(data_.streamBuffer.mode);
   out += "\",\"depth_frames\":";
   out += String(static_cast<unsigned int>(data_.streamBuffer.depthFrames));
-  out += "},\"filter\":{\"enabled\":";
-  out += data_.filterEnabled ? "true" : "false";
-  out += "},\"imu\":{\"enabled\":";
+  out += "},\"filter\":";
+  out += filterJson();
+  out += ",\"imu\":{\"enabled\":";
   out += data_.imuEnabled ? "true" : "false";
   out += "},\"logging\":";
   out += loggingJson();

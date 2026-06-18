@@ -77,6 +77,7 @@ void Calibration::setLayout(const uint8_t* analogPins, size_t analogCount, const
     tare_.assign(totalPointCount(), NAN);
     enabled_ = false;
   }
+  refreshSavedStateCache();
 }
 
 String Calibration::statusJson(bool modeActive) const {
@@ -92,9 +93,9 @@ String Calibration::statusJson(bool modeActive) const {
   out += ",\"complete\":";
   out += complete() ? "true" : "false";
   out += ",\"tare_complete\":";
-  out += tareComplete(tare_) ? "true" : "false";
+  out += savedTareComplete_ ? "true" : "false";
   out += ",\"levels_complete\":";
-  out += levelsComplete(levels_) ? "true" : "false";
+  out += savedLevelsComplete_ ? "true" : "false";
   out += ",\"legacy_missing_tare\":";
   out += legacyMissingTare_ ? "true" : "false";
   out += ",\"tare\":";
@@ -146,9 +147,9 @@ bool Calibration::sessionCommit(bool autoEnable, String& outError) {
   draftTare_.clear();
   draftLevels_.clear();
   sessionActive_ = false;
-  legacyMissingTare_ = !tareComplete(tare_) && !levels_.empty();
+  refreshSavedStateCache();
 
-  if (!nextComplete || legacyMissingTare_) {
+  if (!runtimeReady_) {
     enabled_ = false;
   } else if (autoEnable) {
     enabled_ = true;
@@ -174,7 +175,7 @@ bool Calibration::enabled() const {
 }
 
 bool Calibration::complete() const {
-  return !legacyMissingTare_ && tareComplete(tare_) && levelsComplete(levels_);
+  return runtimeReady_;
 }
 
 bool Calibration::setEnabled(bool enabled, String& outError) {
@@ -193,7 +194,6 @@ bool Calibration::setEnabled(bool enabled, String& outError) {
 
 bool Calibration::clearProfile() {
   enabled_ = false;
-  legacyMissingTare_ = false;
   tare_.clear();
   draftTare_.clear();
   levels_.clear();
@@ -201,6 +201,7 @@ bool Calibration::clearProfile() {
   sessionActive_ = false;
   createdAtMs_ = 0;
   updatedAtMs_ = millis();
+  refreshSavedStateCache();
   return saveToStorage();
 }
 
@@ -215,7 +216,7 @@ bool Calibration::deleteLevel(float level) {
     return false;
   }
   if (!sessionActive_) {
-    legacyMissingTare_ = !tareComplete(tare_) && !levels_.empty();
+    refreshSavedStateCache();
     updatedAtMs_ = millis();
     if (!saveToStorage()) {
       return false;
@@ -353,7 +354,7 @@ bool Calibration::applyTareDirect(const float* values, size_t count) {
     return false;
   }
   tare_.assign(values, values + total);
-  legacyMissingTare_ = !levels_.empty() && !tareComplete(tare_);
+  refreshSavedStateCache();
   if (!complete()) {
     enabled_ = false;
   }
@@ -363,7 +364,7 @@ bool Calibration::applyTareDirect(const float* values, size_t count) {
 
 bool Calibration::apply(float rawMv, uint16_t sensorIndex, float& outValue) const {
   outValue = rawMv;
-  if (!enabled_ || !complete() || sensorIndex >= totalPointCount() || sensorIndex >= tare_.size()) {
+  if (!enabled_ || !runtimeReady_ || sensorIndex >= totalPointCount() || sensorIndex >= tare_.size() || sensorIndex >= runtimeCurves_.size()) {
     return false;
   }
   const float tareValue = tare_[sensorIndex];
@@ -371,90 +372,37 @@ bool Calibration::apply(float rawMv, uint16_t sensorIndex, float& outValue) cons
     return false;
   }
 
-  struct SamplePoint {
-    float raw;
-    float level;
-  };
-
   const float adjustedRaw = std::max(0.0f, rawMv - tareValue);
-  std::vector<SamplePoint> points;
-  points.reserve(levels_.size() + 1);
-  points.push_back({0.0f, 0.0f});
-
-  for (const LevelData& item : levels_) {
-    if (sensorIndex >= item.values.size()) {
-      continue;
-    }
-    const float raw = item.values[sensorIndex];
-    if (std::isnan(raw)) {
-      continue;
-    }
-    const float adjustedLevelRaw = raw - tareValue;
-    if (adjustedLevelRaw <= 0.0001f) {
-      continue;
-    }
-    points.push_back({adjustedLevelRaw, item.level});
-  }
-
-  if (points.empty()) {
+  const RuntimeCurve& curve = runtimeCurves_[sensorIndex];
+  if (curve.raws.empty() || curve.levels.empty() || curve.tangents.empty()) {
     return false;
   }
-
-  std::sort(points.begin(), points.end(), [](const SamplePoint& a, const SamplePoint& b) {
-    if (a.raw == b.raw) {
-      return a.level < b.level;
-    }
-    return a.raw < b.raw;
-  });
-
-  if (points.size() == 1 || adjustedRaw <= points.front().raw) {
-    outValue = points.front().level;
+  if (curve.raws.size() == 1 || adjustedRaw <= curve.raws.front()) {
+    outValue = curve.levels.front();
     return true;
   }
-  if (adjustedRaw >= points.back().raw) {
-    outValue = points.back().level;
+  if (adjustedRaw >= curve.raws.back()) {
+    outValue = curve.levels.back();
     return true;
   }
-  // PCHIP (monotone cubic Hermite) interpolation.
-  // Reduces to linear for n==2; preserves monotonicity and avoids overshoot.
-  const size_t n = points.size();
-  std::vector<float> d(n - 1);
-  for (size_t i = 0; i < n - 1; ++i) {
-    const float dx = points[i + 1].raw - points[i].raw;
-    d[i] = (dx < 0.0001f) ? 0.0f : (points[i + 1].level - points[i].level) / dx;
-  }
-  std::vector<float> m(n, 0.0f);
-  m[0] = d[0];
-  m[n - 1] = d[n - 2];
-  for (size_t i = 1; i < n - 1; ++i) {
-    if (d[i - 1] * d[i] <= 0.0f) {
-      m[i] = 0.0f;
-    } else {
-      m[i] = 2.0f / (1.0f / d[i - 1] + 1.0f / d[i]);
-    }
-  }
-  for (size_t i = 1; i < n; ++i) {
-    if (adjustedRaw > points[i].raw) {
-      continue;
-    }
-    const float h = points[i].raw - points[i - 1].raw;
-    if (h < 0.0001f) {
-      outValue = std::min(points[i - 1].level, points[i].level);
-      return true;
-    }
-    const float t = (adjustedRaw - points[i - 1].raw) / h;
-    const float t2 = t * t;
-    const float t3 = t2 * t;
-    outValue = (2.0f * t3 - 3.0f * t2 + 1.0f) * points[i - 1].level
-             + (t3 - 2.0f * t2 + t) * h * m[i - 1]
-             + (-2.0f * t3 + 3.0f * t2) * points[i].level
-             + (t3 - t2) * h * m[i];
-    if (outValue < 0.0f) {
-      outValue = 0.0f;
-    }
+  const auto upper = std::lower_bound(curve.raws.begin() + 1, curve.raws.end(), adjustedRaw);
+  const size_t i = static_cast<size_t>(upper - curve.raws.begin());
+  const float h = curve.raws[i] - curve.raws[i - 1];
+  if (h < 0.0001f) {
+    outValue = std::min(curve.levels[i - 1], curve.levels[i]);
     return true;
   }
-  return false;
+  const float t = (adjustedRaw - curve.raws[i - 1]) / h;
+  const float t2 = t * t;
+  const float t3 = t2 * t;
+  outValue = (2.0f * t3 - 3.0f * t2 + 1.0f) * curve.levels[i - 1]
+           + (t3 - 2.0f * t2 + t) * h * curve.tangents[i - 1]
+           + (-2.0f * t3 + 3.0f * t2) * curve.levels[i]
+           + (t3 - t2) * h * curve.tangents[i];
+  if (outValue < 0.0f) {
+    outValue = 0.0f;
+  }
+  return true;
 }
 
 Calibration::LevelData* Calibration::mutableLevel(std::vector<LevelData>& levels, float level, bool createIfMissing) {
@@ -513,14 +461,106 @@ bool Calibration::levelsComplete(const std::vector<LevelData>& levels) const {
   return true;
 }
 
+void Calibration::refreshSavedStateCache() {
+  savedTareComplete_ = tareComplete(tare_);
+  savedLevelsComplete_ = levelsComplete(levels_);
+  legacyMissingTare_ = !levels_.empty() && !savedTareComplete_;
+  rebuildRuntimeCurves();
+  runtimeReady_ = !legacyMissingTare_ && savedTareComplete_ && savedLevelsComplete_ && runtimeCurves_.size() == totalPointCount();
+}
+
+void Calibration::rebuildRuntimeCurves() {
+  runtimeCurves_.clear();
+  const size_t total = totalPointCount();
+  if (total == 0) {
+    return;
+  }
+
+  runtimeCurves_.resize(total);
+  for (size_t sensorIndex = 0; sensorIndex < total; ++sensorIndex) {
+    RuntimeCurve& curve = runtimeCurves_[sensorIndex];
+    if (sensorIndex >= tare_.size()) {
+      continue;
+    }
+
+    const float tareValue = tare_[sensorIndex];
+    if (std::isnan(tareValue)) {
+      continue;
+    }
+
+    struct SamplePoint {
+      float raw;
+      float level;
+    };
+
+    std::vector<SamplePoint> points;
+    points.reserve(levels_.size() + 1);
+    points.push_back({0.0f, 0.0f});
+
+    for (const LevelData& item : levels_) {
+      if (sensorIndex >= item.values.size()) {
+        continue;
+      }
+      const float raw = item.values[sensorIndex];
+      if (std::isnan(raw)) {
+        continue;
+      }
+      const float adjustedLevelRaw = raw - tareValue;
+      if (adjustedLevelRaw <= 0.0001f) {
+        continue;
+      }
+      points.push_back({adjustedLevelRaw, item.level});
+    }
+
+    std::sort(points.begin(), points.end(), [](const SamplePoint& a, const SamplePoint& b) {
+      if (a.raw == b.raw) {
+        return a.level < b.level;
+      }
+      return a.raw < b.raw;
+    });
+
+    curve.raws.reserve(points.size());
+    curve.levels.reserve(points.size());
+    curve.tangents.assign(points.size(), 0.0f);
+    for (const SamplePoint& point : points) {
+      curve.raws.push_back(point.raw);
+      curve.levels.push_back(point.level);
+    }
+
+    if (points.size() <= 1) {
+      continue;
+    }
+
+    std::vector<float> slopes(points.size() - 1, 0.0f);
+    for (size_t i = 0; i < points.size() - 1; ++i) {
+      const float dx = points[i + 1].raw - points[i].raw;
+      slopes[i] = (dx < 0.0001f) ? 0.0f : (points[i + 1].level - points[i].level) / dx;
+    }
+
+    curve.tangents[0] = slopes[0];
+    curve.tangents[points.size() - 1] = slopes[points.size() - 2];
+    for (size_t i = 1; i < points.size() - 1; ++i) {
+      if (slopes[i - 1] * slopes[i] <= 0.0f) {
+        curve.tangents[i] = 0.0f;
+      } else {
+        curve.tangents[i] = 2.0f / (1.0f / slopes[i - 1] + 1.0f / slopes[i]);
+      }
+    }
+  }
+}
+
 bool Calibration::loadFromStorage() {
   enabled_ = false;
   sessionActive_ = false;
   legacyMissingTare_ = false;
+  savedTareComplete_ = false;
+  savedLevelsComplete_ = false;
+  runtimeReady_ = false;
   tare_.clear();
   draftTare_.clear();
   levels_.clear();
   draftLevels_.clear();
+  runtimeCurves_.clear();
   createdAtMs_ = 0;
   updatedAtMs_ = 0;
 
@@ -589,7 +629,7 @@ bool Calibration::loadFromStorage() {
     }
   }
 
-  legacyMissingTare_ = !levels_.empty() && !tareComplete(tare_);
+  refreshSavedStateCache();
   if (!complete()) {
     enabled_ = false;
   }
@@ -836,9 +876,9 @@ String Calibration::metadataJson() const {
   out += ",\"max_level\":";
   out += floatLabel(maxLevel);
   out += ",\"tare_complete\":";
-  out += tareComplete(tare_) ? "true" : "false";
+  out += savedTareComplete_ ? "true" : "false";
   out += ",\"levels_complete\":";
-  out += levelsComplete(levels_) ? "true" : "false";
+  out += savedLevelsComplete_ ? "true" : "false";
   out += ",\"legacy_missing_tare\":";
   out += legacyMissingTare_ ? "true" : "false";
   out += "}";

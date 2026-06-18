@@ -39,10 +39,18 @@ class Calibration {
     std::vector<float> values;
   };
 
+  struct RuntimeCurve {
+    std::vector<float> raws;
+    std::vector<float> levels;
+    std::vector<float> tangents;
+  };
+
   LevelData* mutableLevel(std::vector<LevelData>& levels, float level, bool createIfMissing);
   const LevelData* findLevel(const std::vector<LevelData>& levels, float level) const;
   bool tareComplete(const std::vector<float>& tare) const;
   bool levelsComplete(const std::vector<LevelData>& levels) const;
+  void refreshSavedStateCache();
+  void rebuildRuntimeCurves();
   bool loadFromStorage();
   bool saveToStorage();
   bool removeStoredLevels() const;
@@ -73,10 +81,14 @@ class Calibration {
   uint32_t createdAtMs_ = 0;
   uint32_t updatedAtMs_ = 0;
   bool legacyMissingTare_ = false;
+  bool savedTareComplete_ = false;
+  bool savedLevelsComplete_ = false;
+  bool runtimeReady_ = false;
   std::vector<float> tare_;
   std::vector<float> draftTare_;
   std::vector<LevelData> levels_;
   std::vector<LevelData> draftLevels_;
+  std::vector<RuntimeCurve> runtimeCurves_;
 };
 
 }  // namespace nhos

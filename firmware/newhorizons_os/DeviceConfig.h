@@ -26,6 +26,18 @@ struct StreamBufferConfig {
   uint8_t depthFrames = 3;
 };
 
+constexpr uint8_t kFilterMedianMax = 5;
+constexpr uint8_t kFilterDefaultMedian = 3;
+constexpr float kFilterDefaultAlpha = 0.25f;
+constexpr float kFilterAlphaMin = 0.05f;
+constexpr float kFilterAlphaMax = 0.6f;
+
+struct FilterConfig {
+  bool enabled = false;
+  uint8_t median = kFilterDefaultMedian;
+  float alpha = kFilterDefaultAlpha;
+};
+
 struct ExternalLedConfig {
   String mode = "off";
   String preset = "stream_health";
@@ -57,7 +69,7 @@ struct DeviceConfigData {
   MatrixLayoutConfig matrixLayout;
   ScanTimingConfig scanTiming;
   StreamBufferConfig streamBuffer;
-  bool filterEnabled = true;
+  FilterConfig filter;
   bool imuEnabled = true;
   LogConfig logging;
   OtaConfig ota;
@@ -76,7 +88,7 @@ class DeviceConfig {
   bool setMatrixLayout(const uint8_t* analogPins, size_t analogCount, const uint8_t* selectPins, size_t selectCount);
   bool setScanTiming(uint16_t targetFps, uint16_t settleUs, uint16_t sendEveryNFrames);
   bool setStreamBuffer(bool enabled, const String& mode);
-  bool setFilterEnabled(bool enabled);
+  bool setFilter(bool enabled, uint8_t median, float alpha);
   bool setImuEnabled(bool enabled);
   bool setLogging(bool enabled, const String& level, const String& mode, size_t maxBytes);
   bool setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl);

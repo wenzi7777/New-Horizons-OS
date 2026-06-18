@@ -4,6 +4,7 @@
 #include <WiFiUdp.h>
 
 #include "Config.h"
+#include "DeviceConfig.h"
 
 namespace nhos {
 
@@ -54,6 +55,7 @@ class MatrixScanner {
   bool hasLayout() const;
   bool setTiming(uint16_t targetFps, uint16_t settleUs, uint16_t sendEveryNFrames = kDefaultSendEveryNFrames);
   bool setStreamBufferConfig(bool enabled, uint8_t depthFrames);
+  bool setFilterConfig(const FilterConfig& config);
   bool setLayout(const uint8_t* rows, size_t rowCount, const uint8_t* cols, size_t colCount);
   void setCalibration(Calibration* calibration);
   bool scanDue() const;
@@ -73,8 +75,18 @@ class MatrixScanner {
   uint32_t nextScanDueUs() const { return nextScanDueUs_; }
 
  private:
+  struct SensorFilterState {
+    bool initialized = false;
+    float lowpass = 0.0f;
+    uint8_t medianCount = 0;
+    uint8_t medianCursor = 0;
+    float medianValues[kFilterMedianMax] = {0};
+  };
+
   bool sampleRawFrame(float* outValues, size_t count);
   bool sampleRawCell(uint16_t sensorIndex, float& outValue);
+  void resetFilterState();
+  float applyFilter(float value, uint16_t sensorIndex);
   void configurePins();
   void setAllColsInactive();
   void clearPacketQueue();
@@ -124,6 +136,8 @@ class MatrixScanner {
   uint32_t lastPerfLogMs_ = 0;
   float captureTotalsScratch_[kMaxSensors] = {0};
   float captureSampleScratch_[kMaxSensors] = {0};
+  FilterConfig filterConfig_;
+  SensorFilterState filterStates_[kMaxSensors];
   Calibration* calibration_ = nullptr;
 };
 

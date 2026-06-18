@@ -212,6 +212,165 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("calibration_->apply", scanner_impl)
         self.assertIn("scanner.setCalibration(&calibration)", sketch)
 
+    def test_calibration_apply_uses_cached_runtime_curves_instead_of_rebuilding_per_sample(self):
+        calibration_header = (ARDUINO_ROOT / "Calibration.h").read_text(encoding="utf-8")
+        calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
+
+        apply_match = re.search(
+            r"bool Calibration::apply\(float rawMv, uint16_t sensorIndex, float& outValue\) const \{(?P<body>.*?)\n\}",
+            calibration_impl,
+            re.S,
+        )
+        self.assertIsNotNone(apply_match)
+        body = apply_match.group("body")
+
+        self.assertIn("struct RuntimeCurve", calibration_header)
+        self.assertIn("std::vector<RuntimeCurve> runtimeCurves_", calibration_header)
+        self.assertIn("bool runtimeReady_ = false;", calibration_header)
+        self.assertIn("runtimeCurves_[sensorIndex]", body)
+        self.assertIn("std::lower_bound", body)
+        self.assertNotIn("complete()", body)
+        self.assertNotIn("std::vector<SamplePoint>", body)
+        self.assertNotIn("points.reserve", body)
+        self.assertNotIn("std::sort(points.begin()", body)
+
+    def test_saved_profile_mutators_refresh_calibration_runtime_cache(self):
+        calibration_header = (ARDUINO_ROOT / "Calibration.h").read_text(encoding="utf-8")
+        calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("void refreshSavedStateCache();", calibration_header)
+        self.assertIn("void rebuildRuntimeCurves();", calibration_header)
+
+        for signature in (
+            r"void Calibration::setLayout\(.*?\) \{(?P<body>.*?)\n\}",
+            r"bool Calibration::sessionCommit\(bool autoEnable, String& outError\) \{(?P<body>.*?)\n\}",
+            r"bool Calibration::clearProfile\(\) \{(?P<body>.*?)\n\}",
+            r"bool Calibration::deleteLevel\(float level\) \{(?P<body>.*?)\n\}",
+            r"bool Calibration::applyTareDirect\(const float\* values, size_t count\) \{(?P<body>.*?)\n\}",
+            r"bool Calibration::loadFromStorage\(\) \{(?P<body>.*?)\n\}",
+        ):
+            match = re.search(signature, calibration_impl, re.S)
+            self.assertIsNotNone(match)
+            self.assertIn("refreshSavedStateCache();", match.group("body"))
+
+        refresh_match = re.search(
+            r"void Calibration::refreshSavedStateCache\(\) \{(?P<body>.*?)\n\}",
+            calibration_impl,
+            re.S,
+        )
+        self.assertIsNotNone(refresh_match)
+        refresh_body = refresh_match.group("body")
+        self.assertIn("savedTareComplete_", refresh_body)
+        self.assertIn("savedLevelsComplete_", refresh_body)
+        self.assertIn("rebuildRuntimeCurves();", refresh_body)
+        self.assertIn("runtimeReady_", refresh_body)
+
+    def test_optional_stream_filter_config_matches_gcu_shape_and_safe_defaults(self):
+        config_header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
+        config_impl = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertIn("constexpr uint8_t kFilterDefaultMedian = 3;", config_header)
+        self.assertIn("constexpr float kFilterDefaultAlpha = 0.25f;", config_header)
+        self.assertIn("constexpr float kFilterAlphaMin = 0.05f;", config_header)
+        self.assertIn("constexpr float kFilterAlphaMax = 0.6f;", config_header)
+        self.assertIn("struct FilterConfig", config_header)
+        self.assertIn("bool enabled = false;", config_header)
+        self.assertIn("uint8_t median = kFilterDefaultMedian;", config_header)
+        self.assertIn("float alpha = kFilterDefaultAlpha;", config_header)
+        self.assertIn("FilterConfig filter;", config_header)
+        self.assertIn("bool setFilter(bool enabled, uint8_t median, float alpha);", config_header)
+        self.assertIn("data_.filter.enabled = false;", config_impl)
+        self.assertIn("data_.filter.median = kFilterDefaultMedian;", config_impl)
+        self.assertIn("data_.filter.alpha = kFilterDefaultAlpha;", config_impl)
+        self.assertRegex(
+            config_impl,
+            re.compile(
+                r'const String filter = objectForKey\(json, "filter"\);.*?extractBool\(filter, "enabled".*?extractInt\(filter, "median".*?extractFloat\(filter, "alpha"',
+                re.S,
+            ),
+        )
+        self.assertIn('\\"median\\":', config_impl)
+        self.assertIn('\\"alpha\\":', config_impl)
+        self.assertRegex(
+            sketch,
+            re.compile(r"scanner\.setFilterConfig\(\s*deviceConfig\.data\(\)\.filter\s*\)", re.S),
+        )
+
+    def test_set_filter_command_accepts_full_filter_config_and_updates_runtime(self):
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+
+        set_filter_match = re.search(
+            r'if \(cmd == "set_filter"\) \{(?P<body>.*?)\n  \}',
+            control,
+            re.S,
+        )
+        self.assertIsNotNone(set_filter_match)
+        body = set_filter_match.group("body")
+
+        self.assertIn('extractBool(request, "enabled", deviceConfig_->data().filter.enabled)', body)
+        self.assertIn('extractInt(request, "median", deviceConfig_->data().filter.median)', body)
+        self.assertIn('extractFloat(request, "alpha", deviceConfig_->data().filter.alpha)', body)
+        self.assertIn("deviceConfig_->setFilter(enabled, median, alpha)", body)
+        self.assertIn("scanner_->setFilterConfig(deviceConfig_->data().filter)", body)
+        self.assertIn('jsonRawField(data, "filter", deviceConfig_->filterJson(), first);', body)
+        self.assertIn('return ok(cmd, "filter_updated", data);', body)
+
+    def test_matrix_scanner_filters_live_stream_frames_before_calibration_only(self):
+        scanner_header = (ARDUINO_ROOT / "MatrixScanner.h").read_text(encoding="utf-8")
+        scanner_impl = (ARDUINO_ROOT / "MatrixScanner.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("bool setFilterConfig(const FilterConfig& config);", scanner_header)
+        self.assertIn("struct SensorFilterState", scanner_header)
+        self.assertIn("FilterConfig filterConfig_;", scanner_header)
+        self.assertIn("SensorFilterState filterStates_[kMaxSensors];", scanner_header)
+        self.assertIn("void resetFilterState();", scanner_header)
+        self.assertIn("float applyFilter(float value, uint16_t sensorIndex);", scanner_header)
+
+        apply_match = re.search(
+            r"float MatrixScanner::applyFilter\(float value, uint16_t sensorIndex\) \{(?P<body>.*?)\n\}",
+            scanner_impl,
+            re.S,
+        )
+        self.assertIsNotNone(apply_match)
+        apply_body = apply_match.group("body")
+        self.assertIn("filterStates_[sensorIndex]", apply_body)
+        self.assertIn("float ordered[kFilterMedianMax];", apply_body)
+        self.assertIn("state.medianValues[state.medianCursor] = value;", apply_body)
+        self.assertIn("state.lowpass = (filterConfig_.alpha * medianValue)", apply_body)
+        self.assertNotIn("std::vector", apply_body)
+        self.assertNotIn("new ", apply_body)
+        self.assertNotIn("malloc", apply_body)
+
+        scan_match = re.search(
+            r"size_t MatrixScanner::scanIntoPacketPayload\(uint8_t\* out, size_t capacity, MatrixFrame& frame\) \{(?P<body>.*?)\n\}",
+            scanner_impl,
+            re.S,
+        )
+        self.assertIsNotNone(scan_match)
+        scan_body = scan_match.group("body")
+        self.assertIn("value = applyFilter(value, colMajorIdx);", scan_body)
+        self.assertLess(
+            scan_body.index("value = applyFilter(value, colMajorIdx);"),
+            scan_body.index("calibration_->apply(value, colMajorIdx, calibratedValue);"),
+        )
+
+        capture_cell_match = re.search(
+            r"bool MatrixScanner::captureCellAverage\(uint16_t sensorIndex, uint32_t durationMs, float& outValue\) \{(?P<body>.*?)\n\}",
+            scanner_impl,
+            re.S,
+        )
+        self.assertIsNotNone(capture_cell_match)
+        self.assertNotIn("applyFilter(", capture_cell_match.group("body"))
+
+        capture_all_match = re.search(
+            r"bool MatrixScanner::captureAllAverages\(float\* outValues, size_t count, uint32_t durationMs\) \{(?P<body>.*?)\n\}",
+            scanner_impl,
+            re.S,
+        )
+        self.assertIsNotNone(capture_all_match)
+        self.assertNotIn("applyFilter(", capture_all_match.group("body"))
+
     def test_diagnostics_commands_report_heap_totals_and_storage_usage(self):
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
         storage_header = (ARDUINO_ROOT / "Storage.h").read_text(encoding="utf-8")

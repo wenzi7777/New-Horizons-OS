@@ -367,6 +367,7 @@ void setup() {
   scanner.setStreamBufferConfig(
       deviceConfig.data().streamBuffer.enabled,
       deviceConfig.data().streamBuffer.depthFrames);
+  scanner.setFilterConfig(deviceConfig.data().filter);
   calibration.setLayout(
       deviceConfig.data().matrixLayout.analogPins,
       deviceConfig.data().matrixLayout.analogCount,

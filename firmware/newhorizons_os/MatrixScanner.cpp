@@ -15,12 +15,25 @@ void putFloat(uint8_t* out, float value) {
   memcpy(out, &value, sizeof(float));
 }
 
+void sortMedianValues(float* values, uint8_t count) {
+  for (uint8_t i = 1; i < count; ++i) {
+    const float value = values[i];
+    int j = static_cast<int>(i) - 1;
+    while (j >= 0 && values[j] > value) {
+      values[j + 1] = values[j];
+      --j;
+    }
+    values[j + 1] = value;
+  }
+}
+
 }  // namespace
 
 bool MatrixScanner::begin() {
   rowCount_ = 0;
   colCount_ = 0;
   clearPacketQueue();
+  resetFilterState();
   configurePins();
   return validatePinMap();
 }
@@ -31,12 +44,14 @@ bool MatrixScanner::start() {
   scanWindowStartedMs_ = millis();
   scanWindowFrames_ = 0;
   clearPacketQueue();
+  resetFilterState();
   return true;
 }
 
 void MatrixScanner::stop() {
   running_ = false;
   clearPacketQueue();
+  resetFilterState();
   setAllColsInactive();
   for (size_t i = 0; i < rowCount_; ++i) {
     pinMode(rows_[i], INPUT_PULLDOWN);
@@ -78,6 +93,16 @@ bool MatrixScanner::setStreamBufferConfig(bool enabled, uint8_t depthFrames) {
   return true;
 }
 
+bool MatrixScanner::setFilterConfig(const FilterConfig& config) {
+  if ((config.median != 1 && config.median != 3 && config.median != 5) ||
+      config.alpha < kFilterAlphaMin || config.alpha > kFilterAlphaMax) {
+    return false;
+  }
+  filterConfig_ = config;
+  resetFilterState();
+  return true;
+}
+
 bool MatrixScanner::setLayout(const uint8_t* rows, size_t rowCount, const uint8_t* cols, size_t colCount) {
   if (rowCount == 0 || colCount == 0) {
     if (rowCount != 0 || colCount != 0) {
@@ -87,6 +112,7 @@ bool MatrixScanner::setLayout(const uint8_t* rows, size_t rowCount, const uint8_
     rowCount_ = 0;
     colCount_ = 0;
     nextScanDueUs_ = 0;
+    resetFilterState();
     return true;
   }
   if (!rows || !cols || rowCount > kRows || colCount > kCols) {
@@ -107,6 +133,7 @@ bool MatrixScanner::setLayout(const uint8_t* rows, size_t rowCount, const uint8_
   rowCount_ = rowCount;
   colCount_ = colCount;
   nextScanDueUs_ = 0;
+  resetFilterState();
   configurePins();
   return true;
 }
@@ -121,6 +148,43 @@ bool MatrixScanner::streamBufferEnabled() const {
 
 bool MatrixScanner::scanDue() const {
   return running_ && hasLayout() && timeReached(micros(), nextScanDueUs_);
+}
+
+void MatrixScanner::resetFilterState() {
+  for (size_t i = 0; i < kMaxSensors; ++i) {
+    filterStates_[i] = SensorFilterState{};
+  }
+}
+
+float MatrixScanner::applyFilter(float value, uint16_t sensorIndex) {
+  if (!filterConfig_.enabled || sensorIndex >= kMaxSensors || sensorIndex >= rowCount_ * colCount_) {
+    return value;
+  }
+
+  SensorFilterState& state = filterStates_[sensorIndex];
+  float medianValue = value;
+  if (filterConfig_.median > 1) {
+    if (state.medianCount < filterConfig_.median) {
+      ++state.medianCount;
+    }
+    state.medianValues[state.medianCursor] = value;
+    state.medianCursor = (state.medianCursor + 1) % filterConfig_.median;
+    float ordered[kFilterMedianMax];
+    for (uint8_t i = 0; i < state.medianCount; ++i) {
+      ordered[i] = state.medianValues[i];
+    }
+    sortMedianValues(ordered, state.medianCount);
+    medianValue = ordered[state.medianCount / 2];
+  }
+
+  if (!state.initialized) {
+    state.initialized = true;
+    state.lowpass = medianValue;
+    return medianValue;
+  }
+
+  state.lowpass = (filterConfig_.alpha * medianValue) + ((1.0f - filterConfig_.alpha) * state.lowpass);
+  return state.lowpass;
 }
 
 size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, MatrixFrame& frame) {
@@ -147,6 +211,7 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
 #else
       float value = static_cast<float>(analogRead(rows_[r]));
 #endif
+      value = applyFilter(value, colMajorIdx);
       if (calibration_) {
         float calibratedValue = value;
         calibration_->apply(value, colMajorIdx, calibratedValue);
