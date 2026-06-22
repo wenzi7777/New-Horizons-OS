@@ -22,12 +22,20 @@ String jsonEscape(const String& value) {
 }
 
 bool Storage::begin() {
-  if (!SPIFFS.begin(false)) {
-    if (!SPIFFS.begin(true)) {
+  formattedOnBoot_ = false;
+  mountError_ = "";
+  prefs_.begin("nhos", false);
+  mounted_ = SPIFFS.begin(false);
+  if (!mounted_) {
+    const bool firstBootFormatAllowed = !prefs_.getBool("spiffs_initialized", false);
+    if (!firstBootFormatAllowed || !SPIFFS.begin(true)) {
+      mountError_ = firstBootFormatAllowed ? "mount_format_failed" : "mount_failed";
       return false;
     }
+    mounted_ = true;
+    formattedOnBoot_ = true;
   }
-  prefs_.begin("nhos", false);
+  prefs_.putBool("spiffs_initialized", true);
   return ensureDirs();
 }
 
@@ -171,13 +179,19 @@ String Storage::storageStatusJson() {
   const size_t used = SPIFFS.usedBytes();
   const size_t userBytes = directorySize("/files");
   const size_t logBytes = directorySize("/logs");
-  const size_t calibrationBytes = directorySize("/calibration");
+  const size_t calibrationBytes = directorySize("/cal") + directorySize("/calibration");
   const size_t offlineBytes = directorySize("/offline");
   const size_t configBytes = directorySize("/config");
   const size_t known = userBytes + logBytes + calibrationBytes + offlineBytes + configBytes;
   const size_t otherBytes = used > known ? used - known : 0;
 
-  String out = "{\"total_bytes\":";
+  String out = "{\"mounted\":";
+  out += mounted_ ? "true" : "false";
+  out += ",\"formatted_on_boot\":";
+  out += formattedOnBoot_ ? "true" : "false";
+  out += ",\"mount_error\":\"";
+  out += jsonEscape(mountError_);
+  out += "\",\"total_bytes\":";
   out += String(static_cast<unsigned int>(total));
   out += ",\"used_bytes\":";
   out += String(static_cast<unsigned int>(used));
@@ -300,7 +314,7 @@ String Storage::scopedPath(const String& scope, const String& path) const {
   if (scope == "logs") {
     root = "/logs";
   } else if (scope == "calibration") {
-    root = "/calibration";
+    root = "/cal";
   } else if (scope == "offline") {
     root = "/offline";
   }
@@ -337,6 +351,7 @@ size_t Storage::directorySize(const char* path) const {
 bool Storage::ensureDirs() {
   SPIFFS.mkdir("/files");
   SPIFFS.mkdir("/logs");
+  SPIFFS.mkdir("/cal");
   SPIFFS.mkdir("/calibration");
   SPIFFS.mkdir("/offline");
   SPIFFS.mkdir("/config");

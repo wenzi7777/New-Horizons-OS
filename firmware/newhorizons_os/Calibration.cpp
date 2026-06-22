@@ -12,9 +12,12 @@ namespace nhos {
 
 namespace {
 
-constexpr char kCalibrationMetaPath[] = "/calibration/profile.meta";
-constexpr char kCalibrationDirPath[] = "/calibration";
-constexpr char kCalibrationTarePath[] = "/calibration/tare.csv";
+constexpr char kCalibrationMetaPath[] = "/cal/meta";
+constexpr char kCalibrationDirPath[] = "/cal";
+constexpr char kCalibrationTarePath[] = "/cal/tare";
+constexpr char kLegacyCalibrationMetaPath[] = "/calibration/profile.meta";
+constexpr char kLegacyCalibrationDirPath[] = "/calibration";
+constexpr char kLegacyCalibrationTarePath[] = "/calibration/tare.csv";
 
 String trimFloat(float value) {
   String out(value, 3);
@@ -564,11 +567,18 @@ bool Calibration::loadFromStorage() {
   createdAtMs_ = 0;
   updatedAtMs_ = 0;
 
-  if (!SPIFFS.exists(kCalibrationMetaPath)) {
-    return true;
+  if (SPIFFS.exists(kCalibrationMetaPath)) {
+    return loadFromStoragePath(kCalibrationMetaPath, kCalibrationDirPath, kCalibrationTarePath);
   }
+  if (SPIFFS.exists(kLegacyCalibrationMetaPath)) {
+    return loadFromStoragePath(kLegacyCalibrationMetaPath, kLegacyCalibrationDirPath, kLegacyCalibrationTarePath);
+  }
+  return true;
+}
+
+bool Calibration::loadFromStoragePath(const char* metaPath, const char* dirPath, const char* tarePath) {
   String meta;
-  if (!storage_ || !storage_->readTextFile(kCalibrationMetaPath, meta)) {
+  if (!storage_ || !storage_->readTextFile(metaPath, meta)) {
     return false;
   }
   int cursor = 0;
@@ -602,13 +612,26 @@ bool Calibration::loadFromStorage() {
     cursor = end + 1;
   }
 
-  File root = SPIFFS.open(kCalibrationDirPath);
+  const bool legacyLayout = String(dirPath) == kLegacyCalibrationDirPath;
+  File root = SPIFFS.open(dirPath);
   if (root && root.isDirectory()) {
     File file = root.openNextFile();
     while (file) {
       const String name = file.name();
       file.close();
-      if (name.endsWith(".lvl")) {
+      if (!legacyLayout && name.startsWith(String(dirPath) + "/l")) {
+        String base = name.substring(name.lastIndexOf('/') + 2);
+        float level = 0;
+        if (base.startsWith("n")) {
+          level = -static_cast<float>(base.substring(1).toInt()) / 1000.0f;
+        } else {
+          if (base.startsWith("p")) {
+            base.remove(0, 1);
+          }
+          level = static_cast<float>(base.toInt()) / 1000.0f;
+        }
+        loadLevelFile(name, level);
+      } else if (legacyLayout && name.endsWith(".lvl")) {
         String base = name.substring(name.lastIndexOf('/') + 1);
         base.remove(base.length() - 4);
         base.replace("level_", "");
@@ -622,7 +645,7 @@ bool Calibration::loadFromStorage() {
           level = static_cast<float>(base.toInt()) / 1000.0f;
         }
         loadLevelFile(name, level);
-      } else if (name == kCalibrationTarePath || name.endsWith("/tare.csv")) {
+      } else if (name == tarePath || (legacyLayout && name.endsWith("/tare.csv"))) {
         loadTareFile(name);
       }
       file = root.openNextFile();
@@ -640,7 +663,7 @@ bool Calibration::saveToStorage() {
   if (!storage_) {
     return false;
   }
-  if (!removeStoredLevels()) {
+  if (!ensureCalibrationDir()) {
     return false;
   }
   if (!tare_.empty() && !writeTareFile(tare_)) {
@@ -665,25 +688,65 @@ bool Calibration::saveToStorage() {
   meta += "\nlegacy_missing_tare=";
   meta += legacyMissingTare_ ? "1" : "0";
   meta += "\n";
-  return storage_->writeTextFileAtomic(kCalibrationMetaPath, meta);
+  if (!storage_->writeTextFileAtomic(kCalibrationMetaPath, meta)) {
+    return false;
+  }
+  removeObsoleteStoredFiles();
+  removeLegacyCalibrationProfile();
+  return true;
 }
 
-bool Calibration::removeStoredLevels() const {
+bool Calibration::ensureCalibrationDir() const {
+  SPIFFS.mkdir(kCalibrationDirPath);
   File root = SPIFFS.open(kCalibrationDirPath);
+  return root && root.isDirectory();
+}
+
+bool Calibration::removeStoredLevels(const char* dirPath, bool includeTare) const {
+  File root = SPIFFS.open(dirPath);
   if (root && root.isDirectory()) {
     File file = root.openNextFile();
     while (file) {
       const String name = file.name();
       file.close();
-      if (name.endsWith(".lvl") || name.endsWith("/tare.csv") || name == kCalibrationTarePath) {
+      const bool isLevel = name.endsWith(".lvl") || name.startsWith(String(dirPath) + "/l");
+      const bool isTare = name.endsWith("/tare.csv") || name == kCalibrationTarePath || name == kLegacyCalibrationTarePath;
+      if (isLevel || (includeTare && isTare)) {
         SPIFFS.remove(name);
       }
       file = root.openNextFile();
     }
   }
-  SPIFFS.remove(kCalibrationMetaPath);
-  SPIFFS.remove(kCalibrationTarePath);
   return true;
+}
+
+void Calibration::removeLegacyCalibrationProfile() const {
+  removeStoredLevels(kLegacyCalibrationDirPath, true);
+  SPIFFS.remove(kLegacyCalibrationMetaPath);
+  SPIFFS.remove(kLegacyCalibrationTarePath);
+}
+
+void Calibration::removeObsoleteStoredFiles() const {
+  File root = SPIFFS.open(kCalibrationDirPath);
+  if (!root || !root.isDirectory()) {
+    return;
+  }
+  File file = root.openNextFile();
+  while (file) {
+    const String name = file.name();
+    file.close();
+    bool keep = name == kCalibrationMetaPath || (!tare_.empty() && name == kCalibrationTarePath);
+    for (const LevelData& item : levels_) {
+      if (name == levelPath(item.key)) {
+        keep = true;
+        break;
+      }
+    }
+    if (!keep && (name == kCalibrationTarePath || name.startsWith(String(kCalibrationDirPath) + "/l") || name.endsWith(".tmp"))) {
+      SPIFFS.remove(name);
+    }
+    file = root.openNextFile();
+  }
 }
 
 bool Calibration::writeTareFile(const std::vector<float>& tare) const {
@@ -921,7 +984,8 @@ String Calibration::tarePath() const {
 }
 
 String Calibration::levelPath(int32_t key) const {
-  String path = "/calibration/level_";
+  String path = kCalibrationDirPath;
+  path += "/l";
   if (key < 0) {
     path += "n";
     path += String(static_cast<long>(-key));
@@ -929,7 +993,6 @@ String Calibration::levelPath(int32_t key) const {
     path += "p";
     path += String(static_cast<long>(key));
   }
-  path += ".lvl";
   return path;
 }
 

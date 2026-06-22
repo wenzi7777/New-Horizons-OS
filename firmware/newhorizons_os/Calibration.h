@@ -52,8 +52,12 @@ class Calibration {
   void refreshSavedStateCache();
   void rebuildRuntimeCurves();
   bool loadFromStorage();
+  bool loadFromStoragePath(const char* metaPath, const char* dirPath, const char* tarePath);
   bool saveToStorage();
-  bool removeStoredLevels() const;
+  bool ensureCalibrationDir() const;
+  bool removeStoredLevels(const char* dirPath, bool includeTare) const;
+  void removeLegacyCalibrationProfile() const;
+  void removeObsoleteStoredFiles() const;
   bool writeTareFile(const std::vector<float>& tare) const;
   bool writeLevelFile(const LevelData& level) const;
   bool loadTareFile(const String& path);

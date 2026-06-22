@@ -50,6 +50,9 @@ class Storage {
   void rotateLogIfNeeded(size_t incomingBytes = 0);
 
   Preferences prefs_;
+  bool mounted_ = false;
+  bool formattedOnBoot_ = false;
+  String mountError_;
   bool logEnabled_ = true;
   size_t logMaxBytes_ = kDefaultLogMaxBytes;
   LogLevel logLevel_ = LogLevel::Info;

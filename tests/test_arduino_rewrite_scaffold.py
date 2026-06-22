@@ -247,11 +247,20 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             r"bool Calibration::clearProfile\(\) \{(?P<body>.*?)\n\}",
             r"bool Calibration::deleteLevel\(float level\) \{(?P<body>.*?)\n\}",
             r"bool Calibration::applyTareDirect\(const float\* values, size_t count\) \{(?P<body>.*?)\n\}",
-            r"bool Calibration::loadFromStorage\(\) \{(?P<body>.*?)\n\}",
+            r"bool Calibration::loadFromStoragePath\(const char\* metaPath, const char\* dirPath, const char\* tarePath\) \{(?P<body>.*?)\n\}",
         ):
             match = re.search(signature, calibration_impl, re.S)
             self.assertIsNotNone(match)
             self.assertIn("refreshSavedStateCache();", match.group("body"))
+
+        load_match = re.search(
+            r"bool Calibration::loadFromStorage\(\) \{(?P<body>.*?)\n\}",
+            calibration_impl,
+            re.S,
+        )
+        self.assertIsNotNone(load_match)
+        self.assertIn("loadFromStoragePath(kCalibrationMetaPath, kCalibrationDirPath, kCalibrationTarePath)", load_match.group("body"))
+        self.assertIn("loadFromStoragePath(kLegacyCalibrationMetaPath, kLegacyCalibrationDirPath, kLegacyCalibrationTarePath)", load_match.group("body"))
 
         refresh_match = re.search(
             r"void Calibration::refreshSavedStateCache\(\) \{(?P<body>.*?)\n\}",
@@ -264,6 +273,48 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("savedLevelsComplete_", refresh_body)
         self.assertIn("rebuildRuntimeCurves();", refresh_body)
         self.assertIn("runtimeReady_", refresh_body)
+
+    def test_calibration_persistence_uses_short_spiffs_safe_paths(self):
+        calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
+        storage_impl = (ARDUINO_ROOT / "Storage.cpp").read_text(encoding="utf-8")
+
+        self.assertIn('constexpr char kCalibrationDirPath[] = "/cal";', calibration_impl)
+        self.assertIn('constexpr char kCalibrationMetaPath[] = "/cal/meta";', calibration_impl)
+        self.assertIn('constexpr char kCalibrationTarePath[] = "/cal/tare";', calibration_impl)
+        self.assertIn('constexpr char kLegacyCalibrationDirPath[] = "/calibration";', calibration_impl)
+        self.assertIn('constexpr char kLegacyCalibrationMetaPath[] = "/calibration/profile.meta";', calibration_impl)
+        self.assertIn('constexpr char kLegacyCalibrationTarePath[] = "/calibration/tare.csv";', calibration_impl)
+        self.assertIn('SPIFFS.mkdir("/cal")', storage_impl)
+
+        for level in (1, 10, 20):
+            key = int(round(level * 1000))
+            path = f"/cal/lp{key}"
+            self.assertLessEqual(len(path + ".tmp"), 31)
+
+    def test_calibration_save_writes_new_profile_before_legacy_cleanup(self):
+        calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
+        calibration_header = (ARDUINO_ROOT / "Calibration.h").read_text(encoding="utf-8")
+
+        self.assertIn("bool ensureCalibrationDir() const;", calibration_header)
+        self.assertIn("bool removeStoredLevels(const char* dirPath, bool includeTare) const;", calibration_header)
+        self.assertIn("void removeLegacyCalibrationProfile() const;", calibration_header)
+        self.assertIn("void removeObsoleteStoredFiles() const;", calibration_header)
+        self.assertIn("bool loadFromStoragePath(const char* metaPath, const char* dirPath, const char* tarePath);", calibration_header)
+
+        save_match = re.search(
+            r"bool Calibration::saveToStorage\(\) \{(?P<body>.*?)\n\}",
+            calibration_impl,
+            re.S,
+        )
+        self.assertIsNotNone(save_match)
+        body = save_match.group("body")
+        self.assertIn("ensureCalibrationDir()", body)
+        self.assertIn("writeTareFile(tare_)", body)
+        self.assertIn("writeLevelFile(item)", body)
+        self.assertIn("writeTextFileAtomic(kCalibrationMetaPath, meta)", body)
+        self.assertIn("removeObsoleteStoredFiles();", body)
+        self.assertIn("removeLegacyCalibrationProfile();", body)
+        self.assertLess(body.index("writeTextFileAtomic(kCalibrationMetaPath, meta)"), body.index("removeLegacyCalibrationProfile();"))
 
     def test_optional_stream_filter_config_matches_gcu_shape_and_safe_defaults(self):
         config_header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
@@ -383,6 +434,11 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("SPIFFS.totalBytes()", storage)
         self.assertIn("SPIFFS.usedBytes()", storage)
         self.assertIn('"categories"', storage)
+        self.assertIn('\\"mounted\\"', storage)
+        self.assertIn('\\"formatted_on_boot\\"', storage)
+        self.assertIn('\\"mount_error\\"', storage)
+        self.assertIn('prefs_.getBool("spiffs_initialized", false)', storage)
+        self.assertIn('prefs_.putBool("spiffs_initialized", true)', storage)
 
     def test_wifi_setup_ssid_matches_legacy_full_device_suffix(self):
         wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
