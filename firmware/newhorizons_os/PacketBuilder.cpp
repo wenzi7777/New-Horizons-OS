@@ -13,10 +13,11 @@ void PacketBuilder::setDeviceUid(const uint8_t uid[6]) {
 
 size_t PacketBuilder::build(const MatrixFrame& frame, uint8_t* out, size_t capacity, const float* imuData, const BatterySample* battery) {
   const size_t matrixBytes = static_cast<size_t>(frame.pointCount) * sizeof(float);
+  const size_t rawBytes = frame.hasRaw ? matrixBytes : 0;
   const size_t imuBytes = imuData ? kImuBaseFloatCount * sizeof(float) : 0;
   const size_t magBytes = imuData && NHOS_BOARD_HAS_MAG ? kMagFloatCount * sizeof(float) : 0;
   const size_t batteryBytes = battery ? 4 : 0;
-  const size_t payloadLen = matrixBytes + imuBytes + magBytes + batteryBytes;
+  const size_t payloadLen = matrixBytes + rawBytes + imuBytes + magBytes + batteryBytes;
   const size_t totalLen = kPacketHeaderLen + payloadLen;
   if (!out || capacity < totalLen || frame.pointCount > kMaxSensors) {
     return 0;
@@ -28,6 +29,9 @@ size_t PacketBuilder::build(const MatrixFrame& frame, uint8_t* out, size_t capac
 #if NHOS_BOARD_HAS_MAG
     flags |= kPacketFlagMag;
 #endif
+  }
+  if (frame.hasRaw) {
+    flags |= kPacketFlagRawAdc;
   }
   if (battery) {
     flags |= kPacketFlagBattery;
@@ -45,6 +49,12 @@ size_t PacketBuilder::build(const MatrixFrame& frame, uint8_t* out, size_t capac
   for (uint16_t i = 0; i < frame.pointCount; ++i) {
     putFloat(out + offset, frame.values[i]);
     offset += sizeof(float);
+  }
+  if (frame.hasRaw) {
+    for (uint16_t i = 0; i < frame.pointCount; ++i) {
+      putFloat(out + offset, frame.rawValues[i]);
+      offset += sizeof(float);
+    }
   }
   if (imuData) {
     for (uint8_t i = 0; i < kImuBaseFloatCount; ++i) {
@@ -69,9 +79,10 @@ size_t PacketBuilder::build(const MatrixFrame& frame, uint8_t* out, size_t capac
 
 size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imuData) {
   const size_t expectedMatrixBytes = static_cast<size_t>(frame.pointCount) * sizeof(float);
+  const size_t rawBytes = frame.hasRaw ? expectedMatrixBytes : 0;
   const size_t imuBytes = imuData ? kImuBaseFloatCount * sizeof(float) : 0;
   const size_t magBytes = imuData && NHOS_BOARD_HAS_MAG ? kMagFloatCount * sizeof(float) : 0;
-  const size_t payloadLen = matrixPayloadBytes + imuBytes + magBytes;
+  const size_t payloadLen = matrixPayloadBytes + rawBytes + imuBytes + magBytes;
   const size_t totalLen = kPacketHeaderLen + payloadLen;
   if (!out || capacity < totalLen || frame.pointCount > kMaxSensors || matrixPayloadBytes != expectedMatrixBytes) {
     return 0;
@@ -86,12 +97,21 @@ size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint8_t*
     flags |= kPacketFlagMag;
 #endif
   }
+  if (frame.hasRaw) {
+    flags |= kPacketFlagRawAdc;
+  }
   out[3] = flags;
   memcpy(out + 4, deviceUid_, 6);
   putU32(out + 10, frame.seq);
   putU32(out + 14, frame.timestampMs);
   putU16(out + 18, static_cast<uint16_t>(payloadLen));
   size_t offset = kPacketHeaderLen + matrixPayloadBytes;
+  if (frame.hasRaw) {
+    for (uint16_t i = 0; i < frame.pointCount; ++i) {
+      putFloat(out + offset, frame.rawValues[i]);
+      offset += sizeof(float);
+    }
+  }
   if (imuData) {
     for (uint8_t i = 0; i < kImuBaseFloatCount; ++i) {
       putFloat(out + offset, imuData[i]);

@@ -9,7 +9,7 @@ namespace nhos {
 static constexpr char kProductName[] = "New Horizons OS Arduino";
 static constexpr char kProtocolName[] = "NHO/Arduino/1";
 static constexpr char kHardwareModel[] = NHOS_BOARD_NAME;
-static constexpr char kFirmwareVersion[] = "v0.9.1";
+static constexpr char kFirmwareVersion[] = "v0.10.0";
 
 static constexpr uint16_t kRows = NHOS_BOARD_ROWS;
 static constexpr uint16_t kCols = NHOS_BOARD_COLS;
@@ -25,6 +25,7 @@ static constexpr uint8_t kPacketVersion = 3;
 static constexpr uint8_t kPacketFlagImu = 0x01;
 static constexpr uint8_t kPacketFlagBattery = 0x02;
 static constexpr uint8_t kPacketFlagMag = 0x04;
+static constexpr uint8_t kPacketFlagRawAdc = 0x08;
 static constexpr uint8_t kPacketFlagHmac = 0x40;
 static constexpr uint8_t kPacketFlagHeartbeat = 0x80;
 static constexpr size_t kPacketHeaderLen = 20;
@@ -32,6 +33,7 @@ static constexpr size_t kPacketHmacLen = 16;
 static constexpr size_t kMaxPacketBytes =
     kPacketHeaderLen +
     (kMaxSensors * sizeof(float)) +
+    (kMaxSensors * sizeof(float)) +  // optional raw ADC block (parallel to matrix levels)
     (kImuSampleFloats * sizeof(float)) +
     4 +
     kPacketHmacLen;

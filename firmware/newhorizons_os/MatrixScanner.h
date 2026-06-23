@@ -17,6 +17,8 @@ struct MatrixFrame {
   uint16_t cols = 0;
   uint16_t pointCount = 0;
   float values[kMaxSensors] = {0};
+  float rawValues[kMaxSensors] = {0};
+  bool hasRaw = false;
 };
 
 struct ScanHealth {
@@ -58,6 +60,7 @@ class MatrixScanner {
   bool setFilterConfig(const FilterConfig& config);
   bool setLayout(const uint8_t* rows, size_t rowCount, const uint8_t* cols, size_t colCount);
   void setCalibration(Calibration* calibration);
+  void setStreamRawAdc(bool enabled) { streamRawAdc_ = enabled; }
   bool scanDue() const;
   size_t scanIntoPacketPayload(uint8_t* out, size_t capacity, MatrixFrame& frame);
   bool streamBufferEnabled() const;
@@ -139,6 +142,7 @@ class MatrixScanner {
   FilterConfig filterConfig_;
   SensorFilterState filterStates_[kMaxSensors];
   Calibration* calibration_ = nullptr;
+  bool streamRawAdc_ = false;
 };
 
 }  // namespace nhos

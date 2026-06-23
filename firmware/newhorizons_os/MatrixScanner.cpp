@@ -200,6 +200,7 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
   frame.rows = static_cast<uint16_t>(rowCount_);
   frame.cols = static_cast<uint16_t>(colCount_);
   frame.pointCount = pointCount;
+  frame.hasRaw = streamRawAdc_;
 
   uint16_t colMajorIdx = 0;
   for (size_t c = 0; c < colCount_; ++c) {
@@ -212,12 +213,15 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
       float value = static_cast<float>(analogRead(rows_[r]));
 #endif
       value = applyFilter(value, colMajorIdx);
+      const uint16_t rowMajorIdx = static_cast<uint16_t>(r * colCount_ + c);
+      // Capture the pre-calibration reading (filtered millivolts) before it is
+      // overwritten by the calibration curve, so it can optionally be streamed.
+      frame.rawValues[rowMajorIdx] = value;
       if (calibration_) {
         float calibratedValue = value;
         calibration_->apply(value, colMajorIdx, calibratedValue);
         value = calibratedValue;
       }
-      const uint16_t rowMajorIdx = static_cast<uint16_t>(r * colCount_ + c);
       putFloat(out + rowMajorIdx * sizeof(float), value);
       frame.values[rowMajorIdx] = value;
       ++colMajorIdx;

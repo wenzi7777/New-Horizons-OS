@@ -71,6 +71,7 @@ struct DeviceConfigData {
   StreamBufferConfig streamBuffer;
   FilterConfig filter;
   bool imuEnabled = true;
+  bool streamRawAdc = false;
   LogConfig logging;
   OtaConfig ota;
   ExternalLedConfig externalLed;
@@ -90,6 +91,7 @@ class DeviceConfig {
   bool setStreamBuffer(bool enabled, const String& mode);
   bool setFilter(bool enabled, uint8_t median, float alpha);
   bool setImuEnabled(bool enabled);
+  bool setStreamRawAdc(bool enabled);
   bool setLogging(bool enabled, const String& level, const String& mode, size_t maxBytes);
   bool setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl);
   bool setExternalLed(const String& mode, const String& preset, float brightness);

@@ -325,6 +325,7 @@ String ControlServer::processCommand(const String& request) {
     jsonRawField(data, "ota", deviceConfig_ ? deviceConfig_->otaJson() : "{}", first);
     jsonRawField(data, "update_state", ota_ ? ota_->lastStatusJson() : "{}", first);
     jsonRawField(data, "filter", deviceConfig_ ? deviceConfig_->filterJson() : "{}", first);
+    jsonBoolField(data, "stream_raw_adc", deviceConfig_ ? deviceConfig_->data().streamRawAdc : false, first);
     jsonRawField(data, "imu", imu_ ? imu_->statusJson() : "{}", first);
     jsonRawField(data, "stream_buffer", streamBuffer, first);
     jsonRawField(data, "calibration", calibration_ ? calibration_->statusJson(maintenanceMode()) : "{}", first);
@@ -521,6 +522,23 @@ String ControlServer::processCommand(const String& request) {
     jsonRawField(data, "config", deviceConfig_->statusJson(), first);
     data += "}";
     return ok(cmd, "filter_updated", data);
+  }
+  if (cmd == "set_raw_adc") {
+    if (!deviceConfig_ || !scanner_) {
+      return error(cmd, "config_unavailable");
+    }
+    const bool enabled = extractBool(request, "enabled", deviceConfig_->data().streamRawAdc);
+    deviceConfig_->setStreamRawAdc(enabled);
+    scanner_->setStreamRawAdc(enabled);
+    if (!deviceConfig_->save(*storage_)) {
+      return error(cmd, "config_write_failed");
+    }
+    String data = "{";
+    bool first = true;
+    jsonBoolField(data, "stream_raw_adc", deviceConfig_->data().streamRawAdc, first);
+    jsonRawField(data, "config", deviceConfig_->statusJson(), first);
+    data += "}";
+    return ok(cmd, "raw_adc_updated", data);
   }
   if (cmd == "set_imu") {
     const bool enabled = extractBool(request, "enabled", true);

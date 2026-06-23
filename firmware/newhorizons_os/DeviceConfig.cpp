@@ -303,6 +303,11 @@ bool DeviceConfig::setImuEnabled(bool enabled) {
   return true;
 }
 
+bool DeviceConfig::setStreamRawAdc(bool enabled) {
+  data_.streamRawAdc = enabled;
+  return true;
+}
+
 bool DeviceConfig::setLogging(bool enabled, const String& level, const String& mode, size_t maxBytes) {
   if (!validLogLevel(level) || !validLogMode(mode)) {
     return false;
@@ -444,6 +449,7 @@ void DeviceConfig::setDefaults() {
   data_.filter.median = kFilterDefaultMedian;
   data_.filter.alpha = kFilterDefaultAlpha;
   data_.imuEnabled = true;
+  data_.streamRawAdc = false;
   data_.logging.enabled = true;
   data_.logging.maxBytes = kDefaultLogMaxBytes;
   data_.logging.level = "error";
@@ -520,6 +526,8 @@ bool DeviceConfig::applyJson(const String& json) {
     data_.imuEnabled = extractBool(imu, "enabled", data_.imuEnabled);
   }
 
+  data_.streamRawAdc = extractBool(json, "stream_raw_adc", data_.streamRawAdc);
+
   const String logging = objectForKey(json, "logging");
   if (!logging.isEmpty()) {
     const String level = extractString(logging, "level", data_.logging.level);
@@ -591,7 +599,9 @@ String DeviceConfig::toJson() const {
   out += filterJson();
   out += ",\"imu\":{\"enabled\":";
   out += data_.imuEnabled ? "true" : "false";
-  out += "},\"logging\":";
+  out += "},\"stream_raw_adc\":";
+  out += data_.streamRawAdc ? "true" : "false";
+  out += ",\"logging\":";
   out += loggingJson();
   out += ",\"ota\":";
   out += otaJson();

@@ -368,6 +368,7 @@ void setup() {
       deviceConfig.data().streamBuffer.enabled,
       deviceConfig.data().streamBuffer.depthFrames);
   scanner.setFilterConfig(deviceConfig.data().filter);
+  scanner.setStreamRawAdc(deviceConfig.data().streamRawAdc);
   calibration.setLayout(
       deviceConfig.data().matrixLayout.analogPins,
       deviceConfig.data().matrixLayout.analogCount,
