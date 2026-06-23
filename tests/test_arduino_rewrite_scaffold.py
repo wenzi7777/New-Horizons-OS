@@ -967,7 +967,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("externalLeds_->statusJson()", control)
         self.assertIn("status_led", control)
         self.assertIn("external_led", control)
-        self.assertIn('storage.getString("charge_profile", "balanced")', sketch)
+        self.assertIn('storage.getString("charge_profile", "slow")', sketch)
 
     def test_control_server_float_parser_reads_numeric_brightness_without_falling_into_next_key(self):
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
