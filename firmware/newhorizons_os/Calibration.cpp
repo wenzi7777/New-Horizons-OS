@@ -617,7 +617,7 @@ bool Calibration::loadFromStoragePath(const char* metaPath, const char* dirPath,
   if (root && root.isDirectory()) {
     File file = root.openNextFile();
     while (file) {
-      const String name = file.name();
+      const String name = file.path();
       file.close();
       if (!legacyLayout && name.startsWith(String(dirPath) + "/l")) {
         String base = name.substring(name.lastIndexOf('/') + 2);
@@ -656,6 +656,14 @@ bool Calibration::loadFromStoragePath(const char* metaPath, const char* dirPath,
   if (!complete()) {
     enabled_ = false;
   }
+  Serial.print(F("cal_loaded tare_points="));
+  Serial.print(static_cast<unsigned int>(capturedCount(tare_)));
+  Serial.print(F(" levels="));
+  Serial.print(static_cast<unsigned int>(levels_.size()));
+  Serial.print(F(" complete="));
+  Serial.print(complete() ? F("true") : F("false"));
+  Serial.print(F(" enabled="));
+  Serial.println(enabled_ ? F("true") : F("false"));
   return true;
 }
 
@@ -707,7 +715,7 @@ bool Calibration::removeStoredLevels(const char* dirPath, bool includeTare) cons
   if (root && root.isDirectory()) {
     File file = root.openNextFile();
     while (file) {
-      const String name = file.name();
+      const String name = file.path();
       file.close();
       const bool isLevel = name.endsWith(".lvl") || name.startsWith(String(dirPath) + "/l");
       const bool isTare = name.endsWith("/tare.csv") || name == kCalibrationTarePath || name == kLegacyCalibrationTarePath;
@@ -733,7 +741,7 @@ void Calibration::removeObsoleteStoredFiles() const {
   }
   File file = root.openNextFile();
   while (file) {
-    const String name = file.name();
+    const String name = file.path();
     file.close();
     bool keep = name == kCalibrationMetaPath || (!tare_.empty() && name == kCalibrationTarePath);
     for (const LevelData& item : levels_) {
