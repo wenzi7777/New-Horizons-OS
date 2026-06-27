@@ -1,5 +1,7 @@
 #include "ExternalLedController.h"
 
+#include <math.h>
+
 #include "BoardConfig.h"
 #include "BoardPins.h"
 #include "PowerAnimation.h"
@@ -13,6 +15,10 @@ constexpr uint16_t kIdentifyHoldOffMs = 420;
 constexpr float kExternalLedMaxChannel = 96.0f;
 constexpr uint32_t kShutdownAnimationMs = 600;
 constexpr uint32_t kWakeAnimationMs = 500;
+// Streaming activity windows (ms). Derived from ScanHealth deltas so they
+// reflect the current situation and recover on their own.
+constexpr uint32_t kStreamActiveMs = 1500;
+constexpr uint32_t kStreamWarnMs = 3000;
 
 uint16_t identifyDurationMs() {
 #if NHOS_BOARD_HAS_EXT_LED
@@ -137,7 +143,7 @@ void ExternalLedController::wake() {
   sleeping_ = false;
 }
 
-void ExternalLedController::service(uint32_t nowMs, const ScanHealth& health, LedSignal systemSignal) {
+void ExternalLedController::service(uint32_t nowMs, const ScanHealth& health, const ExternalLedInputs& in) {
   if (sleeping_) {
     activePreset_ = "off";
     return;
@@ -151,6 +157,27 @@ void ExternalLedController::service(uint32_t nowMs, const ScanHealth& health, Le
     return;
   }
 
+  // Derive current streaming activity / warnings from cumulative counters by
+  // tracking their deltas, so state reflects "now" and recovers by itself.
+  const uint32_t failTotal = health.udpSendFailures + health.overrunFrames;
+  if (!streamCountersInit_) {
+    lastUdpSentFrames_ = health.udpSentFrames;
+    lastStreamFailTotal_ = failTotal;
+    streamCountersInit_ = true;
+  } else {
+    if (health.udpSentFrames != lastUdpSentFrames_) {
+      lastUdpSentFrames_ = health.udpSentFrames;
+      lastStreamFrameMs_ = nowMs ? nowMs : 1;
+    }
+    if (failTotal != lastStreamFailTotal_) {
+      lastStreamFailTotal_ = failTotal;
+      lastStreamWarnMs_ = nowMs ? nowMs : 1;
+    }
+  }
+  const bool streamingActive = lastStreamFrameMs_ && (nowMs - lastStreamFrameMs_ < kStreamActiveMs);
+  const bool recentWarning = lastStreamWarnMs_ && (nowMs - lastStreamWarnMs_ < kStreamWarnMs);
+
+  // One-shot identify (button / Test / save) takes priority over presets.
   if (identifyStartedMs_) {
     const uint32_t elapsedMs = nowMs - identifyStartedMs_;
     if (elapsedMs < identifyDurationMs()) {
@@ -161,38 +188,107 @@ void ExternalLedController::service(uint32_t nowMs, const ScanHealth& health, Le
     identifyStartedMs_ = 0;
   }
 
-  if (config_.preset == "identify") {
+  const String& preset = config_.preset;
+
+  if (preset == "off") {
+    activePreset_ = "off";
+    showSolid(LedPalette::Off, nowMs);
+    return;
+  }
+
+  if (preset == "identify") {
     activePreset_ = "identify";
     showIdentify(nowMs % identifyDurationMs(), nowMs);
     return;
   }
 
-  if (systemSignal == LedSignal::Error || systemSignal == LedSignal::OtaError || systemSignal == LedSignal::RamDanger) {
-    activePreset_ = "system_warning";
-    showPulse(LedPalette::Error, 2, 5000, 80, 120, nowMs);
-    return;
-  }
-  if (systemSignal == LedSignal::Maintenance || systemSignal == LedSignal::SafeMode) {
-    activePreset_ = "maintenance";
-    showPulse(LedPalette::Maintenance, 1, 4000, 80, 0, nowMs);
+  if (preset == "solid_marker") {
+    activePreset_ = "solid_marker";
+    showSolid(markerColor(config_.color), nowMs);
     return;
   }
 
-  if (config_.preset == "pressure_activity") {
-    activePreset_ = "pressure_activity";
-    showSolid(LedPalette::Online, nowMs);
-  } else if (config_.preset == "recording_focus") {
-    activePreset_ = "recording_focus";
-    showSolid(LedPalette::Warning, nowMs);
-  } else if (config_.preset == "calibration_focus") {
-    activePreset_ = "calibration_focus";
-    showSolid(LedPalette::Maintenance, nowMs);
-  } else if (health.udpSendFailures || health.overrunFrames) {
-    activePreset_ = "stream_health_warning";
-    showSolid(LedPalette::Warning, nowMs);
-  } else {
-    activePreset_ = "stream_health";
-    showSolid(LedPalette::FindMePending, nowMs);
+  if (preset == "connectivity") {
+    activePreset_ = "connectivity";
+    LedColor seg[3];
+    seg[0] = in.wifiConnected ? LedPalette::Online : (in.wifiBusy ? LedPalette::Warning : LedPalette::Error);
+    seg[1] = !in.wifiConnected ? LedPalette::Off : (in.hasGateway ? LedPalette::Online : LedPalette::Error);
+    seg[2] = !in.hasGateway ? LedPalette::Off : (streamingActive ? LedPalette::Online : LedPalette::Warning);
+    showSegments(seg, 3, nowMs);
+    return;
+  }
+
+  if (preset == "pressure_meter") {
+    activePreset_ = "pressure_meter";
+    float p = in.pressure01;
+    if (p < 0.0f) {
+      p = 0.0f;
+    } else if (p > 1.0f) {
+      p = 1.0f;
+    }
+    uint8_t lit = static_cast<uint8_t>(ceilf(p * static_cast<float>(kExternalLedCount)));
+    if (lit > kExternalLedCount) {
+      lit = kExternalLedCount;
+    }
+    showMeter(lit, LedPalette::Online, LedPalette::Error, nowMs);
+    return;
+  }
+
+  if (preset == "stream_heartbeat") {
+    activePreset_ = "stream_heartbeat";
+    if (streamingActive) {
+      showPulse(LedPalette::FindMePending, 1, 1000, 120, 0, nowMs);
+    } else {
+      showSolid(LedPalette::Off, nowMs);
+    }
+    return;
+  }
+
+  if (preset == "calibration_auto") {
+    activePreset_ = "calibration_auto";
+    if (in.calibrating) {
+      showPulse(LedPalette::Maintenance, 1, 1800, 900, 0, nowMs);
+    } else {
+      showSolid(LedPalette::Off, nowMs);
+    }
+    return;
+  }
+
+  // Default and canonical fallback: system_status.
+  activePreset_ = "system_status";
+  renderSystemStatus(in, recentWarning, nowMs);
+}
+
+void ExternalLedController::renderSystemStatus(const ExternalLedInputs& in, bool recentWarning, uint32_t nowMs) {
+  switch (in.systemSignal) {
+    case LedSignal::Error:
+    case LedSignal::OtaError:
+    case LedSignal::RamDanger:
+      showPulse(LedPalette::Error, 2, 5000, 80, 120, nowMs);
+      return;
+    case LedSignal::Maintenance:
+    case LedSignal::SafeMode:
+      showPulse(LedPalette::Maintenance, 1, 4000, 80, 0, nowMs);
+      return;
+    case LedSignal::WifiSetup:
+      showSolid(LedPalette::WifiSetup, nowMs);
+      return;
+    case LedSignal::WifiConnecting:
+      showSolid(LedPalette::WifiConnecting, nowMs);
+      return;
+    case LedSignal::FindMePending:
+      showSolid(LedPalette::FindMePending, nowMs);
+      return;
+    case LedSignal::ChargeDone:
+      showSolid(LedPalette::ChargeDone, nowMs);
+      return;
+    case LedSignal::ChargingOrMissing:
+      showSolid(LedPalette::Warning, nowMs);
+      return;
+    case LedSignal::Online:
+    default:
+      showSolid(recentWarning ? LedPalette::Warning : LedPalette::Online, nowMs);
+      return;
   }
 }
 
@@ -202,6 +298,8 @@ String ExternalLedController::statusJson() const {
   out += jsonEscape(config_.mode);
   out += "\",\"preset\":\"";
   out += jsonEscape(config_.preset);
+  out += "\",\"color\":\"";
+  out += jsonEscape(config_.color);
   out += "\",\"active_preset\":\"";
   out += jsonEscape(activePreset_);
   out += "\",\"brightness\":";
@@ -259,6 +357,56 @@ void ExternalLedController::showSolid(LedColor colorValue, uint32_t nowMs) {
   }
   pixels_.show();
   lastShowMs_ = nowMs;
+}
+
+void ExternalLedController::showSegments(const LedColor* colors, size_t count, uint32_t nowMs) {
+  pixels_.clear();
+  for (uint16_t i = 0; i < kExternalLedCount; ++i) {
+    const LedColor c = (colors && i < count) ? colors[i] : LedPalette::Off;
+    pixels_.setPixelColor(i, color(c));
+  }
+  pixels_.show();
+  lastShowMs_ = nowMs;
+}
+
+void ExternalLedController::showMeter(uint8_t litCount, LedColor low, LedColor high, uint32_t nowMs) {
+  pixels_.clear();
+  for (uint16_t i = 0; i < kExternalLedCount; ++i) {
+    if (i >= litCount) {
+      pixels_.setPixelColor(i, 0);
+      continue;
+    }
+    const float t = (kExternalLedCount > 1) ? static_cast<float>(i) / static_cast<float>(kExternalLedCount - 1) : 0.0f;
+    LedColor c;
+    c.r = static_cast<uint8_t>(low.r + (static_cast<int>(high.r) - low.r) * t);
+    c.g = static_cast<uint8_t>(low.g + (static_cast<int>(high.g) - low.g) * t);
+    c.b = static_cast<uint8_t>(low.b + (static_cast<int>(high.b) - low.b) * t);
+    pixels_.setPixelColor(i, color(c));
+  }
+  pixels_.show();
+  lastShowMs_ = nowMs;
+}
+
+LedColor ExternalLedController::markerColor(const String& name) {
+  if (name == "green") {
+    return LedColor{0, 24, 0};
+  }
+  if (name == "blue") {
+    return LedColor{0, 6, 28};
+  }
+  if (name == "purple") {
+    return LedColor{24, 0, 28};
+  }
+  if (name == "amber") {
+    return LedColor{30, 16, 0};
+  }
+  if (name == "red") {
+    return LedColor{30, 0, 0};
+  }
+  if (name == "white") {
+    return LedColor{22, 22, 22};
+  }
+  return LedColor{0, 20, 22};  // teal (default)
 }
 
 void ExternalLedController::showPulse(LedColor colorValue, uint8_t flashes, uint16_t intervalMs, uint16_t onMs, uint16_t gapMs, uint32_t nowMs) {

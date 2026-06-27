@@ -31,6 +31,18 @@ namespace nhos {
 
 enum class PowerAnimation : uint8_t;
 
+// Runtime signals fed into the external LED service each loop. The single
+// systemSignal is already prioritized by updateLedState(); the remaining
+// fields drive the per-pixel / metering presets.
+struct ExternalLedInputs {
+  LedSignal systemSignal = LedSignal::Online;
+  bool wifiConnected = false;
+  bool wifiBusy = false;   // WiFi setup or connecting in progress
+  bool hasGateway = false;
+  float pressure01 = 0.0f;  // current matrix peak, normalized 0..1
+  bool calibrating = false;
+};
+
 class ExternalLedController {
  public:
   ExternalLedController();
@@ -43,14 +55,18 @@ class ExternalLedController {
   bool powerAnimationActive() const;
   void sleep();
   void wake();
-  void service(uint32_t nowMs, const ScanHealth& health, LedSignal systemSignal);
+  void service(uint32_t nowMs, const ScanHealth& health, const ExternalLedInputs& inputs);
   String statusJson() const;
 
  private:
   void clear();
   void showIdentify(uint32_t elapsedMs, uint32_t nowMs);
   void showSolid(LedColor color, uint32_t nowMs);
+  void showSegments(const LedColor* colors, size_t count, uint32_t nowMs);
+  void showMeter(uint8_t litCount, LedColor low, LedColor high, uint32_t nowMs);
   void showPulse(LedColor color, uint8_t flashes, uint16_t intervalMs, uint16_t onMs, uint16_t gapMs, uint32_t nowMs);
+  void renderSystemStatus(const ExternalLedInputs& inputs, bool recentWarning, uint32_t nowMs);
+  static LedColor markerColor(const String& name);
   uint32_t color(LedColor color) const;
   uint8_t scale(uint8_t value) const;
 
@@ -64,6 +80,13 @@ class ExternalLedController {
   uint32_t identifyStartedMs_ = 0;
   uint32_t lastShowMs_ = 0;
   String lastError_ = "";
+
+  // Streaming activity tracked from ScanHealth deltas (current, not cumulative).
+  bool streamCountersInit_ = false;
+  uint32_t lastUdpSentFrames_ = 0;
+  uint32_t lastStreamFailTotal_ = 0;
+  uint32_t lastStreamFrameMs_ = 0;
+  uint32_t lastStreamWarnMs_ = 0;
 };
 
 }  // namespace nhos

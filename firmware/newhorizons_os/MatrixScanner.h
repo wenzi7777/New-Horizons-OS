@@ -76,6 +76,10 @@ class MatrixScanner {
   String matrixLayoutJson() const;
   uint32_t scanIntervalUs() const;
   uint32_t nextScanDueUs() const { return nextScanDueUs_; }
+  // Most recent frame's normalized peak pressure (0..1) and active cell count,
+  // for driving indicator LEDs. Reset to 0 when scanning stops.
+  float lastPeak01() const { return lastPeak01_; }
+  uint16_t lastActiveCells() const { return lastActiveCells_; }
 
  private:
   struct SensorFilterState {
@@ -128,6 +132,8 @@ class MatrixScanner {
   uint32_t udpSentFrames_ = 0;
   uint32_t udpSendFailures_ = 0;
   uint32_t lastUdpSendUs_ = 0;
+  volatile float lastPeak01_ = 0.0f;
+  volatile uint16_t lastActiveCells_ = 0;
   bool queueEnabled_ = false;
   uint8_t queueDepthFrames_ = 0;
   uint8_t queueHead_ = 0;

@@ -610,8 +610,13 @@ String ControlServer::processCommand(const String& request) {
       if (preset.isEmpty()) {
         preset = next.externalLed.preset;
       }
+      String color = extractString(external, "color");
+      if (color.isEmpty()) {
+        color = next.externalLed.color;
+      }
       next.externalLed.mode = mode;
       next.externalLed.preset = preset;
+      next.externalLed.color = color;
       next.externalLed.brightness = extractFloat(external, "brightness", next.externalLed.brightness);
     }
     const String oled = extractObject(request, "oled");
@@ -634,7 +639,7 @@ String ControlServer::processCommand(const String& request) {
       if (oledRotation > 3) oledRotation = 0;
       next.oled.rotation = oledRotation;
     }
-    if (!deviceConfig_->setExternalLed(next.externalLed.mode, next.externalLed.preset, next.externalLed.brightness)) {
+    if (!deviceConfig_->setExternalLed(next.externalLed.mode, next.externalLed.preset, next.externalLed.brightness, next.externalLed.color)) {
       return error(cmd, "external_led_config_invalid");
     }
     if (!deviceConfig_->setOled(next.oled.mode, next.oled.page, next.oled.updateHz, next.oled.contrast, next.oled.rotation)) {

@@ -50,6 +50,8 @@ bool MatrixScanner::start() {
 
 void MatrixScanner::stop() {
   running_ = false;
+  lastPeak01_ = 0.0f;
+  lastActiveCells_ = 0;
   clearPacketQueue();
   resetFilterState();
   setAllColsInactive();
@@ -202,6 +204,13 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
   frame.pointCount = pointCount;
   frame.hasRaw = streamRawAdc_;
 
+  // Indicator metrics: empirical full-scale / active threshold used only to
+  // normalize the LED pressure meter. Tune against real calibrated readings.
+  constexpr float kPressureFullScale = 2000.0f;
+  constexpr float kPressureActiveThreshold = 50.0f;
+  float peakValue = 0.0f;
+  uint16_t activeCells = 0;
+
   uint16_t colMajorIdx = 0;
   for (size_t c = 0; c < colCount_; ++c) {
     digitalWrite(cols_[c], LOW);
@@ -224,11 +233,26 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
       }
       putFloat(out + rowMajorIdx * sizeof(float), value);
       frame.values[rowMajorIdx] = value;
+      if (value > peakValue) {
+        peakValue = value;
+      }
+      if (value > kPressureActiveThreshold) {
+        ++activeCells;
+      }
       ++colMajorIdx;
     }
     digitalWrite(cols_[c], HIGH);
   }
   setAllColsInactive();
+
+  float peak01 = peakValue / kPressureFullScale;
+  if (peak01 < 0.0f) {
+    peak01 = 0.0f;
+  } else if (peak01 > 1.0f) {
+    peak01 = 1.0f;
+  }
+  lastPeak01_ = peak01;
+  lastActiveCells_ = activeCells;
 
   const uint32_t scanEndUs = micros();
   const uint32_t durationUs = scanEndUs - scanStartUs;

@@ -40,8 +40,9 @@ struct FilterConfig {
 
 struct ExternalLedConfig {
   String mode = "off";
-  String preset = "stream_health";
+  String preset = "system_status";
   float brightness = 0.35f;
+  String color = "teal";
 };
 
 struct OledConfig {
@@ -94,7 +95,7 @@ class DeviceConfig {
   bool setStreamRawAdc(bool enabled);
   bool setLogging(bool enabled, const String& level, const String& mode, size_t maxBytes);
   bool setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl);
-  bool setExternalLed(const String& mode, const String& preset, float brightness);
+  bool setExternalLed(const String& mode, const String& preset, float brightness, const String& color);
   bool setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast, uint8_t rotation);
 
   String statusJson() const;
@@ -108,6 +109,7 @@ class DeviceConfig {
   static bool validLogMode(const String& mode);
   static bool validStreamBufferMode(const String& mode);
   static bool validExternalLedMode(const String& mode);
+  static String canonicalExternalLedPreset(const String& preset);
   static bool validOledMode(const String& mode);
 
  private:

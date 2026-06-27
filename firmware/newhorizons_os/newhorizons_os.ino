@@ -261,6 +261,12 @@ void sendHeartbeatIfDue() {
 void updateLedState() {
   const uint32_t nowMs = millis();
   const nhos::ScanHealth health = scanner.health();
+  nhos::ExternalLedInputs extIn;
+  extIn.wifiConnected = wifi.isConnected();
+  extIn.wifiBusy = wifi.setupActive();
+  extIn.hasGateway = findme.hasGateway();
+  extIn.pressure01 = scanner.lastPeak01();
+  extIn.calibrating = calibration.sessionActive();
   if (health.overrunFrames > lastObservedOverrunFrames || health.udpSendFailures > lastObservedUdpFailures) {
     leds.showEvent(nhos::LedSignal::ScanWarning);
     lastObservedOverrunFrames = health.overrunFrames;
@@ -270,7 +276,8 @@ void updateLedState() {
   if (powerState.state() == nhos::PowerState::SoftOffBattery) {
     leds.setSignal(nhos::LedSignal::Off);
     leds.service(nowMs);
-    externalLeds.service(nowMs, health, nhos::LedSignal::Off);
+    extIn.systemSignal = nhos::LedSignal::Off;
+    externalLeds.service(nowMs, health, extIn);
     return;
   }
   if (powerState.state() == nhos::PowerState::SoftOffCharging) {
@@ -282,7 +289,8 @@ void updateLedState() {
       leds.setSignal(nhos::LedSignal::Off);
     }
     leds.service(nowMs);
-    externalLeds.service(nowMs, health, nhos::LedSignal::Off);
+    extIn.systemSignal = nhos::LedSignal::Off;
+    externalLeds.service(nowMs, health, extIn);
     return;
   }
   nhos::LedSignal activeSignal = nhos::LedSignal::Online;
@@ -309,7 +317,8 @@ void updateLedState() {
   }
   leds.setSignal(activeSignal);
   leds.service(nowMs);
-  externalLeds.service(nowMs, health, activeSignal);
+  extIn.systemSignal = activeSignal;
+  externalLeds.service(nowMs, health, extIn);
 }
 
 }  // namespace

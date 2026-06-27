@@ -329,16 +329,41 @@ bool DeviceConfig::setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl)
   return true;
 }
 
-bool DeviceConfig::setExternalLed(const String& mode, const String& preset, float brightness) {
+bool DeviceConfig::setExternalLed(const String& mode, const String& preset, float brightness, const String& color) {
   if (!validExternalLedMode(mode)) {
     return false;
   }
   data_.externalLed.mode = mode;
   if (!preset.isEmpty()) {
-    data_.externalLed.preset = preset;
+    data_.externalLed.preset = canonicalExternalLedPreset(preset);
   }
   data_.externalLed.brightness = clampBrightness(brightness);
+  if (!color.isEmpty()) {
+    data_.externalLed.color = color;
+  }
   return true;
+}
+
+String DeviceConfig::canonicalExternalLedPreset(const String& preset) {
+  if (preset == "off" || preset == "system_status" || preset == "connectivity" ||
+      preset == "pressure_meter" || preset == "stream_heartbeat" ||
+      preset == "calibration_auto" || preset == "solid_marker" || preset == "identify") {
+    return preset;
+  }
+  // Legacy aliases from firmware <= v0.10.2 so existing device configs keep working.
+  if (preset == "stream_health" || preset == "stream_health_idle") {
+    return "system_status";
+  }
+  if (preset == "pressure_activity") {
+    return "pressure_meter";
+  }
+  if (preset == "calibration_focus") {
+    return "calibration_auto";
+  }
+  if (preset == "recording_focus") {
+    return "solid_marker";
+  }
+  return "system_status";
 }
 
 bool DeviceConfig::setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast, uint8_t rotation) {
@@ -457,8 +482,9 @@ void DeviceConfig::setDefaults() {
   data_.ota.autoApplyOnBoot = true;
   data_.ota.manifestUrl = kDefaultUpdateManifestUrl;
   data_.externalLed.mode = "off";
-  data_.externalLed.preset = "stream_health";
+  data_.externalLed.preset = "system_status";
   data_.externalLed.brightness = 0.35f;
+  data_.externalLed.color = "teal";
   data_.oled.mode = "off";
   data_.oled.page = "live_status";
   data_.oled.updateHz = 1;
@@ -553,8 +579,9 @@ bool DeviceConfig::applyJson(const String& json) {
   if (!external.isEmpty()) {
     const String mode = extractString(external, "mode", data_.externalLed.mode);
     const String preset = extractString(external, "preset", data_.externalLed.preset);
+    const String color = extractString(external, "color", data_.externalLed.color);
     if (validExternalLedMode(mode)) {
-      setExternalLed(mode, preset, extractFloat(external, "brightness", data_.externalLed.brightness));
+      setExternalLed(mode, preset, extractFloat(external, "brightness", data_.externalLed.brightness), color);
     }
   }
   const String oled = objectForKey(indicators, "oled");
@@ -609,6 +636,8 @@ String DeviceConfig::toJson() const {
   out += jsonEscape(data_.externalLed.mode);
   out += "\",\"preset\":\"";
   out += jsonEscape(data_.externalLed.preset);
+  out += "\",\"color\":\"";
+  out += jsonEscape(data_.externalLed.color);
   out += "\",\"brightness\":";
   out += String(data_.externalLed.brightness, 2);
   out += "},\"oled\":{\"mode\":\"";
