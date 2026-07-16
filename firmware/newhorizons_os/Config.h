@@ -9,7 +9,7 @@ namespace nhos {
 static constexpr char kProductName[] = "New Horizons OS Arduino";
 static constexpr char kProtocolName[] = "NHO/Arduino/1";
 static constexpr char kHardwareModel[] = NHOS_BOARD_NAME;
-static constexpr char kFirmwareVersion[] = "v0.11.1";
+static constexpr char kFirmwareVersion[] = "v0.11.2";
 
 static constexpr uint16_t kRows = NHOS_BOARD_ROWS;
 static constexpr uint16_t kCols = NHOS_BOARD_COLS;
@@ -40,7 +40,7 @@ static constexpr size_t kMaxPacketBytes =
 static constexpr uint32_t kHeartbeatIntervalMs = 5000;
 
 static constexpr uint16_t kDefaultTargetFps = 60;
-static constexpr uint16_t kMaxTargetFps = 90;
+static constexpr uint16_t kMaxTargetFps = 120;
 static constexpr uint16_t kDefaultSettleUs = 20;
 static constexpr uint8_t kDefaultSendEveryNFrames = 1;
 static constexpr uint8_t kStandardScanRingFrames = 3;
