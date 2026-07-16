@@ -789,7 +789,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("void service(uint32_t nowUs);", imu_header)
         self.assertIn("IMU.setContinuousMode()", imu_impl)
         self.assertIn("lastReadDurationUs_", imu_header)
-        self.assertIn("sampleRateHz_", imu_header)
+        self.assertIn("serviceIntervalUs_", imu_header)
+        self.assertIn("sampleRateHz", imu_impl)
         self.assertIn("cacheAgeMs", imu_impl)
         self.assertIn("buildMatrixPacketHeader(frame, packetBuffer, sizeof(packetBuffer), matrixPayloadLen, imuSampleValid ? imuSample : nullptr)", sketch)
         self.assertIn("const float* imuData", packet_header)
@@ -1005,12 +1006,54 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             "build_arduino_release.sh",
             "build_arduino_release_gcu_lts.sh",
             "flash_arduino_firmware.sh",
+            "flash_arduino_firmware_gcu_v23d_lts.sh",
+            "flash_arduino_firmware_gcu_v22c_lts.sh",
+            "flash_arduino_firmware_gcu_v21_lts.sh",
             "generate_arduino_manifest.py",
         }
 
         missing = sorted(name for name in expected if not (SCRIPT_ROOT / name).exists())
 
         self.assertEqual(missing, [])
+
+    def test_flash_scripts_use_correct_fqbn_and_board_flag_per_variant(self):
+        cases = {
+            "flash_arduino_firmware_gcu_v23d_lts.sh": "-DNHOS_BOARD_GCU_V23D_LTS",
+            "flash_arduino_firmware_gcu_v22c_lts.sh": "-DNHOS_BOARD_GCU_V22C_LTS",
+            "flash_arduino_firmware_gcu_v21_lts.sh": "-DNHOS_BOARD_GCU_V21_LTS",
+        }
+
+        for filename, board_flag in cases.items():
+            script = (SCRIPT_ROOT / filename).read_text(encoding="utf-8")
+            self.assertIn("FlashSize=4M,PartitionScheme=min_spiffs", script)
+            self.assertIn(f'--build-property "build.extra_flags={board_flag}"', script)
+            self.assertNotIn("FlashSize=8M", script)
+
+    def test_flash_scripts_compile_before_upload_since_upload_alone_does_not_build(self):
+        # arduino-cli's `upload` subcommand does not compile the sketch; it only
+        # flashes pre-built binaries from a build path. Without an explicit
+        # --build-path/--input-dir, `upload` falls back to the sketch's default
+        # cache directory (firmware/newhorizons_os/build/<fqbn-board-id>/), which
+        # is keyed only by vendor:arch:board and ignores FlashSize/PartitionScheme
+        # and any -DNHOS_BOARD_* build-property flags. A stale compile of a
+        # different board variant left in that shared cache would silently get
+        # flashed instead of the requested one. Every flash script must therefore
+        # compile into its own dedicated build path immediately before uploading
+        # from that same path.
+        for filename in (
+            "flash_arduino_firmware.sh",
+            "flash_arduino_firmware_gcu_v23d_lts.sh",
+            "flash_arduino_firmware_gcu_v22c_lts.sh",
+            "flash_arduino_firmware_gcu_v21_lts.sh",
+        ):
+            script = (SCRIPT_ROOT / filename).read_text(encoding="utf-8")
+            self.assertIn("arduino-cli compile", script)
+            self.assertIn('BUILD_PATH="', script)
+            self.assertIn("--input-dir \"${BUILD_PATH}\"", script)
+            self.assertNotRegex(
+                script,
+                r"arduino-cli upload[^\n]*--build-property",
+            )
 
     def test_release_script_publishes_trackable_artifacts(self):
         script = (SCRIPT_ROOT / "build_arduino_release.sh").read_text(encoding="utf-8")

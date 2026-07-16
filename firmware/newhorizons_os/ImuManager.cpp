@@ -130,6 +130,9 @@ bool ImuManager::copyLatestSample(float out[kImuSampleFloats]) const {
 String ImuManager::statusJson() const {
   const uint32_t nowMs = millis();
   const uint32_t cacheAgeMs = sampleValid_ ? nowMs - lastSampleAtMs_ : 0;
+  const uint32_t sampleRateHz = serviceIntervalUs_ > 0
+      ? (1000000UL + serviceIntervalUs_ / 2) / serviceIntervalUs_
+      : 0;
   String out = "{\"enabled\":";
   out += enabled_ ? "true" : "false";
   out += ",\"runtime_enabled\":";
@@ -156,7 +159,7 @@ String ImuManager::statusJson() const {
   out += ",\"sample_cached\":";
   out += sampleValid_ ? "true" : "false";
   out += ",\"sample_rate_hz\":";
-  out += sampleRateHz_;
+  out += sampleRateHz;
   out += ",\"cache_age_ms\":";
   out += cacheAgeMs;
   out += ",\"last_read_duration_us\":";

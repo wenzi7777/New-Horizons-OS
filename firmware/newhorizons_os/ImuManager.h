@@ -29,7 +29,6 @@ class ImuManager {
   uint32_t lastSampleAtUs_ = 0;
   uint32_t lastSampleAtMs_ = 0;
   uint32_t lastReadDurationUs_ = 0;
-  uint16_t sampleRateHz_ = 100;
   float sample_[kImuSampleFloats] = {0};
   bool sampleValid_ = false;
 };

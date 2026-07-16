@@ -64,7 +64,18 @@ VERSION=v0.5.4 firmware/scripts/build_arduino_release_gcu_v21_lts.sh
 
 ```bash
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
+
+# VD-CTL/R v1.0.F 2026.4
 firmware/scripts/flash_arduino_firmware.sh /dev/cu.usbserial-10
+
+# VD-CTL/R v2.3.D GCU LTS
+firmware/scripts/flash_arduino_firmware_gcu_v23d_lts.sh /dev/cu.usbserial-10
+
+# VD-CTL/R v2.2.C GCU LTS
+firmware/scripts/flash_arduino_firmware_gcu_v22c_lts.sh /dev/cu.usbserial-10
+
+# VD-CTL/R v2.1 GCU LTS
+firmware/scripts/flash_arduino_firmware_gcu_v21_lts.sh /dev/cu.usbserial-10
 ```
 
 Adjust the serial port after checking:
@@ -137,6 +148,7 @@ The manifest shape is JSON:
 ```bash
 python3 -m unittest discover -s tests -q
 arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB firmware/newhorizons_os
+arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "build.extra_flags=-DNHOS_BOARD_GCU_V23D_LTS" firmware/newhorizons_os
 arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "build.extra_flags=-DNHOS_BOARD_GCU_V22C_LTS" firmware/newhorizons_os
 arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "build.extra_flags=-DNHOS_BOARD_GCU_V21_LTS" firmware/newhorizons_os
 ```
