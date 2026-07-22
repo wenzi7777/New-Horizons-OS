@@ -11,7 +11,7 @@ void PacketBuilder::setDeviceUid(const uint8_t uid[6]) {
   memcpy(deviceUid_, uid, 6);
 }
 
-size_t PacketBuilder::build(const MatrixFrame& frame, uint8_t* out, size_t capacity, const float* imuData, const BatterySample* battery) {
+size_t PacketBuilder::build(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, const float* imuData, const BatterySample* battery) {
   const size_t matrixBytes = static_cast<size_t>(frame.pointCount) * sizeof(float);
   const size_t rawBytes = frame.hasRaw ? matrixBytes : 0;
   const size_t imuBytes = imuData ? kImuBaseFloatCount * sizeof(float) : 0;
@@ -36,14 +36,17 @@ size_t PacketBuilder::build(const MatrixFrame& frame, uint8_t* out, size_t capac
   if (battery) {
     flags |= kPacketFlagBattery;
   }
+  if (epochValid) {
+    flags |= kPacketFlagEpochValid;
+  }
 
   putU16(out, kPacketMagic);
   out[2] = kPacketVersion;
   out[3] = flags;
   memcpy(out + 4, deviceUid_, 6);
   putU32(out + 10, frame.seq);
-  putU32(out + 14, frame.timestampMs);
-  putU16(out + 18, static_cast<uint16_t>(payloadLen));
+  putU64(out + 14, epochValid ? epochMs : 0);
+  putU16(out + 22, static_cast<uint16_t>(payloadLen));
 
   size_t offset = kPacketHeaderLen;
   for (uint16_t i = 0; i < frame.pointCount; ++i) {
@@ -77,7 +80,7 @@ size_t PacketBuilder::build(const MatrixFrame& frame, uint8_t* out, size_t capac
   return offset;
 }
 
-size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imuData) {
+size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imuData) {
   const size_t expectedMatrixBytes = static_cast<size_t>(frame.pointCount) * sizeof(float);
   const size_t rawBytes = frame.hasRaw ? expectedMatrixBytes : 0;
   const size_t imuBytes = imuData ? kImuBaseFloatCount * sizeof(float) : 0;
@@ -100,11 +103,14 @@ size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint8_t*
   if (frame.hasRaw) {
     flags |= kPacketFlagRawAdc;
   }
+  if (epochValid) {
+    flags |= kPacketFlagEpochValid;
+  }
   out[3] = flags;
   memcpy(out + 4, deviceUid_, 6);
   putU32(out + 10, frame.seq);
-  putU32(out + 14, frame.timestampMs);
-  putU16(out + 18, static_cast<uint16_t>(payloadLen));
+  putU64(out + 14, epochValid ? epochMs : 0);
+  putU16(out + 22, static_cast<uint16_t>(payloadLen));
   size_t offset = kPacketHeaderLen + matrixPayloadBytes;
   if (frame.hasRaw) {
     for (uint16_t i = 0; i < frame.pointCount; ++i) {
@@ -127,18 +133,18 @@ size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint8_t*
   return totalLen;
 }
 
-size_t PacketBuilder::buildHeartbeat(uint32_t seq, uint32_t timestampMs, uint8_t* out, size_t capacity) {
+size_t PacketBuilder::buildHeartbeat(uint32_t seq, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity) {
   if (!out || capacity < kPacketHeaderLen) {
     return 0;
   }
 
   putU16(out, kPacketMagic);
   out[2] = kPacketVersion;
-  out[3] = kPacketFlagHeartbeat;
+  out[3] = kPacketFlagHeartbeat | (epochValid ? kPacketFlagEpochValid : 0);
   memcpy(out + 4, deviceUid_, 6);
   putU32(out + 10, seq);
-  putU32(out + 14, timestampMs);
-  putU16(out + 18, 0);
+  putU64(out + 14, epochValid ? epochMs : 0);
+  putU16(out + 22, 0);
   return kPacketHeaderLen;
 }
 
@@ -152,6 +158,12 @@ void PacketBuilder::putU32(uint8_t* out, uint32_t value) {
   out[1] = static_cast<uint8_t>((value >> 8) & 0xff);
   out[2] = static_cast<uint8_t>((value >> 16) & 0xff);
   out[3] = static_cast<uint8_t>((value >> 24) & 0xff);
+}
+
+void PacketBuilder::putU64(uint8_t* out, uint64_t value) {
+  for (int i = 0; i < 8; ++i) {
+    out[i] = static_cast<uint8_t>((value >> (8 * i)) & 0xff);
+  }
 }
 
 void PacketBuilder::putFloat(uint8_t* out, float value) {

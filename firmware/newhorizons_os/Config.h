@@ -9,7 +9,7 @@ namespace nhos {
 static constexpr char kProductName[] = "New Horizons OS Arduino";
 static constexpr char kProtocolName[] = "NHO/Arduino/1";
 static constexpr char kHardwareModel[] = NHOS_BOARD_NAME;
-static constexpr char kFirmwareVersion[] = "v0.11.2";
+static constexpr char kFirmwareVersion[] = "v0.11.3";
 
 static constexpr uint16_t kRows = NHOS_BOARD_ROWS;
 static constexpr uint16_t kCols = NHOS_BOARD_COLS;
@@ -21,14 +21,15 @@ static constexpr uint16_t kDiscoveryPort = 22346;
 static constexpr uint16_t kControlPort = 22345;
 
 static constexpr uint16_t kPacketMagic = 0xA55A;
-static constexpr uint8_t kPacketVersion = 3;
+static constexpr uint8_t kPacketVersion = 4;
 static constexpr uint8_t kPacketFlagImu = 0x01;
 static constexpr uint8_t kPacketFlagBattery = 0x02;
 static constexpr uint8_t kPacketFlagMag = 0x04;
 static constexpr uint8_t kPacketFlagRawAdc = 0x08;
+static constexpr uint8_t kPacketFlagEpochValid = 0x10;
 static constexpr uint8_t kPacketFlagHmac = 0x40;
 static constexpr uint8_t kPacketFlagHeartbeat = 0x80;
-static constexpr size_t kPacketHeaderLen = 20;
+static constexpr size_t kPacketHeaderLen = 24;
 static constexpr size_t kPacketHmacLen = 16;
 static constexpr size_t kMaxPacketBytes =
     kPacketHeaderLen +
@@ -38,6 +39,7 @@ static constexpr size_t kMaxPacketBytes =
     4 +
     kPacketHmacLen;
 static constexpr uint32_t kHeartbeatIntervalMs = 5000;
+static constexpr uint32_t kTimeSyncValidEpochS = 1600000000;  // ~2020-09-13; time() below this means "not yet synced"
 
 static constexpr uint16_t kDefaultTargetFps = 60;
 static constexpr uint16_t kMaxTargetFps = 120;

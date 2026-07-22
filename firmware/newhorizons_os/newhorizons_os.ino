@@ -20,6 +20,7 @@
 #include "PowerManager.h"
 #include "PowerStateManager.h"
 #include "Storage.h"
+#include "TimeSync.h"
 #include "WifiManager.h"
 
 namespace {
@@ -40,6 +41,7 @@ nhos::ImuManager imu;
 nhos::FindMeClient findme;
 nhos::ControlServer control;
 nhos::OtaManager ota;
+nhos::TimeSync timeSync;
 WiFiUDP streamUdp;
 
 uint8_t packetBuffer[
@@ -192,7 +194,9 @@ void scanAndStreamIfDue() {
 
   float imuSample[nhos::kImuSampleFloats] = {0};
   const bool imuSampleValid = imu.copyLatestSample(imuSample);
-  size_t len = packetBuilder.buildMatrixPacketHeader(frame, packetBuffer, sizeof(packetBuffer), matrixPayloadLen, imuSampleValid ? imuSample : nullptr);
+  const bool epochValid = timeSync.hasSynced();
+  const uint64_t epochMs = epochValid ? timeSync.nowEpochMs() : 0;
+  size_t len = packetBuilder.buildMatrixPacketHeader(frame, epochMs, epochValid, packetBuffer, sizeof(packetBuffer), matrixPayloadLen, imuSampleValid ? imuSample : nullptr);
   if (!len) {
     scanner.recordUdpSend(false, 0);
     return;
@@ -244,7 +248,9 @@ void sendHeartbeatIfDue() {
     return;
   }
   lastHeartbeatAttemptMs = now;
-  size_t len = packetBuilder.buildHeartbeat(heartbeatSeq++, now, packetBuffer, sizeof(packetBuffer));
+  const bool epochValid = timeSync.hasSynced();
+  const uint64_t epochMs = epochValid ? timeSync.nowEpochMs() : 0;
+  size_t len = packetBuilder.buildHeartbeat(heartbeatSeq++, epochMs, epochValid, packetBuffer, sizeof(packetBuffer));
   if (!len) {
     findme.recordHeartbeat(now, "heartbeat_encode_failed");
     return;
@@ -401,6 +407,9 @@ void setup() {
   }
   logBoot(String("boot_stage=wifi_ready connected=") + (wifiConnected ? "true" : "false") +
           " setup_active=" + (wifi.setupActive() ? "true" : "false"));
+  if (wifiConnected) {
+    timeSync.begin();
+  }
   uint8_t uid[6] = {0};
   wifi.macBytes(uid);
   packetBuilder.setDeviceUid(uid);
@@ -433,6 +442,9 @@ void loop() {
     control.service();
     control.serviceUdpCommand(streamUdp);
     imu.service(micros());
+    if (wifi.isConnected()) {
+      timeSync.begin();  // no-op after first successful call; covers WiFi connecting after boot
+    }
     sendHeartbeatIfDue();
     updateLedState();
     servicePowerTransition();
