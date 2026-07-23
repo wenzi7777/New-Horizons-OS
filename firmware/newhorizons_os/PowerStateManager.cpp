@@ -19,7 +19,12 @@ void PowerStateManager::service(uint32_t nowMs, bool chargerDetected, ChargeStat
   chargeState_ = chargeState;
 
 #if NHOS_BOARD_HAS_BUTTON
-  const bool pressed = digitalRead(kActionButtonPin) == LOW;
+  const bool rawPressed = digitalRead(kActionButtonPin) == LOW;
+  if (rawPressed != rawButtonPressed_) {
+    rawButtonPressed_ = rawPressed;
+    rawButtonChangedAtMs_ = nowMs;
+  }
+  const bool pressed = rawButtonPressed_ && (nowMs - rawButtonChangedAtMs_ >= kDebounceMs);
   if (pressed && !buttonDown_) {
     buttonDown_ = true;
     buttonPressedAtMs_ = nowMs;

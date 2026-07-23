@@ -20,6 +20,9 @@ void ImuManager::begin(bool enabled) {
   lastSampleAtUs_ = 0;
   lastSampleAtMs_ = 0;
   lastReadDurationUs_ = 0;
+  sampleWindowStartMs_ = 0;
+  sampleWindowCount_ = 0;
+  measuredSampleRateHz_ = 0.0f;
   heapBefore_ = ESP.getFreeHeap();
   if (!enabled_) {
     heapAfter_ = ESP.getFreeHeap();
@@ -115,6 +118,17 @@ void ImuManager::service(uint32_t nowUs) {
   lastSampleAtUs_ = nowUs;
   lastSampleAtMs_ = millis();
   lastError_ = "";
+
+  if (!sampleWindowStartMs_) {
+    sampleWindowStartMs_ = lastSampleAtMs_;
+  }
+  ++sampleWindowCount_;
+  const uint32_t windowElapsedMs = lastSampleAtMs_ - sampleWindowStartMs_;
+  if (windowElapsedMs >= 1000) {
+    measuredSampleRateHz_ = sampleWindowCount_ * 1000.0f / windowElapsedMs;
+    sampleWindowCount_ = 0;
+    sampleWindowStartMs_ = lastSampleAtMs_;
+  }
 }
 
 bool ImuManager::copyLatestSample(float out[kImuSampleFloats]) const {
@@ -160,6 +174,8 @@ String ImuManager::statusJson() const {
   out += sampleValid_ ? "true" : "false";
   out += ",\"sample_rate_hz\":";
   out += sampleRateHz;
+  out += ",\"measured_rate_hz\":";
+  out += measuredSampleRateHz_;
   out += ",\"cache_age_ms\":";
   out += cacheAgeMs;
   out += ",\"last_read_duration_us\":";

@@ -38,9 +38,10 @@ class PowerStateManager {
   String statusJson() const;
 
  private:
-  static constexpr uint32_t kLongPressMs = 1500;
+  static constexpr uint32_t kLongPressMs = 3000;
   static constexpr uint32_t kShortPressMinMs = 50;
   static constexpr uint32_t kShortPressMaxMs = 500;
+  static constexpr uint32_t kDebounceMs = 30;
   static constexpr uint64_t kSoftOffBatterySleepUs = 5000000ULL;
   static constexpr uint64_t kSoftOffChargingSleepUs = 2000000ULL;
   static constexpr uint64_t kButtonTrackSleepUs = 50000ULL;
@@ -61,6 +62,8 @@ class PowerStateManager {
   bool buttonDown_ = false;
   uint32_t buttonPressedAtMs_ = 0;
   bool longPressHandled_ = false;
+  bool rawButtonPressed_ = false;
+  uint32_t rawButtonChangedAtMs_ = 0;
   String softOffReason_ = "";
   String wakeSource_ = "boot";
   PowerTransitionPhase transitionPhase_ = PowerTransitionPhase::None;
