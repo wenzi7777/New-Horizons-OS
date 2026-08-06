@@ -15,3 +15,10 @@ CXX="${CXX:-c++}"
   -o "$BUILD_DIR/test_esp_now_frame"
 
 "$BUILD_DIR/test_esp_now_frame"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  "$SCRIPT_DIR/test_ota_chunk_codec.cpp" \
+  "$FIRMWARE_DIR/OtaChunkCodec.cpp" \
+  -o "$BUILD_DIR/test_ota_chunk_codec"
+
+"$BUILD_DIR/test_ota_chunk_codec"

@@ -10,6 +10,7 @@
 #include "ControlServer.h"
 #include "DeviceConfig.h"
 #include "DisplayManager.h"
+#include "EspNowOtaReceiver.h"
 #include "EspNowPairing.h"
 #include "EspNowStreamTransport.h"
 #include "ExternalLedController.h"
@@ -51,6 +52,7 @@ WiFiUDP streamUdp;
 nhos::UdpStreamTransport udpTransport;
 nhos::EspNowStreamTransport espNowTransport;
 nhos::EspNowPairing espNowPairing;
+nhos::EspNowOtaReceiver espNowOtaReceiver;
 nhos::StreamTransport* activeTransport = nullptr;
 bool espNowMode = false;
 
@@ -500,6 +502,7 @@ void setup() {
     if (!espNowPairing.begin(storage, deviceConfig, control, uid)) {
       logBoot("espnow_pairing_begin_failed");
     }
+    espNowPairing.setOtaReceiver(&espNowOtaReceiver);
     esp_now_register_recv_cb(onEspNowRecv);
     espNowTransport.attach(espNowPairing);
     activeTransport = &espNowTransport;
@@ -549,6 +552,7 @@ void loop() {
     sectionStartUs = micros();
     if (espNowMode) {
       espNowPairing.service();
+      espNowOtaReceiver.service();
       espNowTransport.service();
     } else {
       wifi.service();

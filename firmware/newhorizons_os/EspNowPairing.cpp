@@ -5,10 +5,18 @@
 #include <esp_wifi.h>
 
 #include "ControlServer.h"
+#include "EspNowOtaReceiver.h"
 
 namespace nhos {
 
 namespace {
+// Offset of the frame-type byte within an EspNowFrame fragment header --
+// MUST match New-Horizons-Hub/newhorizons_hub/EspNowHubManager.cpp's own
+// kEspNowFragTypeOffset. Peeked before feeding a fragment to a reassembler
+// so control/OTA/hub-request traffic never shares one (see
+// EspNowPairing.h's otaReassembler_/hubRequestReassembler_ comment).
+constexpr size_t kEspNowFragTypeOffset = 2;
+
 // Mirrors EspNowStreamTransport.cpp's kSendWindowUs -- same reasoning
 // (spread a multi-fragment burst out so esp_now_send()'s internal queue
 // isn't overwhelmed, see EspNowPairing.h's responseFrags_ comment).
@@ -46,7 +54,10 @@ bool parseMac(const String& text, uint8_t out[6]) {
 
 }  // namespace
 
-EspNowPairing::EspNowPairing() : controlReassembler_(controlScratch_, sizeof(controlScratch_)) {}
+EspNowPairing::EspNowPairing()
+    : controlReassembler_(controlScratch_, sizeof(controlScratch_)),
+      otaReassembler_(otaScratch_, sizeof(otaScratch_)),
+      hubRequestReassembler_(hubRequestScratch_, sizeof(hubRequestScratch_)) {}
 
 bool EspNowPairing::parseHubMacFromConfig() {
   const String& mac = deviceConfig_->data().transport.hubMac;
@@ -163,10 +174,26 @@ void EspNowPairing::onPaired() {
     deviceConfig_->save(*storage_);
   }
   Serial.println("[espnow_pairing] paired");
+  if (otaReceiver_ != nullptr) {
+    otaReceiver_->begin(*deviceConfig_, hubMac_);
+    otaReceiver_->startBootCheck();
+  }
 }
 
 void EspNowPairing::service() {
   serviceCommand();
+  if (hubRequestFrameReady_) {
+    hubRequestFrameReady_ = false;
+    if (otaReceiver_ != nullptr) {
+      otaReceiver_->handleHubRequestFrame(hubRequestFrameBuffer_, hubRequestFrameBufferLen_);
+    }
+  }
+  if (otaFrameReady_) {
+    otaFrameReady_ = false;
+    if (otaReceiver_ != nullptr) {
+      otaReceiver_->handleOtaChunkFrame(otaFrameBuffer_, otaFrameBufferLen_);
+    }
+  }
   if (discovering_) {
     serviceDiscovery();
     return;
@@ -220,7 +247,7 @@ void EspNowPairing::handleEspNowRecv(const uint8_t mac[6], const uint8_t* data, 
     return;
   }
   if (paired_) {
-    handleControlFragment(data, len);
+    handleFragmentedPacket(data, len);
   }
 }
 
@@ -270,10 +297,37 @@ void EspNowPairing::onHubDiscovered(const uint8_t mac[6]) {
   ESP.restart();
 }
 
-void EspNowPairing::handleControlFragment(const uint8_t* data, size_t len) {
-  // Runs on the ESP-NOW/WiFi driver task (small stack) -- keep this to
-  // reassembly + a memcpy only. See pendingCommandBuffer_'s comment for
-  // why actual command processing is deferred to serviceCommand().
+void EspNowPairing::handleFragmentedPacket(const uint8_t* data, size_t len) {
+  // Runs on the ESP-NOW/WiFi driver task (small stack) -- keep every branch
+  // here to reassembly + a memcpy only. Peek the frame-type byte before
+  // feeding any reassembler, exactly like EspNowHubManager.cpp's own
+  // 3-way routing -- see otaReassembler_/hubRequestReassembler_'s comment
+  // in the header for why these can never share controlReassembler_.
+  const uint8_t frameTypeByte =
+      len > kEspNowFragTypeOffset ? data[kEspNowFragTypeOffset] : kEspNowFragTypeData;
+
+  if (frameTypeByte == kEspNowFragTypeOta) {
+    ReassembledFrame frame;
+    if (!otaReassembler_.onFragment(data, len, &frame)) return;
+    if (frame.len > sizeof(otaFrameBuffer_)) return;
+    memcpy(otaFrameBuffer_, frame.data, frame.len);
+    otaFrameBufferLen_ = frame.len;
+    otaFrameReady_ = true;
+    return;
+  }
+  if (frameTypeByte == kEspNowFragTypeHubRequest) {
+    ReassembledFrame frame;
+    if (!hubRequestReassembler_.onFragment(data, len, &frame)) return;
+    if (frame.len > sizeof(hubRequestFrameBuffer_)) return;
+    memcpy(hubRequestFrameBuffer_, frame.data, frame.len);
+    hubRequestFrameBufferLen_ = frame.len;
+    hubRequestFrameReady_ = true;
+    return;
+  }
+
+  // Default: kEspNowFragTypeControl (existing behavior, unchanged). See
+  // pendingCommandBuffer_'s comment for why actual command processing is
+  // deferred to serviceCommand().
   ReassembledFrame frame;
   if (!controlReassembler_.onFragment(data, len, &frame)) {
     return;

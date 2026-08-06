@@ -33,6 +33,15 @@
 namespace nhos {
 
 class ControlServer;
+class EspNowOtaReceiver;
+
+// Scratch size for the device-initiated hub-request reassembler
+// (fetch_manifest/ota_relay_start replies) -- MUST match
+// New-Horizons-Hub/newhorizons_hub/EspNowHubManager.h's own
+// kHubRequestBufferBytes. Deliberately much smaller than the OTA/control
+// reassemblers' kEspNowMaxFragCount*kEspNowFragMaxPayload (3840B), since
+// these payloads are small JSON asks/replies, not firmware chunks.
+constexpr size_t kEspNowHubRequestScratchBytes = 1024;
 
 // MUST match firmware/newhorizons_hub/EspNowHubManager.h's
 // kHubHelloMagic/kHubPairedMagic/kHubPollMagic exactly -- duplicated, not
@@ -86,12 +95,19 @@ class EspNowPairing {
   // clears the flag) at most once per POLL received.
   bool consumePollPending();
 
+  // Wired once from newhorizons_os.ino's setup(), before the recv callback
+  // is registered -- see EspNowOtaReceiver.h. onPaired() hands off the
+  // boot-time OTA manifest check to it; service() dispatches completed
+  // kEspNowFragTypeOta/kEspNowFragTypeHubRequest frames to it. Optional --
+  // left null, this device simply never attempts Direct-mode OTA.
+  void setOtaReceiver(EspNowOtaReceiver* receiver) { otaReceiver_ = receiver; }
+
  private:
   void buildScanChannelList();
   void startScanIfNeeded();
   void sendHello();
   void onPaired();
-  void handleControlFragment(const uint8_t* data, size_t len);
+  void handleFragmentedPacket(const uint8_t* data, size_t len);
   void serviceCommand();
   bool parseHubMacFromConfig();
   void serviceDiscovery();
@@ -124,6 +140,34 @@ class EspNowPairing {
 
   uint8_t controlScratch_[kEspNowMaxFragCount * kEspNowFragMaxPayload];
   EspNowReassembler controlReassembler_;
+
+  // Separate reassembler + buffer for kEspNowFragTypeOta frames (Hub-pushed
+  // firmware chunks) -- mirrors EspNowHubManager.h's DeviceSlot rationale
+  // for never sharing a reassembler across frame types (a new frame's
+  // first fragment abandons whatever's in flight, which would otherwise
+  // corrupt an in-progress OTA chunk if it interleaved with a control
+  // command). Copied out of the reassembler's own scratch (only valid
+  // until the next onFragment() call) into otaFrameBuffer_ so service()
+  // can process it after the recv callback returns -- same
+  // buffer-in-callback/process-in-loop split as pendingCommandBuffer_
+  // below (Update.write() + SHA256 are far too much work for the small
+  // ESP-NOW/WiFi driver task stack).
+  uint8_t otaScratch_[kEspNowMaxFragCount * kEspNowFragMaxPayload];
+  EspNowReassembler otaReassembler_;
+  uint8_t otaFrameBuffer_[kEspNowMaxFragCount * kEspNowFragMaxPayload];
+  size_t otaFrameBufferLen_ = 0;
+  volatile bool otaFrameReady_ = false;
+
+  // Same pattern again, for device-initiated kEspNowFragTypeHubRequest
+  // replies (fetch_manifest/ota_relay_start). Smaller buffer -- see
+  // kEspNowHubRequestScratchBytes.
+  uint8_t hubRequestScratch_[kEspNowHubRequestScratchBytes];
+  EspNowReassembler hubRequestReassembler_;
+  uint8_t hubRequestFrameBuffer_[kEspNowHubRequestScratchBytes];
+  size_t hubRequestFrameBufferLen_ = 0;
+  volatile bool hubRequestFrameReady_ = false;
+
+  EspNowOtaReceiver* otaReceiver_ = nullptr;
 
   // A fully-reassembled control command is copied here and only handed to
   // ControlServer::serviceEspNowCommand() from service() (main-loop

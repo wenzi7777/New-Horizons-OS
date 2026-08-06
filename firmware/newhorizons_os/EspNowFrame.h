@@ -37,6 +37,21 @@ static constexpr uint8_t kEspNowFragTypeData = 0x00;
 // of this envelope; the frame layer only tags the type so those messages
 // can be told apart from data frames.
 static constexpr uint8_t kEspNowFragTypeControl = 0x01;
+// Hub-pushed OTA firmware chunk (EspNowOtaRelay -> EspNowOtaReceiver).
+// Deliberately its own type, not reused kEspNowFragTypeData/Control --
+// see EspNowHubManager.h's DeviceSlot comment on why data/control traffic
+// already needs separate EspNowReassembler instances (a shared
+// reassembler lets one stream's fragments abandon another's mid-flight);
+// giving OTA chunks their own type+reassembler avoids reintroducing that
+// exact bug a third time.
+static constexpr uint8_t kEspNowFragTypeOta = 0x02;
+// Device-initiated ask to the Hub (fetch_manifest / ota_relay_start) and
+// the Hub's reply -- the mirror-image direction of kEspNowFragTypeControl
+// (which only ever carries Hub-initiated commands + device replies to
+// them; EspNowCommandDispatcher::handleControlResponse() silently drops
+// anything that doesn't match a command it dispatched). Small, low-rate
+// traffic (JSON manifests/relay-start acks), not sized like OTA chunks.
+static constexpr uint8_t kEspNowFragTypeHubRequest = 0x03;
 
 // Upper bound on fragments per frame. 16 * kEspNowFragMaxPayload (240) =
 // 3840B, well above the current worst-case ~1884B frame, leaving headroom
