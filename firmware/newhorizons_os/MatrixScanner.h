@@ -1,10 +1,10 @@
 #pragma once
 
 #include <Arduino.h>
-#include <WiFiUdp.h>
 
 #include "Config.h"
 #include "DeviceConfig.h"
+#include "StreamTransport.h"
 
 namespace nhos {
 
@@ -68,7 +68,7 @@ class MatrixScanner {
   bool captureAllAverages(float* outValues, size_t count, uint32_t durationMs);
   bool shouldSendFrame(const MatrixFrame& frame) const;
   bool enqueuePacket(const uint8_t* data, size_t len, uint32_t seq, uint32_t timestampMs, uint8_t flags);
-  bool sendQueuedPacket(WiFiUDP& udp, const String& host, uint16_t port);
+  bool sendQueuedPacket(StreamTransport& transport);
   void recordUdpSend(bool ok, uint32_t durationUs);
   ScanHealth health() const;
   String healthJson() const;

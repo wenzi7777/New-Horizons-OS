@@ -1,0 +1,138 @@
+#pragma once
+
+// Device-side ESP-NOW pairing + command handling. Counterpart to
+// firmware/newhorizons_hub/EspNowHubManager.h -- see that file (and
+// ~/.claude/plans/linked-strolling-puppy.md) for the full HELLO/PAIRED/POLL
+// protocol design and why it's event-driven rather than a fixed schedule.
+//
+// This device doesn't discover an arbitrary Hub -- it targets a specific,
+// already-known Hub MAC (set via DeviceConfig.transport.hubMac, e.g. by
+// the `set_transport` command from New Horizons Direct's "convert to
+// local pairing" flow). What it *doesn't* know is which 2.4GHz channel
+// that Hub is currently on, since the Hub's channel follows whatever its
+// own WiFi STA uplink is associated on (see EspNowHubManager.h) -- so this
+// scans a small set of candidate channels while unpaired.
+
+#include <Arduino.h>
+
+#include "Config.h"
+#include "DeviceConfig.h"
+#include "EspNowFrame.h"
+#include "Storage.h"
+
+namespace nhos {
+
+class ControlServer;
+
+// MUST match firmware/newhorizons_hub/EspNowHubManager.h's
+// kHubHelloMagic/kHubPairedMagic/kHubPollMagic exactly -- duplicated, not
+// shared, since the Hub and device are separate Arduino sketch trees (see
+// newhorizons_hub/README.md's "shared files" note for the general pattern
+// this project uses instead of symlinks).
+constexpr uint8_t kEspNowHelloMagic = 0xE1;
+constexpr uint8_t kEspNowPollMagic = 0xE2;
+constexpr uint8_t kEspNowPairedMagic = 0xE3;
+
+// All valid 2.4GHz channels (1-13, the Japan/EU/most-regions range --
+// channels 12-13 are unused in the US but harmlessly scanned there too).
+// Real-hardware testing found a university AP that auto-selected channel
+// 9 -- assuming APs only use the "standard" non-overlapping 1/6/11 trio
+// (an earlier version of this scan list) missed it entirely, so this
+// scans everything. DeviceConfig.transport.lastKnownChannel (if non-zero)
+// is tried first, ahead of this list, so a previously-paired device
+// doesn't pay the full scan cost on every reconnect.
+constexpr uint8_t kEspNowScanChannels[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13};
+constexpr uint8_t kEspNowMaxScanChannels = 14;  // lastKnownChannel + the 13 above
+constexpr uint32_t kEspNowChannelDwellMs = 400;
+constexpr uint32_t kEspNowHelloRetryMs = 1500;
+
+class EspNowPairing {
+ public:
+  EspNowPairing();
+
+  bool begin(Storage& storage, DeviceConfig& deviceConfig, ControlServer& control,
+             const uint8_t uid[6]);
+
+  // Call every loop() iteration.
+  void service();
+
+  // Wired to the global esp_now_recv callback in newhorizons_os.ino.
+  void handleEspNowRecv(const uint8_t mac[6], const uint8_t* data, size_t len);
+
+  bool hasHub() const { return paired_; }
+  const uint8_t* hubMac() const { return hubMac_; }
+
+  // EspNowStreamTransport calls this once per loop(); returns true (and
+  // clears the flag) at most once per POLL received.
+  bool consumePollPending();
+
+ private:
+  void buildScanChannelList();
+  void startScanIfNeeded();
+  void sendHello();
+  void onPaired();
+  void handleControlFragment(const uint8_t* data, size_t len);
+  void serviceCommand();
+  bool parseHubMacFromConfig();
+
+  Storage* storage_ = nullptr;
+  DeviceConfig* deviceConfig_ = nullptr;
+  ControlServer* control_ = nullptr;
+  uint8_t uid_[6] = {0};
+
+  uint8_t hubMac_[6] = {0};
+  bool hubMacValid_ = false;
+  bool paired_ = false;
+
+  uint8_t scanChannels_[kEspNowMaxScanChannels] = {0};
+  uint8_t scanChannelCount_ = 0;
+  uint8_t scanIndex_ = 0;
+  uint32_t lastChannelSwitchMs_ = 0;
+  uint32_t lastHelloMs_ = 0;
+
+  volatile bool pollPending_ = false;
+
+  uint8_t controlScratch_[kEspNowMaxFragCount * kEspNowFragMaxPayload];
+  EspNowReassembler controlReassembler_;
+
+  // A fully-reassembled control command is copied here and only handed to
+  // ControlServer::serviceEspNowCommand() from service() (main-loop
+  // context). Found on real hardware: calling serviceEspNowCommand()
+  // directly from handleControlFragment() -- which runs on the ESP-NOW/
+  // WiFi driver task, not the main Arduino task -- overflowed that task's
+  // (much smaller) stack while building a large response like "status",
+  // crashing with a stack-canary panic. Mirrors the buffer-in-callback/
+  // process-in-loop split firmware/newhorizons_hub/EspNowHubManager.h
+  // already uses for the same reason.
+  uint8_t pendingCommandBuffer_[kEspNowMaxFragCount * kEspNowFragMaxPayload];
+  size_t pendingCommandLen_ = 0;
+  volatile bool commandPending_ = false;
+
+  // Response-side fragment buffer for serviceCommand(). A class member
+  // rather than a function-local array on purpose: found on real
+  // hardware that a ~4KB local EspNowFragment[kEspNowMaxFragCount] array,
+  // reserved in serviceCommand()'s stack frame for the whole duration of
+  // the (much deeper, String-heavy) processCommand() call it wraps, was
+  // enough extra stack pressure to overflow the main loop task's stack
+  // while building a large response like "status" -- manifesting as heap
+  // corruption inside String::reserve()'s realloc() rather than tripping
+  // the stack canary (which is why it looked like a different, unrelated
+  // crash at first). Static storage removes that stack cost entirely.
+  //
+  // Sending is paced across service() calls (same reason
+  // EspNowStreamTransport.cpp paces its own fragment bursts): found on
+  // real hardware that firing all of a multi-fragment response's
+  // esp_now_send() calls back-to-back in one go gets most of them
+  // silently dropped (ESP_ERR_ESPNOW_NO_MEM) for anything bigger than a
+  // couple of fragments, e.g. the ~11-fragment "status" response -- the
+  // Hub never saw a single fragment from it. A single-fragment response
+  // (e.g. "reboot"'s tiny ack) happens to send within one service() call
+  // regardless, which is why this wasn't caught until "status" was tested.
+  EspNowFragment responseFrags_[kEspNowMaxFragCount];
+  uint8_t responseFragCount_ = 0;
+  uint8_t responseFragsSent_ = 0;
+  uint32_t responseFragIntervalUs_ = 0;
+  uint32_t responseNextFragDueUs_ = 0;
+};
+
+}  // namespace nhos

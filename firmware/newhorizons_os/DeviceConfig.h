@@ -65,6 +65,19 @@ struct OtaConfig {
   String manifestUrl = kDefaultUpdateManifestUrl;
 };
 
+// New Horizons Direct: which transport StreamTransport should use.
+// Defaults to "wifi_udp" so existing lab devices are unaffected unless
+// explicitly switched (via the `set_transport` command or local config
+// edit). `hubMac` is only meaningful in "espnow" mode ("AA:BB:CC:DD:EE:FF"
+// format). `lastKnownChannel` is a fast-reconnect hint for EspNowPairing's
+// channel scan (0 = unknown, scan from scratch) -- the Hub's own WiFi-STA
+// channel can change between boots, so this is a hint, not a guarantee.
+struct TransportConfig {
+  String mode = "wifi_udp";
+  String hubMac = "";
+  uint8_t lastKnownChannel = 0;
+};
+
 struct DeviceConfigData {
   uint8_t schemaVersion = 1;
   MatrixLayoutConfig matrixLayout;
@@ -77,6 +90,7 @@ struct DeviceConfigData {
   OtaConfig ota;
   ExternalLedConfig externalLed;
   OledConfig oled;
+  TransportConfig transport;
 };
 
 class DeviceConfig {
@@ -97,12 +111,15 @@ class DeviceConfig {
   bool setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl);
   bool setExternalLed(const String& mode, const String& preset, float brightness, const String& color);
   bool setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast, uint8_t rotation);
+  bool setTransport(const String& mode, const String& hubMac);
+  void setTransportLastKnownChannel(uint8_t channel);
 
   String statusJson() const;
   String filterJson() const;
   String loggingJson() const;
   String otaJson() const;
   String streamBufferJson() const;
+  String transportJson() const;
   String configJson() const;
 
   static bool validLogLevel(const String& level);
@@ -111,6 +128,8 @@ class DeviceConfig {
   static bool validExternalLedMode(const String& mode);
   static String canonicalExternalLedPreset(const String& preset);
   static bool validOledMode(const String& mode);
+  static bool validTransportMode(const String& mode);
+  static bool validHubMac(const String& mac);
 
  private:
   void setDefaults();

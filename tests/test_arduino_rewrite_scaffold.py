@@ -19,7 +19,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("firmware/newhorizons_os/", readme)
         self.assertIn("firmware/scripts/", readme)
         self.assertIn("hardware/vd-ctl-r-v1.0f/", readme)
-        self.assertIn("firmware/build/", gitignore)
+        self.assertIn("firmware/build*/", gitignore)
         self.assertNotIn("firmware/arduino/newhorizons_os", readme)
 
     def test_required_arduino_modules_exist(self):

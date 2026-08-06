@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFiUdp.h>
 #include <Wire.h>
+#include <esp_now.h>
 
 #include "BoardPins.h"
 #include "BootModeManager.h"
@@ -9,6 +10,8 @@
 #include "ControlServer.h"
 #include "DeviceConfig.h"
 #include "DisplayManager.h"
+#include "EspNowPairing.h"
+#include "EspNowStreamTransport.h"
 #include "ExternalLedController.h"
 #include "FindMeClient.h"
 #include "ImuManager.h"
@@ -19,8 +22,10 @@
 #include "PowerAnimation.h"
 #include "PowerManager.h"
 #include "PowerStateManager.h"
+#include "StreamTransport.h"
 #include "Storage.h"
 #include "TimeSync.h"
+#include "UdpStreamTransport.h"
 #include "WifiManager.h"
 
 namespace {
@@ -43,6 +48,15 @@ nhos::ControlServer control;
 nhos::OtaManager ota;
 nhos::TimeSync timeSync;
 WiFiUDP streamUdp;
+nhos::UdpStreamTransport udpTransport;
+nhos::EspNowStreamTransport espNowTransport;
+nhos::EspNowPairing espNowPairing;
+nhos::StreamTransport* activeTransport = nullptr;
+bool espNowMode = false;
+
+void onEspNowRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
+  espNowPairing.handleEspNowRecv(info->src_addr, data, static_cast<size_t>(len));
+}
 
 uint8_t packetBuffer[
     nhos::kMaxPacketBytes
@@ -229,8 +243,18 @@ void servicePowerState() {
   }
 }
 
+// WiFi/UDP mode gates streaming on wifi.isConnected(); ESP-NOW mode has no
+// AP association to wait for at all (readiness -- i.e. "paired with a
+// Hub" -- is checked per-send by StreamTransport::ready(), not here).
+bool streamingGateOk() {
+  if (control.maintenanceMode()) {
+    return false;
+  }
+  return espNowMode || wifi.isConnected();
+}
+
 void scanAndStreamIfDue() {
-  if (!wifi.isConnected() || control.maintenanceMode()) {
+  if (!streamingGateOk()) {
     return;
   }
   if (!scanner.scanDue()) {
@@ -255,42 +279,29 @@ void scanAndStreamIfDue() {
     scanner.recordUdpSend(false, 0);
     return;
   }
-  const String* host = &control.streamHost();
-  uint16_t port = control.streamPort();
-  if (findme.hasGateway()) {
-    host = &findme.streamHost();
-    port = findme.streamPort();
-  }
-  if (host->isEmpty()) {
-    return;
-  }
   if (scanner.streamBufferEnabled()) {
     if (!scanner.enqueuePacket(packetBuffer, len, frame.seq, frame.timestampMs, packetBuffer[3])) {
       scanner.recordUdpSend(false, 0);
     }
     return;
   }
+  // Matches the original UDP-only code's behavior of not touching
+  // recordUdpSend() at all when there's nowhere to send yet (no
+  // discovered/configured host in wifi_udp mode; not yet paired in
+  // espnow mode) -- see StreamTransport::ready()'s doc comment.
+  if (!activeTransport->ready()) {
+    return;
+  }
   const uint32_t udpStartUs = micros();
-  streamUdp.beginPacket(host->c_str(), port);
-  streamUdp.write(packetBuffer, len);
-  const bool sent = streamUdp.endPacket() == 1;
+  const bool sent = activeTransport->sendFrame(packetBuffer, len);
   scanner.recordUdpSend(sent, micros() - udpStartUs);
 }
 
 void sendQueuedPacketIfAny() {
-  if (!wifi.isConnected() || control.maintenanceMode() || !scanner.streamBufferEnabled()) {
+  if (!streamingGateOk() || !scanner.streamBufferEnabled()) {
     return;
   }
-  const String* host = &control.streamHost();
-  uint16_t port = control.streamPort();
-  if (findme.hasGateway()) {
-    host = &findme.streamHost();
-    port = findme.streamPort();
-  }
-  if (host->isEmpty()) {
-    return;
-  }
-  scanner.sendQueuedPacket(streamUdp, *host, port);
+  scanner.sendQueuedPacket(*activeTransport);
 }
 
 void sendHeartbeatIfDue() {
@@ -455,22 +466,48 @@ void setup() {
     logBoot("scan_task_deferred maintenance_mode=true");
   }
 
-  bool wifiConnected = wifi.begin(storage, bootMode.wifiSetupRequested());
-  if (wifiConnected) {
-    bootMode.markWifiConnected();
-  }
-  logBoot(String("boot_stage=wifi_ready connected=") + (wifiConnected ? "true" : "false") +
-          " setup_active=" + (wifi.setupActive() ? "true" : "false"));
-  if (wifiConnected) {
-    timeSync.begin();
-  }
+  // esp_read_mac() reads straight from eFuse, unlike WiFi.macAddress()
+  // (observed unreliable pre-esp_wifi_start() during New Horizons Direct
+  // spike testing) -- safe to call before any WiFi/ESP-NOW init below.
   uint8_t uid[6] = {0};
   wifi.macBytes(uid);
   packetBuilder.setDeviceUid(uid);
-  findme.begin(storage, wifi, uid);
-  logBoot("findme_started");
-  streamUdp.begin(nhos::kUdpStreamPort);
-  logBoot(String("udp_stream_started port=") + String(nhos::kUdpStreamPort));
+
+  bool wifiConnected = false;
+  espNowMode = deviceConfig.data().transport.mode == "espnow";
+  if (espNowMode) {
+    // ESP-NOW doesn't join a WiFi AP at all -- just needs the radio
+    // driver initialized (see EspNowPairing.h for why the channel itself
+    // isn't fixed here). FindMe/UDP streaming/heartbeat are meaningless
+    // in this mode and are skipped entirely, not adapted.
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    logBoot("boot_stage=wifi_skipped transport=espnow");
+    if (!espNowPairing.begin(storage, deviceConfig, control, uid)) {
+      logBoot("espnow_pairing_begin_failed");
+    }
+    esp_now_register_recv_cb(onEspNowRecv);
+    espNowTransport.attach(espNowPairing);
+    activeTransport = &espNowTransport;
+    logBoot("boot_stage=espnow_pairing_ready");
+  } else {
+    wifiConnected = wifi.begin(storage, bootMode.wifiSetupRequested());
+    if (wifiConnected) {
+      bootMode.markWifiConnected();
+    }
+    logBoot(String("boot_stage=wifi_ready connected=") + (wifiConnected ? "true" : "false") +
+            " setup_active=" + (wifi.setupActive() ? "true" : "false"));
+    if (wifiConnected) {
+      timeSync.begin();
+    }
+    findme.begin(storage, wifi, uid);
+    logBoot("findme_started");
+    streamUdp.begin(nhos::kUdpStreamPort);
+    udpTransport.begin();
+    udpTransport.attach(control, findme);
+    activeTransport = &udpTransport;
+    logBoot(String("udp_stream_started port=") + String(nhos::kUdpStreamPort));
+  }
   ota.begin(storage);
   logBoot("boot_stage=ota_ready");
   serviceAutoOta(wifiConnected);
@@ -495,27 +532,38 @@ void loop() {
     loopProfile.scanUs += micros() - sectionStartUs;
 
     sectionStartUs = micros();
-    wifi.service();
+    if (espNowMode) {
+      espNowPairing.service();
+      espNowTransport.service();
+    } else {
+      wifi.service();
+    }
     loopProfile.wifiUs += micros() - sectionStartUs;
 
-    findme.setModeName(bootMode.modeName());
-    sectionStartUs = micros();
-    findme.service();
-    loopProfile.findmeUs += micros() - sectionStartUs;
+    if (!espNowMode) {
+      findme.setModeName(bootMode.modeName());
+      sectionStartUs = micros();
+      findme.service();
+      loopProfile.findmeUs += micros() - sectionStartUs;
+    }
 
     sectionStartUs = micros();
     control.service();
-    control.serviceUdpCommand(streamUdp);
+    if (!espNowMode) {
+      control.serviceUdpCommand(streamUdp);
+    }
     loopProfile.controlUs += micros() - sectionStartUs;
 
     sectionStartUs = micros();
     imu.service(micros());
     loopProfile.imuUs += micros() - sectionStartUs;
 
-    if (wifi.isConnected()) {
-      timeSync.begin();  // no-op after first successful call; covers WiFi connecting after boot
+    if (!espNowMode) {
+      if (wifi.isConnected()) {
+        timeSync.begin();  // no-op after first successful call; covers WiFi connecting after boot
+      }
+      sendHeartbeatIfDue();
     }
-    sendHeartbeatIfDue();
 
     sectionStartUs = micros();
     updateLedState();

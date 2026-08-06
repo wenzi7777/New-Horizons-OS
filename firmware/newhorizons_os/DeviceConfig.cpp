@@ -366,6 +366,43 @@ String DeviceConfig::canonicalExternalLedPreset(const String& preset) {
   return "system_status";
 }
 
+bool DeviceConfig::setTransport(const String& mode, const String& hubMac) {
+  if (!validTransportMode(mode)) {
+    return false;
+  }
+  if (mode == "espnow" && !hubMac.isEmpty() && !validHubMac(hubMac)) {
+    return false;
+  }
+  data_.transport.mode = mode;
+  if (!hubMac.isEmpty()) {
+    data_.transport.hubMac = hubMac;
+  }
+  return true;
+}
+
+void DeviceConfig::setTransportLastKnownChannel(uint8_t channel) {
+  data_.transport.lastKnownChannel = channel;
+}
+
+bool DeviceConfig::validTransportMode(const String& mode) {
+  return mode == "wifi_udp" || mode == "espnow";
+}
+
+bool DeviceConfig::validHubMac(const String& mac) {
+  if (mac.length() != 17) {
+    return false;
+  }
+  for (int i = 0; i < 17; ++i) {
+    const char c = mac.charAt(i);
+    if ((i % 3) == 2) {
+      if (c != ':') return false;
+    } else if (!isHexadecimalDigit(c)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool DeviceConfig::setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast, uint8_t rotation) {
   if (!validOledMode(mode)) {
     return false;
@@ -437,6 +474,17 @@ String DeviceConfig::streamBufferJson() const {
   return out;
 }
 
+String DeviceConfig::transportJson() const {
+  String out = "{\"mode\":\"";
+  out += jsonEscape(data_.transport.mode);
+  out += "\",\"hub_mac\":\"";
+  out += jsonEscape(data_.transport.hubMac);
+  out += "\",\"last_known_channel\":";
+  out += String(static_cast<unsigned int>(data_.transport.lastKnownChannel));
+  out += "}";
+  return out;
+}
+
 String DeviceConfig::configJson() const {
   return toJson();
 }
@@ -490,6 +538,9 @@ void DeviceConfig::setDefaults() {
   data_.oled.updateHz = 1;
   data_.oled.contrast = 128;
   data_.oled.rotation = 0;
+  data_.transport.mode = "wifi_udp";
+  data_.transport.hubMac = "";
+  data_.transport.lastKnownChannel = 0;
 }
 
 bool DeviceConfig::applyJson(const String& json) {
@@ -597,6 +648,17 @@ bool DeviceConfig::applyJson(const String& json) {
     }
   }
 
+  const String transport = objectForKey(json, "transport");
+  if (!transport.isEmpty()) {
+    const String mode = extractString(transport, "mode", data_.transport.mode);
+    const String hubMac = extractString(transport, "hub_mac", data_.transport.hubMac);
+    if (validTransportMode(mode)) {
+      setTransport(mode, hubMac);
+    }
+    data_.transport.lastKnownChannel = static_cast<uint8_t>(
+        extractInt(transport, "last_known_channel", data_.transport.lastKnownChannel));
+  }
+
   return true;
 }
 
@@ -650,7 +712,9 @@ String DeviceConfig::toJson() const {
   out += String(static_cast<unsigned int>(data_.oled.contrast));
   out += ",\"rotation\":";
   out += String(static_cast<unsigned int>(data_.oled.rotation));
-  out += "}}}";
+  out += "}},\"transport\":";
+  out += transportJson();
+  out += "}";
   return out;
 }
 

@@ -268,6 +268,15 @@ bool jsonExtractObject(const String& source, const char* key, String& out) {
   return captureCompositeValue(source, start, '{', '}', out);
 }
 
+bool jsonExtractArray(const String& source, const char* key, String& out) {
+  const int colon = findKeyColon(source, key);
+  if (colon < 0) {
+    return false;
+  }
+  const int start = skipWhitespace(source, colon + 1);
+  return captureCompositeValue(source, start, '[', ']', out);
+}
+
 bool jsonExtractBool(const String& source, const char* key, bool& out) {
   String value;
   if (!extractScalarText(source, key, value)) {

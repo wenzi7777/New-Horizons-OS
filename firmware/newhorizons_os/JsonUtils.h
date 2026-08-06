@@ -15,6 +15,7 @@ void jsonRawField(String& out, const char* key, const String& rawJson, bool& fir
 bool jsonExtractString(const String& source, const char* key, String& out);
 String jsonExtractString(const String& source, const char* key, const String& fallback = "");
 bool jsonExtractObject(const String& source, const char* key, String& out);
+bool jsonExtractArray(const String& source, const char* key, String& out);
 bool jsonExtractBool(const String& source, const char* key, bool& out);
 bool jsonExtractInt(const String& source, const char* key, long& out);
 bool jsonExtractFloat(const String& source, const char* key, float& out);

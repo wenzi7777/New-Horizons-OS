@@ -43,6 +43,10 @@ class ControlServer {
       ExternalLedController& externalLeds);
   void service();
   void serviceUdpCommand(WiFiUDP& udp);
+  // Returns the JSON response so the caller (EspNowPairing) can send it
+  // back to the Hub -- see the .cpp for why this differs from
+  // serviceUdpCommand()'s ack-then-fire-and-forget shape.
+  String serviceEspNowCommand(const uint8_t* data, size_t len);
   bool maintenanceMode() const;
   const String& streamHost() const;
   uint16_t streamPort() const;

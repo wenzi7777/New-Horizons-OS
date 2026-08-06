@@ -20,4 +20,9 @@ Publish two manifest tracks:
 - `releases/arduino-gcu-v22c-lts-latest.json` and `releases/arduino-gcu-v22c-lts-vX.Y.Z.json` for `VD-CTL/R v2.2.C GCU LTS`
 - `releases/arduino-gcu-v21-lts-latest.json` and `releases/arduino-gcu-v21-lts-vX.Y.Z.json` for `VD-CTL/R v2.1 GCU LTS`
 
+The New Horizons Hub firmware (formerly `firmware/newhorizons_hub/` in this
+repo) now lives in its own repo, `New-Horizons-Hub`, with its own release
+line (`releases/hub-gcu-v23d-lts-*.json` there) -- not published from here
+anymore.
+
 Do not publish the old MicroPython TLV per-file manifests from this repository anymore.

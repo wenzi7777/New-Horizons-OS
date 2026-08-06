@@ -355,8 +355,8 @@ bool MatrixScanner::enqueuePacket(const uint8_t* data, size_t len, uint32_t seq,
   return true;
 }
 
-bool MatrixScanner::sendQueuedPacket(WiFiUDP& udp, const String& host, uint16_t port) {
-  if (!streamBufferEnabled() || queueCount_ == 0 || host.isEmpty()) {
+bool MatrixScanner::sendQueuedPacket(StreamTransport& transport) {
+  if (!streamBufferEnabled() || queueCount_ == 0 || !transport.ready()) {
     return false;
   }
 
@@ -371,9 +371,7 @@ bool MatrixScanner::sendQueuedPacket(WiFiUDP& udp, const String& host, uint16_t 
   }
 
   const uint32_t udpStartUs = micros();
-  udp.beginPacket(host.c_str(), port);
-  udp.write(slot.bytes, slot.len);
-  const bool sent = udp.endPacket() == 1;
+  const bool sent = transport.sendFrame(slot.bytes, slot.len);
   recordUdpSend(sent, micros() - udpStartUs);
 
   slot.occupied = false;

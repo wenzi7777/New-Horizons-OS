@@ -185,6 +185,46 @@ void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
   servicePendingApplyUpdate();
 }
 
+String ControlServer::serviceEspNowCommand(const uint8_t* data, size_t len) {
+  // ESP-NOW counterpart to serviceUdpCommand() above, reusing the same
+  // processCommand() core. Unlike the UDP path, this takes the command
+  // object directly (no outer {"type":"command","seq":...,"payload":{...}}
+  // wrapper, no immediate ack-before-execute, no response chunking) --
+  // EspNowFrame's fragmentation already handles arbitrarily-sized
+  // payloads at the transport layer, and the ack/retry semantics for
+  // Hub-initiated commands belong to the Hub-side dispatcher (Phase 4),
+  // not this device-side handler.
+  if (!started_ || data == nullptr || len == 0) {
+    return error("", "invalid_request");
+  }
+  const String request(reinterpret_cast<const char*>(data), len);
+  const String cmd = commandName(request);
+  const String logCmd = cmd.isEmpty() ? String("missing") : cmd;
+  Serial.print(F("control_command_received transport=espnow cmd="));
+  Serial.println(logCmd);
+  if (leds_) {
+    leds_->showEvent(LedSignal::CommandReceived);
+    leds_->service(millis());
+  }
+
+  const uint32_t startedMs = millis();
+  const String response = processCommand(request);
+  const uint32_t durationMs = millis() - startedMs;
+  const bool responseOk = response.indexOf("\"ok\":true") >= 0;
+  Serial.print(F("control_command_finished transport=espnow cmd="));
+  Serial.print(logCmd);
+  Serial.print(F(" ok="));
+  Serial.print(responseOk ? F("true") : F("false"));
+  Serial.print(F(" duration_ms="));
+  Serial.println(durationMs);
+  if (leds_) {
+    leds_->showEvent(responseOk ? LedSignal::CommandSuccess : LedSignal::CommandFailed);
+    leds_->service(millis());
+  }
+  servicePendingApplyUpdate();
+  return response;
+}
+
 // Large command responses (e.g. "status", ~2.5 KB) exceed a single UDP
 // datagram and get lost to IP fragmentation over WiFi/Docker bridges. Split
 // any oversized response into application-level chunks that each fit inside one
@@ -383,6 +423,26 @@ String ControlServer::processCommand(const String& request) {
       }
     }
     return ok(cmd, "scan_timing_updated", scanTimingStatusJson());
+  }
+  if (cmd == "set_transport") {
+    // New Horizons Direct device migration (plan section 5): lets a Hub
+    // (over ESP-NOW) or the existing Gateway/Desktop path (over UDP)
+    // switch this device between wifi_udp and espnow transport modes.
+    // Takes effect on next boot -- deliberately does not attempt a live
+    // in-place transport swap, which would need to tear down/reinit
+    // WiFiUDP or ESP-NOW mid-loop.
+    if (!deviceConfig_) {
+      return error(cmd, "config_unavailable");
+    }
+    const String mode = extractString(request, "mode");
+    const String hubMac = extractString(request, "hub_mac");
+    if (!deviceConfig_->setTransport(mode, hubMac)) {
+      return error(cmd, "transport_invalid");
+    }
+    if (!deviceConfig_->save(*storage_)) {
+      return error(cmd, "config_write_failed");
+    }
+    return ok(cmd, "transport_updated_reboot_required", deviceConfig_->transportJson());
   }
   if (cmd == "set_stream_buffer") {
     if (!deviceConfig_) {

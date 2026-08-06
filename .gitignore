@@ -3,10 +3,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
+.serena/
 
 firmware/arduino/build/
-firmware/build/
+firmware/build*/
 firmware/newhorizons_os/build/
+tests_native/.build/
 *.elf
 *.map
 *.bin

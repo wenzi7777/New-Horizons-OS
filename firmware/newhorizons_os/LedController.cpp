@@ -78,6 +78,8 @@ LedController::Pattern LedController::patternFor(LedSignal signal) const {
       return {PatternMode::Solid, LedPalette::Error, LedPalette::Off, 0, 0, 0, 0, 0, 0, 255};
     case LedSignal::ScanWarning:
       return {PatternMode::BlinkBurst, LedPalette::Warning, LedPalette::Off, 650, 90, 120, 2, 850, 0, 255};
+    case LedSignal::UplinkDegraded:
+      return {PatternMode::Breathe, LedPalette::Warning, LedPalette::Off, 2200, 0, 0, 0, 0, 40, 255};
     case LedSignal::RamDanger:
       return {PatternMode::Solid, LedPalette::Warning, LedPalette::Off, 0, 0, 0, 0, 0, 0, 255};
     case LedSignal::ChargingOrMissing:
