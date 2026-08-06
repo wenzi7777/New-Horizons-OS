@@ -175,6 +175,78 @@ implementation, not something to keep hacking at inside throwaway spike
 code. The 2-device-with-static-slots result earlier in this doc should be
 treated as inconclusive/possibly lucky, not a validated data point.
 
+### PHY rate config (2026-08-06)
+
+All results above were measured at ESP-NOW's **default** PHY rate
+(`WIFI_PHY_RATE_1M_L`, 1Mbps 802.11b long preamble) -- Espressif's
+maximally-conservative default, not a speed-optimized choice. The
+diagnosed bottleneck in the 40/60fps collapse above was airtime/TX-queue
+saturation, so a faster PHY rate should directly raise the ceiling. This
+was untested until this session: neither `esp_now_set_peer_rate_config()`
+nor any related rate-config API had ever been called anywhere in this
+repo.
+
+Real hardware (VD-CTL/R v1.0.F sender -> VD-CTL/R v2.3.D GCU LTS receiver,
+single link, `espnow_throughput_sender.ino`/`espnow_throughput_receiver.ino`
+with `esp_now_set_peer_rate_config()` wired in after `esp_now_add_peer()`,
+`esp_wifi_set_protocol()` called defensively beforehand):
+
+| PHY rate | target fps | loss | achieved fps | throughput |
+|---|---|---|---|---|
+| MCS3 LGI (~26Mbps) | 24 | `loss=0.0%` (6 windows) | 83-87 | ~660-686 kbit/s |
+| MCS3 LGI (~26Mbps) | 40 | `loss=0.0%` (6 windows) | 132-137 | ~1039-1083 kbit/s |
+| MCS3 LGI (~26Mbps) | 60 | 1.2-4.8% | 180-191 | ~1421-1505 kbit/s |
+| MCS5 SGI (~57.8Mbps) | 60 | 0.2-2.8% | 171-204 | ~1347-1602 kbit/s |
+| MCS3 LGI (~26Mbps) | 24, ~6m through a wall, sender on battery | 0.4-1.9% | 72-94 | ~570-737 kbit/s |
+
+Note "achieved fps" exceeds "target fps" at every row -- the sender has no
+local frame timer at all (see `EspNowPairing`/`espnow_throughput_sender.ino`:
+it only fragments+sends on receiving a `POLL`), so with a single registered
+peer the Hub's polling loop cycles as fast as reassembly completes, not at
+the nominal per-device budget derived from `kTargetFps`. `kTargetFps` still
+matters here because it sets `kPollBudgetUs` (the fragment-pacing spread on
+both sides) -- a smaller budget means tighter fragment pacing, which is why
+achieved fps kept climbing as the target rose.
+
+**Environmental confound caught before trusting any of the above**: the
+first attempt showed 2 extra "ghost" peers registering on the receiver with
+58-90% loss each, degrading the real sender's numbers too -- traced to
+other New Horizons device boards still powered on nearby, still in
+`espnow` transport mode from earlier sessions, coincidentally matching this
+spike's naive single-byte `HELLO` magic (no device-identity check). Not a
+rate-config bug. Resolved by powering off the other boards; all numbers
+above are from the clean, single-real-peer environment.
+
+**Conclusion**: MCS3 LGI clears both the real target (24fps -- clean, both
+at desk range and at ~6m through a wall on battery) and massively
+outperforms the old default-rate ceiling (previously: 40fps collapsed to
+76-91% loss, 60fps got ~0 complete frames) at every fps step tested,
+including well past the real target. The residual 1-5% loss only shows up
+at the extreme ~180-200fps end (target=60, both MCS3 LGI and MCS5 SGI) --
+going to a higher MCS didn't clear it, suggesting that residual is a
+different (TX-queue-pacing) limit, not further alleviated by raw PHY rate,
+and out of scope for this round (see `kSendWindowUs` note below). MCS3 LGI
+was chosen over MCS5 SGI for production: no meaningful throughput
+advantage at the only regime where MCS3 LGI wasn't already fully clean,
+and LGI (long guard interval) trades a small rate ceiling for more margin
+against a noisy/marginal link than SGI.
+
+**Wired into production code** (`EspNowPairing.cpp` device side,
+`EspNowHubManager.cpp` Hub side, both repos) after this validation,
+real-hardware end-to-end tested with the actual HELLO/PAIRED/POLL pairing
+flow (not just this spike's point-to-point harness) -- device and Hub paired
+cleanly and forwarded frames to a local Desktop Backend without incident.
+
+**Deliberately not touched this round**: `kSendWindowUs`
+(`EspNowStreamTransport.cpp`), `kEspNowResponseSendWindowUs`
+(`EspNowPairing.cpp`), `kHubPollTimeoutUs` (`EspNowHubManager.h`) -- these
+are TX-queue/driver-level pacing constants, not a direct function of PHY
+rate, and changing them in the same round as the rate config would make it
+impossible to attribute results to either change. Only worth revisiting if
+`ESP_ERR_ESPNOW_NO_MEM` reappears at fps levels the product actually
+targets (it didn't, at any fps at or below the real 24fps "Direct
+Stability Mode" target).
+
 ## 6.2 — `hub_memory_budget`
 
 What it measures: `ESP.getFreeHeap()`/`getMaxAllocHeap()` at each stage of

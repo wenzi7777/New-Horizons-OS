@@ -30,6 +30,15 @@ namespace {
 
 // ---- Spike config: edit before flashing ----
 constexpr uint8_t kEspNowChannel = 6;   // must match the receiver
+// PHY rate config (2026-08-06): the fps ceiling recorded below was
+// measured entirely at ESP-NOW's default WIFI_PHY_RATE_1M_L (1Mbps, 802.11b
+// long preamble). MCS3 LGI (~26Mbps) validated clean at both 24fps and
+// 40fps target, usable (<2% loss) at ~6m through a wall on battery power --
+// see the README's "PHY rate config" section for the full results table.
+// This is the value now wired into production (EspNowPairing.cpp,
+// EspNowHubManager.cpp).
+constexpr wifi_phy_mode_t kEspNowPeerPhyMode = WIFI_PHY_MODE_HT20;
+constexpr wifi_phy_rate_t kEspNowPeerPhyRate = WIFI_PHY_RATE_MCS3_LGI;
 // Measured on real hardware (VD-CTL/R v1.0.F sender -> VD-CTL/R v2.3.D GCU
 // LTS receiver, single link, this 1884B/8-fragment payload): 20fps is
 // clean (0% loss, ~300kbit/s sustained); 40fps and 60fps both collapse
@@ -37,7 +46,7 @@ constexpr uint8_t kEspNowChannel = 6;   // must match the receiver
 // somewhere around 20-25fps, well below the Config.h kDefaultTargetFps=60
 // this spike is meant to validate against. See the plan's Phase 0 section
 // for the follow-up decision this implies.
-constexpr uint16_t kTargetFps = 24;     // candidate "Direct Stability Mode" target
+constexpr uint16_t kTargetFps = 24;     // "Direct Stability Mode" real target -- see README's "PHY rate config" section
 // "Direct Stability Mode" candidate size: same as kMaxPacketBytes but with
 // the raw ADC block dropped (matrix levels + IMU + mag + battery + HMAC
 // only) -- 1884 - (225 floats * 4B) = 984.
@@ -115,6 +124,15 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   esp_wifi_set_channel(kEspNowChannel, WIFI_SECOND_CHAN_NONE);
+  // Defensive: HT rates need 802.11n enabled on this interface. STA mode's
+  // default protocol bitmask is expected to already include it, but that's
+  // never been confirmed on this hardware/core -- set it explicitly rather
+  // than find out via a mystifying rate-config failure.
+  {
+    const esp_err_t protoErr = esp_wifi_set_protocol(
+        WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+    Serial.printf("[sender] esp_wifi_set_protocol -> %d\n", protoErr);
+  }
 
   if (esp_now_init() != ESP_OK) {
     Serial.println("[sender] esp_now_init FAILED");
@@ -130,6 +148,15 @@ void setup() {
   peer.encrypt = false;
   if (esp_now_add_peer(&peer) != ESP_OK) {
     Serial.println("[sender] esp_now_add_peer FAILED -- check kReceiverMac");
+  } else {
+    esp_now_rate_config_t rateConfig = {};
+    rateConfig.phymode = kEspNowPeerPhyMode;
+    rateConfig.rate = kEspNowPeerPhyRate;
+    rateConfig.ersu = false;
+    rateConfig.dcm = false;
+    const esp_err_t rateErr =
+        esp_now_set_peer_rate_config(kReceiverMac, &rateConfig);
+    Serial.printf("[sender] esp_now_set_peer_rate_config -> %d\n", rateErr);
   }
 
   // See espnow_throughput_receiver.ino -- WiFi.macAddress() was unreliable

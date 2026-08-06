@@ -14,6 +14,17 @@ namespace {
 // isn't overwhelmed, see EspNowPairing.h's responseFrags_ comment).
 constexpr uint32_t kEspNowResponseSendWindowUs = 15000;
 
+// PHY rate for the ESP-NOW link to the Hub. ESP-NOW defaults to
+// WIFI_PHY_RATE_1M_L (1Mbps, 802.11b long preamble) -- the previously
+// recorded fps ceiling (see firmware/spikes/README.md) was entirely
+// airtime-bound at that default rate. Real-hardware validated 2026-08-06
+// (same README, "PHY rate" section): MCS3 LGI (~26Mbps) held loss=0.0%
+// clean at both 24fps and 40fps target (well past the old ~20-25fps
+// ceiling), stayed usable (<2% loss) at ~6m through a wall on battery
+// power. Non-fatal if unsupported -- falls back to the default rate.
+constexpr wifi_phy_mode_t kEspNowPeerPhyMode = WIFI_PHY_MODE_HT20;
+constexpr wifi_phy_rate_t kEspNowPeerPhyRate = WIFI_PHY_RATE_MCS3_LGI;
+
 bool parseMac(const String& text, uint8_t out[6]) {
   if (text.length() != 17) return false;
   uint8_t bytes[6] = {0};
@@ -68,6 +79,16 @@ bool EspNowPairing::begin(Storage& storage, DeviceConfig& deviceConfig, ControlS
     return false;
   }
 
+  // Defensive: HT rates need 802.11n enabled on this interface. STA mode's
+  // default protocol bitmask is expected to already include it, but set it
+  // explicitly rather than have the rate-config call below fail for an
+  // unobvious reason.
+  const esp_err_t protoErr = esp_wifi_set_protocol(
+      WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+  if (protoErr != ESP_OK) {
+    Serial.printf("[espnow_pairing] esp_wifi_set_protocol -> %d\n", protoErr);
+  }
+
   if (esp_now_init() != ESP_OK) {
     Serial.println("[espnow_pairing] esp_now_init FAILED");
     return false;
@@ -81,6 +102,19 @@ bool EspNowPairing::begin(Storage& storage, DeviceConfig& deviceConfig, ControlS
   if (esp_now_add_peer(&peer) != ESP_OK) {
     Serial.println("[espnow_pairing] esp_now_add_peer FAILED");
     return false;
+  }
+
+  esp_now_rate_config_t rateConfig = {};
+  rateConfig.phymode = kEspNowPeerPhyMode;
+  rateConfig.rate = kEspNowPeerPhyRate;
+  rateConfig.ersu = false;
+  rateConfig.dcm = false;
+  const esp_err_t rateErr = esp_now_set_peer_rate_config(hubMac_, &rateConfig);
+  if (rateErr != ESP_OK) {
+    // Non-fatal by design -- falls back to the default (slow but
+    // maximally compatible) ESP-NOW rate rather than blocking pairing.
+    Serial.printf("[espnow_pairing] esp_now_set_peer_rate_config -> %d, using default rate\n",
+                  rateErr);
   }
 
   buildScanChannelList();
