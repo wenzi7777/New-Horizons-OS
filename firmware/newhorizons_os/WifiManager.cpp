@@ -1,13 +1,16 @@
 #include "WifiManager.h"
 
 #include "Config.h"
+#include "DeviceConfig.h"
+#include "EspNowPairing.h"  // kEspNowDiscoveryFailFlagKey, so this stays in sync with EspNowPairing.cpp's own check
 
 #include <esp_mac.h>
 
 namespace nhos {
 
-bool WifiManager::begin(Storage& storage, bool forceSetupPortal) {
+bool WifiManager::begin(Storage& storage, DeviceConfig& deviceConfig, bool forceSetupPortal) {
   storage_ = &storage;
+  deviceConfig_ = &deviceConfig;
   suspended_ = false;
   if (forceSetupPortal) {
     Serial.println(F("wifi_setup_requested_by_action_button"));
@@ -244,6 +247,32 @@ void WifiManager::handlePortalRoot() {
 }
 
 void WifiManager::handlePortalSave() {
+  String mode = portalServer_.arg("mode");
+  if (mode == "espnow") {
+    // hub_mac is deliberately left blank -- EspNowPairing's broadcast
+    // discovery bootstrap fills it in on the next boot (see
+    // ~/.claude/plans/linked-strolling-puppy.md's "新裝置免 Gateway 直接
+    // 配對 Hub" section). Not routed through applyCredentials(), which is
+    // WiFi-STA-specific.
+    if (!deviceConfig_ || !deviceConfig_->setTransport("espnow", "")) {
+      portalServer_.sendHeader("Cache-Control", "no-store");
+      portalServer_.send(400, "text/html", portalPage("Could not enable Direct/Hub mode.", false));
+      return;
+    }
+    // Clear any stale discovery-timeout flag so a deliberate retry from
+    // this portal gets a full fresh discovery window, not an immediate
+    // bounce back here -- see newhorizons_os.ino's boot-time check.
+    if (storage_) {
+      storage_->putUInt(kEspNowDiscoveryFailFlagKey, 0);
+      deviceConfig_->save(*storage_);
+    }
+    portalServer_.sendHeader("Cache-Control", "no-store");
+    portalServer_.send(200, "text/html", portalPage("Direct/Hub mode saved. Restarting...", true));
+    delay(150);
+    ESP.restart();
+    return;
+  }
+
   String ssid = portalServer_.arg("ssid");
   String password = portalServer_.arg("password");
   ssid.trim();
@@ -285,6 +314,14 @@ String WifiManager::portalPage(const String& message, bool success) const {
     out += F("</p>");
   }
   out += F("<form method=\"post\" action=\"/save\">");
+  out += F("<label for=\"mode_select\">Connection mode</label>");
+  out += F("<select id=\"mode_select\" name=\"mode\" onchange=\"");
+  out += F("document.getElementById(\'wifi_fields\').style.display=this.value==\'espnow\'?\'none\':\'block\';");
+  out += F("document.getElementById(\'ssid\').required=this.value!=\'espnow\';\">");
+  out += F("<option value=\"wifi\">Wi-Fi (connect to a Gateway)</option>");
+  out += F("<option value=\"espnow\">Direct / Hub (no Wi-Fi network needed)</option>");
+  out += F("</select>");
+  out += F("<div id=\"wifi_fields\">");
   out += F("<label for=\"ssid_select\">Nearby Wi-Fi</label>");
   out += F("<select id=\"ssid_select\" onchange=\"document.getElementById(\'ssid\').value=this.value\">");
   out += F("<option value=\"\">Select a network or type manually</option>");
@@ -296,7 +333,9 @@ String WifiManager::portalPage(const String& message, bool success) const {
   out += F("\" required>");
   out += F("<label for=\"password\">Password</label>");
   out += F("<input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\">");
-  out += F("<button type=\"submit\">Connect</button>");
+  out += F("</div>");
+  out += F("<p>Direct/Hub mode broadcasts to find any New Horizons Hub in range -- no Wi-Fi network or Gateway needed.</p>");
+  out += F("<button type=\"submit\">Save</button>");
   out += F("</form><p>Setup AP: ");
   out += htmlEscape(WiFi.softAPSSID());
   out += F("<br>Manual URL: http://");

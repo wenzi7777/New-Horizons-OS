@@ -475,6 +475,20 @@ void setup() {
 
   bool wifiConnected = false;
   espNowMode = deviceConfig.data().transport.mode == "espnow";
+  // If a previous boot's broadcast-discovery bootstrap (EspNowPairing,
+  // triggered when hub_mac was empty) timed out without finding any Hub,
+  // don't retry a doomed discovery forever -- fall back to the WiFi
+  // SoftAP portal so the device stays reachable for reconfiguration.
+  // Deliberately checked once here at boot, not as a live mid-loop
+  // transition -- see EspNowPairing.cpp's serviceDiscovery() comment for
+  // why (mirrors set_transport's own "next boot, not in-place" rule).
+  const bool espnowDiscoveryPreviouslyFailed =
+      espNowMode && deviceConfig.data().transport.hubMac.isEmpty() &&
+      storage.getUInt(nhos::kEspNowDiscoveryFailFlagKey, 0) != 0;
+  if (espnowDiscoveryPreviouslyFailed) {
+    espNowMode = false;
+    logBoot("espnow_discovery_previous_timeout falling_back_to_wifi_portal");
+  }
   if (espNowMode) {
     // ESP-NOW doesn't join a WiFi AP at all -- just needs the radio
     // driver initialized (see EspNowPairing.h for why the channel itself
@@ -491,7 +505,8 @@ void setup() {
     activeTransport = &espNowTransport;
     logBoot("boot_stage=espnow_pairing_ready");
   } else {
-    wifiConnected = wifi.begin(storage, bootMode.wifiSetupRequested());
+    wifiConnected = wifi.begin(storage, deviceConfig,
+                                espnowDiscoveryPreviouslyFailed || bootMode.wifiSetupRequested());
     if (wifiConnected) {
       bootMode.markWifiConnected();
     }

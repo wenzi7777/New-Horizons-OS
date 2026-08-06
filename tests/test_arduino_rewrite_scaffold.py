@@ -472,13 +472,20 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
-        self.assertIn("bool begin(Storage& storage, bool forceSetupPortal = false);", header)
+        self.assertIn(
+            "bool begin(Storage& storage, DeviceConfig& deviceConfig, bool forceSetupPortal = false);",
+            header,
+        )
         self.assertIn("bool hasCredentials() const;", header)
         self.assertIn("if (!hasCredentials())", wifi)
         self.assertIn("wifi_sta_no_credentials", wifi)
         self.assertIn("if (forceSetupPortal)", wifi)
         self.assertIn("wifi_setup_requested_by_action_button", wifi)
-        self.assertIn("wifi.begin(storage, bootMode.wifiSetupRequested())", sketch)
+        self.assertIn(
+            "wifi.begin(storage, deviceConfig,\n"
+            "                                espnowDiscoveryPreviouslyFailed || bootMode.wifiSetupRequested())",
+            sketch,
+        )
 
     def test_force_setup_portal_does_not_prestart_sta_or_disconnect_missing_ap(self):
         wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")

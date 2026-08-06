@@ -5,13 +5,23 @@
 // ~/.claude/plans/linked-strolling-puppy.md) for the full HELLO/PAIRED/POLL
 // protocol design and why it's event-driven rather than a fixed schedule.
 //
-// This device doesn't discover an arbitrary Hub -- it targets a specific,
-// already-known Hub MAC (set via DeviceConfig.transport.hubMac, e.g. by
-// the `set_transport` command from New Horizons Direct's "convert to
-// local pairing" flow). What it *doesn't* know is which 2.4GHz channel
-// that Hub is currently on, since the Hub's channel follows whatever its
-// own WiFi STA uplink is associated on (see EspNowHubManager.h) -- so this
-// scans a small set of candidate channels while unpaired.
+// Normally this device targets a specific, already-known Hub MAC (set via
+// DeviceConfig.transport.hubMac, e.g. by the `set_transport` command from
+// New Horizons Direct's "convert to local pairing" flow). What it
+// *doesn't* know in that case is which 2.4GHz channel that Hub is
+// currently on, since the Hub's channel follows whatever its own WiFi STA
+// uplink is associated on (see EspNowHubManager.h) -- so this scans a
+// small set of candidate channels while unpaired.
+//
+// If hub_mac is empty/invalid at begin() (e.g. a factory-fresh device
+// that has never been reachable via any Gateway to receive a
+// set_transport command), this instead broadcasts the same HELLO byte to
+// FF:FF:FF:FF:FF:FF while channel-hopping -- see serviceDiscovery(). Any
+// Hub in range replies exactly as it would to a unicast HELLO (Hub-side
+// code is unchanged and unaware of the distinction -- it only ever looks
+// at the sender's real MAC, never the frame's destination address). Once
+// a reply is seen, the discovered MAC is saved and the device reboots
+// into the normal, unmodified unicast flow above.
 
 #include <Arduino.h>
 
@@ -46,6 +56,16 @@ constexpr uint8_t kEspNowMaxScanChannels = 14;  // lastKnownChannel + the 13 abo
 constexpr uint32_t kEspNowChannelDwellMs = 400;
 constexpr uint32_t kEspNowHelloRetryMs = 1500;
 
+// Broadcast-discovery bootstrap (no known hub_mac yet). 120s is a
+// placeholder pending real-hardware measurement of worst-case channel-hop
+// find time (see ~/.claude/plans/linked-strolling-puppy.md's "新裝置免
+// Gateway 直接配對 Hub" section) -- tune from that, don't leave it as a
+// guess once real numbers exist.
+constexpr uint8_t kEspNowBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+constexpr uint32_t kEspNowDiscoveryTimeoutMs = 120000;
+// NVS key (Preferences 15-char limit -- this is 14).
+constexpr char kEspNowDiscoveryFailFlagKey[] = "espnow_disc_fb";
+
 class EspNowPairing {
  public:
   EspNowPairing();
@@ -74,6 +94,9 @@ class EspNowPairing {
   void handleControlFragment(const uint8_t* data, size_t len);
   void serviceCommand();
   bool parseHubMacFromConfig();
+  void serviceDiscovery();
+  void sendDiscoveryHello();
+  void onHubDiscovered(const uint8_t mac[6]);
 
   Storage* storage_ = nullptr;
   DeviceConfig* deviceConfig_ = nullptr;
@@ -83,6 +106,13 @@ class EspNowPairing {
   uint8_t hubMac_[6] = {0};
   bool hubMacValid_ = false;
   bool paired_ = false;
+
+  // True from begin() (when hub_mac was empty/invalid) until a Hub
+  // replies or discovery times out. Mutually exclusive with the normal
+  // hubMacValid_-gated flow below by construction -- see service() and
+  // handleEspNowRecv().
+  bool discovering_ = false;
+  uint32_t discoveryStartMs_ = 0;
 
   uint8_t scanChannels_[kEspNowMaxScanChannels] = {0};
   uint8_t scanChannelCount_ = 0;

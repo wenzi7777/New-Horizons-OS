@@ -10,9 +10,11 @@
 
 namespace nhos {
 
+class DeviceConfig;
+
 class WifiManager {
  public:
-  bool begin(Storage& storage, bool forceSetupPortal = false);
+  bool begin(Storage& storage, DeviceConfig& deviceConfig, bool forceSetupPortal = false);
   void service();
   void suspend();
   void resume();
@@ -38,6 +40,7 @@ class WifiManager {
   String htmlEscape(const String& value) const;
 
   Storage* storage_ = nullptr;
+  DeviceConfig* deviceConfig_ = nullptr;
   bool setupActive_ = false;
   bool suspended_ = false;
   bool portalStarted_ = false;

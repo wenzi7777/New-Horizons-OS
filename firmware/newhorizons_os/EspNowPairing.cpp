@@ -74,10 +74,11 @@ bool EspNowPairing::begin(Storage& storage, DeviceConfig& deviceConfig, ControlS
   control_ = &control;
   memcpy(uid_, uid, 6);
 
-  if (!parseHubMacFromConfig()) {
-    Serial.println("[espnow_pairing] invalid/missing hub_mac in config");
-    return false;
-  }
+  // Missing/invalid hub_mac doesn't fail begin() anymore -- it means this
+  // device has never been reachable via a Gateway to receive a
+  // set_transport command, so it falls back to broadcast discovery
+  // instead (serviceDiscovery()). See EspNowPairing.h's file comment.
+  discovering_ = !parseHubMacFromConfig();
 
   // Defensive: HT rates need 802.11n enabled on this interface. STA mode's
   // default protocol bitmask is expected to already include it, but set it
@@ -94,27 +95,41 @@ bool EspNowPairing::begin(Storage& storage, DeviceConfig& deviceConfig, ControlS
     return false;
   }
 
-  esp_now_peer_info_t peer = {};
-  memcpy(peer.peer_addr, hubMac_, 6);
-  peer.channel = 0;  // follow whatever channel this radio is currently on
-  peer.ifidx = WIFI_IF_STA;
-  peer.encrypt = false;
-  if (esp_now_add_peer(&peer) != ESP_OK) {
-    Serial.println("[espnow_pairing] esp_now_add_peer FAILED");
-    return false;
-  }
+  if (discovering_) {
+    esp_now_peer_info_t bcastPeer = {};
+    memcpy(bcastPeer.peer_addr, kEspNowBroadcastMac, 6);
+    bcastPeer.channel = 0;
+    bcastPeer.ifidx = WIFI_IF_STA;
+    bcastPeer.encrypt = false;
+    if (esp_now_add_peer(&bcastPeer) != ESP_OK) {
+      Serial.println("[espnow_pairing] broadcast peer add FAILED");
+      return false;
+    }
+    discoveryStartMs_ = millis();
+    Serial.println("[espnow_pairing] no hub_mac configured, starting broadcast discovery");
+  } else {
+    esp_now_peer_info_t peer = {};
+    memcpy(peer.peer_addr, hubMac_, 6);
+    peer.channel = 0;  // follow whatever channel this radio is currently on
+    peer.ifidx = WIFI_IF_STA;
+    peer.encrypt = false;
+    if (esp_now_add_peer(&peer) != ESP_OK) {
+      Serial.println("[espnow_pairing] esp_now_add_peer FAILED");
+      return false;
+    }
 
-  esp_now_rate_config_t rateConfig = {};
-  rateConfig.phymode = kEspNowPeerPhyMode;
-  rateConfig.rate = kEspNowPeerPhyRate;
-  rateConfig.ersu = false;
-  rateConfig.dcm = false;
-  const esp_err_t rateErr = esp_now_set_peer_rate_config(hubMac_, &rateConfig);
-  if (rateErr != ESP_OK) {
-    // Non-fatal by design -- falls back to the default (slow but
-    // maximally compatible) ESP-NOW rate rather than blocking pairing.
-    Serial.printf("[espnow_pairing] esp_now_set_peer_rate_config -> %d, using default rate\n",
-                  rateErr);
+    esp_now_rate_config_t rateConfig = {};
+    rateConfig.phymode = kEspNowPeerPhyMode;
+    rateConfig.rate = kEspNowPeerPhyRate;
+    rateConfig.ersu = false;
+    rateConfig.dcm = false;
+    const esp_err_t rateErr = esp_now_set_peer_rate_config(hubMac_, &rateConfig);
+    if (rateErr != ESP_OK) {
+      // Non-fatal by design -- falls back to the default (slow but
+      // maximally compatible) ESP-NOW rate rather than blocking pairing.
+      Serial.printf("[espnow_pairing] esp_now_set_peer_rate_config -> %d, using default rate\n",
+                    rateErr);
+    }
   }
 
   buildScanChannelList();
@@ -152,6 +167,10 @@ void EspNowPairing::onPaired() {
 
 void EspNowPairing::service() {
   serviceCommand();
+  if (discovering_) {
+    serviceDiscovery();
+    return;
+  }
   if (!hubMacValid_) return;
   if (!paired_) {
     startScanIfNeeded();
@@ -175,6 +194,18 @@ void EspNowPairing::service() {
 }
 
 void EspNowPairing::handleEspNowRecv(const uint8_t mac[6], const uint8_t* data, size_t len) {
+  // Checked first, before the hubMac_ filter below: discovering_ can only
+  // be true pre-boot-decision (set once in begin(), from an empty/invalid
+  // configured hub_mac) and is mutually exclusive with hubMacValid_ for
+  // the device's entire boot lifetime -- an already-paired device's
+  // routine keepalive HELLO/PAIRED exchange with its own Hub never
+  // reaches this branch, so it can't be misread as "found a new Hub".
+  if (discovering_) {
+    if (len == 1 && data[0] == kEspNowPairedMagic) {
+      onHubDiscovered(mac);
+    }
+    return;  // no POLL/control traffic is meaningful before a hub_mac exists
+  }
   if (!hubMacValid_ || memcmp(mac, hubMac_, 6) != 0) {
     return;  // ignore anything not from our configured Hub
   }
@@ -191,6 +222,52 @@ void EspNowPairing::handleEspNowRecv(const uint8_t mac[6], const uint8_t* data, 
   if (paired_) {
     handleControlFragment(data, len);
   }
+}
+
+void EspNowPairing::serviceDiscovery() {
+  const uint32_t now = millis();
+  if (now - discoveryStartMs_ >= kEspNowDiscoveryTimeoutMs) {
+    // No live in-place fallback here on purpose -- mirrors
+    // ControlServer.cpp's set_transport handler, which "deliberately does
+    // not attempt a live in-place transport swap, which would need to
+    // tear down/reinit WiFiUDP or ESP-NOW mid-loop." newhorizons_os.ino's
+    // setup() reads this flag on the *next* boot and forces the WiFi
+    // SoftAP portal instead of retrying a doomed discovery.
+    Serial.println("[espnow_pairing] discovery_timeout no_hub_found");
+    if (storage_) {
+      storage_->putUInt(kEspNowDiscoveryFailFlagKey, 1);
+    }
+    delay(50);
+    ESP.restart();
+    return;
+  }
+  startScanIfNeeded();  // same channel-hop as the known-hub_mac path
+  if (now - lastHelloMs_ >= kEspNowHelloRetryMs) {
+    sendDiscoveryHello();
+    lastHelloMs_ = now;
+  }
+}
+
+void EspNowPairing::sendDiscoveryHello() {
+  const uint8_t payload[1] = {kEspNowHelloMagic};
+  esp_now_send(kEspNowBroadcastMac, payload, sizeof(payload));
+}
+
+void EspNowPairing::onHubDiscovered(const uint8_t mac[6]) {
+  if (!discovering_) return;  // guard against a stray duplicate callback before restart lands
+  discovering_ = false;
+  char macStr[18];
+  snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2],
+           mac[3], mac[4], mac[5]);
+  Serial.print("[espnow_pairing] discovered hub ");
+  Serial.println(macStr);
+  deviceConfig_->setTransport("espnow", String(macStr));
+  if (storage_) {
+    storage_->putUInt(kEspNowDiscoveryFailFlagKey, 0);  // clear any stale failure flag
+    deviceConfig_->save(*storage_);
+  }
+  delay(50);
+  ESP.restart();
 }
 
 void EspNowPairing::handleControlFragment(const uint8_t* data, size_t len) {
