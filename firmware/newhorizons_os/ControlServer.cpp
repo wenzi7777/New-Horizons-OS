@@ -1,5 +1,7 @@
 #include "ControlServer.h"
 
+#include "EspNowOtaReceiver.h"
+
 #include <vector>
 
 #include "Config.h"
@@ -364,7 +366,13 @@ String ControlServer::processCommand(const String& request) {
     jsonRawField(data, "config", deviceConfig_ ? deviceConfig_->statusJson() : "{}", first);
     jsonRawField(data, "logging", storage_ ? storage_->logStatusJson() : "{}", first);
     jsonRawField(data, "ota", deviceConfig_ ? deviceConfig_->otaJson() : "{}", first);
-    jsonRawField(data, "update_state", ota_ ? ota_->lastStatusJson() : "{}", first);
+    // In Direct mode the HTTP OtaManager is never used (no WiFi), so its
+    // state would always read "idle" and hide a relay that is actually
+    // running -- report the ESP-NOW relay's own progress instead.
+    jsonRawField(data, "update_state",
+                 espNowOta_ != nullptr ? espNowOta_->statusJson()
+                                        : (ota_ ? ota_->lastStatusJson() : String("{}")),
+                 first);
     jsonRawField(data, "filter", deviceConfig_ ? deviceConfig_->filterJson() : "{}", first);
     jsonBoolField(data, "stream_raw_adc", deviceConfig_ ? deviceConfig_->data().streamRawAdc : false, first);
     jsonRawField(data, "imu", imu_ ? imu_->statusJson() : "{}", first);
@@ -1047,6 +1055,18 @@ String ControlServer::processCommand(const String& request) {
     return ok(cmd, "ota_config_updated", data);
   }
   if (cmd == "check_update") {
+    if (espNowOta_ != nullptr) {
+      // Direct mode: the manifest lives behind a Hub round trip, so this
+      // can only start the check -- the result lands in update_state a
+      // moment later (poll `status`, which the Desktop app already does).
+      const bool started = espNowOta_->requestCheck(extractString(request, "manifest_url"));
+      String data = "{";
+      bool f = true;
+      jsonRawField(data, "update_state", espNowOta_->statusJson(), f);
+      data += "}";
+      return started ? ok(cmd, "update_check_started", data)
+                     : error(cmd, "espnow_ota_busy_or_unpaired");
+    }
     UpdateInfo info = ota_->checkUpdate(extractString(request, "manifest_url"));
     String data = "{";
     data.reserve(512);
@@ -1063,6 +1083,15 @@ String ControlServer::processCommand(const String& request) {
     return ok(cmd, info.error.isEmpty() ? "update_checked" : "update_check_failed", data);
   }
   if (cmd == "apply_update") {
+    if (espNowOta_ != nullptr) {
+      const bool started = espNowOta_->requestApply(extractString(request, "manifest_url"));
+      String data = "{";
+      bool f = true;
+      jsonRawField(data, "update_state", espNowOta_->statusJson(), f);
+      data += "}";
+      return started ? ok(cmd, "update_started", data)
+                     : error(cmd, "espnow_ota_busy_or_unpaired");
+    }
     otaPendingManifestUrl_ = extractString(request, "manifest_url");
     otaPending_ = true;
     return ok(

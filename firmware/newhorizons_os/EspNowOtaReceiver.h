@@ -80,6 +80,35 @@ class EspNowOtaReceiver {
   // header for why this is deliberately not re-armed periodically.
   void startBootCheck();
 
+  // On-demand entry points for ControlServer's `check_update` /
+  // `apply_update` commands while this device is in ESP-NOW/Direct mode.
+  //
+  // Those two commands normally drive OtaManager over HTTP, which cannot
+  // work here: a Direct-mode device never joins WiFi, so the manifest GET
+  // fails outright (observed as `manifest_http_-1` from the WebUI). They
+  // now route here instead, so the Hub-relayed path that already works at
+  // boot is also reachable on demand.
+  //
+  // Unlike startBootCheck() these are re-armable -- the boot-once rule in
+  // the file header is about *automatic* rechecks, not about refusing an
+  // explicit user request. Both return false if a check/transfer is
+  // already running (or the device isn't paired yet), so a second click
+  // can't corrupt an in-flight update.
+  //
+  // Both are asynchronous: the manifest lives on the Hub's side of a
+  // request/reply round trip, so the result appears in statusJson() a
+  // moment later rather than in the command's own reply. That matches how
+  // apply_update already behaves on the HTTP path (returns
+  // "update_started", caller polls update_state).
+  bool requestCheck(const String& manifestUrl);
+  bool requestApply(const String& manifestUrl);
+
+  // Same field shape as OtaManager::lastStatusJson() so the Desktop app's
+  // existing update_state rendering (phase/version/url/last_error) works
+  // unchanged for Direct-mode devices. ControlServer substitutes this for
+  // the OtaManager one in `status` when a receiver is attached.
+  String statusJson() const;
+
   // Call every loop() iteration (from newhorizons_os.ino, parallel to
   // espNowPairing.service() -- mirrors newhorizons_hub.ino's own
   // otaRelay.service() call alongside hubManager.service()).
@@ -112,6 +141,8 @@ class EspNowOtaReceiver {
     kFinished,
   };
 
+  bool startOnDemand(const String& manifestUrl, bool apply);
+  const char* phaseName() const;
   void sendHubRequest(const String& json);
   void sendManifestRequest();
   void sendRelayStartRequest();
@@ -135,7 +166,19 @@ class EspNowOtaReceiver {
   String pendingVersion_;
   String pendingUrl_;
   String pendingSha256_;
+  String pendingChangelogUrl_;
   size_t pendingSize_ = 0;
+
+  // Reported through statusJson(). applyRequested_ is what separates a
+  // check ("is there a newer build?" -- stop after comparing versions)
+  // from an apply ("go get it" -- continue into the relay). The boot-time
+  // path sets it true, matching the WiFi path's own autoApplyOnBoot
+  // behaviour.
+  bool applyRequested_ = false;
+  bool updateAvailable_ = false;
+  String operation_;
+  String lastError_;
+  String lastResult_;
 
   uint16_t totalChunks_ = 0;
   uint16_t nextExpectedChunk_ = 0;

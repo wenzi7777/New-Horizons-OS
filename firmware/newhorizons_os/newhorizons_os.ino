@@ -580,6 +580,12 @@ void setup() {
   logBoot("boot_stage=ota_ready");
   serviceAutoOta(wifiConnected);
   control.begin(wifi, scanner, storage, bootMode, ota, findme, power, powerState, imu, leds, deviceConfig, calibration, displayManager, externalLeds);
+  if (espNowMode) {
+    // Route check_update/apply_update through the Hub-relayed OTA path --
+    // a Direct-mode device has no WiFi, so OtaManager's HTTP fetch can
+    // only fail. See ControlServer::setEspNowOtaReceiver().
+    control.setEspNowOtaReceiver(&espNowOtaReceiver);
+  }
   logBoot(String("boot_stage=control_ready port=") + String(nhos::kControlPort));
 
   logBoot(String("runtime_ready protocol=") + nhos::kProtocolName + " firmware=" + nhos::kFirmwareVersion +

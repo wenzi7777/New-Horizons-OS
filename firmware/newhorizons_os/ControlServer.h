@@ -23,6 +23,7 @@
 namespace nhos {
 
 class PowerStateManager;
+class EspNowOtaReceiver;
 
 class ControlServer {
  public:
@@ -47,6 +48,14 @@ class ControlServer {
   // back to the Hub -- see the .cpp for why this differs from
   // serviceUdpCommand()'s ack-then-fire-and-forget shape.
   String serviceEspNowCommand(const uint8_t* data, size_t len);
+
+  // Wired once from newhorizons_os.ino's setup(), only in ESP-NOW/Direct
+  // mode. When set, `check_update`/`apply_update` drive the Hub-relayed
+  // OTA path (EspNowOtaReceiver) instead of OtaManager's HTTP one, and
+  // `status` reports that path's progress as update_state. A Direct-mode
+  // device has no WiFi at all, so the HTTP path can only ever fail there
+  // (it surfaced in the WebUI as an opaque `manifest_http_-1`).
+  void setEspNowOtaReceiver(EspNowOtaReceiver* receiver) { espNowOta_ = receiver; }
   bool maintenanceMode() const;
   const String& streamHost() const;
   uint16_t streamPort() const;
@@ -80,6 +89,7 @@ class ControlServer {
   Storage* storage_ = nullptr;
   BootModeManager* boot_ = nullptr;
   OtaManager* ota_ = nullptr;
+  EspNowOtaReceiver* espNowOta_ = nullptr;
   FindMeClient* findme_ = nullptr;
   PowerManager* power_ = nullptr;
   PowerStateManager* powerState_ = nullptr;

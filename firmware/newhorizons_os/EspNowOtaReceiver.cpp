@@ -24,7 +24,85 @@ void EspNowOtaReceiver::startBootCheck() {
     phase_ = Phase::kFinished;
     return;
   }
+  applyRequested_ = true;  // boot path always applies -- mirrors autoApplyOnBoot
+  operation_ = "apply_update";
   bootCheckPending_ = true;
+}
+
+bool EspNowOtaReceiver::startOnDemand(const String& manifestUrl, bool apply) {
+  if (deviceConfig_ == nullptr) {
+    return false;  // begin() not called yet -- not paired with a Hub
+  }
+  // Refuse while a check or transfer is already running rather than
+  // stomping on its state (an interrupted kRelaying would leave the flash
+  // image half-written).
+  if (phase_ == Phase::kAwaitingManifestReply || phase_ == Phase::kAwaitingRelayStartReply ||
+      phase_ == Phase::kRelaying) {
+    return false;
+  }
+  if (!manifestUrl.isEmpty()) {
+    manifestUrl_ = manifestUrl;
+  }
+  applyRequested_ = apply;
+  operation_ = apply ? "apply_update" : "check_update";
+  updateAvailable_ = false;
+  lastError_ = "";
+  lastResult_ = "";
+  pendingVersion_ = "";
+  pendingUrl_ = "";
+  pendingChangelogUrl_ = "";
+  pendingSize_ = 0;
+  totalChunks_ = 0;
+  nextExpectedChunk_ = 0;
+  // kIdle + bootCheckPending_ is exactly what service()'s idle branch
+  // consumes to fire the manifest request on the next loop() iteration.
+  phase_ = Phase::kIdle;
+  bootCheckPending_ = true;
+  return true;
+}
+
+bool EspNowOtaReceiver::requestCheck(const String& manifestUrl) {
+  return startOnDemand(manifestUrl, /*apply=*/false);
+}
+
+bool EspNowOtaReceiver::requestApply(const String& manifestUrl) {
+  return startOnDemand(manifestUrl, /*apply=*/true);
+}
+
+const char* EspNowOtaReceiver::phaseName() const {
+  switch (phase_) {
+    case Phase::kAwaitingManifestReply: return "checking";
+    case Phase::kAwaitingRelayStartReply: return "starting";
+    case Phase::kRelaying: return "downloading";
+    case Phase::kFinished:
+      if (!lastError_.isEmpty()) return "error";
+      return updateAvailable_ ? "ready" : "current";
+    case Phase::kIdle:
+    default: return "idle";
+  }
+}
+
+String EspNowOtaReceiver::statusJson() const {
+  String s = "{";
+  s.reserve(384);
+  bool first = true;
+  jsonStringField(s, "phase", String(phaseName()), first);
+  jsonStringField(s, "operation", operation_, first);
+  jsonBoolField(s, "available", updateAvailable_, first);
+  jsonStringField(s, "version", pendingVersion_, first);
+  jsonStringField(s, "url", pendingUrl_, first);
+  jsonUnsignedField(s, "size", static_cast<unsigned long>(pendingSize_), first);
+  jsonStringField(s, "changelog_url", pendingChangelogUrl_, first);
+  jsonStringField(s, "manifest_url", manifestUrl_, first);
+  jsonStringField(s, "current_file", phase_ == Phase::kRelaying ? "firmware" : "", first);
+  jsonUnsignedField(s, "total_chunks", totalChunks_, first);
+  jsonUnsignedField(s, "applied_chunks", nextExpectedChunk_, first);
+  jsonStringField(s, "transport", "espnow_relay", first);
+  jsonStringField(s, "last_error", lastError_, first);
+  jsonStringField(s, "last_result", lastResult_, first);
+  jsonBoolField(s, "reboot_required", false, first);
+  s += "}";
+  return s;
 }
 
 void EspNowOtaReceiver::sendHubRequest(const String& json) {
@@ -86,7 +164,8 @@ void EspNowOtaReceiver::service() {
   if (phase_ == Phase::kAwaitingManifestReply || phase_ == Phase::kAwaitingRelayStartReply) {
     if (millis() - requestSentMs_ < kHubRequestResendIntervalMs) return;
     if (requestAttempts_ >= kHubRequestMaxAttempts) {
-      Serial.println(F("[espnow_ota] hub_request_timeout giving_up_until_next_boot"));
+      Serial.println(F("[espnow_ota] hub_request_timeout"));
+      lastError_ = "hub_request_timeout";
       phase_ = Phase::kFinished;
       return;
     }
@@ -129,12 +208,14 @@ void EspNowOtaReceiver::handleManifestReply(const String& payload) {
     jsonExtractString(payload, "error", err);
     Serial.print(F("[espnow_ota] fetch_manifest_failed error="));
     Serial.println(err);
+    lastError_ = err.isEmpty() ? String("fetch_manifest_failed") : err;
     phase_ = Phase::kFinished;
     return;
   }
   String manifest;
   if (!jsonExtractObject(payload, "manifest", manifest)) {
     Serial.println(F("[espnow_ota] fetch_manifest_reply_malformed"));
+    lastError_ = "fetch_manifest_reply_malformed";
     phase_ = Phase::kFinished;
     return;
   }
@@ -142,11 +223,13 @@ void EspNowOtaReceiver::handleManifestReply(const String& payload) {
   const String model = jsonExtractString(manifest, "model", "");
   if (protocol != kProtocolName) {
     Serial.println(F("[espnow_ota] protocol_mismatch"));
+    lastError_ = "protocol_mismatch";
     phase_ = Phase::kFinished;
     return;
   }
   if (model != kHardwareModel) {
     Serial.println(F("[espnow_ota] model_mismatch"));
+    lastError_ = "model_mismatch";
     phase_ = Phase::kFinished;
     return;
   }
@@ -157,11 +240,15 @@ void EspNowOtaReceiver::handleManifestReply(const String& payload) {
   jsonExtractInt(manifest, "size", sizeLong);
   if (version.isEmpty() || url.isEmpty() || sha256.length() != 64 || sizeLong <= 0) {
     Serial.println(F("[espnow_ota] manifest_missing_fields"));
+    lastError_ = "manifest_missing_fields";
     phase_ = Phase::kFinished;
     return;
   }
+  pendingChangelogUrl_ = jsonExtractString(manifest, "changelog_url", "");
   if (compareVersion(version, kFirmwareVersion) <= 0) {
     Serial.println(F("[espnow_ota] auto_ota_no_update"));
+    updateAvailable_ = false;
+    lastResult_ = "current";
     phase_ = Phase::kFinished;
     return;
   }
@@ -169,8 +256,16 @@ void EspNowOtaReceiver::handleManifestReply(const String& payload) {
   pendingUrl_ = url;
   pendingSha256_ = sha256;
   pendingSize_ = static_cast<size_t>(sizeLong);
+  updateAvailable_ = true;
   Serial.print(F("[espnow_ota] update_available version="));
   Serial.println(pendingVersion_);
+  if (!applyRequested_) {
+    // check_update: report what's available and stop here. The caller
+    // decides whether to follow up with apply_update.
+    lastResult_ = "manifest_ready";
+    phase_ = Phase::kFinished;
+    return;
+  }
   sendRelayStartRequest();
   phase_ = Phase::kAwaitingRelayStartReply;
   requestSentMs_ = millis();
@@ -185,6 +280,7 @@ void EspNowOtaReceiver::handleRelayStartReply(const String& payload) {
     jsonExtractString(payload, "error", err);
     Serial.print(F("[espnow_ota] ota_relay_start_failed error="));
     Serial.println(err);
+    lastError_ = err.isEmpty() ? String("ota_relay_start_failed") : err;
     phase_ = Phase::kFinished;
     return;
   }
@@ -192,12 +288,14 @@ void EspNowOtaReceiver::handleRelayStartReply(const String& payload) {
   jsonExtractInt(payload, "total_chunks", totalChunksLong);
   if (totalChunksLong <= 0) {
     Serial.println(F("[espnow_ota] relay_start_reply_malformed"));
+    lastError_ = "relay_start_reply_malformed";
     phase_ = Phase::kFinished;
     return;
   }
   totalChunks_ = static_cast<uint16_t>(totalChunksLong);
   if (!Update.begin(pendingSize_)) {
     Serial.println(F("[espnow_ota] update_begin_failed"));
+    lastError_ = "update_begin_failed";
     phase_ = Phase::kFinished;
     return;
   }
@@ -256,15 +354,18 @@ void EspNowOtaReceiver::finishRelay() {
   if (!pendingSha256_.equalsIgnoreCase(hex)) {
     Update.abort();
     Serial.println(F("[espnow_ota] sha256_mismatch"));
+    lastError_ = "sha256_mismatch";
     phase_ = Phase::kFinished;
     return;
   }
   if (!Update.end(true) || !Update.isFinished()) {
     Serial.println(F("[espnow_ota] update_end_failed"));
+    lastError_ = "update_end_failed";
     phase_ = Phase::kFinished;
     return;
   }
   Serial.println(F("[espnow_ota] update_applied restarting"));
+  lastResult_ = "applied";
   phase_ = Phase::kFinished;
   delay(50);
   ESP.restart();
@@ -275,6 +376,7 @@ void EspNowOtaReceiver::abortRelay(const char* reason) {
   mbedtls_sha256_free(&shaCtx_);
   Serial.print(F("[espnow_ota] relay_aborted reason="));
   Serial.println(reason);
+  lastError_ = reason;
   phase_ = Phase::kFinished;
 }
 
