@@ -50,7 +50,7 @@ void EspNowStreamTransport::service() {
   hasBufferedFrame_ = false;
   pendingCount_ = EspNowFragmenter::fragment(frameBuffer_, frameBufferLen_, frameId_++,
                                               kEspNowFragTypeData, pendingFrags_,
-                                              kEspNowMaxFragCount);
+                                              kEspNowDataFragCount);
   pendingSent_ = 0;
   fragIntervalUs_ = pendingCount_ > 0 ? kSendWindowUs / pendingCount_ : 0;
   nextFragDueUs_ = nowUs;

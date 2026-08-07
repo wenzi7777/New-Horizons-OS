@@ -53,10 +53,42 @@ static constexpr uint8_t kEspNowFragTypeOta = 0x02;
 // traffic (JSON manifests/relay-start acks), not sized like OTA chunks.
 static constexpr uint8_t kEspNowFragTypeHubRequest = 0x03;
 
-// Upper bound on fragments per frame. 16 * kEspNowFragMaxPayload (240) =
-// 3840B, well above the current worst-case ~1884B frame, leaving headroom
-// for larger boards without changing the wire format.
-static constexpr uint8_t kEspNowMaxFragCount = 16;
+// Upper bound on fragments per frame. 32 * kEspNowFragMaxPayload (240) =
+// 7680B.
+//
+// Raised from 16 (3840B) after real-hardware debugging: the `status`
+// control response (ControlServer.cpp aggregates 20+ sub-status JSON
+// objects -- wifi/battery/power/config/ota/imu/calibration/indicators/
+// scan_health/findme/...) grew past 3840B as the firmware gained fields,
+// and EspNowFragmenter::fragment() returns 0 for anything that doesn't
+// fit. EspNowPairing::serviceCommand() then set responseFragCount_ = 0
+// and sent *nothing at all*, completely silently -- the device logged
+// `control_command_finished ok=true` while the Hub never received a
+// single fragment, so every `status` command failed with an eventual
+// `command_delivery_timeout` that looked like a transport/RF problem.
+// Smaller responses (memory_status, scan_health) kept working, which is
+// what finally isolated it. See serviceCommand()'s fragmentation-failure
+// branch, which now reports this loudly instead of failing silently.
+//
+// 32 is the hard ceiling for the wire format: EspNowReassembler tracks
+// arrival with a uint32_t receivedMask_ bitmask, so fragIndex must stay
+// under 32. Going higher would need a wider mask.
+static constexpr uint8_t kEspNowMaxFragCount = 32;
+
+// Only the control channel actually needs the larger budget above. Sensor
+// data frames are ~56B (a single fragment), and the OTA chunk size is
+// *derived* from a fragment budget (EspNowOtaRelay.h's
+// kOtaChunkPayloadBytes) -- so letting those follow kEspNowMaxFragCount
+// would silently double the OTA wire chunk size and quadruple several
+// per-device-slot buffers on the Hub for no benefit. These paths stay
+// pinned to the original 16-fragment budget, which keeps the OTA protocol
+// byte-for-byte unchanged and keeps the RAM cost of the raise confined to
+// the control path that needed it.
+static constexpr uint8_t kEspNowDataFragCount = 16;
+static constexpr size_t kEspNowDataFrameBytes =
+    kEspNowDataFragCount * kEspNowFragMaxPayload;  // 3840B
+static constexpr size_t kEspNowMaxFrameBytes =
+    kEspNowMaxFragCount * kEspNowFragMaxPayload;  // 7680B
 
 // One wire-ready ESP-NOW packet, sized to hand directly to esp_now_send().
 struct EspNowFragment {

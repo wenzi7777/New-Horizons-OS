@@ -68,12 +68,8 @@ void onEspNowRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len)
 // successfully was invisible. Logs failures only, to isolate whether
 // control-response fragment loss (see EspNowPairing.cpp's serviceCommand())
 // is happening here vs. somewhere else.
-void onEspNowSent(const esp_now_send_info_t* info, esp_now_send_status_t status) {
-  if (status != ESP_NOW_SEND_SUCCESS) {
-    Serial.printf("[espnow] send_cb_fail mac=%02X:%02X:%02X:%02X:%02X:%02X\n",
-                  info->des_addr[0], info->des_addr[1], info->des_addr[2],
-                  info->des_addr[3], info->des_addr[4], info->des_addr[5]);
-  }
+void onEspNowSent(const esp_now_send_info_t* /*info*/, esp_now_send_status_t status) {
+  espNowPairing.handleSendStatus(status == ESP_NOW_SEND_SUCCESS);
 }
 
 uint8_t packetBuffer[

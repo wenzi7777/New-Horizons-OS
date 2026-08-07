@@ -126,7 +126,13 @@ bool EspNowReassembler::onFragment(const uint8_t* data, size_t len,
   memcpy(scratch_ + offset, data + kEspNowFragHeaderLen, payloadLen);
   receivedMask_ |= (1u << fragIndex);
 
-  const uint32_t fullMask = (1u << fragCount_) - 1u;
+  // `1u << 32` is undefined behaviour (shift >= width of uint32_t) -- on
+  // ESP32 it wraps to `1u << 0`, making fullMask 0, which would make the
+  // check below pass on the very first fragment and hand up a
+  // half-filled buffer. kEspNowMaxFragCount is exactly 32, so this case
+  // is reachable and must be special-cased rather than assumed away.
+  const uint32_t fullMask =
+      (fragCount_ >= 32) ? 0xFFFFFFFFu : ((1u << fragCount_) - 1u);
   if ((receivedMask_ & fullMask) != fullMask) {
     return false;
   }

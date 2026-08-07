@@ -22,6 +22,16 @@ constexpr size_t kEspNowFragTypeOffset = 2;
 // isn't overwhelmed, see EspNowPairing.h's responseFrags_ comment).
 constexpr uint32_t kEspNowResponseSendWindowUs = 15000;
 
+// Stop-and-wait retransmit budget for response fragments (see
+// EspNowPairing.h's responseSendAwaitingCb_ comment). Real-hardware
+// testing saw ~1-2 radio-level send failures per 22-fragment response, so
+// a handful of retries per fragment is ample; the whole drain still
+// finishes far inside the Hub's 10s post-ack response deadline.
+constexpr uint8_t kEspNowResponseFragMaxRetries = 5;
+// Generous upper bound on how long a send callback may take before we
+// assume it is never coming and retry the fragment anyway.
+constexpr uint32_t kEspNowResponseFragCbTimeoutUs = 50000;
+
 // PHY rate for the ESP-NOW link to the Hub. ESP-NOW defaults to
 // WIFI_PHY_RATE_1M_L (1Mbps, 802.11b long preamble) -- the previously
 // recorded fps ceiling (see firmware/spikes/README.md) was entirely
@@ -372,25 +382,51 @@ void EspNowPairing::serviceCommand() {
   // over esp_now_send() in one shot. Mirrors
   // EspNowStreamTransport::service()'s own pacing state machine.
   if (responseFragsSent_ < responseFragCount_) {
-    if (static_cast<int32_t>(nowUs - responseNextFragDueUs_) >= 0) {
-      // esp_now_send()'s return value was previously unchecked here: a
-      // transient failure (e.g. ESP_ERR_ESPNOW_NO_MEM from a still-busy
-      // internal TX queue, observed on real hardware after sustained
-      // ~60fps streaming) would silently drop that one fragment while
-      // responseFragsSent_ still advanced past it -- the Hub's reassembler
-      // then waits forever for a fragment that was never actually sent,
-      // and the whole response is lost even though every other fragment
-      // arrived fine. Only advance (and let the pacing interval elapse)
-      // on success; a failed send retries the same fragment next tick.
-      if (esp_now_send(hubMac_, responseFrags_[responseFragsSent_].bytes,
-                        responseFrags_[responseFragsSent_].len) == ESP_OK) {
-        ++responseFragsSent_;
-        responseNextFragDueUs_ += responseFragIntervalUs_;
-      } else {
-        Serial.printf("[espnow_pairing] response_frag_send_failed idx=%u\n",
-                      static_cast<unsigned>(responseFragsSent_));
-        responseNextFragDueUs_ = nowUs + responseFragIntervalUs_;
+    // Stop-and-wait: one fragment is in flight at a time, and we only
+    // advance once the radio confirms it was actually delivered. See
+    // responseSendAwaitingCb_'s comment in the header for why the
+    // synchronous esp_now_send() return value is not sufficient here.
+    if (responseSendAwaitingCb_) {
+      if (static_cast<int32_t>(nowUs - responseSendStartedUs_) <
+          static_cast<int32_t>(kEspNowResponseFragCbTimeoutUs)) {
+        return;  // still waiting for this fragment's verdict
       }
+      // Callback never arrived -- treat as a failed send so we retry
+      // rather than stalling the drain forever.
+      responseSendAwaitingCb_ = false;
+      responseSendCbFailed_ = true;
+    }
+
+    if (responseSendCbFailed_) {
+      responseSendCbFailed_ = false;
+      if (++responseFragRetries_ > kEspNowResponseFragMaxRetries) {
+        Serial.printf("[espnow_pairing] response_frag_giving_up idx=%u/%u\n",
+                      static_cast<unsigned>(responseFragsSent_),
+                      static_cast<unsigned>(responseFragCount_));
+        // Abandon the response: the Hub will report a delivery timeout,
+        // which is at least an honest, bounded failure rather than a
+        // drain that never finishes and blocks every later command.
+        responseFragCount_ = 0;
+        responseFragsSent_ = 0;
+        responseFragRetries_ = 0;
+        return;
+      }
+      Serial.printf("[espnow_pairing] response_frag_retry idx=%u attempt=%u\n",
+                    static_cast<unsigned>(responseFragsSent_),
+                    static_cast<unsigned>(responseFragRetries_));
+    }
+
+    if (static_cast<int32_t>(nowUs - responseNextFragDueUs_) >= 0) {
+      responseSendAwaitingCb_ = true;
+      responseSendStartedUs_ = nowUs;
+      if (esp_now_send(hubMac_, responseFrags_[responseFragsSent_].bytes,
+                        responseFrags_[responseFragsSent_].len) != ESP_OK) {
+        // Rejected outright (e.g. ESP_ERR_ESPNOW_NO_MEM) -- no callback
+        // will ever arrive for this one, so fail it immediately.
+        responseSendAwaitingCb_ = false;
+        responseSendCbFailed_ = true;
+      }
+      responseNextFragDueUs_ = nowUs + responseFragIntervalUs_;
     }
     return;  // don't start processing a new command while still draining this response
   }
@@ -405,7 +441,14 @@ void EspNowPairing::serviceCommand() {
   // top, and this is only ever called synchronously from loop().
   const String response = control_->serviceEspNowCommand(pendingCommandBuffer_, pendingCommandLen_);
   commandPending_ = false;
-  if (response.isEmpty()) return;
+  if (response.isEmpty()) {
+    // Nothing to send back -- the Hub will sit on this command until its
+    // own deadline expires and report command_delivery_timeout, which
+    // gives no hint that the device actually processed it fine. Log it so
+    // the two are distinguishable from the serial console.
+    Serial.println("[espnow_pairing] empty_response nothing_to_send");
+    return;
+  }
 
   // Fragment the response back to the Hub; actual sending is paced out
   // across subsequent service() calls above. frameId=0 is fine here since
@@ -414,9 +457,47 @@ void EspNowPairing::serviceCommand() {
   responseFragCount_ = EspNowFragmenter::fragment(
       reinterpret_cast<const uint8_t*>(response.c_str()), response.length(), 0,
       kEspNowFragTypeControl, responseFrags_, kEspNowMaxFragCount);
+
+  if (responseFragCount_ == 0) {
+    // The response doesn't fit the wire format (> kEspNowMaxFragCount *
+    // kEspNowFragMaxPayload). This used to fall straight through with
+    // responseFragCount_ = 0, sending *nothing at all* and silently: the
+    // device logged `control_command_finished ok=true` while the Hub never
+    // saw a fragment, so it looked exactly like an RF/transport failure and
+    // sent debugging down the wrong path for a long time. Substitute a
+    // compact error that always fits, so the caller gets a real, named
+    // failure instead of an unexplained command_delivery_timeout.
+    Serial.printf("[espnow_pairing] response_too_large bytes=%u max=%u\n",
+                  static_cast<unsigned>(response.length()),
+                  static_cast<unsigned>(kEspNowMaxFragCount * kEspNowFragMaxPayload));
+    String fallback = "{\"ok\":false,\"error\":\"response_too_large\",";
+    fallback += "\"message\":\"response_too_large\",\"data\":{\"response_bytes\":";
+    fallback += response.length();
+    fallback += ",\"max_bytes\":";
+    fallback += static_cast<unsigned>(kEspNowMaxFragCount * kEspNowFragMaxPayload);
+    fallback += "}}";
+    responseFragCount_ = EspNowFragmenter::fragment(
+        reinterpret_cast<const uint8_t*>(fallback.c_str()), fallback.length(), 0,
+        kEspNowFragTypeControl, responseFrags_, kEspNowMaxFragCount);
+  }
+
   responseFragsSent_ = 0;
+  responseFragRetries_ = 0;
+  responseSendAwaitingCb_ = false;
+  responseSendCbFailed_ = false;
   responseFragIntervalUs_ = responseFragCount_ > 0 ? kEspNowResponseSendWindowUs / responseFragCount_ : 0;
   responseNextFragDueUs_ = nowUs;
+}
+
+void EspNowPairing::handleSendStatus(bool ok) {
+  if (!responseSendAwaitingCb_) return;  // not ours (ack / stream / OTA send)
+  responseSendAwaitingCb_ = false;
+  if (ok) {
+    ++responseFragsSent_;
+    responseFragRetries_ = 0;
+  } else {
+    responseSendCbFailed_ = true;
+  }
 }
 
 bool EspNowPairing::consumePollPending() {

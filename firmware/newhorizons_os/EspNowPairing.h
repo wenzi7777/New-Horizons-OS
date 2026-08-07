@@ -121,6 +121,12 @@ class EspNowPairing {
   // that getter's comment.
   bool hasPendingCommandWork() const { return commandPending_ || responseFragsSent_ < responseFragCount_; }
 
+  // Wired to the global esp_now_register_send_cb() in newhorizons_os.ino.
+  // Runs on the WiFi/ESP-NOW driver task, so it only flips flags -- the
+  // actual advance/retransmit decision happens in serviceCommand() on the
+  // main loop. See responseSendAwaitingCb_'s comment for why this exists.
+  void handleSendStatus(bool ok);
+
   // EspNowStreamTransport calls this once per loop(); returns true (and
   // clears the flag) at most once per POLL received.
   bool consumePollPending();
@@ -174,7 +180,7 @@ class EspNowPairing {
 
   volatile bool pollPending_ = false;
 
-  uint8_t controlScratch_[kEspNowMaxFragCount * kEspNowFragMaxPayload];
+  uint8_t controlScratch_[kEspNowMaxFrameBytes];
   EspNowReassembler controlReassembler_;
 
   // Separate reassembler + buffer for kEspNowFragTypeOta frames (Hub-pushed
@@ -188,9 +194,9 @@ class EspNowPairing {
   // buffer-in-callback/process-in-loop split as pendingCommandBuffer_
   // below (Update.write() + SHA256 are far too much work for the small
   // ESP-NOW/WiFi driver task stack).
-  uint8_t otaScratch_[kEspNowMaxFragCount * kEspNowFragMaxPayload];
+  uint8_t otaScratch_[kEspNowDataFrameBytes];
   EspNowReassembler otaReassembler_;
-  uint8_t otaFrameBuffer_[kEspNowMaxFragCount * kEspNowFragMaxPayload];
+  uint8_t otaFrameBuffer_[kEspNowDataFrameBytes];
   size_t otaFrameBufferLen_ = 0;
   volatile bool otaFrameReady_ = false;
 
@@ -214,7 +220,7 @@ class EspNowPairing {
   // crashing with a stack-canary panic. Mirrors the buffer-in-callback/
   // process-in-loop split firmware/newhorizons_hub/EspNowHubManager.h
   // already uses for the same reason.
-  uint8_t pendingCommandBuffer_[kEspNowMaxFragCount * kEspNowFragMaxPayload];
+  uint8_t pendingCommandBuffer_[kEspNowMaxFrameBytes];
   size_t pendingCommandLen_ = 0;
   volatile bool commandPending_ = false;
 
@@ -243,6 +249,24 @@ class EspNowPairing {
   uint8_t responseFragsSent_ = 0;
   uint32_t responseFragIntervalUs_ = 0;
   uint32_t responseNextFragDueUs_ = 0;
+
+  // Stop-and-wait retransmit state for the response drain above.
+  //
+  // esp_now_send() returning ESP_OK only means the packet was accepted
+  // into the driver's TX queue -- it says nothing about whether the peer
+  // actually acknowledged it over the air. Real-hardware testing (with a
+  // newly-registered esp_now_register_send_cb(), which this project had
+  // never used) showed 1-2 of a 22-fragment `status` response failing at
+  // that radio level per attempt while every other fragment went out
+  // fine. Because EspNowReassembler needs *every* fragment before it
+  // hands the frame up, losing even one silently destroyed the whole
+  // response, and the Hub timed out. Fire-and-forget pacing alone can't
+  // fix that -- so each fragment now waits for its send callback and is
+  // retransmitted if the radio reports failure.
+  volatile bool responseSendAwaitingCb_ = false;
+  volatile bool responseSendCbFailed_ = false;
+  uint8_t responseFragRetries_ = 0;
+  uint32_t responseSendStartedUs_ = 0;
 };
 
 }  // namespace nhos

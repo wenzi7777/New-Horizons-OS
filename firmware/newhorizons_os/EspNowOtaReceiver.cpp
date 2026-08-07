@@ -28,10 +28,15 @@ void EspNowOtaReceiver::startBootCheck() {
 }
 
 void EspNowOtaReceiver::sendHubRequest(const String& json) {
-  EspNowFragment frags[kEspNowMaxFragCount];
+  // static, not a stack local: kEspNowMaxFragCount * sizeof(EspNowFragment)
+  // is ~8KB, far too much for this task's stack (the same mistake is
+  // documented in EspNowPairing.h's responseFrags_ comment, where a ~4KB
+  // stack array was enough to corrupt the heap). Safe as static because
+  // this only ever runs on the main loop task, never from a recv callback.
+  static EspNowFragment frags[kEspNowDataFragCount];
   const uint8_t count = EspNowFragmenter::fragment(
       reinterpret_cast<const uint8_t*>(json.c_str()), json.length(), 0,
-      kEspNowFragTypeHubRequest, frags, kEspNowMaxFragCount);
+      kEspNowFragTypeHubRequest, frags, kEspNowDataFragCount);
   for (uint8_t i = 0; i < count; ++i) {
     esp_now_send(hubMac_, frags[i].bytes, frags[i].len);
   }

@@ -41,7 +41,7 @@ class EspNowStreamTransport : public StreamTransport {
   // firing them all back-to-back saturates ESP-NOW's internal TX queue
   // (~60% ESP_ERR_ESPNOW_NO_MEM observed in spike testing without
   // pacing); see firmware/spikes/README.md.
-  EspNowFragment pendingFrags_[kEspNowMaxFragCount];
+  EspNowFragment pendingFrags_[kEspNowDataFragCount];
   uint8_t pendingCount_ = 0;
   uint8_t pendingSent_ = 0;
   uint32_t nextFragDueUs_ = 0;

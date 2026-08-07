@@ -170,6 +170,52 @@ void testControlFrameTypePreserved() {
   CHECK(out.frameType == nhos::kEspNowFragTypeControl);
 }
 
+// Regression: a frame using the *full* kEspNowMaxFragCount budget must
+// round-trip. This is the boundary that silently broke ESP-NOW control
+// responses: EspNowReassembler computes its completion mask as
+// `(1u << fragCount_) - 1u`, and with kEspNowMaxFragCount == 32 that shift
+// is undefined behaviour (shift >= width of uint32_t). On ESP32 it wraps
+// to `1u << 0`, making fullMask 0, so the "have I got every fragment?"
+// check passes on the very first fragment and hands up a mostly-empty
+// buffer. Guards both the shift fix and the max-fragment size itself.
+void testRoundTripMaxFragmentCountFrame() {
+  const size_t fullSize = nhos::kEspNowMaxFragCount * nhos::kEspNowFragMaxPayload;
+  auto payload = makePayload(fullSize, 31);
+  nhos::EspNowFragment frags[nhos::kEspNowMaxFragCount];
+  uint8_t count = nhos::EspNowFragmenter::fragment(
+      payload.data(), payload.size(), /*frameId=*/1234,
+      nhos::kEspNowFragTypeControl, frags, nhos::kEspNowMaxFragCount);
+  CHECK(count == nhos::kEspNowMaxFragCount);
+
+  uint8_t scratch[nhos::kEspNowMaxFragCount * nhos::kEspNowFragMaxPayload];
+  nhos::EspNowReassembler reassembler(scratch, sizeof(scratch));
+  nhos::ReassembledFrame out;
+
+  // Every fragment but the last must report "not complete yet" -- under the
+  // UB this returned true immediately on fragment 0.
+  for (uint8_t i = 0; i < count - 1; ++i) {
+    CHECK(!reassembler.onFragment(frags[i].bytes, frags[i].len, &out));
+  }
+  CHECK(reassembler.onFragment(frags[count - 1].bytes, frags[count - 1].len, &out));
+  CHECK(out.len == payload.size());
+  CHECK(out.frameType == nhos::kEspNowFragTypeControl);
+  CHECK(std::memcmp(out.data, payload.data(), payload.size()) == 0);
+}
+
+// A response one byte past the budget must be rejected up front (count 0)
+// rather than partially sent. EspNowPairing::serviceCommand() relies on
+// this to substitute its `response_too_large` error instead of going
+// silent -- the exact failure that made every `status` command time out.
+void testFrameOneByteOverBudgetRejected() {
+  const size_t overSize = nhos::kEspNowMaxFragCount * nhos::kEspNowFragMaxPayload + 1;
+  auto payload = makePayload(overSize, 7);
+  nhos::EspNowFragment frags[nhos::kEspNowMaxFragCount];
+  uint8_t count = nhos::EspNowFragmenter::fragment(
+      payload.data(), payload.size(), /*frameId=*/5,
+      nhos::kEspNowFragTypeControl, frags, nhos::kEspNowMaxFragCount);
+  CHECK(count == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -180,6 +226,8 @@ int main() {
   testOversizedFrameRejected();
   testMalformedFragmentDropped();
   testControlFrameTypePreserved();
+  testRoundTripMaxFragmentCountFrame();
+  testFrameOneByteOverBudgetRejected();
 
   if (g_failures == 0) {
     std::printf("OK: all EspNowFrame tests passed\n");
