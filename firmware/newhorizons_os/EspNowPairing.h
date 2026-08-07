@@ -52,6 +52,18 @@ constexpr uint8_t kEspNowHelloMagic = 0xE1;
 constexpr uint8_t kEspNowPollMagic = 0xE2;
 constexpr uint8_t kEspNowPairedMagic = 0xE3;
 
+// Sent back to the Hub the instant a control-command frame finishes
+// reassembling, before commandPending_ is even set -- lets
+// EspNowCommandDispatcher stop blind-resending the raw command as soon as
+// it's confirmed received, rather than only once the (possibly slow,
+// possibly multi-fragment) response fully arrives. Mirrors kOtaChunkAckMagic
+// (EspNowOtaReceiver.h) in spirit but carries no payload -- only one
+// command is ever in flight per device, so there's nothing to disambiguate.
+// MUST match New-Horizons-Hub/newhorizons_hub/EspNowHubManager.h's own
+// kEspNowControlAckMagic exactly (duplicated, not shared -- see this file's
+// header comment on kEspNowHelloMagic).
+constexpr uint8_t kEspNowControlAckMagic = 0xE7;
+
 // All valid 2.4GHz channels (1-13, the Japan/EU/most-regions range --
 // channels 12-13 are unused in the US but harmlessly scanned there too).
 // Real-hardware testing found a university AP that auto-selected channel
@@ -99,6 +111,15 @@ class EspNowPairing {
 
   bool hasHub() const { return paired_; }
   const uint8_t* hubMac() const { return hubMac_; }
+
+  // True from the moment a control-command frame finishes reassembling
+  // (commandPending_) through processCommand() execution and the paced
+  // response-fragment drain (responseFragsSent_ < responseFragCount_).
+  // Wired into newhorizons_os.ino's streamingGateOk() to pause this
+  // device's own sensor-data uploads for the same airtime-contention
+  // reason already validated for EspNowOtaReceiver::isRelaying() -- see
+  // that getter's comment.
+  bool hasPendingCommandWork() const { return commandPending_ || responseFragsSent_ < responseFragCount_; }
 
   // EspNowStreamTransport calls this once per loop(); returns true (and
   // clears the flag) at most once per POLL received.

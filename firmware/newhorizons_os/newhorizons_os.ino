@@ -262,6 +262,15 @@ bool streamingGateOk() {
   if (espNowMode && espNowOtaReceiver.isRelaying()) {
     return false;
   }
+  // Same reasoning as the OTA-relay pause above, applied to control-command
+  // exchanges: a command's response can be up to ~11 fragments, paced out
+  // over several loop() iterations, and would otherwise compete for
+  // ESP-NOW airtime with concurrent sensor streaming -- real-hardware
+  // testing found this reliably starved command responses (see
+  // EspNowPairing::hasPendingCommandWork()'s comment).
+  if (espNowMode && espNowPairing.hasPendingCommandWork()) {
+    return false;
+  }
   return espNowMode || wifi.isConnected();
 }
 

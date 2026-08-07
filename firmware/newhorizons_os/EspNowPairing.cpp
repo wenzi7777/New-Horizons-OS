@@ -350,6 +350,15 @@ void EspNowPairing::handleFragmentedPacket(const uint8_t* data, size_t len) {
     return;
   }
   if (frame.len > sizeof(pendingCommandBuffer_)) return;
+
+  // Ack immediately, before even setting commandPending_, so the Hub's
+  // EspNowCommandDispatcher can stop resending as soon as delivery is
+  // confirmed rather than waiting for the full (possibly slow) response.
+  // Sent unconditionally on every reassembled frame, including duplicates
+  // from pre-ack resends still in flight -- idempotent and cheap.
+  const uint8_t ackPayload[1] = {kEspNowControlAckMagic};
+  esp_now_send(hubMac_, ackPayload, sizeof(ackPayload));
+
   memcpy(pendingCommandBuffer_, frame.data, frame.len);
   pendingCommandLen_ = frame.len;
   commandPending_ = true;
@@ -373,9 +382,15 @@ void EspNowPairing::serviceCommand() {
   }
 
   if (!commandPending_ || control_ == nullptr) return;
-  commandPending_ = false;
 
+  // Cleared after processCommand() returns, not before -- keeps
+  // hasPendingCommandWork() true for the entire received-but-not-yet-
+  // answered window, including this synchronous call itself, so
+  // streamingGateOk() can hold off sensor streaming while it runs. Safe:
+  // serviceEspNowCommand() copies out of pendingCommandBuffer_ at its own
+  // top, and this is only ever called synchronously from loop().
   const String response = control_->serviceEspNowCommand(pendingCommandBuffer_, pendingCommandLen_);
+  commandPending_ = false;
   if (response.isEmpty()) return;
 
   // Fragment the response back to the Hub; actual sending is paced out
