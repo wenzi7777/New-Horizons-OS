@@ -60,6 +60,22 @@ void onEspNowRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len)
   espNowPairing.handleEspNowRecv(info->src_addr, data, static_cast<size_t>(len));
 }
 
+// Diagnostic only (temporary): esp_now_send()'s own synchronous return
+// value only confirms a packet was accepted into the driver's TX queue,
+// NOT that it was actually transmitted/acked over the air -- this project
+// never previously registered a send-status callback anywhere, so a
+// send that's silently dropped at the RF/driver layer after being queued
+// successfully was invisible. Logs failures only, to isolate whether
+// control-response fragment loss (see EspNowPairing.cpp's serviceCommand())
+// is happening here vs. somewhere else.
+void onEspNowSent(const esp_now_send_info_t* info, esp_now_send_status_t status) {
+  if (status != ESP_NOW_SEND_SUCCESS) {
+    Serial.printf("[espnow] send_cb_fail mac=%02X:%02X:%02X:%02X:%02X:%02X\n",
+                  info->des_addr[0], info->des_addr[1], info->des_addr[2],
+                  info->des_addr[3], info->des_addr[4], info->des_addr[5]);
+  }
+}
+
 uint8_t packetBuffer[
     nhos::kMaxPacketBytes
 ];
@@ -541,6 +557,7 @@ void setup() {
     }
     espNowPairing.setOtaReceiver(&espNowOtaReceiver);
     esp_now_register_recv_cb(onEspNowRecv);
+    esp_now_register_send_cb(onEspNowSent);
     espNowTransport.attach(espNowPairing);
     activeTransport = &espNowTransport;
     logBoot("boot_stage=espnow_pairing_ready");

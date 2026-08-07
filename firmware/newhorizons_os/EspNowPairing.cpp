@@ -373,10 +373,24 @@ void EspNowPairing::serviceCommand() {
   // EspNowStreamTransport::service()'s own pacing state machine.
   if (responseFragsSent_ < responseFragCount_) {
     if (static_cast<int32_t>(nowUs - responseNextFragDueUs_) >= 0) {
-      esp_now_send(hubMac_, responseFrags_[responseFragsSent_].bytes,
-                   responseFrags_[responseFragsSent_].len);
-      ++responseFragsSent_;
-      responseNextFragDueUs_ += responseFragIntervalUs_;
+      // esp_now_send()'s return value was previously unchecked here: a
+      // transient failure (e.g. ESP_ERR_ESPNOW_NO_MEM from a still-busy
+      // internal TX queue, observed on real hardware after sustained
+      // ~60fps streaming) would silently drop that one fragment while
+      // responseFragsSent_ still advanced past it -- the Hub's reassembler
+      // then waits forever for a fragment that was never actually sent,
+      // and the whole response is lost even though every other fragment
+      // arrived fine. Only advance (and let the pacing interval elapse)
+      // on success; a failed send retries the same fragment next tick.
+      if (esp_now_send(hubMac_, responseFrags_[responseFragsSent_].bytes,
+                        responseFrags_[responseFragsSent_].len) == ESP_OK) {
+        ++responseFragsSent_;
+        responseNextFragDueUs_ += responseFragIntervalUs_;
+      } else {
+        Serial.printf("[espnow_pairing] response_frag_send_failed idx=%u\n",
+                      static_cast<unsigned>(responseFragsSent_));
+        responseNextFragDueUs_ = nowUs + responseFragIntervalUs_;
+      }
     }
     return;  // don't start processing a new command while still draining this response
   }
