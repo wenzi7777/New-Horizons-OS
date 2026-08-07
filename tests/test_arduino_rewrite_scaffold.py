@@ -483,7 +483,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("wifi_setup_requested_by_action_button", wifi)
         self.assertIn(
             "wifi.begin(storage, deviceConfig,\n"
-            "                                espnowDiscoveryPreviouslyFailed || bootMode.wifiSetupRequested())",
+            "                                espnowPairingPreviouslyFailed || bootMode.wifiSetupRequested())",
             sketch,
         )
 

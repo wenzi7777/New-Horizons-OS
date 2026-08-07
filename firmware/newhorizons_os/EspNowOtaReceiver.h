@@ -94,6 +94,15 @@ class EspNowOtaReceiver {
   // kEspNowFragTypeOta frame -- one firmware chunk, sub-header + payload).
   void handleOtaChunkFrame(const uint8_t* data, size_t len);
 
+  // True only during the actual chunk-by-chunk transfer (not the brief
+  // manifest-check/relay-negotiation phases beforehand) -- checked by
+  // newhorizons_os.ino's streamingGateOk() to pause this device's own
+  // sensor-data uploads while a relay is in progress. Real-hardware
+  // testing found the two compete for the same ESP-NOW airtime, making
+  // the relay far slower than expected when sensor streaming continued
+  // unpaused alongside it.
+  bool isRelaying() const { return phase_ == Phase::kRelaying; }
+
  private:
   enum class Phase : uint8_t {
     kIdle,

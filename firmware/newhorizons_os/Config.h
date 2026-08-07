@@ -9,7 +9,7 @@ namespace nhos {
 static constexpr char kProductName[] = "New Horizons OS Arduino";
 static constexpr char kProtocolName[] = "NHO/Arduino/1";
 static constexpr char kHardwareModel[] = NHOS_BOARD_NAME;
-static constexpr char kFirmwareVersion[] = "v0.13.0";
+static constexpr char kFirmwareVersion[] = "v0.14.0";
 
 static constexpr uint16_t kRows = NHOS_BOARD_ROWS;
 static constexpr uint16_t kCols = NHOS_BOARD_COLS;
@@ -51,6 +51,16 @@ static constexpr size_t kScanRingFrames = kStandardScanRingFrames;
 static constexpr size_t kMaxScanRingFrames = kExtendedScanRingFrames;
 
 static constexpr uint32_t kWifiReconnectMs = 10000;
+// If the ongoing background reconnect (WifiManager::service(), after a
+// previously-successful connection drops) can't get back on the air for
+// this long, give up and reopen the setup portal rather than retrying
+// silently forever -- mirrors the boot-time "one failed connect attempt
+// opens the portal immediately" behavior, just with a grace period since
+// this path also covers routine transient outages (AP reboot, roaming)
+// that shouldn't bounce the device into setup mode. Starting guess, same
+// order of magnitude as kEspNowPairingTimeoutMs for consistency -- not a
+// tuned promise.
+static constexpr uint32_t kWifiReconnectFallbackMs = 120000;
 static constexpr uint32_t kBootWifiSetupWindowMs = 3000;
 static constexpr uint8_t kSafeModeBootFailures = 3;
 static constexpr size_t kDefaultLogMaxBytes = 12 * 1024;

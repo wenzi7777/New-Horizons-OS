@@ -252,6 +252,16 @@ bool streamingGateOk() {
   if (control.maintenanceMode()) {
     return false;
   }
+  // Pause this device's own sensor-data uploads while an ESP-NOW OTA
+  // relay is actively transferring chunks -- both compete for the same
+  // ESP-NOW airtime (real-hardware validated finding, see
+  // EspNowOtaReceiver::isRelaying()'s comment). MatrixScanner's ring
+  // buffer just drops the oldest queued frames while paused (sensor data
+  // is lossy by design already), and resumes normally once the relay
+  // finishes -- no special draining/resume logic needed here.
+  if (espNowMode && espNowOtaReceiver.isRelaying()) {
+    return false;
+  }
   return espNowMode || wifi.isConnected();
 }
 
@@ -375,6 +385,18 @@ void updateLedState() {
     activeSignal = nhos::LedSignal::SafeMode;
   } else if (control.maintenanceMode()) {
     activeSignal = nhos::LedSignal::Maintenance;
+  } else if (espNowMode) {
+    // Mirrors streamingGateOk()'s own espNowMode-first special-casing --
+    // wifi.isConnected()/setupActive()/findme.hasGateway() are all
+    // permanently false in this mode (WiFi is never brought up), so
+    // without this branch every ESP-NOW device would fall through to
+    // WifiConnecting and stay there even once genuinely paired. Flat
+    // paired-vs-not check, deliberately not nested with the charge-state
+    // branches below -- a paired ESP-NOW device shows solid Online
+    // regardless of charge state; see EspNowConnecting's own comment in
+    // LedController.h for why this is a distinct signal from
+    // WifiConnecting rather than reusing it.
+    activeSignal = espNowPairing.hasHub() ? nhos::LedSignal::Online : nhos::LedSignal::EspNowConnecting;
   } else if (wifi.setupActive()) {
     activeSignal = nhos::LedSignal::WifiSetup;
   } else if (!wifi.isConnected()) {
@@ -477,19 +499,25 @@ void setup() {
 
   bool wifiConnected = false;
   espNowMode = deviceConfig.data().transport.mode == "espnow";
-  // If a previous boot's broadcast-discovery bootstrap (EspNowPairing,
-  // triggered when hub_mac was empty) timed out without finding any Hub,
-  // don't retry a doomed discovery forever -- fall back to the WiFi
-  // SoftAP portal so the device stays reachable for reconfiguration.
+  // If a previous boot's ESP-NOW pairing attempt (EspNowPairing --
+  // whether it was broadcast-discovering with an empty hub_mac, or
+  // retrying a known-but-unreachable hub_mac) timed out without ever
+  // pairing, don't retry a doomed attempt forever -- fall back to the
+  // WiFi SoftAP portal so the device stays reachable for reconfiguration.
   // Deliberately checked once here at boot, not as a live mid-loop
-  // transition -- see EspNowPairing.cpp's serviceDiscovery() comment for
-  // why (mirrors set_transport's own "next boot, not in-place" rule).
-  const bool espnowDiscoveryPreviouslyFailed =
-      espNowMode && deviceConfig.data().transport.hubMac.isEmpty() &&
-      storage.getUInt(nhos::kEspNowDiscoveryFailFlagKey, 0) != 0;
-  if (espnowDiscoveryPreviouslyFailed) {
+  // transition -- see EspNowPairing.cpp's failPairingAndRestart() comment
+  // for why (mirrors set_transport's own "next boot, not in-place" rule).
+  // Checked on the flag alone, NOT also gated on hubMac.isEmpty() --
+  // that used to only recognize the discovery case; now that a known
+  // (but unreachable) hub_mac can also set this same flag, keeping that
+  // condition would make this check never trip for that case, and the
+  // device would restart every ~2 minutes forever instead of ever
+  // reaching the portal.
+  const bool espnowPairingPreviouslyFailed =
+      espNowMode && storage.getUInt(nhos::kEspNowPairingFailFlagKey, 0) != 0;
+  if (espnowPairingPreviouslyFailed) {
     espNowMode = false;
-    logBoot("espnow_discovery_previous_timeout falling_back_to_wifi_portal");
+    logBoot("espnow_pairing_previous_timeout falling_back_to_wifi_portal");
   }
   if (espNowMode) {
     // ESP-NOW doesn't join a WiFi AP at all -- just needs the radio
@@ -509,7 +537,7 @@ void setup() {
     logBoot("boot_stage=espnow_pairing_ready");
   } else {
     wifiConnected = wifi.begin(storage, deviceConfig,
-                                espnowDiscoveryPreviouslyFailed || bootMode.wifiSetupRequested());
+                                espnowPairingPreviouslyFailed || bootMode.wifiSetupRequested());
     if (wifiConnected) {
       bootMode.markWifiConnected();
     }

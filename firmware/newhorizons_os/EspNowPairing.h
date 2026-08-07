@@ -65,15 +65,24 @@ constexpr uint8_t kEspNowMaxScanChannels = 14;  // lastKnownChannel + the 13 abo
 constexpr uint32_t kEspNowChannelDwellMs = 400;
 constexpr uint32_t kEspNowHelloRetryMs = 1500;
 
-// Broadcast-discovery bootstrap (no known hub_mac yet). 120s is a
-// placeholder pending real-hardware measurement of worst-case channel-hop
-// find time (see ~/.claude/plans/linked-strolling-puppy.md's "新裝置免
-// Gateway 直接配對 Hub" section) -- tune from that, don't leave it as a
-// guess once real numbers exist.
 constexpr uint8_t kEspNowBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-constexpr uint32_t kEspNowDiscoveryTimeoutMs = 120000;
-// NVS key (Preferences 15-char limit -- this is 14).
-constexpr char kEspNowDiscoveryFailFlagKey[] = "espnow_disc_fb";
+
+// Shared "give up and fall back to the WiFi setup portal" timeout, applied
+// from begin() regardless of whether hub_mac was empty (discovering_) or a
+// known-but-currently-unreachable MAC -- both cases are the same "hasn't
+// paired since this boot's begin()" watchdog, just with different entry
+// conditions (empty hub_mac vs. a Hub that's off/moved/factory-reset).
+// 120s is a placeholder pending real-hardware measurement of worst-case
+// channel-hop find time (see ~/.claude/plans/linked-strolling-puppy.md's
+// "新裝置免 Gateway 直接配對 Hub" section) -- tune from that, don't leave
+// it as a guess once real numbers exist. Comfortably longer than a Hub's
+// own OTA-reboot window (10-30s), so a Hub briefly rebooting doesn't
+// bounce a paired device back to the portal.
+constexpr uint32_t kEspNowPairingTimeoutMs = 120000;
+// NVS key (Preferences 15-char limit -- this is 14). Value unchanged from
+// this constant's earlier discovery-only name/scope -- no NVS migration
+// needed, this is a rename for code clarity only.
+constexpr char kEspNowPairingFailFlagKey[] = "espnow_disc_fb";
 
 class EspNowPairing {
  public:
@@ -113,6 +122,7 @@ class EspNowPairing {
   void serviceDiscovery();
   void sendDiscoveryHello();
   void onHubDiscovered(const uint8_t mac[6]);
+  void failPairingAndRestart(const char* reason);
 
   Storage* storage_ = nullptr;
   DeviceConfig* deviceConfig_ = nullptr;
@@ -128,7 +138,12 @@ class EspNowPairing {
   // hubMacValid_-gated flow below by construction -- see service() and
   // handleEspNowRecv().
   bool discovering_ = false;
-  uint32_t discoveryStartMs_ = 0;
+
+  // Stamped unconditionally in begin() (regardless of discovering_), so
+  // the shared kEspNowPairingTimeoutMs watchdog in service() covers both
+  // the empty-hub_mac discovery path and the known-but-unreachable-hub_mac
+  // path with one mechanism -- see failPairingAndRestart().
+  uint32_t pairingAttemptStartMs_ = 0;
 
   uint8_t scanChannels_[kEspNowMaxScanChannels] = {0};
   uint8_t scanChannelCount_ = 0;

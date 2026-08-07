@@ -2,7 +2,7 @@
 
 #include "Config.h"
 #include "DeviceConfig.h"
-#include "EspNowPairing.h"  // kEspNowDiscoveryFailFlagKey, so this stays in sync with EspNowPairing.cpp's own check
+#include "EspNowPairing.h"  // kEspNowPairingFailFlagKey, so this stays in sync with EspNowPairing.cpp's own check
 
 #include <esp_mac.h>
 
@@ -40,10 +40,27 @@ void WifiManager::service() {
     serviceSetupPortal();
     return;
   }
-  if (isConnected() || millis() - lastReconnectMs_ < kWifiReconnectMs) {
+  if (isConnected()) {
+    disconnectedSinceMs_ = 0;
     return;
   }
-  lastReconnectMs_ = millis();
+  const uint32_t now = millis();
+  if (disconnectedSinceMs_ == 0) {
+    disconnectedSinceMs_ = now;  // first tick we've noticed we're disconnected
+  } else if (now - disconnectedSinceMs_ >= kWifiReconnectFallbackMs) {
+    // Ongoing reconnect has been failing for too long -- give up and
+    // reopen the portal (credentials are NOT cleared, matching the
+    // existing boot-time-failure behavior; the previously-saved SSID
+    // stays pre-filled so the user can fix a wrong password or just
+    // retry without losing anything).
+    Serial.println(F("wifi_reconnect_timeout_falling_back_to_setup_portal"));
+    startSetupAp();
+    return;
+  }
+  if (now - lastReconnectMs_ < kWifiReconnectMs) {
+    return;
+  }
+  lastReconnectMs_ = now;
   connectStored();
 }
 
@@ -259,11 +276,11 @@ void WifiManager::handlePortalSave() {
       portalServer_.send(400, "text/html", portalPage("Could not enable Direct/Hub mode.", false));
       return;
     }
-    // Clear any stale discovery-timeout flag so a deliberate retry from
-    // this portal gets a full fresh discovery window, not an immediate
+    // Clear any stale pairing-timeout flag so a deliberate retry from
+    // this portal gets a full fresh pairing window, not an immediate
     // bounce back here -- see newhorizons_os.ino's boot-time check.
     if (storage_) {
-      storage_->putUInt(kEspNowDiscoveryFailFlagKey, 0);
+      storage_->putUInt(kEspNowPairingFailFlagKey, 0);
       deviceConfig_->save(*storage_);
     }
     portalServer_.sendHeader("Cache-Control", "no-store");

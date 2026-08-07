@@ -31,6 +31,14 @@ enum class LedSignal : uint8_t {
   Boot,
   WifiSetup,
   WifiConnecting,
+  // New Horizons Direct (ESP-NOW/Hub transport): not yet paired with the
+  // Hub (still channel-scanning/sending HELLO). Same color/pattern as
+  // WifiConnecting (both mean "still trying to establish connectivity"),
+  // kept as a distinct value rather than reusing WifiConnecting so an
+  // ESP-NOW device's logs/state aren't misleadingly labeled "WiFi" --
+  // mirrors the existing precedent of UplinkDegraded below (Hub-only, but
+  // still lives in this shared enum rather than a per-sketch copy).
+  EspNowConnecting,
   FindMePending,
   Online,
   Maintenance,

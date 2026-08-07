@@ -90,6 +90,11 @@ bool EspNowPairing::begin(Storage& storage, DeviceConfig& deviceConfig, ControlS
   // set_transport command, so it falls back to broadcast discovery
   // instead (serviceDiscovery()). See EspNowPairing.h's file comment.
   discovering_ = !parseHubMacFromConfig();
+  // Unconditional (not just inside the discovering_ branch below) so the
+  // shared kEspNowPairingTimeoutMs watchdog in service() covers both the
+  // empty-hub_mac discovery path and the known-but-unreachable-hub_mac
+  // path with one mechanism.
+  pairingAttemptStartMs_ = millis();
 
   // Defensive: HT rates need 802.11n enabled on this interface. STA mode's
   // default protocol bitmask is expected to already include it, but set it
@@ -116,7 +121,6 @@ bool EspNowPairing::begin(Storage& storage, DeviceConfig& deviceConfig, ControlS
       Serial.println("[espnow_pairing] broadcast peer add FAILED");
       return false;
     }
-    discoveryStartMs_ = millis();
     Serial.println("[espnow_pairing] no hub_mac configured, starting broadcast discovery");
   } else {
     esp_now_peer_info_t peer = {};
@@ -194,6 +198,15 @@ void EspNowPairing::service() {
       otaReceiver_->handleOtaChunkFrame(otaFrameBuffer_, otaFrameBufferLen_);
     }
   }
+  // Unified "hasn't paired since begin()" watchdog -- covers both
+  // discovering_ (empty hub_mac) and the known-but-unreachable-hub_mac
+  // case (neither of which has its own separate timeout anymore). Checked
+  // before discovering_'s own branch so a timed-out discovery attempt
+  // never reaches serviceDiscovery() at all this tick.
+  if (!paired_ && millis() - pairingAttemptStartMs_ >= kEspNowPairingTimeoutMs) {
+    failPairingAndRestart(discovering_ ? "discovery_timeout" : "known_hub_unreachable_timeout");
+    return;
+  }
   if (discovering_) {
     serviceDiscovery();
     return;
@@ -253,26 +266,27 @@ void EspNowPairing::handleEspNowRecv(const uint8_t mac[6], const uint8_t* data, 
 
 void EspNowPairing::serviceDiscovery() {
   const uint32_t now = millis();
-  if (now - discoveryStartMs_ >= kEspNowDiscoveryTimeoutMs) {
-    // No live in-place fallback here on purpose -- mirrors
-    // ControlServer.cpp's set_transport handler, which "deliberately does
-    // not attempt a live in-place transport swap, which would need to
-    // tear down/reinit WiFiUDP or ESP-NOW mid-loop." newhorizons_os.ino's
-    // setup() reads this flag on the *next* boot and forces the WiFi
-    // SoftAP portal instead of retrying a doomed discovery.
-    Serial.println("[espnow_pairing] discovery_timeout no_hub_found");
-    if (storage_) {
-      storage_->putUInt(kEspNowDiscoveryFailFlagKey, 1);
-    }
-    delay(50);
-    ESP.restart();
-    return;
-  }
   startScanIfNeeded();  // same channel-hop as the known-hub_mac path
   if (now - lastHelloMs_ >= kEspNowHelloRetryMs) {
     sendDiscoveryHello();
     lastHelloMs_ = now;
   }
+}
+
+void EspNowPairing::failPairingAndRestart(const char* reason) {
+  // No live in-place fallback here on purpose -- mirrors
+  // ControlServer.cpp's set_transport handler, which "deliberately does
+  // not attempt a live in-place transport swap, which would need to
+  // tear down/reinit WiFiUDP or ESP-NOW mid-loop." newhorizons_os.ino's
+  // setup() reads this flag on the *next* boot and forces the WiFi
+  // SoftAP portal instead of retrying a doomed pairing attempt.
+  Serial.print("[espnow_pairing] pairing_timeout reason=");
+  Serial.println(reason);
+  if (storage_) {
+    storage_->putUInt(kEspNowPairingFailFlagKey, 1);
+  }
+  delay(50);
+  ESP.restart();
 }
 
 void EspNowPairing::sendDiscoveryHello() {
@@ -290,7 +304,7 @@ void EspNowPairing::onHubDiscovered(const uint8_t mac[6]) {
   Serial.println(macStr);
   deviceConfig_->setTransport("espnow", String(macStr));
   if (storage_) {
-    storage_->putUInt(kEspNowDiscoveryFailFlagKey, 0);  // clear any stale failure flag
+    storage_->putUInt(kEspNowPairingFailFlagKey, 0);  // clear any stale failure flag
     deviceConfig_->save(*storage_);
   }
   delay(50);

@@ -46,6 +46,10 @@ class WifiManager {
   bool portalStarted_ = false;
   bool portalRoutesConfigured_ = false;
   uint32_t lastReconnectMs_ = 0;
+  // 0 means "currently connected" (or not yet noticed a disconnect) --
+  // stamped the first service() tick isConnected() is false, reset back
+  // to 0 once reconnected. See service()'s kWifiReconnectFallbackMs check.
+  uint32_t disconnectedSinceMs_ = 0;
   DNSServer dnsServer_;
   WebServer portalServer_{kSetupPortalPort};
 };

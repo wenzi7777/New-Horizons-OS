@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "Config.h"
+#include "EspNowPairing.h"  // kEspNowPairingFailFlagKey, so this stays in sync with EspNowPairing.cpp's own check
 #include "JsonUtils.h"
 
 namespace nhos {
@@ -438,6 +439,15 @@ String ControlServer::processCommand(const String& request) {
     const String hubMac = extractString(request, "hub_mac");
     if (!deviceConfig_->setTransport(mode, hubMac)) {
       return error(cmd, "transport_invalid");
+    }
+    // Clear any stale ESP-NOW pairing-timeout flag from an unrelated past
+    // failure -- otherwise a device freshly (and correctly) reconfigured
+    // here to a new, reachable Hub would bounce straight to the WiFi
+    // portal on its very next boot because of leftover state. Mirrors
+    // WifiManager.cpp's portal-driven "Direct/Hub" path, which does the
+    // same for the same reason.
+    if (storage_) {
+      storage_->putUInt(kEspNowPairingFailFlagKey, 0);
     }
     if (!deviceConfig_->save(*storage_)) {
       return error(cmd, "config_write_failed");

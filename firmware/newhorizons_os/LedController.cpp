@@ -60,6 +60,8 @@ LedController::Pattern LedController::patternFor(LedSignal signal) const {
       return {PatternMode::Solid, LedPalette::WifiSetup, LedPalette::Off, 0, 0, 0, 0, 0, 0, 255};
     case LedSignal::WifiConnecting:
       return {PatternMode::Breathe, LedPalette::WifiConnecting, LedPalette::Off, 1800, 0, 0, 0, 0, 40, 255};
+    case LedSignal::EspNowConnecting:
+      return {PatternMode::Breathe, LedPalette::WifiConnecting, LedPalette::Off, 1800, 0, 0, 0, 0, 40, 255};
     case LedSignal::FindMePending:
       return {PatternMode::Breathe, LedPalette::FindMePending, LedPalette::Off, 2200, 0, 0, 0, 0, 40, 255};
     case LedSignal::Online:
