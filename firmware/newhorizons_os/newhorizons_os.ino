@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <WiFiUdp.h>
 #include <Wire.h>
 #include <esp_now.h>
 
@@ -48,7 +47,10 @@ nhos::FindMeClient findme;
 nhos::ControlServer control;
 nhos::OtaManager ota;
 nhos::TimeSync timeSync;
-WiFiUDP streamUdp;
+// Single WiFiUDP for the whole wifi_udp path lives inside udpTransport.
+// Do not add a second WiFiUDP bound to kUdpStreamPort: dual-bind steals
+// inbound command packets from serviceUdpCommand() while outbound stream
+// still appears healthy (Gateway last_seen updates, commands time out).
 nhos::UdpStreamTransport udpTransport;
 nhos::EspNowStreamTransport espNowTransport;
 nhos::EspNowPairing espNowPairing;
@@ -353,9 +355,12 @@ void sendHeartbeatIfDue() {
     findme.recordHeartbeat(now, "heartbeat_encode_failed");
     return;
   }
-  streamUdp.beginPacket(findme.streamHost().c_str(), findme.streamPort());
-  streamUdp.write(packetBuffer, len);
-  if (streamUdp.endPacket()) {
+  // Share the single bound UDP socket with stream + command RX (udpTransport).
+  if (!activeTransport || !activeTransport->ready()) {
+    findme.recordHeartbeat(now, "heartbeat_not_ready");
+    return;
+  }
+  if (activeTransport->sendFrame(packetBuffer, len)) {
     findme.recordHeartbeat(now, "");
   } else {
     findme.recordHeartbeat(now, "heartbeat_send_failed");
@@ -539,6 +544,16 @@ void setup() {
   if (espnowPairingPreviouslyFailed) {
     espNowMode = false;
     logBoot("espnow_pairing_previous_timeout falling_back_to_wifi_portal");
+  } else if (espNowMode && bootMode.wifiSetupRequested()) {
+    // Holding the boot action button must win over the device's
+    // persisted ESP-NOW/Hub transport mode, or there is no way back to
+    // the WiFi setup portal (and so no way to switch back to
+    // Gateway/WiFi mode) once a device has ever been paired with a Hub --
+    // bootMode.wifiSetupRequested() used to only be consulted inside the
+    // WiFi-mode branch below, which this device never reaches while
+    // transport.mode == "espnow".
+    espNowMode = false;
+    logBoot("boot_action_button_setup_requested_from_espnow falling_back_to_wifi_portal");
   }
   if (espNowMode) {
     // ESP-NOW doesn't join a WiFi AP at all -- just needs the radio
@@ -570,7 +585,7 @@ void setup() {
     }
     findme.begin(storage, wifi, uid);
     logBoot("findme_started");
-    streamUdp.begin(nhos::kUdpStreamPort);
+    // One bind only — see comment on udpTransport above.
     udpTransport.begin();
     udpTransport.attach(control, findme);
     activeTransport = &udpTransport;
@@ -625,7 +640,8 @@ void loop() {
     sectionStartUs = micros();
     control.service();
     if (!espNowMode) {
-      control.serviceUdpCommand(streamUdp);
+      // Poll the same socket used for outbound stream/heartbeat.
+      control.serviceUdpCommand(udpTransport.udp());
     }
     loopProfile.controlUs += micros() - sectionStartUs;
 

@@ -134,6 +134,25 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('jsonRawField(data, "findme"', control)
         self.assertIn("findme_->statusJson()", control)
 
+    def test_wifi_udp_uses_single_socket_for_stream_and_commands(self):
+        # v0.12.0 left a global WiFiUDP streamUdp.begin(13250) beside
+        # udpTransport.begin() (also 13250). Dual-bind steals inbound
+        # commands from serviceUdpCommand while outbound stream still works.
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        transport_h = (ARDUINO_ROOT / "UdpStreamTransport.h").read_text(encoding="utf-8")
+        transport_cpp = (ARDUINO_ROOT / "UdpStreamTransport.cpp").read_text(encoding="utf-8")
+
+        self.assertNotIn("WiFiUDP streamUdp", sketch)
+        self.assertNotIn("streamUdp.begin", sketch)
+        self.assertIn("udpTransport.begin()", sketch)
+        self.assertEqual(sketch.count("udpTransport.begin()"), 1)
+        self.assertIn("control.serviceUdpCommand(udpTransport.udp())", sketch)
+        self.assertIn("activeTransport->sendFrame", sketch)
+        self.assertIn("udp_.begin(kUdpStreamPort)", transport_cpp)
+        self.assertIn("WiFiUDP& udp()", transport_h)
+        # Exactly one begin of the stream port in the wifi_udp transport.
+        self.assertEqual(transport_cpp.count("udp_.begin(kUdpStreamPort)"), 1)
+
     def test_findme_gateway_transfer_expires_and_requires_matching_offer(self):
         header = (ARDUINO_ROOT / "FindMeClient.h").read_text(encoding="utf-8")
         findme = (ARDUINO_ROOT / "FindMeClient.cpp").read_text(encoding="utf-8")

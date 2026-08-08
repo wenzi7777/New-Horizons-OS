@@ -19,8 +19,10 @@ class FindMeClient;
 
 class UdpStreamTransport : public StreamTransport {
  public:
-  // Mirrors the existing `streamUdp.begin(nhos::kUdpStreamPort)` call in
-  // newhorizons_os.ino's setup().
+  // Sole bind of kUdpStreamPort for the wifi_udp path. Outbound stream,
+  // heartbeat, and inbound control commands all share this one WiFiUDP
+  // instance — a second begin(kUdpStreamPort) on another WiFiUDP steals
+  // RX from serviceUdpCommand while TX still looks healthy.
   void begin();
 
   void attach(ControlServer& control, FindMeClient& findme);
@@ -28,10 +30,9 @@ class UdpStreamTransport : public StreamTransport {
   bool ready() const override;
   bool sendFrame(const uint8_t* data, size_t len) override;
 
-  // Exposed for the two remaining UDP-specific call sites that need the
-  // raw socket directly: ControlServer::serviceUdpCommand() (inbound
-  // command parsing) and MatrixScanner's queued-packet path goes through
-  // sendFrame() above instead, not this.
+  // Exposed for ControlServer::serviceUdpCommand() (inbound command
+  // parsing on the same bound socket). Matrix/heartbeat go through
+  // sendFrame() above.
   WiFiUDP& udp() { return udp_; }
 
  private:

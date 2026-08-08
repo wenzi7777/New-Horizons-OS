@@ -299,6 +299,18 @@ void WifiManager::handlePortalSave() {
     return;
   }
 
+  // Submitting WiFi credentials through this portal is a deliberate
+  // "use Gateway/WiFi mode" choice -- persist it, or a device that was
+  // ever paired with a Hub reverts straight back to transport.mode ==
+  // "espnow" on its very next reboot regardless of these credentials
+  // working, since nothing else in this function ever touches
+  // transport.mode. Saved even if the connect attempt below fails so the
+  // portal (which this device can still reach either way) reflects the
+  // mode the user actually asked for.
+  if (deviceConfig_ && deviceConfig_->setTransport("wifi_udp", "") && storage_) {
+    deviceConfig_->save(*storage_);
+  }
+
   portalServer_.sendHeader("Cache-Control", "no-store");
   portalServer_.send(200, "text/html", portalPage("Credentials saved. Connecting...", true));
   delay(150);
