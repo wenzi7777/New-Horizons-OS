@@ -29,6 +29,7 @@ class PowerManager {
   uint8_t lastStat0() const;
   bool applyProfile(ChargeProfile profile);
   bool applyProfileByName(const String& profileName);
+  bool applyBatteryChargeLimit(uint16_t requestedMa, uint16_t& actualMa);
   String profileName() const;
   String statusJson() const;
 

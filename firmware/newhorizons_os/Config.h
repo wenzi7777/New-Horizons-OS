@@ -14,7 +14,9 @@ static constexpr char kFirmwareVersion[] = "v0.16.1";
 static constexpr uint16_t kRows = NHOS_BOARD_ROWS;
 static constexpr uint16_t kCols = NHOS_BOARD_COLS;
 static constexpr uint16_t kMaxSensors = kRows * kCols;
-static constexpr uint8_t kImuSampleFloats = 7 + (NHOS_BOARD_HAS_MAG ? 3 : 0);
+// Magnetometer samples are now supplied by MagnetometerManager.  Keep the
+// legacy BMM150 combined IMU payload only on existing GCU boards.
+static constexpr uint8_t kImuSampleFloats = 7 + (NHOS_BOARD_MAG_MODEL == 1 ? 3 : 0);
 
 static constexpr uint16_t kUdpStreamPort = 13250;
 static constexpr uint16_t kDiscoveryPort = 22346;

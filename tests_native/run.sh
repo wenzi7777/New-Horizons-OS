@@ -22,3 +22,11 @@ CXX="${CXX:-c++}"
   -o "$BUILD_DIR/test_ota_chunk_codec"
 
 "$BUILD_DIR/test_ota_chunk_codec"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_v15f_foundation.cpp" \
+  "$FIRMWARE_DIR/BatteryProfile.cpp" \
+  -o "$BUILD_DIR/test_v15f_foundation"
+
+"$BUILD_DIR/test_v15f_foundation"

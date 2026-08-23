@@ -29,7 +29,7 @@ void ImuManager::begin(bool enabled) {
     return;
   }
 
-#if NHOS_BOARD_HAS_MAG
+#if NHOS_BOARD_MAG_MODEL == 1
   if (!IMU.begin()) {
     lastError_ = "bmi270_bmm150_init_failed";
 #else
@@ -87,12 +87,6 @@ void ImuManager::service(uint32_t nowUs) {
   const uint32_t readStartedUs = micros();
   const bool gyroUpdated = IMU.readGyroscope(gx, gy, gz);
   const bool accelUpdated = IMU.readAcceleration(ax, ay, az);
-#if NHOS_BOARD_HAS_MAG
-  float mx = sample_[7];
-  float my = sample_[8];
-  float mz = sample_[9];
-  IMU.readMagneticField(mx, my, mz);
-#endif
   lastReadDurationUs_ = micros() - readStartedUs;
 
   if (!gyroUpdated && !accelUpdated) {
@@ -109,11 +103,6 @@ void ImuManager::service(uint32_t nowUs) {
   sample_[4] = gy;
   sample_[5] = gz;
   sample_[6] = 0.0f;
-#if NHOS_BOARD_HAS_MAG
-  sample_[7] = mx;
-  sample_[8] = my;
-  sample_[9] = mz;
-#endif
   sampleValid_ = true;
   lastSampleAtUs_ = nowUs;
   lastSampleAtMs_ = millis();
@@ -159,7 +148,7 @@ String ImuManager::statusJson() const {
   } else {
     out += "error";
   }
-#if NHOS_BOARD_HAS_MAG
+#if NHOS_BOARD_MAG_MODEL == 1
   out += "\",\"chip\":\"BMI270+BMM150\"";
 #else
   out += "\",\"chip\":\"BMI270\"";

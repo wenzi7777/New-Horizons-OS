@@ -15,6 +15,8 @@
 #include "ExternalLedController.h"
 #include "FindMeClient.h"
 #include "ImuManager.h"
+#include "MagnetometerManager.h"
+#include "BatteryGaugeManager.h"
 #include "LedController.h"
 #include "MatrixScanner.h"
 #include "OtaManager.h"
@@ -43,6 +45,8 @@ nhos::PacketBuilder packetBuilder;
 nhos::PowerManager power;
 nhos::PowerStateManager powerState;
 nhos::ImuManager imu;
+nhos::BatteryGaugeManager batteryGauge;
+nhos::MagnetometerManager magnetometer;
 nhos::FindMeClient findme;
 nhos::ControlServer control;
 nhos::OtaManager ota;
@@ -471,8 +475,19 @@ void setup() {
   logBoot(String("boot_stage=display_ready ") + displayManager.statusJson());
   power.begin(storage.getString("charge_profile", "slow"));
   logBoot(String("boot_stage=power_ready ") + power.statusJson());
+  batteryGauge.begin();
+  batteryGauge.service(millis());
+#if NHOS_BOARD_HAS_MAX17048
+  uint16_t actualChargeCurrentMa = 0;
+  if (!power.applyBatteryChargeLimit(batteryGauge.profile().maxChargeCurrentMa, actualChargeCurrentMa)) {
+    logBoot(String("battery_charge_limit_not_applied requested=") + batteryGauge.profile().maxChargeCurrentMa + " actual=" + actualChargeCurrentMa);
+  }
+#endif
+  logBoot(String("boot_stage=battery_gauge_ready ") + batteryGauge.statusJson());
   imu.begin(deviceConfig.data().imuEnabled);
   logBoot(String("boot_stage=imu_ready ") + imu.statusJson());
+  magnetometer.begin();
+  logBoot(String("boot_stage=magnetometer_ready ") + magnetometer.statusJson());
 
   if (!nhos::validatePinMap()) {
     logBoot("pin_map_invalid");
@@ -613,6 +628,7 @@ void setup() {
 void loop() {
   const uint32_t loopStartUs = micros();
   power.service(millis());
+  batteryGauge.service(millis());
   servicePowerState();
   if (powerState.shouldRunServices()) {
     uint32_t sectionStartUs = micros();
@@ -647,6 +663,7 @@ void loop() {
 
     sectionStartUs = micros();
     imu.service(micros());
+    magnetometer.service(millis());
     loopProfile.imuUs += micros() - sectionStartUs;
 
     if (!espNowMode) {

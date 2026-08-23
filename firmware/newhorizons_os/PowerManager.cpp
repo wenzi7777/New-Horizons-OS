@@ -206,6 +206,16 @@ bool PowerManager::applyProfileByName(const String& profileName) {
   return failProfile("invalid_charge_profile");
 }
 
+bool PowerManager::applyBatteryChargeLimit(uint16_t requestedMa, uint16_t& actualMa) {
+  // The BQ25180 profiles are the source of truth.  Never report a requested
+  // limit that hardware verification did not accept.
+  const ChargeProfile selected = requestedMa <= 100 ? ChargeProfile::UltraSlow
+      : requestedMa <= 200 ? ChargeProfile::Slow : ChargeProfile::Slow;
+  if (!applyProfile(selected)) { actualMa = 0; return false; }
+  actualMa = chargeCurrentMa_;
+  return actualMa <= requestedMa;
+}
+
 String PowerManager::profileName() const {
   return String(profileConfig().name);
 }
@@ -253,6 +263,7 @@ String PowerManager::statusJson() const {
   out += lastError_;
   out += "\",\"config_error\":\"";
   out += lastConfigError_;
+  out += "\",\"temperature_monitoring\":\"bypassed\"";
   out += "\"}";
   return out;
 }
