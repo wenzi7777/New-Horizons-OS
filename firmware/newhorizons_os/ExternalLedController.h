@@ -3,9 +3,14 @@
 #include <Arduino.h>
 
 #include "BoardConfig.h"
+#include "BoardPins.h"
 #include "DeviceConfig.h"
 #include "LedController.h"
 #include "MatrixScanner.h"
+
+#if NHOS_BOARD_HAS_EXT_LED && !defined(NHOS_BOARD_V15F)
+#include <Adafruit_NeoPixel.h>
+#endif
 
 namespace nhos {
 
@@ -53,12 +58,18 @@ class ExternalLedController {
   uint32_t color(LedColor color) const;
   uint8_t scale(uint8_t value) const;
 
-  // The external strip uses its own RMT channel. Adafruit_NeoPixel's ESP-IDF
-  // v5 backend owns one static channel for every instance, which makes GPIO16
-  // and the two-pixel GPIO46 status chain tear each other down on each show.
+  // v1.5.F's FPC 3.0 uses WS2812B-2020-V6 and needs a dedicated RMT channel:
+  // Adafruit_NeoPixel's ESP-IDF v5 backend owns one static channel for every
+  // instance, which makes GPIO16 and the two-pixel GPIO46 chain interfere.
+#if defined(NHOS_BOARD_V15F)
   static constexpr size_t kPixelByteCount =
-      NHOS_BOARD_HAS_EXT_LED ? NHOS_BOARD_EXTERNAL_LED_COUNT * 3U : 1U;
+      NHOS_BOARD_EXTERNAL_LED_COUNT * 3U;
   uint8_t pixelBytes_[kPixelByteCount] = {};
+#elif NHOS_BOARD_HAS_EXT_LED
+  // v1.0.F FPC 2.0 keeps its established Adafruit WS2812 path and timing.
+  Adafruit_NeoPixel pixels_{kExternalLedCount, kExternalLedPin,
+                            NEO_GRB + NEO_KHZ800};
+#endif
   ExternalLedConfig config_;
   bool initialized_ = false;
   bool rmtReady_ = false;

@@ -14,13 +14,14 @@ int main() {
   const size_t written = encodeWs2812Grb(grb, sizeof(grb), symbols, 24);
   assert(written == 24);
 
-  // WS2812B-2020-V6 is GRB, MSB first. At the 10 MHz RMT clock used by
-  // the controller a logical 1 is 800 ns high / 400 ns low, and 0 is
-  // 400 ns high / 800 ns low.
-  assert(symbols[0] == (Ws2812RmtSymbol{1, 8, 0, 4}));
-  assert(symbols[1] == (Ws2812RmtSymbol{1, 4, 0, 8}));
-  assert(symbols[7] == (Ws2812RmtSymbol{1, 4, 0, 8}));
-  assert(symbols[23] == (Ws2812RmtSymbol{1, 8, 0, 4}));
+  // WS2812B-2020-V6 is GRB, MSB first. Its V6 timing specification needs
+  // a 0 high period of 220..380 ns and a 1 low period of 580 ns or more.
+  // At the 10 MHz RMT clock this is 300/1000 ns for 0 and 700/600 ns for 1;
+  // both 1.3 us cycles comply with the documented >= 1.25 us period.
+  assert(symbols[0] == (Ws2812RmtSymbol{1, 7, 0, 6}));
+  assert(symbols[1] == (Ws2812RmtSymbol{1, 3, 0, 10}));
+  assert(symbols[7] == (Ws2812RmtSymbol{1, 3, 0, 10}));
+  assert(symbols[23] == (Ws2812RmtSymbol{1, 7, 0, 6}));
 
   // An incomplete destination must be rejected rather than producing a
   // truncated frame that the first LED could relay as corrupted colours.
