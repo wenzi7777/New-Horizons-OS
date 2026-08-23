@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "Bmm350SensorApiAdapter.h"
+
 namespace nhos {
 
 class MagnetometerManager {
@@ -21,6 +23,7 @@ class MagnetometerManager {
   float sample_[3] = {0};
   String error_;
   uint32_t lastPollMs_ = 0;
+  Bmm350SensorApiAdapter bmm350_;
 };
 
 }  // namespace nhos

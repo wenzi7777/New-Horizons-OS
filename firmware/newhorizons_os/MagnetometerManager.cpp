@@ -3,6 +3,7 @@
 #include <Wire.h>
 
 #include "BoardConfig.h"
+#include "Bmm350BridgePolicy.h"
 #include "MagnetometerSamplePolicy.h"
 
 #if NHOS_BOARD_MAG_MODEL == 1
@@ -11,10 +12,6 @@
 
 namespace nhos {
 namespace {
-constexpr uint8_t kBmm350Address = 0x14;
-constexpr uint8_t kBmm350ChipId = 0x00;
-constexpr uint8_t kBmm350PmuCmd = 0x06;
-constexpr uint8_t kBmm350NormalMode = 0x01;
 }  // namespace
 
 void MagnetometerManager::begin(bool bmm150HostReady) {
@@ -26,25 +23,12 @@ void MagnetometerManager::begin(bool bmm150HostReady) {
   lastPollMs_ = 0;
 
 #if NHOS_BOARD_MAG_MODEL == 2
-  Wire.beginTransmission(kBmm350Address);
-  Wire.write(kBmm350ChipId);
-  if (Wire.endTransmission(false) != 0 ||
-      Wire.requestFrom(kBmm350Address, static_cast<uint8_t>(1)) != 1 ||
-      !Wire.available() || Wire.read() != 0x33) {
-    error_ = "bmm350_not_detected";
-    return;
+  initialized_ = bmm350_.begin();
+  ready_ = initialized_ && bmm350_.normalMode();
+  calibrationAvailable_ = initialized_;
+  if (!ready_) {
+    error_ = String("bmm350_sensorapi_init_failed_") + bmm350_.lastResult();
   }
-  Wire.beginTransmission(kBmm350Address);
-  Wire.write(kBmm350PmuCmd);
-  Wire.write(kBmm350NormalMode);
-  if (Wire.endTransmission() != 0) {
-    error_ = "bmm350_normal_mode_failed";
-    return;
-  }
-  // BMM350 output needs Bosch trim compensation.  Do not advertise raw ADC
-  // counts as BMM150-compatible magnetic-field values while it is absent.
-  initialized_ = true;
-  error_ = "bmm350_calibration_unavailable";
 #elif NHOS_BOARD_MAG_MODEL == 1
   initialized_ = bmm150HostReady;
   ready_ = bmm150HostReady;
@@ -68,6 +52,22 @@ void MagnetometerManager::service(uint32_t nowMs) {
                               calibrationAvailable_, readSucceeded)) {
     valid_ = false;
     error_ = "bmm150_read_failed";
+    return;
+  }
+  sample_[0] = next[0];
+  sample_[1] = next[1];
+  sample_[2] = next[2];
+  valid_ = true;
+  error_ = "";
+#elif NHOS_BOARD_MAG_MODEL == 2
+  float next[3];
+  const bool readSucceeded = bmm350_.readCompensatedMicroTesla(next);
+  if (!bmm350CanPublishCompensatedSample(bmm350_.initialized(),
+                                         bmm350_.normalMode(), readSucceeded) ||
+      !magnetometerCanPublish(MagnetometerModel::Bmm350, initialized_,
+                              calibrationAvailable_, readSucceeded)) {
+    valid_ = false;
+    error_ = String("bmm350_compensated_read_failed_") + bmm350_.lastResult();
     return;
   }
   sample_[0] = next[0];

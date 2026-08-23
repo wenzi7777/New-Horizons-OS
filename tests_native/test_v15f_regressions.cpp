@@ -3,6 +3,7 @@
 #include <string>
 
 #include "BatteryChargeSafety.h"
+#include "Bmm350BridgePolicy.h"
 #include "MagnetometerSamplePolicy.h"
 #include "PacketSensorBlocks.h"
 #include "PowerStatusJson.h"
@@ -40,6 +41,14 @@ void testUncalibratedBmm350CannotPublishFakeMagneticField() {
   assert(magnetometerCanPublish(MagnetometerModel::Bmm350, true, true, true));
 }
 
+void testBmm350RequiresTheOfficialCompensatedReadPath() {
+  using namespace nhos;
+  assert(!bmm350CanPublishCompensatedSample(false, true, true));
+  assert(!bmm350CanPublishCompensatedSample(true, false, true));
+  assert(!bmm350CanPublishCompensatedSample(true, true, false));
+  assert(bmm350CanPublishCompensatedSample(true, true, true));
+}
+
 void testPowerStatusJsonClosesExactlyOnce() {
   using namespace nhos;
   const PowerStatusJsonSnapshot snapshot{
@@ -58,6 +67,7 @@ int main() {
   testMagIsAnExplicitOptionalBlock();
   testBatterySafetyLimitIsReappliedOnProfileTransition();
   testUncalibratedBmm350CannotPublishFakeMagneticField();
+  testBmm350RequiresTheOfficialCompensatedReadPath();
   testPowerStatusJsonClosesExactlyOnce();
   std::cout << "v1.5.F regression tests passed\n";
   return 0;

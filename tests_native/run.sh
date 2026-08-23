@@ -34,6 +34,7 @@ CXX="${CXX:-c++}"
 "$CXX" -std=c++17 -Wall -Wextra -Werror \
   -I"$FIRMWARE_DIR" \
   "$SCRIPT_DIR/test_v15f_regressions.cpp" \
+  "$FIRMWARE_DIR/Bmm350BridgePolicy.cpp" \
   "$FIRMWARE_DIR/BatteryChargeSafety.cpp" \
   "$FIRMWARE_DIR/MagnetometerSamplePolicy.cpp" \
   "$FIRMWARE_DIR/PacketSensorBlocks.cpp" \
