@@ -18,7 +18,7 @@ void MagnetometerManager::begin(bool bmm150HostReady) {
   initialized_ = false;
   ready_ = false;
   calibrationAvailable_ = false;
-  valid_ = false;
+  sample_.clear();
   error_ = "not_initialized";
   lastPollMs_ = 0;
 
@@ -50,14 +50,11 @@ void MagnetometerManager::service(uint32_t nowMs) {
   const bool readSucceeded = IMU.readMagneticField(next[0], next[1], next[2]);
   if (!magnetometerCanPublish(MagnetometerModel::Bmm150, initialized_,
                               calibrationAvailable_, readSucceeded)) {
-    valid_ = false;
+    sample_.clear();
     error_ = "bmm150_read_failed";
     return;
   }
-  sample_[0] = next[0];
-  sample_[1] = next[1];
-  sample_[2] = next[2];
-  valid_ = true;
+  sample_.store(next);
   error_ = "";
 #elif NHOS_BOARD_MAG_MODEL == 2
   float next[3];
@@ -66,26 +63,17 @@ void MagnetometerManager::service(uint32_t nowMs) {
                                          bmm350_.normalMode(), readSucceeded) ||
       !magnetometerCanPublish(MagnetometerModel::Bmm350, initialized_,
                               calibrationAvailable_, readSucceeded)) {
-    valid_ = false;
+    sample_.clear();
     error_ = String("bmm350_compensated_read_failed_") + bmm350_.lastResult();
     return;
   }
-  sample_[0] = next[0];
-  sample_[1] = next[1];
-  sample_[2] = next[2];
-  valid_ = true;
+  sample_.store(next);
   error_ = "";
 #endif
 }
 
 bool MagnetometerManager::copyLatestSample(float out[3]) const {
-  if (!out || !valid_) {
-    return false;
-  }
-  out[0] = sample_[0];
-  out[1] = sample_[1];
-  out[2] = sample_[2];
-  return true;
+  return sample_.copy(out);
 }
 
 String MagnetometerManager::statusJson() const {
@@ -104,7 +92,7 @@ String MagnetometerManager::statusJson() const {
   out += ",\"calibration\":\"";
   out += calibrationAvailable_ ? "available" : "unavailable";
   out += "\",\"sample_valid\":";
-  out += valid_ ? "true" : "false";
+  out += sample_.valid() ? "true" : "false";
   out += ",\"last_error\":\"";
   out += error_;
   out += "\"}";

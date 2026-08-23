@@ -2,7 +2,11 @@
 
 #include <Arduino.h>
 
+#include "BoardConfig.h"
+#include "MagnetometerSampleCache.h"
+#if NHOS_BOARD_MAG_MODEL == 2
 #include "Bmm350SensorApiAdapter.h"
+#endif
 
 namespace nhos {
 
@@ -19,11 +23,12 @@ class MagnetometerManager {
   bool initialized_ = false;
   bool ready_ = false;
   bool calibrationAvailable_ = false;
-  bool valid_ = false;
-  float sample_[3] = {0};
+  MagnetometerSampleCache sample_;
   String error_;
   uint32_t lastPollMs_ = 0;
+#if NHOS_BOARD_MAG_MODEL == 2
   Bmm350SensorApiAdapter bmm350_;
+#endif
 };
 
 }  // namespace nhos

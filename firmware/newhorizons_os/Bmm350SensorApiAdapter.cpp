@@ -1,11 +1,34 @@
+#include "BoardConfig.h"
+
+#if NHOS_BOARD_MAG_MODEL == 2
 #include "Bmm350SensorApiAdapter.h"
 
 #include <Wire.h>
 
+#include "Bmm350I2cTransport.h"
+
 namespace nhos {
 namespace {
 constexpr uint8_t kBmm350Address = BMM350_I2C_ADSEL_SET_LOW;
-constexpr uint8_t kWireChunkBytes = 24;
+class WireBmm350Bus final : public Bmm350I2cBus {
+ public:
+  bool write(uint8_t address, uint8_t reg, const uint8_t* data, uint8_t length) override {
+    Wire.beginTransmission(address);
+    Wire.write(reg);
+    return Wire.write(data, length) == length && Wire.endTransmission() == 0;
+  }
+
+  uint8_t read(uint8_t address, uint8_t reg, uint8_t* data, uint8_t length) override {
+    Wire.beginTransmission(address);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0 || Wire.requestFrom(address, length) != length) return 0;
+    for (uint8_t i = 0; i < length; ++i) {
+      if (!Wire.available()) return i;
+      data[i] = static_cast<uint8_t>(Wire.read());
+    }
+    return length;
+  }
+};
 }
 
 bool Bmm350SensorApiAdapter::begin() {
@@ -63,39 +86,23 @@ void Bmm350SensorApiAdapter::delayCallback(uint32_t periodUs, void*) {
 
 BMM350_INTF_RET_TYPE Bmm350SensorApiAdapter::read(uint8_t reg, uint8_t* data,
                                                    uint32_t length) {
-  if (!data) return BMM350_E_NULL_PTR;
-  uint32_t offset = 0;
-  while (offset < length) {
-    const uint8_t count = static_cast<uint8_t>(
-        (length - offset) > kWireChunkBytes ? kWireChunkBytes : length - offset);
-    Wire.beginTransmission(kBmm350Address);
-    Wire.write(static_cast<uint8_t>(reg + offset));
-    if (Wire.endTransmission(false) != 0 ||
-        Wire.requestFrom(kBmm350Address, count) != count) return BMM350_E_COM_FAIL;
-    for (uint8_t i = 0; i < count; ++i) {
-      if (!Wire.available()) return BMM350_E_COM_FAIL;
-      data[offset + i] = static_cast<uint8_t>(Wire.read());
-    }
-    offset += count;
-  }
-  return BMM350_INTF_RET_SUCCESS;
+  WireBmm350Bus bus;
+  const Bmm350TransportResult result =
+      Bmm350I2cTransport::read(bus, kBmm350Address, reg, data, length);
+  return result == Bmm350TransportResult::Success ? BMM350_INTF_RET_SUCCESS
+      : result == Bmm350TransportResult::NullPointer ? BMM350_E_NULL_PTR
+      : BMM350_E_COM_FAIL;
 }
 
 BMM350_INTF_RET_TYPE Bmm350SensorApiAdapter::write(uint8_t reg, const uint8_t* data,
                                                     uint32_t length) {
-  if (!data) return BMM350_E_NULL_PTR;
-  uint32_t offset = 0;
-  while (offset < length) {
-    const uint8_t count = static_cast<uint8_t>(
-        (length - offset) > kWireChunkBytes ? kWireChunkBytes : length - offset);
-    Wire.beginTransmission(kBmm350Address);
-    Wire.write(static_cast<uint8_t>(reg + offset));
-    if (Wire.write(data + offset, count) != count || Wire.endTransmission() != 0) {
-      return BMM350_E_COM_FAIL;
-    }
-    offset += count;
-  }
-  return BMM350_INTF_RET_SUCCESS;
+  WireBmm350Bus bus;
+  const Bmm350TransportResult result =
+      Bmm350I2cTransport::write(bus, kBmm350Address, reg, data, length);
+  return result == Bmm350TransportResult::Success ? BMM350_INTF_RET_SUCCESS
+      : result == Bmm350TransportResult::NullPointer ? BMM350_E_NULL_PTR
+      : BMM350_E_COM_FAIL;
 }
 
 }  // namespace nhos
+#endif  // NHOS_BOARD_MAG_MODEL == 2

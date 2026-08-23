@@ -1,7 +1,8 @@
 #pragma once
 
+#include "BoardConfig.h"
+#if NHOS_BOARD_MAG_MODEL == 2
 #include <Arduino.h>
-
 extern "C" {
 #include "third_party/bmm350/bmm350.h"
 }
@@ -35,3 +36,4 @@ class Bmm350SensorApiAdapter {
 };
 
 }  // namespace nhos
+#endif  // NHOS_BOARD_MAG_MODEL == 2
