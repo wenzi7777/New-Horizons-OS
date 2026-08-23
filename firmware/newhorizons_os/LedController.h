@@ -12,17 +12,25 @@ struct LedColor {
 
 namespace LedPalette {
 static constexpr LedColor Off{0, 0, 0};
-static constexpr LedColor Boot{0, 0, 16};
+static constexpr LedColor Boot{0, 0, 28};
 static constexpr LedColor WifiSetup{32, 9, 0};
-static constexpr LedColor WifiConnecting{24, 18, 0};
-static constexpr LedColor FindMePending{0, 18, 24};
-static constexpr LedColor Online{0, 24, 0};
+// Direct transport searches for a Gateway in blue. ESP-NOW searches for a
+// Hub in orange, so an operator can distinguish the two at a glance.
+static constexpr LedColor WifiConnecting{0, 20, 128};
+static constexpr LedColor HubSearching{80, 30, 0};
+static constexpr LedColor FindMePending{0, 20, 128};
+static constexpr LedColor Online{0, 80, 0};
 static constexpr LedColor Maintenance{32, 18, 0};
 static constexpr LedColor SafeMode{32, 0, 32};
 static constexpr LedColor Ota{0, 18, 24};
-static constexpr LedColor Error{32, 0, 0};
+static constexpr LedColor Error{160, 0, 0};
 static constexpr LedColor Warning{28, 18, 0};
 static constexpr LedColor White{24, 24, 24};
+// Command acknowledgement and completion must remain visually distinct from
+// the normal online-green base state. WS2812B is GRB on the wire but accepts
+// these logical RGB values through Adafruit_NeoPixel's NEO_GRB configuration.
+static constexpr LedColor CommandReceived{16, 48, 180};
+static constexpr LedColor CommandSuccess{0, 160, 90};
 static constexpr LedColor ChargeDone{0x39, 0xc5, 0xbb};
 }  // namespace LedPalette
 
@@ -84,6 +92,7 @@ class LedController {
   void service(uint32_t nowMs);
   void setSignal(LedSignal signal);
   void showEvent(LedSignal signal);
+  void setBrightness(float brightness);
   void setStatus(LedColor color);
   void setBatteryStatus(bool sampleValid, uint16_t socCentiPercent, bool charging);
   void pulse(LedColor color, uint16_t delayMs);
@@ -106,12 +115,23 @@ class LedController {
   LedColor colorFor(LedSignal signal, uint32_t nowMs) const;
   LedColor batteryColorFor(uint32_t nowMs) const;
   LedColor scaleColor(LedColor color, uint8_t level) const;
+  LedColor applyBrightness(LedColor color) const;
+  void enqueueEvent(LedSignal signal);
+  bool startNextEvent(uint32_t nowMs);
   void writeStatusPixels(LedColor system, LedColor battery);
   void writePixel(uint8_t pin, LedColor color);
 
+  static constexpr uint32_t kBootSolidDurationMs = 3000;
+  static constexpr uint8_t kPendingEventCapacity = 4;
   LedSignal baseSignal_ = LedSignal::Boot;
   LedSignal eventSignal_ = LedSignal::Off;
   uint32_t eventStartedMs_ = 0;
+  uint32_t bootStartedMs_ = 0;
+  LedSignal pendingEvents_[kPendingEventCapacity] = {};
+  uint8_t pendingEventHead_ = 0;
+  uint8_t pendingEventTail_ = 0;
+  uint8_t pendingEventCount_ = 0;
+  float brightness_ = 0.30f;
   LedColor currentSystem_{255, 255, 255};
   LedColor currentBattery_{0, 0, 0};
   bool batterySampleValid_ = false;

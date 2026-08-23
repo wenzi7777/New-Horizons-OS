@@ -793,7 +793,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         defaults_body = re.search(r"void DeviceConfig::setDefaults\(\) \{(?P<body>.*?)\n\}", config, re.S)
         self.assertIsNotNone(defaults_body)
-        self.assertIn("data_.schemaVersion = 3", defaults_body.group("body"))
+        self.assertIn("data_.schemaVersion = 4", defaults_body.group("body"))
         self.assertIn("defaultMatrixLayout(data_.matrixLayout);", defaults_body.group("body"))
         self.assertIn("memcpy(layout.analogPins, kRowAdcPins, kRowAdcPinCount);", config)
         self.assertIn("memcpy(layout.selectPins, kColPins, kColPinCount);", config)
@@ -908,7 +908,10 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('cmd == "set_ota_config"', control)
         self.assertIn("LedSignal::OtaActive", sketch)
         self.assertIn("LedSignal::OtaSuccess", sketch)
-        self.assertIn("LedSignal::OtaError", sketch)
+        # Automatic update checks must not turn the connectivity LED red for
+        # a transient download failure; the detailed OTA state remains in
+        # status/logs while the base Gateway/Hub search indication resumes.
+        self.assertNotIn("leds.showEvent(nhos::LedSignal::OtaError)", sketch)
         self.assertIn("auto_ota_apply_failed", sketch)
         self.assertIn("firmware_download_timeout", ota)
         self.assertIn("update_started", control)
@@ -1487,6 +1490,44 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('\\"charge_profile\\":\\"', charger)
         self.assertIn('\\"battery_profile\\":\\"', gauge)
         self.assertNotIn('\\"profile\\":\\"', gauge)
+
+    def test_v15f_leds_keep_gateway_search_and_command_feedback_distinct(self):
+        header = (ARDUINO_ROOT / "LedController.h").read_text(encoding="utf-8")
+        impl = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        # Direct gateway discovery is blue; Hub/ESP-NOW discovery remains orange.
+        self.assertIn("PatternMode::Solid, LedPalette::Boot", impl)
+        self.assertIn("case LedSignal::WifiConnecting:\n      return {PatternMode::Breathe, LedPalette::FindMePending", impl)
+        self.assertIn("case LedSignal::EspNowConnecting:\n      return {PatternMode::Breathe, LedPalette::HubSearching", impl)
+        # A completion indication must follow, rather than replace, reception.
+        self.assertIn("pendingEvents_", header)
+        self.assertIn("enqueueEvent", header)
+        self.assertIn("startNextEvent", header)
+        self.assertIn("LedPalette::CommandReceived", impl)
+        self.assertIn("LedPalette::CommandSuccess", impl)
+        # Connectivity discovery is operationally more useful than the
+        # maintenance base color while no Gateway/Hub is attached.
+        self.assertLess(
+            sketch.index("else if (espNowMode)"),
+            sketch.index("else if (bootMode.mode() == nhos::RunMode::SafeMaintenance)"),
+        )
+
+    def test_v15f_board_led_brightness_is_persisted_and_reported(self):
+        header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
+        config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        leds = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("BoardLedConfig", header)
+        self.assertIn("brightness = 0.30f", header)
+        self.assertIn("setBoardLedBrightness", header)
+        self.assertIn('"board_led"', config)
+        self.assertIn("schemaVersion = 4", config)
+        self.assertIn("setBoardLedBrightness", control)
+        self.assertIn('"board_led"', control)
+        self.assertIn("setBrightness", leds)
+        self.assertIn("brightness_", leds)
 
 
 if __name__ == "__main__":

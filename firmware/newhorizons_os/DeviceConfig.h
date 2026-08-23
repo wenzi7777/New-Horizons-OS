@@ -45,6 +45,13 @@ struct ExternalLedConfig {
   String color = "teal";
 };
 
+// The system and battery pixels are a separate onboard WS2812B chain from
+// the optional FPC LED strip. Keep its intensity in device config so every
+// v1.5.F boots at a comfortable level without muting external indicators.
+struct BoardLedConfig {
+  float brightness = 0.30f;
+};
+
 struct OledConfig {
   String mode = "off";
   String page = "live_status";
@@ -88,6 +95,7 @@ struct DeviceConfigData {
   bool streamRawAdc = false;
   LogConfig logging;
   OtaConfig ota;
+  BoardLedConfig boardLed;
   ExternalLedConfig externalLed;
   OledConfig oled;
   TransportConfig transport;
@@ -109,6 +117,7 @@ class DeviceConfig {
   bool setStreamRawAdc(bool enabled);
   bool setLogging(bool enabled, const String& level, const String& mode, size_t maxBytes);
   bool setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl);
+  bool setBoardLedBrightness(float brightness);
   bool setExternalLed(const String& mode, const String& preset, float brightness, const String& color);
   bool setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast, uint8_t rotation);
   bool setTransport(const String& mode, const String& hubMac);

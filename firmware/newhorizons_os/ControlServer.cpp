@@ -728,6 +728,11 @@ String ControlServer::processCommand(const String& request) {
       return error(cmd, "config_unavailable");
     }
     DeviceConfigData next = deviceConfig_->data();
+    const String boardLed = extractObject(request, "board_led");
+    if (!boardLed.isEmpty()) {
+      next.boardLed.brightness = extractFloat(
+          boardLed, "brightness", next.boardLed.brightness);
+    }
     const String external = extractObject(request, "external_led");
     const bool externalTouched = !external.isEmpty();
     if (!external.isEmpty()) {
@@ -774,6 +779,9 @@ String ControlServer::processCommand(const String& request) {
     if (!deviceConfig_->setExternalLed(next.externalLed.mode, next.externalLed.preset, next.externalLed.brightness, next.externalLed.color)) {
       return error(cmd, "external_led_config_invalid");
     }
+    if (!deviceConfig_->setBoardLedBrightness(next.boardLed.brightness)) {
+      return error(cmd, "board_led_config_invalid");
+    }
     if (!deviceConfig_->setOled(next.oled.mode, next.oled.page, next.oled.updateHz, next.oled.contrast, next.oled.rotation)) {
       return error(cmd, "oled_config_invalid");
     }
@@ -785,6 +793,9 @@ String ControlServer::processCommand(const String& request) {
       if (externalTouched && deviceConfig_->data().externalLed.mode == "enabled") {
         externalLeds_->identify();
       }
+    }
+    if (leds_) {
+      leds_->setBrightness(deviceConfig_->data().boardLed.brightness);
     }
     if (display_) {
       display_->apply(deviceConfig_->data().oled);
@@ -1241,6 +1252,10 @@ String ControlServer::indicatorsStatusJson() const {
   data.reserve(256);
   bool first = true;
   jsonRawField(data, "status_led", "{\"role\":\"system_status\"}", first);
+  String boardLed = "{\"brightness\":";
+  boardLed += String(deviceConfig_ ? deviceConfig_->data().boardLed.brightness : 0.30f, 2);
+  boardLed += "}";
+  jsonRawField(data, "board_led", boardLed, first);
   jsonRawField(data, "external_led", externalLeds_ ? externalLeds_->statusJson() : "{}", first);
   jsonRawField(data, "oled", display_ ? display_->statusJson() : "{}", first);
   data += "}";

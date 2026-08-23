@@ -329,6 +329,11 @@ bool DeviceConfig::setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl)
   return true;
 }
 
+bool DeviceConfig::setBoardLedBrightness(float brightness) {
+  data_.boardLed.brightness = clampBrightness(brightness);
+  return true;
+}
+
 bool DeviceConfig::setExternalLed(const String& mode, const String& preset, float brightness, const String& color) {
   if (!validExternalLedMode(mode)) {
     return false;
@@ -510,7 +515,7 @@ bool DeviceConfig::validOledMode(const String& mode) {
 }
 
 void DeviceConfig::setDefaults() {
-  data_.schemaVersion = 3;
+  data_.schemaVersion = 4;
   defaultMatrixLayout(data_.matrixLayout);
   data_.scanTiming.targetFps = kDefaultTargetFps;
   data_.scanTiming.settleUs = kDefaultSettleUs;
@@ -529,6 +534,7 @@ void DeviceConfig::setDefaults() {
   data_.logging.mode = "standard";
   data_.ota.autoApplyOnBoot = true;
   data_.ota.manifestUrl = kDefaultUpdateManifestUrl;
+  data_.boardLed.brightness = 0.30f;
   data_.externalLed.mode = "off";
   data_.externalLed.preset = "system_status";
   data_.externalLed.brightness = 0.35f;
@@ -549,7 +555,7 @@ bool DeviceConfig::applyJson(const String& json) {
     return false;
   }
   const uint8_t storedSchemaVersion = static_cast<uint8_t>(extractInt(json, "schema_version", 1));
-  data_.schemaVersion = 3;
+  data_.schemaVersion = 4;
 
   const String matrix = objectForKey(json, "matrix_layout");
   if (!matrix.isEmpty()) {
@@ -626,6 +632,11 @@ bool DeviceConfig::applyJson(const String& json) {
   }
 
   const String indicators = objectForKey(json, "indicators");
+  const String boardLed = objectForKey(indicators, "board_led");
+  if (!boardLed.isEmpty()) {
+    setBoardLedBrightness(extractFloat(
+        boardLed, "brightness", data_.boardLed.brightness));
+  }
   const String external = objectForKey(indicators, "external_led");
   if (!external.isEmpty()) {
     const String mode = extractString(external, "mode", data_.externalLed.mode);
@@ -694,7 +705,9 @@ String DeviceConfig::toJson() const {
   out += loggingJson();
   out += ",\"ota\":";
   out += otaJson();
-  out += ",\"indicators\":{\"external_led\":{\"mode\":\"";
+  out += ",\"indicators\":{\"board_led\":{\"brightness\":";
+  out += String(data_.boardLed.brightness, 2);
+  out += "},\"external_led\":{\"mode\":\"";
   out += jsonEscape(data_.externalLed.mode);
   out += "\",\"preset\":\"";
   out += jsonEscape(data_.externalLed.preset);

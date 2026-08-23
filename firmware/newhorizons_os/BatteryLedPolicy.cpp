@@ -5,23 +5,19 @@ namespace {
 
 constexpr BatteryLedColor kOff{0, 0, 0};
 constexpr BatteryLedColor kGreen{0, 80, 0};
-constexpr BatteryLedColor kYellowGreen{64, 96, 0};
-constexpr BatteryLedColor kAmber{128, 48, 0};
-constexpr BatteryLedColor kRed{128, 0, 0};
-
-BatteryLedColor scale(BatteryLedColor color, uint8_t level) {
-  return {
-      static_cast<uint8_t>((static_cast<uint16_t>(color.r) * level) / 255),
-      static_cast<uint8_t>((static_cast<uint16_t>(color.g) * level) / 255),
-      static_cast<uint8_t>((static_cast<uint16_t>(color.b) * level) / 255),
-  };
-}
+constexpr BatteryLedColor kOrange{128, 48, 0};
 
 BatteryLedColor baseColor(uint16_t socCentiPercent) {
-  if (socCentiPercent > 5000) return kGreen;
-  if (socCentiPercent >= 2000) return kYellowGreen;
-  if (socCentiPercent >= 1000) return kAmber;
-  return kRed;
+  // The dedicated v1.5.F battery pixel is a continuous fuel indicator:
+  // orange at 0%, green at 100%.  Avoid threshold colors and low-battery
+  // flashing here; the user can read its level at a glance without glare.
+  const uint32_t soc = socCentiPercent > 10000U ? 10000U : socCentiPercent;
+  const uint32_t remaining = 10000U - soc;
+  return {
+      static_cast<uint8_t>((kOrange.r * remaining + kGreen.r * soc) / 10000U),
+      static_cast<uint8_t>((kOrange.g * remaining + kGreen.g * soc) / 10000U),
+      static_cast<uint8_t>((kOrange.b * remaining + kGreen.b * soc) / 10000U),
+  };
 }
 
 }  // namespace
@@ -30,22 +26,14 @@ BatteryLedColor batteryLedColor(bool sampleValid, uint16_t socCentiPercent,
                                 bool charging, uint32_t nowMs) {
   if (!sampleValid) return kOff;
   const BatteryLedColor color = baseColor(socCentiPercent);
-  // A critical battery blinks only while discharging. While charging, the
-  // red breathing animation below still communicates both charge activity and
-  // the critical state.
-  if (socCentiPercent < 1000 && !charging) {
-    return (nowMs / 500U) % 2U == 0U ? color : kOff;
-  }
   if (!charging) return color;
 
-  constexpr uint32_t kBreathePeriodMs = 1600;
-  constexpr uint8_t kMinLevel = 48;
-  const uint32_t phase = nowMs % kBreathePeriodMs;
-  const uint32_t half = kBreathePeriodMs / 2;
-  const uint32_t ramp = phase < half ? phase : kBreathePeriodMs - phase;
-  const uint8_t level = static_cast<uint8_t>(
-      kMinLevel + ((255U - kMinLevel) * ramp) / half);
-  return scale(color, level);
+  // Keep the actual SoC hue while charging. A calm on/off cadence communicates
+  // charge activity without making the status pixel compete with the system
+  // state or shining into the user's eyes.
+  constexpr uint32_t kChargeBlinkPeriodMs = 1200;
+  constexpr uint32_t kChargeBlinkOnMs = 650;
+  return (nowMs % kChargeBlinkPeriodMs) < kChargeBlinkOnMs ? color : kOff;
 }
 
 }  // namespace nhos

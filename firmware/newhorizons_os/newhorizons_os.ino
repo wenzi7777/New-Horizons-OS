@@ -166,8 +166,9 @@ void serviceAutoOta(bool wifiConnected) {
       return;
     }
     logBoot(String("auto_ota_apply_failed status=") + ota.lastStatusJson());
-    leds.showEvent(nhos::LedSignal::OtaError);
-    leds.service(millis());
+    // Keep OTA failure in serial/status, but do not overwrite the base
+    // Gateway/Hub discovery indication with a red burst during every boot.
+    // Explicit OTA commands still report their result through ControlServer.
     return;
   }
   leds.showEvent(nhos::LedSignal::OtaSuccess);
@@ -437,10 +438,6 @@ void updateLedState() {
     activeSignal = nhos::LedSignal::Error;
   } else if (ESP.getFreeHeap() < 30000 || ESP.getMaxAllocHeap() < 12000) {
     activeSignal = nhos::LedSignal::RamDanger;
-  } else if (bootMode.mode() == nhos::RunMode::SafeMaintenance) {
-    activeSignal = nhos::LedSignal::SafeMode;
-  } else if (control.maintenanceMode()) {
-    activeSignal = nhos::LedSignal::Maintenance;
   } else if (espNowMode) {
     // Mirrors streamingGateOk()'s own espNowMode-first special-casing --
     // wifi.isConnected()/setupActive()/findme.hasGateway() are all
@@ -459,6 +456,10 @@ void updateLedState() {
     activeSignal = nhos::LedSignal::WifiConnecting;
   } else if (!findme.hasGateway()) {
     activeSignal = nhos::LedSignal::FindMePending;
+  } else if (bootMode.mode() == nhos::RunMode::SafeMaintenance) {
+    activeSignal = nhos::LedSignal::SafeMode;
+  } else if (control.maintenanceMode()) {
+    activeSignal = nhos::LedSignal::Maintenance;
 #if !defined(NHOS_BOARD_V15F)
   } else if (power.chargeState() == nhos::ChargeState::ChargeDone) {
     activeSignal = nhos::LedSignal::ChargeDone;
@@ -491,6 +492,7 @@ void setup() {
       deviceConfig.data().logging.level);
   logBoot(String("boot_stage=config_ready ") + deviceConfig.statusJson());
   leds.begin();
+  leds.setBrightness(deviceConfig.data().boardLed.brightness);
   externalLeds.begin(deviceConfig.data().externalLed);
   logBoot("boot_stage=leds_ready");
   bootMode.begin();

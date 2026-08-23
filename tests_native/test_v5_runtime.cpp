@@ -136,23 +136,26 @@ void testBatteryPixelUsesSocAndChargingStateWithoutFakingSamples() {
   const BatteryLedColor off = batteryLedColor(false, 9000, false, 0);
   assert(off.r == 0 && off.g == 0 && off.b == 0);
 
-  const BatteryLedColor green = batteryLedColor(true, 5001, false, 0);
-  assert(green.g > green.r && green.g > green.b);
-  const BatteryLedColor amber = batteryLedColor(true, 1500, false, 0);
-  assert(amber.r > amber.g && amber.g > amber.b);
-  const BatteryLedColor lowOn = batteryLedColor(true, 900, false, 0);
-  const BatteryLedColor lowOff = batteryLedColor(true, 900, false, 500);
-  assert(lowOn.r > 0 && lowOn.g == 0 && lowOn.b == 0);
-  assert(lowOff.r == 0 && lowOff.g == 0 && lowOff.b == 0);
-  // Charging takes the breathing path even for a red critical state, so the
-  // pack never appears absent merely because the low-battery blink is off.
-  const BatteryLedColor chargingCritical = batteryLedColor(true, 900, true, 500);
-  assert(chargingCritical.r > 0 && chargingCritical.g == 0 &&
-         chargingCritical.b == 0);
+  // Discharging is always visible and moves continuously from orange (0%) to
+  // green (100%); there are no threshold jumps or a distracting low-battery
+  // blink on the dedicated battery pixel.
+  const BatteryLedColor full = batteryLedColor(true, 10000, false, 0);
+  assert(full.r == 0 && full.g == 80 && full.b == 0);
+  const BatteryLedColor empty = batteryLedColor(true, 0, false, 0);
+  assert(empty.r == 128 && empty.g == 48 && empty.b == 0);
+  const BatteryLedColor half = batteryLedColor(true, 5000, false, 0);
+  assert(half.r == 64 && half.g == 64 && half.b == 0);
+  const BatteryLedColor critical = batteryLedColor(true, 900, false, 500);
+  assert(critical.r > 0 && critical.g > 0 && critical.b == 0);
 
-  const BatteryLedColor chargingLow = batteryLedColor(true, 7000, true, 0);
-  const BatteryLedColor chargingHigh = batteryLedColor(true, 7000, true, 800);
-  assert(chargingLow.g < chargingHigh.g);
+  // Charging flashes the exact same SoC hue rather than changing it to a
+  // generic charging colour. The off phase only communicates charge activity.
+  const BatteryLedColor chargingOn = batteryLedColor(true, 7000, true, 0);
+  const BatteryLedColor chargingOff = batteryLedColor(true, 7000, true, 750);
+  const BatteryLedColor chargingNextOn = batteryLedColor(true, 7000, true, 1200);
+  assert(chargingOn.r == chargingNextOn.r && chargingOn.g == chargingNextOn.g &&
+         chargingOn.b == chargingNextOn.b);
+  assert(chargingOff.r == 0 && chargingOff.g == 0 && chargingOff.b == 0);
 }
 
 }  // namespace
