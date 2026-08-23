@@ -82,9 +82,11 @@ void testBmm350TransportChunksAndRejectsShortOrFailedI2c() {
   assert(bus.readRegs[0] == 0x10 && bus.readRegs[1] == 0x28 && bus.readRegs[2] == 0x40);
   assert(data[0] == 0x10 && data[24] == 0x28 && data[48] == 0x40);
 
+  bus.reads = 0;
   bus.shortRead = true;
   assert(Bmm350I2cTransport::read(bus, 0x14, 0x10, data, 4) ==
          Bmm350TransportResult::CommunicationFailure);
+  assert(bus.reads == 1);
 
   bus.shortRead = false;
   bus.failWrite = true;
