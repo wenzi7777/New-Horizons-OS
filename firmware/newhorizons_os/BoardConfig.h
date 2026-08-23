@@ -17,6 +17,7 @@
 #define NHOS_BOARD_HAS_NATIVE_USB 1
 #define NHOS_BOARD_HAS_MAX17048 1
 #define NHOS_BOARD_HAS_BMM350   1
+#define NHOS_BOARD_EXTERNAL_LED_COUNT 9
 #define NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL \
   "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v15f-latest.json"
 
@@ -85,6 +86,7 @@
 #define NHOS_BOARD_HAS_EXT_LED  1
 #define NHOS_BOARD_HAS_OLED     1
 #define NHOS_BOARD_SUPPORTS_GPIO_WAKE 1
+#define NHOS_BOARD_EXTERNAL_LED_COUNT 3
 #define NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL \
   "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v10f-latest.json"
 
@@ -98,4 +100,7 @@
 #endif
 #ifndef NHOS_BOARD_HAS_BMM350
 #define NHOS_BOARD_HAS_BMM350 0
+#endif
+#ifndef NHOS_BOARD_EXTERNAL_LED_COUNT
+#define NHOS_BOARD_EXTERNAL_LED_COUNT 0
 #endif

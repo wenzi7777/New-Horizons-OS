@@ -659,6 +659,19 @@ String ControlServer::processCommand(const String& request) {
     data += "}";
     return ok(cmd, "battery_profile_updated", data);
   }
+  if (cmd == "detect_battery_profile") {
+    if (!batteryProfileCommandSupported(NHOS_BOARD_HAS_MAX17048) ||
+        !batteryGauge_) {
+      return error(cmd, "battery_profile_unavailable");
+    }
+    batteryGauge_->detectNow(millis());
+    String data = "{";
+    bool first = true;
+    jsonRawField(data, "battery", batteryStatusJson(), first);
+    jsonRawField(data, "battery_gauge", batteryGauge_->statusJson(), first);
+    data += "}";
+    return ok(cmd, "battery_profile_detected", data);
+  }
   if (cmd == "set_imu") {
     const bool enabled = extractBool(request, "enabled", true);
     if (deviceConfig_) {

@@ -55,6 +55,44 @@ void testUnknownAndJstNeverRaiseTheSafetyLimit() {
   assert(manualJst.maxChargeCurrentMa == 100);
 }
 
+void testBatteryIdDividerDistinguishesNoIdFromKnownResistors() {
+  using namespace nhos;
+
+  // v1.5.F BAT_ID has a 100k pull-up. These representative 12-bit ADC
+  // samples correspond to 1k, 10k, 100k-to-GND and an open/no-ID POGO pin.
+  assert(classifyBatteryIdAdcRaw(40) == BatteryIdClass::Ohm1k);
+  assert(classifyBatteryIdAdcRaw(372) == BatteryIdClass::Ohm10k);
+  assert(classifyBatteryIdAdcRaw(2048) == BatteryIdClass::Ohm100k);
+  assert(classifyBatteryIdAdcRaw(4090) == BatteryIdClass::NoId);
+  assert(classifyBatteryIdAdcRaw(-1) == BatteryIdClass::Unknown);
+  assert(classifyBatteryIdAdcRaw(1200) == BatteryIdClass::Unknown);
+}
+
+void testDetectedIdsOverrideManualCurrentButNoIdUsesManualDefault() {
+  using namespace nhos;
+  const ManualBatteryProfile manual{600, 250, true};
+
+  const BatteryProfile auto10k = resolveBatteryProfile(
+      true, true, BatteryIdClass::Ohm10k, manual);
+  assert(auto10k.source == BatteryProfileSource::Auto);
+  assert(auto10k.maxChargeCurrentMa == 200);
+
+  const BatteryProfile auto100k = resolveBatteryProfile(
+      true, true, BatteryIdClass::Ohm100k, manual);
+  assert(auto100k.source == BatteryProfileSource::Auto);
+  assert(auto100k.maxChargeCurrentMa == 100);
+
+  const BatteryProfile noIdManual = resolveBatteryProfile(
+      true, true, BatteryIdClass::NoId, manual);
+  assert(noIdManual.source == BatteryProfileSource::Manual);
+  assert(noIdManual.maxChargeCurrentMa == 250);
+
+  const BatteryProfile noIdDefault = resolveBatteryProfile(
+      true, true, BatteryIdClass::NoId, ManualBatteryProfile{});
+  assert(noIdDefault.source == BatteryProfileSource::Manual);
+  assert(noIdDefault.maxChargeCurrentMa == 100);
+}
+
 void testMax17048RawConversions() {
   using namespace nhos;
   assert(max17048RawVcellToMv(0xB800) == 3680);
@@ -72,6 +110,8 @@ void testMax17048RawConversions() {
 int main() {
   testAutoPogoProfilesRequireHealthyGauge();
   testUnknownAndJstNeverRaiseTheSafetyLimit();
+  testBatteryIdDividerDistinguishesNoIdFromKnownResistors();
+  testDetectedIdsOverrideManualCurrentButNoIdUsesManualDefault();
   testMax17048RawConversions();
   std::cout << "v1.5.F foundation tests passed\n";
   return 0;

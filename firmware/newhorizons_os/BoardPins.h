@@ -41,7 +41,7 @@ static constexpr uint8_t kBatteryStatusLedPixelIndex =
     kHasBatteryStatusLedPixel ? 1 : 0xFF;
 
 #if NHOS_BOARD_HAS_EXT_LED
-static constexpr uint16_t kExternalLedCount = 3;
+static constexpr uint16_t kExternalLedCount = NHOS_BOARD_EXTERNAL_LED_COUNT;
 #else
 static constexpr uint16_t kExternalLedCount = 0;
 #endif

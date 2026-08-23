@@ -14,9 +14,11 @@ class BatteryGaugeManager {
   void setPowerManager(PowerManager& power);
   void setManualProfile(const ManualBatteryProfile& profile);
   void service(uint32_t nowMs);
+  bool detectNow(uint32_t nowMs);
   bool copyLatestSample(BatteryGaugeSample& out) const;
   const BatteryProfile& profile() const { return profile_; }
   const ManualBatteryProfile& manualProfile() const { return manualProfile_; }
+  BatteryIdClass detectedBatteryId() const { return lastBatteryId_; }
   String statusJson() const;
  private:
   bool readWord(uint8_t reg, uint16_t& value);

@@ -33,6 +33,14 @@ CXX="${CXX:-c++}"
 "$BUILD_DIR/test_v15f_foundation"
 
 "$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -DNHOS_BOARD_V15F \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_v15f_board_capabilities.cpp" \
+  -o "$BUILD_DIR/test_v15f_board_capabilities"
+
+"$BUILD_DIR/test_v15f_board_capabilities"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
   -I"$FIRMWARE_DIR" \
   "$SCRIPT_DIR/test_v15f_regressions.cpp" \
   "$FIRMWARE_DIR/Bmm350BridgePolicy.cpp" \
