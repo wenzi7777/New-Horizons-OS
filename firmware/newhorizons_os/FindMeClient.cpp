@@ -26,18 +26,15 @@ void FindMeClient::begin(Storage& storage, WifiManager& wifi, const uint8_t uid[
   streamPort_ = static_cast<uint16_t>(storage.getUInt("findme_udp_port", kUdpStreamPort));
   gatewayId_ = storage.getString("findme_gw_id", "");
   gatewayName_ = storage.getString("findme_gw_name", "");
-  // Trust a persisted gateway attachment immediately so the LED can reach
-  // Online without waiting on a fresh UDP offer every boot; still refresh
-  // in the background (without clearing the attach flag) to confirm/update it.
-  attachedThisBoot_ = !streamHost_.isEmpty() && streamPort_ > 0;
-  state_ = attachedThisBoot_ ? "attached" : "idle";
+  // A persisted endpoint is only a unicast discovery hint. It is not proof
+  // that the Gateway is reachable in this boot: treating it as attached sent
+  // matrix frames before the first fresh offer, then those transient sends
+  // queued orange warning flashes over the required blue search indication.
+  attachedThisBoot_ = false;
+  state_ = "idle";
   wasWifiConnected_ = wifi_->isConnected();
   if (wasWifiConnected_) {
-    if (attachedThisBoot_) {
-      nextDiscoverMs_ = millis() + kDiscoverIntervalMs;
-    } else {
-      discoverNow();
-    }
+    discoverNow();
   }
 }
 

@@ -1513,6 +1513,26 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             sketch.index("else if (bootMode.mode() == nhos::RunMode::SafeMaintenance)"),
         )
 
+    def test_v15f_boot_requires_a_fresh_gateway_offer_before_streaming_or_warning(self):
+        findme = (ARDUINO_ROOT / "FindMeClient.cpp").read_text(encoding="utf-8")
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        begin_start = findme.index("void FindMeClient::begin")
+        begin_end = findme.index("void FindMeClient::service", begin_start)
+        begin = findme[begin_start:begin_end]
+        led_start = sketch.index("void updateLedState()")
+        led_end = sketch.index("}  // namespace", led_start)
+        led_update = sketch[led_start:led_end]
+
+        # A saved endpoint is a discovery hint, not proof that this boot has
+        # reached a Gateway. Otherwise initial UDP failures overwrite the
+        # required blue search indication with orange warning flashes.
+        self.assertNotIn("attachedThisBoot_ = !streamHost_", begin)
+        self.assertIn("attachedThisBoot_ = false;", begin)
+        self.assertIn('state_ = "idle";', begin)
+        self.assertIn("const bool transportAttached =", led_update)
+        self.assertIn("if (!transportAttached) {", led_update)
+        self.assertIn("} else if (health.overrunFrames", led_update)
+
     def test_v15f_board_led_brightness_is_persisted_and_reported(self):
         header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
         config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")

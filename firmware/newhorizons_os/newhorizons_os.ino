@@ -401,7 +401,16 @@ void updateLedState() {
   extIn.hasGateway = findme.hasGateway();
   extIn.pressure01 = scanner.lastPeak01();
   extIn.calibrating = calibration.sessionActive();
-  if (health.overrunFrames > lastObservedOverrunFrames || health.udpSendFailures > lastObservedUdpFailures) {
+  const bool transportAttached =
+      espNowMode ? espNowPairing.hasHub() : findme.hasGateway();
+  // Treat failures observed while finding a Gateway/Hub as startup history,
+  // not an operator-facing scan warning. The base signal must remain the
+  // blue/orange search breathe until a fresh attachment exists.
+  if (!transportAttached) {
+    lastObservedOverrunFrames = health.overrunFrames;
+    lastObservedUdpFailures = health.udpSendFailures;
+  } else if (health.overrunFrames > lastObservedOverrunFrames ||
+             health.udpSendFailures > lastObservedUdpFailures) {
     leds.showEvent(nhos::LedSignal::ScanWarning);
     lastObservedOverrunFrames = health.overrunFrames;
     lastObservedUdpFailures = health.udpSendFailures;
