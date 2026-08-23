@@ -52,6 +52,10 @@ struct BoardLedConfig {
   float brightness = 0.30f;
 };
 
+struct BatteryLedConfig {
+  uint8_t lowBatteryThresholdPercent = 10;
+};
+
 struct OledConfig {
   String mode = "off";
   String page = "live_status";
@@ -96,6 +100,7 @@ struct DeviceConfigData {
   LogConfig logging;
   OtaConfig ota;
   BoardLedConfig boardLed;
+  BatteryLedConfig batteryLed;
   ExternalLedConfig externalLed;
   OledConfig oled;
   TransportConfig transport;
@@ -118,6 +123,7 @@ class DeviceConfig {
   bool setLogging(bool enabled, const String& level, const String& mode, size_t maxBytes);
   bool setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl);
   bool setBoardLedBrightness(float brightness);
+  bool setBatteryLedLowBatteryThreshold(uint8_t lowBatteryThresholdPercent);
   bool setExternalLed(const String& mode, const String& preset, float brightness, const String& color);
   bool setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast, uint8_t rotation);
   bool setTransport(const String& mode, const String& hubMac);

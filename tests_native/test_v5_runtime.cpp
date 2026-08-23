@@ -136,26 +136,30 @@ void testBatteryPixelUsesSocAndChargingStateWithoutFakingSamples() {
   const BatteryLedColor off = batteryLedColor(false, 9000, false, 0);
   assert(off.r == 0 && off.g == 0 && off.b == 0);
 
-  // Discharging is always visible and moves continuously from orange (0%) to
-  // green (100%); there are no threshold jumps or a distracting low-battery
-  // blink on the dedicated battery pixel.
+  // Discharging must move continuously from red (0%) to green (100%) with no
+  // blue component. The global board LED brightness is applied later.
   const BatteryLedColor full = batteryLedColor(true, 10000, false, 0);
   assert(full.r == 0 && full.g == 80 && full.b == 0);
   const BatteryLedColor empty = batteryLedColor(true, 0, false, 0);
-  assert(empty.r == 128 && empty.g == 48 && empty.b == 0);
+  assert(empty.r == 80 && empty.g == 0 && empty.b == 0);
   const BatteryLedColor half = batteryLedColor(true, 5000, false, 0);
-  assert(half.r == 64 && half.g == 64 && half.b == 0);
-  const BatteryLedColor critical = batteryLedColor(true, 900, false, 500);
-  assert(critical.r > 0 && critical.g > 0 && critical.b == 0);
+  assert(half.r == 40 && half.g == 40 && half.b == 0);
 
-  // Charging flashes the exact same SoC hue rather than changing it to a
-  // generic charging colour. The off phase only communicates charge activity.
+  // A low battery that is not charging fast-blinks at or below the default
+  // 10% threshold, while a configured threshold of 0 disables that warning.
+  const BatteryLedColor criticalOn = batteryLedColor(true, 900, false, 0);
+  const BatteryLedColor criticalOff = batteryLedColor(true, 900, false, 250);
+  const BatteryLedColor warningDisabled = batteryLedColor(true, 900, false, 250, 0);
+  assert(criticalOn.r > 0 && criticalOn.g > 0 && criticalOn.b == 0);
+  assert(criticalOff.r == 0 && criticalOff.g == 0 && criticalOff.b == 0);
+  assert(warningDisabled.r == criticalOn.r && warningDisabled.g == criticalOn.g &&
+         warningDisabled.b == criticalOn.b);
+
+  // Charging breathes in the exact SoC hue without ever becoming black.
   const BatteryLedColor chargingOn = batteryLedColor(true, 7000, true, 0);
-  const BatteryLedColor chargingOff = batteryLedColor(true, 7000, true, 750);
-  const BatteryLedColor chargingNextOn = batteryLedColor(true, 7000, true, 1200);
-  assert(chargingOn.r == chargingNextOn.r && chargingOn.g == chargingNextOn.g &&
-         chargingOn.b == chargingNextOn.b);
-  assert(chargingOff.r == 0 && chargingOff.g == 0 && chargingOff.b == 0);
+  const BatteryLedColor chargingDim = batteryLedColor(true, 7000, true, 750);
+  assert(chargingOn.r > chargingDim.r && chargingOn.g > chargingDim.g);
+  assert(chargingDim.r > 0 && chargingDim.g > 0 && chargingDim.b == 0);
 }
 
 }  // namespace

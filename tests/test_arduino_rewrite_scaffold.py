@@ -793,7 +793,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         defaults_body = re.search(r"void DeviceConfig::setDefaults\(\) \{(?P<body>.*?)\n\}", config, re.S)
         self.assertIsNotNone(defaults_body)
-        self.assertIn("data_.schemaVersion = 4", defaults_body.group("body"))
+        self.assertIn("data_.schemaVersion = 5", defaults_body.group("body"))
         self.assertIn("defaultMatrixLayout(data_.matrixLayout);", defaults_body.group("body"))
         self.assertIn("memcpy(layout.analogPins, kRowAdcPins, kRowAdcPinCount);", config)
         self.assertIn("memcpy(layout.selectPins, kColPins, kColPinCount);", config)
@@ -1540,7 +1540,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("if (!transportAttached) {", led_update)
         self.assertIn("} else if (health.overrunFrames", led_update)
 
-    def test_v15f_board_led_brightness_is_persisted_and_reported(self):
+    def test_v15f_board_led_settings_are_persisted_and_reported(self):
         header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
         config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
@@ -1550,11 +1550,22 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("brightness = 0.30f", header)
         self.assertIn("setBoardLedBrightness", header)
         self.assertIn('"board_led"', config)
-        self.assertIn("schemaVersion = 4", config)
+        self.assertIn("schemaVersion = 5", config)
         self.assertIn("setBoardLedBrightness", control)
         self.assertIn('"board_led"', control)
         self.assertIn("setBrightness", leds)
         self.assertIn("brightness_", leds)
+
+        self.assertIn("BatteryLedConfig", header)
+        self.assertIn("lowBatteryThresholdPercent = 10", header)
+        self.assertIn("setBatteryLedLowBatteryThreshold", header)
+        self.assertIn('"battery_led"', config)
+        self.assertIn('"low_battery_threshold_percent"', config)
+        self.assertIn("lowBatteryThresholdPercent > 25", config)
+        self.assertIn('"battery_led"', control)
+        self.assertIn('"battery_led_threshold_invalid"', control)
+        self.assertIn('"battery_led_unsupported"', control)
+        self.assertIn('\\"supported\\"', control)
 
 
 if __name__ == "__main__":

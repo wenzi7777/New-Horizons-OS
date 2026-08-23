@@ -393,7 +393,8 @@ void updateLedState() {
   const bool batterySampleValid = batteryGauge.copyLatestSample(batterySample);
   leds.setBatteryStatus(
       batterySampleValid, batterySample.socCentiPercent,
-      power.chargeState() == nhos::ChargeState::ChargingOrMissing);
+      power.chargeState() == nhos::ChargeState::ChargingOrMissing,
+      deviceConfig.data().batteryLed.lowBatteryThresholdPercent);
   const nhos::ScanHealth health = scanner.health();
   nhos::ExternalLedInputs extIn;
   extIn.wifiConnected = wifi.isConnected();

@@ -1,8 +1,8 @@
 {
   "changelog_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.17.4/releases/notes/v0.17.4.md",
   "firmware": {
-    "sha256": "7dd1c429eccdbb1ce342180abf3309cc2c63f99e2ec617d43e43c377ba0be05a",
-    "size": 1375248,
+    "sha256": "996871916a439c2b74e4c2775d63260bf80805f309d9cb68a183bdef265082f0",
+    "size": 1376224,
     "url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.17.4/releases/artifacts/newhorizons-os-v15f-v0.17.4.bin"
   },
   "latest": "v0.17.4",

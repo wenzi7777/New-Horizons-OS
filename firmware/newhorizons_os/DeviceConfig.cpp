@@ -334,6 +334,15 @@ bool DeviceConfig::setBoardLedBrightness(float brightness) {
   return true;
 }
 
+bool DeviceConfig::setBatteryLedLowBatteryThreshold(
+    uint8_t lowBatteryThresholdPercent) {
+  if (lowBatteryThresholdPercent > 25) {
+    return false;
+  }
+  data_.batteryLed.lowBatteryThresholdPercent = lowBatteryThresholdPercent;
+  return true;
+}
+
 bool DeviceConfig::setExternalLed(const String& mode, const String& preset, float brightness, const String& color) {
   if (!validExternalLedMode(mode)) {
     return false;
@@ -515,7 +524,7 @@ bool DeviceConfig::validOledMode(const String& mode) {
 }
 
 void DeviceConfig::setDefaults() {
-  data_.schemaVersion = 4;
+  data_.schemaVersion = 5;
   defaultMatrixLayout(data_.matrixLayout);
   data_.scanTiming.targetFps = kDefaultTargetFps;
   data_.scanTiming.settleUs = kDefaultSettleUs;
@@ -535,6 +544,7 @@ void DeviceConfig::setDefaults() {
   data_.ota.autoApplyOnBoot = true;
   data_.ota.manifestUrl = kDefaultUpdateManifestUrl;
   data_.boardLed.brightness = 0.30f;
+  data_.batteryLed.lowBatteryThresholdPercent = 10;
   data_.externalLed.mode = "off";
   data_.externalLed.preset = "system_status";
   data_.externalLed.brightness = 0.35f;
@@ -555,7 +565,7 @@ bool DeviceConfig::applyJson(const String& json) {
     return false;
   }
   const uint8_t storedSchemaVersion = static_cast<uint8_t>(extractInt(json, "schema_version", 1));
-  data_.schemaVersion = 4;
+  data_.schemaVersion = 5;
 
   const String matrix = objectForKey(json, "matrix_layout");
   if (!matrix.isEmpty()) {
@@ -637,6 +647,15 @@ bool DeviceConfig::applyJson(const String& json) {
     setBoardLedBrightness(extractFloat(
         boardLed, "brightness", data_.boardLed.brightness));
   }
+  const String batteryLed = objectForKey(indicators, "battery_led");
+  if (!batteryLed.isEmpty()) {
+    const int threshold = extractInt(
+        batteryLed, "low_battery_threshold_percent",
+        data_.batteryLed.lowBatteryThresholdPercent);
+    if (threshold >= 0 && threshold <= 25) {
+      setBatteryLedLowBatteryThreshold(static_cast<uint8_t>(threshold));
+    }
+  }
   const String external = objectForKey(indicators, "external_led");
   if (!external.isEmpty()) {
     const String mode = extractString(external, "mode", data_.externalLed.mode);
@@ -707,6 +726,8 @@ String DeviceConfig::toJson() const {
   out += otaJson();
   out += ",\"indicators\":{\"board_led\":{\"brightness\":";
   out += String(data_.boardLed.brightness, 2);
+  out += "},\"battery_led\":{\"low_battery_threshold_percent\":";
+  out += String(static_cast<unsigned int>(data_.batteryLed.lowBatteryThresholdPercent));
   out += "},\"external_led\":{\"mode\":\"";
   out += jsonEscape(data_.externalLed.mode);
   out += "\",\"preset\":\"";

@@ -97,10 +97,11 @@ void LedController::setStatus(LedColor color) {
 }
 
 void LedController::setBatteryStatus(bool sampleValid, uint16_t socCentiPercent,
-                                     bool charging) {
+                                     bool charging, uint8_t lowBatteryThresholdPercent) {
   batterySampleValid_ = sampleValid;
   batterySocCentiPercent_ = socCentiPercent;
   batteryCharging_ = charging;
+  lowBatteryThresholdPercent_ = lowBatteryThresholdPercent;
 }
 
 void LedController::pulse(LedColor color, uint16_t delayMs) {
@@ -231,7 +232,8 @@ LedColor LedController::colorFor(LedSignal signal, uint32_t nowMs) const {
 
 LedColor LedController::batteryColorFor(uint32_t nowMs) const {
   const BatteryLedColor color = batteryLedColor(
-      batterySampleValid_, batterySocCentiPercent_, batteryCharging_, nowMs);
+      batterySampleValid_, batterySocCentiPercent_, batteryCharging_, nowMs,
+      lowBatteryThresholdPercent_);
   return {color.r, color.g, color.b};
 }
 

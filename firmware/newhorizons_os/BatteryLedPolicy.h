@@ -11,6 +11,7 @@ struct BatteryLedColor {
 };
 
 BatteryLedColor batteryLedColor(bool sampleValid, uint16_t socCentiPercent,
-                                bool charging, uint32_t nowMs);
+                                bool charging, uint32_t nowMs,
+                                uint8_t lowBatteryThresholdPercent = 10);
 
 }  // namespace nhos

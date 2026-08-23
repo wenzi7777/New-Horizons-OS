@@ -94,7 +94,8 @@ class LedController {
   void showEvent(LedSignal signal);
   void setBrightness(float brightness);
   void setStatus(LedColor color);
-  void setBatteryStatus(bool sampleValid, uint16_t socCentiPercent, bool charging);
+  void setBatteryStatus(bool sampleValid, uint16_t socCentiPercent, bool charging,
+                        uint8_t lowBatteryThresholdPercent = 10);
   void pulse(LedColor color, uint16_t delayMs);
 
  private:
@@ -137,6 +138,7 @@ class LedController {
   bool batterySampleValid_ = false;
   uint16_t batterySocCentiPercent_ = 0;
   bool batteryCharging_ = false;
+  uint8_t lowBatteryThresholdPercent_ = 10;
 };
 
 }  // namespace nhos

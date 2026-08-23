@@ -733,6 +733,21 @@ String ControlServer::processCommand(const String& request) {
       next.boardLed.brightness = extractFloat(
           boardLed, "brightness", next.boardLed.brightness);
     }
+    const String batteryLed = extractObject(request, "battery_led");
+    if (!batteryLed.isEmpty()) {
+#if defined(NHOS_BOARD_V15F)
+      const int threshold = extractInt(
+          batteryLed, "low_battery_threshold_percent",
+          next.batteryLed.lowBatteryThresholdPercent);
+      if (threshold < 0 || threshold > 25) {
+        return error(cmd, "battery_led_threshold_invalid");
+      }
+      next.batteryLed.lowBatteryThresholdPercent =
+          static_cast<uint8_t>(threshold);
+#else
+      return error(cmd, "battery_led_unsupported");
+#endif
+    }
     const String external = extractObject(request, "external_led");
     const bool externalTouched = !external.isEmpty();
     if (!external.isEmpty()) {
@@ -781,6 +796,10 @@ String ControlServer::processCommand(const String& request) {
     }
     if (!deviceConfig_->setBoardLedBrightness(next.boardLed.brightness)) {
       return error(cmd, "board_led_config_invalid");
+    }
+    if (!deviceConfig_->setBatteryLedLowBatteryThreshold(
+            next.batteryLed.lowBatteryThresholdPercent)) {
+      return error(cmd, "battery_led_threshold_invalid");
     }
     if (!deviceConfig_->setOled(next.oled.mode, next.oled.page, next.oled.updateHz, next.oled.contrast, next.oled.rotation)) {
       return error(cmd, "oled_config_invalid");
@@ -1256,6 +1275,17 @@ String ControlServer::indicatorsStatusJson() const {
   boardLed += String(deviceConfig_ ? deviceConfig_->data().boardLed.brightness : 0.30f, 2);
   boardLed += "}";
   jsonRawField(data, "board_led", boardLed, first);
+  String batteryLed = "{\"supported\":";
+#if defined(NHOS_BOARD_V15F)
+  batteryLed += "true";
+#else
+  batteryLed += "false";
+#endif
+  batteryLed += ",\"low_battery_threshold_percent\":";
+  batteryLed += String(static_cast<unsigned int>(
+      deviceConfig_ ? deviceConfig_->data().batteryLed.lowBatteryThresholdPercent : 10));
+  batteryLed += "}";
+  jsonRawField(data, "battery_led", batteryLed, first);
   jsonRawField(data, "external_led", externalLeds_ ? externalLeds_->statusJson() : "{}", first);
   jsonRawField(data, "oled", display_ ? display_->statusJson() : "{}", first);
   data += "}";
