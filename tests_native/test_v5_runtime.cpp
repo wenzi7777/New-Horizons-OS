@@ -2,9 +2,11 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <string>
 
 #include "BatteryLedPolicy.h"
 #include "BatteryManualProfile.h"
+#include "BatteryStatusJsonMerge.h"
 #include "PacketV5Codec.h"
 
 namespace {
@@ -12,6 +14,17 @@ namespace {
 uint16_t readU16(const uint8_t* data) {
   return static_cast<uint16_t>(data[0]) |
          (static_cast<uint16_t>(data[1]) << 8);
+}
+
+size_t countJsonKey(const std::string& json, const std::string& key) {
+  const std::string needle = "\"" + key + "\"";
+  size_t count = 0;
+  size_t offset = 0;
+  while ((offset = json.find(needle, offset)) != std::string::npos) {
+    ++count;
+    offset += needle.size();
+  }
+  return count;
 }
 
 void testValidOptionalSamplesProduceV5Blocks() {
@@ -92,6 +105,32 @@ void testManualBatteryProfileOnlyAcceptsSafeHardwareSteps() {
   assert(manualBatteryProfileIsUsable(manual));
 }
 
+void testBatteryProfileCommandCapabilityGatesNvsEligiblePath() {
+  using namespace nhos;
+  assert(!batteryProfileCommandSupported(false));
+  assert(batteryProfileCommandSupported(true));
+}
+
+void testBatteryStatusMergePreservesDistinctProfileKeys() {
+  using namespace nhos;
+  const std::string charger =
+      "{\"profile\":\"balanced\",\"charge_profile\":\"balanced\","
+      "\"temperature_monitoring\":\"bypassed\"}";
+  const std::string gauge =
+      "{\"battery_profile\":\"manual\",\"profile_source\":\"manual\","
+      "\"profile_resolved\":true}";
+  const std::string merged = mergeBatteryStatusJson(charger, gauge);
+
+  assert(merged ==
+         "{\"profile\":\"balanced\",\"charge_profile\":\"balanced\","
+         "\"temperature_monitoring\":\"bypassed\","
+         "\"battery_profile\":\"manual\",\"profile_source\":\"manual\","
+         "\"profile_resolved\":true}");
+  assert(countJsonKey(merged, "profile") == 1);
+  assert(countJsonKey(merged, "battery_profile") == 1);
+  assert(mergeBatteryStatusJson(charger, "not-an-object") == charger);
+}
+
 void testBatteryPixelUsesSocAndChargingStateWithoutFakingSamples() {
   using namespace nhos;
   const BatteryLedColor off = batteryLedColor(false, 9000, false, 0);
@@ -123,6 +162,8 @@ int main() {
   testMissingOptionalSamplesOmitTheirV5Blocks();
   testExtensionsAreBoundedAndMalformedTlvIsRejected();
   testManualBatteryProfileOnlyAcceptsSafeHardwareSteps();
+  testBatteryProfileCommandCapabilityGatesNvsEligiblePath();
+  testBatteryStatusMergePreservesDistinctProfileKeys();
   testBatteryPixelUsesSocAndChargingStateWithoutFakingSamples();
   std::cout << "v5 runtime tests passed\n";
   return 0;

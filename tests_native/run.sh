@@ -52,6 +52,7 @@ CXX="${CXX:-c++}"
   "$FIRMWARE_DIR/PacketV5Codec.cpp" \
   "$FIRMWARE_DIR/BatteryManualProfile.cpp" \
   "$FIRMWARE_DIR/BatteryLedPolicy.cpp" \
+  "$FIRMWARE_DIR/BatteryStatusJsonMerge.cpp" \
   -o "$BUILD_DIR/test_v5_runtime"
 
 "$BUILD_DIR/test_v5_runtime"

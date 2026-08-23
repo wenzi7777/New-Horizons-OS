@@ -1408,9 +1408,12 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         command = control[command_start:command_end]
         first_nvs_write = command.index('storage_->putUInt("battery_profile_capacity_mah"')
 
-        self.assertIn("#if !NHOS_BOARD_HAS_MAX17048", command)
+        self.assertIn(
+            "batteryProfileCommandSupported(NHOS_BOARD_HAS_MAX17048)", command
+        )
         self.assertIn('return error(cmd, "battery_profile_unavailable")', command)
-        self.assertLess(command.index("#else"), first_nvs_write)
+        self.assertLess(command.index("batteryProfileCommandSupported"),
+                        first_nvs_write)
 
     def test_root_battery_keeps_distinct_charger_and_battery_profile_fields(self):
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")

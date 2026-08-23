@@ -13,4 +13,8 @@ bool manualBatteryProfileIsUsable(const ManualBatteryProfile& profile) {
                                    profile.maxChargeCurrentMa);
 }
 
+bool batteryProfileCommandSupported(bool hasMax17048) {
+  return hasMax17048;
+}
+
 }  // namespace nhos

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "Config.h"
+#include "BatteryStatusJsonMerge.h"
 #include "EspNowPairing.h"  // kEspNowPairingFailFlagKey, so this stays in sync with EspNowPairing.cpp's own check
 #include "JsonUtils.h"
 
@@ -625,13 +626,12 @@ String ControlServer::processCommand(const String& request) {
     return ok(cmd, "raw_adc_updated", data);
   }
   if (cmd == "set_battery_profile") {
-#if !NHOS_BOARD_HAS_MAX17048
-    // Old boards instantiate the manager for uniform status reporting, but do
-    // not have a gauge-backed battery profile or a safe manual charge target.
-    // Reject before touching NVS so this command cannot create latent settings
-    // which would silently apply after a board change.
-    return error(cmd, "battery_profile_unavailable");
-#else
+    if (!batteryProfileCommandSupported(NHOS_BOARD_HAS_MAX17048)) {
+      // Old boards instantiate the manager for uniform status reporting, but
+      // do not have a gauge-backed battery profile or a safe manual target.
+      // Reject before touching NVS so no latent cross-board setting persists.
+      return error(cmd, "battery_profile_unavailable");
+    }
     if (!batteryGauge_ || !storage_) {
       return error(cmd, "battery_profile_unavailable");
     }
@@ -658,7 +658,6 @@ String ControlServer::processCommand(const String& request) {
     jsonRawField(data, "battery_gauge", batteryGauge_->statusJson(), first);
     data += "}";
     return ok(cmd, "battery_profile_updated", data);
-#endif
   }
   if (cmd == "set_imu") {
     const bool enabled = extractBool(request, "enabled", true);
@@ -1238,19 +1237,9 @@ String ControlServer::indicatorsStatusJson() const {
 String ControlServer::batteryStatusJson() const {
   const String charger = power_ ? power_->statusJson() : String("{}");
   const String gauge = batteryGauge_ ? batteryGauge_->statusJson() : String("{}");
-  if (charger.length() < 2 || gauge.length() < 2 || charger[0] != '{' ||
-      gauge[0] != '{' || charger[charger.length() - 1] != '}' ||
-      gauge[gauge.length() - 1] != '}') {
-    return gauge != "{}" ? gauge : charger;
-  }
-  String merged = charger.substring(0, charger.length() - 1);
-  if (gauge.length() > 2) {
-    if (merged.length() > 1) merged += ',';
-    merged += gauge.substring(1);
-  } else {
-    merged += '}';
-  }
-  return merged;
+  const std::string merged = mergeBatteryStatusJson(
+      std::string(charger.c_str()), std::string(gauge.c_str()));
+  return String(merged.c_str());
 }
 
 String ControlServer::extractString(const String& request, const char* key) const {
