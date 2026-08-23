@@ -1012,7 +1012,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("findme.hasGateway()", sketch)
         self.assertIn("ESP.getHeapSize()", sketch)
 
-    def test_external_ws2812b_controller_is_separate_from_internal_sk6812_status_led(self):
+    def test_external_ws2812b_controller_is_separate_from_internal_status_led_rmt(self):
         status_header = (ARDUINO_ROOT / "LedController.h").read_text(encoding="utf-8")
         status_impl = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
         external_header = (ARDUINO_ROOT / "ExternalLedController.h").read_text(encoding="utf-8")
@@ -1025,8 +1025,12 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("kExternalLedPin", status_header + status_impl)
         self.assertNotIn("setExternal", status_header + status_impl)
         self.assertIn("class ExternalLedController", external_header)
-        self.assertIn("#include <Adafruit_NeoPixel.h>", external_header)
-        self.assertIn("Adafruit_NeoPixel pixels_", external_header)
+        self.assertIn("pixelBytes_", external_header)
+        self.assertIn("own RMT channel", external_header)
+        self.assertIn('#include "Ws2812RmtEncoder.h"', external)
+        self.assertIn("rmtInit(kExternalLedPin", external)
+        self.assertIn("rmtWrite(kExternalLedPin", external)
+        self.assertIn("dedicated_rmt", external)
         self.assertIn("kExternalLedCount", external)
         self.assertIn("kExternalLedPin", external)
         self.assertIn('"identify"', external + control)

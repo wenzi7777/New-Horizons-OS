@@ -5,6 +5,11 @@
 #include "BoardConfig.h"
 #include "BoardPins.h"
 #include "PowerAnimation.h"
+#include "Ws2812RmtEncoder.h"
+
+#if NHOS_BOARD_HAS_EXT_LED
+#include <esp32-hal-rmt.h>
+#endif
 
 namespace nhos {
 
@@ -42,25 +47,31 @@ String jsonEscape(const String& value) {
 }
 }  // namespace
 
-ExternalLedController::ExternalLedController()
-#if NHOS_BOARD_HAS_EXT_LED
-    : pixels_(kExternalLedCount, kExternalLedPin, NEO_GRB + NEO_KHZ800) {}
-#else
-    : pixels_(0, 0, NEO_GRB + NEO_KHZ800) {}
-#endif
+ExternalLedController::ExternalLedController() = default;
 
 void ExternalLedController::begin(const ExternalLedConfig& config) {
 #if !NHOS_BOARD_HAS_EXT_LED
   initialized_ = false;
+  rmtReady_ = false;
   sleeping_ = false;
   activePreset_ = "off";
   config_ = config;
   return;
-#endif
+#else
   pinMode(kExternalLedPin, OUTPUT);
-  pixels_.begin();
+  if (!rmtInit(kExternalLedPin, RMT_TX_MODE, RMT_MEM_NUM_BLOCKS_1, 10000000)) {
+    initialized_ = false;
+    rmtReady_ = false;
+    lastError_ = "rmt_init_failed";
+    return;
+  }
+  rmtSetEOT(kExternalLedPin, LOW);
   initialized_ = true;
+  rmtReady_ = true;
+  clearPixels();
+  showPixels();
   apply(config);
+#endif
 }
 
 void ExternalLedController::apply(const ExternalLedConfig& config) {
@@ -114,19 +125,19 @@ void ExternalLedController::servicePowerAnimation(uint32_t nowMs) {
     return;
   }
 
-  pixels_.clear();
+  clearPixels();
   if (animation == PowerAnimation::Shutdown) {
     const uint16_t index = static_cast<uint16_t>((elapsedMs / 200U) % kExternalLedCount);
-    pixels_.setPixelColor(index, color(LedPalette::White));
+    setPixelColor(index, color(LedPalette::White));
   } else if (animation == PowerAnimation::Wake) {
     const uint16_t lit = static_cast<uint16_t>((elapsedMs * (kExternalLedCount + 1)) / durationMs);
     for (uint16_t i = 0; i < kExternalLedCount; ++i) {
       if (i <= lit) {
-        pixels_.setPixelColor(i, color(LedPalette::FindMePending));
+        setPixelColor(i, color(LedPalette::FindMePending));
       }
     }
   }
-  pixels_.show();
+  showPixels();
   lastShowMs_ = nowMs;
 }
 
@@ -318,6 +329,9 @@ String ExternalLedController::statusJson() const {
 #endif
   out += ",\"initialized\":";
   out += initialized_ ? "true" : "false";
+  out += ",\"transport\":\"dedicated_rmt\"";
+  out += ",\"rmt_ready\":";
+  out += rmtReady_ ? "true" : "false";
   out += ",\"sleeping\":";
   out += sleeping_ ? "true" : "false";
   out += ",\"last_show_ms\":";
@@ -334,46 +348,46 @@ void ExternalLedController::clear() {
     return;
   }
   activePreset_ = "off";
-  pixels_.clear();
-  pixels_.show();
+  clearPixels();
+  showPixels();
   lastShowMs_ = millis();
 }
 
 void ExternalLedController::showIdentify(uint32_t elapsedMs, uint32_t nowMs) {
-  pixels_.clear();
+  clearPixels();
   const uint16_t step = elapsedMs / kIdentifyStepMs;
   const uint16_t phase = elapsedMs % kIdentifyStepMs;
   if (step < kExternalLedCount && phase < kIdentifyOnMs) {
-    pixels_.setPixelColor(step, color(LedPalette::White));
+    setPixelColor(step, color(LedPalette::White));
   }
-  pixels_.show();
+  showPixels();
   lastShowMs_ = nowMs;
 }
 
 void ExternalLedController::showSolid(LedColor colorValue, uint32_t nowMs) {
   const uint32_t next = color(colorValue);
   for (uint16_t i = 0; i < kExternalLedCount; ++i) {
-    pixels_.setPixelColor(i, next);
+    setPixelColor(i, next);
   }
-  pixels_.show();
+  showPixels();
   lastShowMs_ = nowMs;
 }
 
 void ExternalLedController::showSegments(const LedColor* colors, size_t count, uint32_t nowMs) {
-  pixels_.clear();
+  clearPixels();
   for (uint16_t i = 0; i < kExternalLedCount; ++i) {
     const LedColor c = (colors && i < count) ? colors[i] : LedPalette::Off;
-    pixels_.setPixelColor(i, color(c));
+    setPixelColor(i, color(c));
   }
-  pixels_.show();
+  showPixels();
   lastShowMs_ = nowMs;
 }
 
 void ExternalLedController::showMeter(uint8_t litCount, LedColor low, LedColor high, uint32_t nowMs) {
-  pixels_.clear();
+  clearPixels();
   for (uint16_t i = 0; i < kExternalLedCount; ++i) {
     if (i >= litCount) {
-      pixels_.setPixelColor(i, 0);
+      setPixelColor(i, 0);
       continue;
     }
     const float t = (kExternalLedCount > 1) ? static_cast<float>(i) / static_cast<float>(kExternalLedCount - 1) : 0.0f;
@@ -381,9 +395,9 @@ void ExternalLedController::showMeter(uint8_t litCount, LedColor low, LedColor h
     c.r = static_cast<uint8_t>(low.r + (static_cast<int>(high.r) - low.r) * t);
     c.g = static_cast<uint8_t>(low.g + (static_cast<int>(high.g) - low.g) * t);
     c.b = static_cast<uint8_t>(low.b + (static_cast<int>(high.b) - low.b) * t);
-    pixels_.setPixelColor(i, color(c));
+    setPixelColor(i, color(c));
   }
-  pixels_.show();
+  showPixels();
   lastShowMs_ = nowMs;
 }
 
@@ -422,14 +436,68 @@ void ExternalLedController::showPulse(LedColor colorValue, uint8_t flashes, uint
   }
   const uint32_t next = on ? color(colorValue) : 0;
   for (uint16_t i = 0; i < kExternalLedCount; ++i) {
-    pixels_.setPixelColor(i, next);
+    setPixelColor(i, next);
   }
-  pixels_.show();
+  showPixels();
   lastShowMs_ = nowMs;
 }
 
 uint32_t ExternalLedController::color(LedColor colorValue) const {
-  return pixels_.Color(scale(colorValue.r), scale(colorValue.g), scale(colorValue.b));
+  return (static_cast<uint32_t>(scale(colorValue.r)) << 16U) |
+         (static_cast<uint32_t>(scale(colorValue.g)) << 8U) |
+         static_cast<uint32_t>(scale(colorValue.b));
+}
+
+void ExternalLedController::setPixelColor(uint16_t index, uint32_t rgb) {
+#if NHOS_BOARD_HAS_EXT_LED
+  if (index >= kExternalLedCount) {
+    return;
+  }
+  const size_t offset = static_cast<size_t>(index) * 3U;
+  pixelBytes_[offset] = static_cast<uint8_t>(rgb >> 8U);   // G
+  pixelBytes_[offset + 1U] = static_cast<uint8_t>(rgb >> 16U);  // R
+  pixelBytes_[offset + 2U] = static_cast<uint8_t>(rgb);    // B
+#else
+  (void)index;
+  (void)rgb;
+#endif
+}
+
+void ExternalLedController::clearPixels() {
+  for (size_t i = 0; i < kPixelByteCount; ++i) {
+    pixelBytes_[i] = 0;
+  }
+}
+
+bool ExternalLedController::showPixels() {
+#if !NHOS_BOARD_HAS_EXT_LED
+  return false;
+#else
+  if (!rmtReady_) {
+    return false;
+  }
+  constexpr size_t kSymbolCount = NHOS_BOARD_EXTERNAL_LED_COUNT * 3U * 8U;
+  Ws2812RmtSymbol encoded[kSymbolCount] = {};
+  rmt_data_t rmtData[kSymbolCount] = {};
+  const size_t symbolCount = encodeWs2812Grb(pixelBytes_, kPixelByteCount,
+                                              encoded, kSymbolCount);
+  if (symbolCount != kSymbolCount) {
+    lastError_ = "rmt_encode_failed";
+    return false;
+  }
+  for (size_t i = 0; i < symbolCount; ++i) {
+    rmtData[i].level0 = encoded[i].level0;
+    rmtData[i].duration0 = encoded[i].duration0;
+    rmtData[i].level1 = encoded[i].level1;
+    rmtData[i].duration1 = encoded[i].duration1;
+  }
+  if (!rmtWrite(kExternalLedPin, rmtData, symbolCount, RMT_WAIT_FOR_EVER)) {
+    lastError_ = "rmt_write_failed";
+    return false;
+  }
+  lastError_ = "";
+  return true;
+#endif
 }
 
 uint8_t ExternalLedController::scale(uint8_t value) const {

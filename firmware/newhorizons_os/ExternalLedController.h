@@ -7,26 +7,6 @@
 #include "LedController.h"
 #include "MatrixScanner.h"
 
-#if NHOS_BOARD_HAS_EXT_LED
-#include <Adafruit_NeoPixel.h>
-#else
-using neoPixelType = uint16_t;
-
-class Adafruit_NeoPixel {
- public:
-  Adafruit_NeoPixel(uint16_t, int16_t, neoPixelType) {}
-
-  void begin() {}
-  void clear() {}
-  void show() {}
-  void setPixelColor(uint16_t, uint32_t) {}
-  uint32_t Color(uint8_t, uint8_t, uint8_t) const { return 0; }
-};
-
-static constexpr neoPixelType NEO_GRB = 0;
-static constexpr neoPixelType NEO_KHZ800 = 0;
-#endif
-
 namespace nhos {
 
 enum class PowerAnimation : uint8_t;
@@ -66,13 +46,22 @@ class ExternalLedController {
   void showMeter(uint8_t litCount, LedColor low, LedColor high, uint32_t nowMs);
   void showPulse(LedColor color, uint8_t flashes, uint16_t intervalMs, uint16_t onMs, uint16_t gapMs, uint32_t nowMs);
   void renderSystemStatus(const ExternalLedInputs& inputs, bool recentWarning, uint32_t nowMs);
+  void setPixelColor(uint16_t index, uint32_t rgb);
+  void clearPixels();
+  bool showPixels();
   static LedColor markerColor(const String& name);
   uint32_t color(LedColor color) const;
   uint8_t scale(uint8_t value) const;
 
-  Adafruit_NeoPixel pixels_;
+  // The external strip uses its own RMT channel. Adafruit_NeoPixel's ESP-IDF
+  // v5 backend owns one static channel for every instance, which makes GPIO16
+  // and the two-pixel GPIO46 status chain tear each other down on each show.
+  static constexpr size_t kPixelByteCount =
+      NHOS_BOARD_HAS_EXT_LED ? NHOS_BOARD_EXTERNAL_LED_COUNT * 3U : 1U;
+  uint8_t pixelBytes_[kPixelByteCount] = {};
   ExternalLedConfig config_;
   bool initialized_ = false;
+  bool rmtReady_ = false;
   bool sleeping_ = false;
   uint8_t powerAnimation_ = 0;
   uint32_t powerAnimationStartedMs_ = 0;
