@@ -8,11 +8,11 @@ std::string formatPowerStatusJson(const PowerStatusJsonSnapshot& s) {
       "\",\"charge_state\":\"" + s.state +
       "\",\"charger\":\"" + s.charger +
       "\",\"supported\":" + (s.supported ? "true" : "false") +
-      ",\"detected\":" + (s.detected ? "true" : "false") +
+      ",\"charger_controller_detected\":" + (s.detected ? "true" : "false") +
       ",\"charger_detected\":" + (s.chargerDetected ? "true" : "false") +
       ",\"soft_off_recommended\":" + ((s.chargerDetected || std::string(s.state) != "not_charging") ? "true" : "false") +
       ",\"configured\":" + (s.configured ? "true" : "false") +
-      ",\"profile\":\"" + s.profile +
+      ",\"charge_profile\":\"" + s.profile +
       "\",\"charge_current_ma\":" + std::to_string(s.chargeCurrentMa) +
       ",\"input_limit_ma\":" + std::to_string(s.inputLimitMa) +
       ",\"vbat_reg_mv\":" + std::to_string(s.vbatRegMv) +

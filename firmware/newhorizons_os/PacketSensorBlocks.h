@@ -3,13 +3,13 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "PacketWire.h"
+
 namespace nhos {
 
-constexpr uint8_t kPacketSensorFlagImu = 0x01;
-constexpr uint8_t kPacketSensorFlagBattery = 0x02;
-constexpr uint8_t kPacketSensorFlagMag = 0x04;
-constexpr uint8_t kPacketBaseImuFloatCount = 7;
-constexpr uint8_t kPacketMagFloatCount = 3;
+constexpr uint8_t kPacketSensorFlagImu = kPacketFlagImu;
+constexpr uint8_t kPacketSensorFlagBattery = kPacketFlagBattery;
+constexpr uint8_t kPacketSensorFlagMag = kPacketFlagMag;
 
 struct PacketSensorBlocks {
   bool hasImu;

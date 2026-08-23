@@ -3,7 +3,7 @@
 #include <Arduino.h>
 
 #include "BoardConfig.h"
-#include "PacketSensorBlocks.h"
+#include "PacketWire.h"
 
 namespace nhos {
 
@@ -23,25 +23,17 @@ static constexpr uint16_t kUdpStreamPort = 13250;
 static constexpr uint16_t kDiscoveryPort = 22346;
 static constexpr uint16_t kControlPort = 22345;
 
-static constexpr uint16_t kPacketMagic = 0xA55A;
-static constexpr uint8_t kPacketVersion = 4;
-static constexpr uint8_t kPacketFlagImu = 0x01;
-static constexpr uint8_t kPacketFlagBattery = 0x02;
-static constexpr uint8_t kPacketFlagMag = 0x04;
-static constexpr uint8_t kPacketFlagRawAdc = 0x08;
-static constexpr uint8_t kPacketFlagEpochValid = 0x10;
-static constexpr uint8_t kPacketFlagHmac = 0x40;
-static constexpr uint8_t kPacketFlagHeartbeat = 0x80;
-static constexpr size_t kPacketHeaderLen = 24;
-static constexpr size_t kPacketHmacLen = 16;
 static constexpr size_t kMaxPacketBytes =
     kPacketHeaderLen +
     (kMaxSensors * sizeof(float)) +
     (kMaxSensors * sizeof(float)) +  // optional raw ADC block (parallel to matrix levels)
-    (kImuSampleFloats * sizeof(float)) +
-    (NHOS_BOARD_HAS_MAG ? kPacketMagFloatCount * sizeof(float) : 0) +
-    4 +
+    kPacketBaseImuBytes +
+    kPacketMagBytes +
+    kPacketBatteryBytes +
+    kPacketExtensionBudget +
     kPacketHmacLen;
+static_assert(kMaxPacketBytes <= kEspNowDataFrameBudget,
+              "v5 packet must stay within the ESP-NOW data-frame budget");
 static constexpr uint32_t kHeartbeatIntervalMs = 5000;
 static constexpr uint32_t kTimeSyncValidEpochS = 1600000000;  // ~2020-09-13; time() below this means "not yet synced"
 

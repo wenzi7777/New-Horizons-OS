@@ -26,6 +26,7 @@ CXX="${CXX:-c++}"
 "$CXX" -std=c++17 -Wall -Wextra -Werror \
   -I"$FIRMWARE_DIR" \
   "$SCRIPT_DIR/test_v15f_foundation.cpp" \
+  "$FIRMWARE_DIR/BatteryManualProfile.cpp" \
   "$FIRMWARE_DIR/BatteryProfile.cpp" \
   -o "$BUILD_DIR/test_v15f_foundation"
 
@@ -35,10 +36,22 @@ CXX="${CXX:-c++}"
   -I"$FIRMWARE_DIR" \
   "$SCRIPT_DIR/test_v15f_regressions.cpp" \
   "$FIRMWARE_DIR/Bmm350BridgePolicy.cpp" \
+  "$FIRMWARE_DIR/Bmm350I2cTransport.cpp" \
   "$FIRMWARE_DIR/BatteryChargeSafety.cpp" \
+  "$FIRMWARE_DIR/MagnetometerSampleCache.cpp" \
   "$FIRMWARE_DIR/MagnetometerSamplePolicy.cpp" \
   "$FIRMWARE_DIR/PacketSensorBlocks.cpp" \
   "$FIRMWARE_DIR/PowerStatusJson.cpp" \
   -o "$BUILD_DIR/test_v15f_regressions"
 
 "$BUILD_DIR/test_v15f_regressions"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_v5_runtime.cpp" \
+  "$FIRMWARE_DIR/PacketV5Codec.cpp" \
+  "$FIRMWARE_DIR/BatteryManualProfile.cpp" \
+  "$FIRMWARE_DIR/BatteryLedPolicy.cpp" \
+  -o "$BUILD_DIR/test_v5_runtime"
+
+"$BUILD_DIR/test_v5_runtime"

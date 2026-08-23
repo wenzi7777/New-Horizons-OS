@@ -24,11 +24,36 @@ BatteryProfile resolveBatteryProfile(bool gaugeResponsive, bool voltageValid,
   return profile(BatteryProfileId::Unknown, BatteryProfileSource::Pending, false, true, 0, 100);
 }
 
+BatteryProfile resolveBatteryProfile(bool gaugeResponsive, bool voltageValid,
+                                    BatteryIdClass detectedId,
+                                    const ManualBatteryProfile& manualProfile) {
+  // A verified POGO identifier always wins on the next healthy gauge poll.
+  // That prevents a stale manual JST setting from raising a known pack's
+  // hardware-selected charging limit.
+  if (gaugeResponsive && voltageValid) {
+    if (detectedId == BatteryIdClass::Ohm1k) {
+      return profile(BatteryProfileId::Pogo1k, BatteryProfileSource::Auto,
+                     true, false, 200, 100);
+    }
+    if (detectedId == BatteryIdClass::Ohm10k) {
+      return profile(BatteryProfileId::Pogo10k, BatteryProfileSource::Auto,
+                     true, false, 400, 200);
+    }
+  }
+  if (manualBatteryProfileIsUsable(manualProfile)) {
+    return profile(BatteryProfileId::Manual, BatteryProfileSource::Manual,
+                   true, false, manualProfile.capacityMah,
+                   manualProfile.maxChargeCurrentMa);
+  }
+  return resolveBatteryProfile(gaugeResponsive, voltageValid, detectedId,
+                               BatteryProfileId::None);
+}
+
 uint16_t max17048RawVcellToMv(uint16_t raw) { return static_cast<uint16_t>((static_cast<uint32_t>(raw) * 5U + 32U) / 64U); }
 uint16_t max17048RawSocToCentiPercent(uint16_t raw) { return static_cast<uint16_t>((static_cast<uint32_t>(raw) * 100U + 128U) / 256U); }
 int16_t max17048RawRateToCentiPercentPerHour(uint16_t raw) { return static_cast<int16_t>((static_cast<int32_t>(static_cast<int16_t>(raw)) * 208) / 10); }
 bool isValidBatteryVoltageMv(uint16_t mv) { return mv >= 2500 && mv <= 5000; }
 
-const char* batteryProfileIdName(BatteryProfileId id) { switch (id) { case BatteryProfileId::Pogo1k: return "pogo_1k"; case BatteryProfileId::Pogo10k: return "pogo_10k"; case BatteryProfileId::Jst: return "jst"; case BatteryProfileId::Unknown: return "unknown"; default: return "none"; } }
+const char* batteryProfileIdName(BatteryProfileId id) { switch (id) { case BatteryProfileId::Pogo1k: return "pogo_1k"; case BatteryProfileId::Pogo10k: return "pogo_10k"; case BatteryProfileId::Jst: return "jst"; case BatteryProfileId::Manual: return "manual"; case BatteryProfileId::Unknown: return "unknown"; default: return "none"; } }
 const char* batteryProfileSourceName(BatteryProfileSource source) { switch (source) { case BatteryProfileSource::Auto: return "auto"; case BatteryProfileSource::Manual: return "manual"; default: return "pending"; } }
 }  // namespace nhos

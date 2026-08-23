@@ -208,7 +208,13 @@ String PowerStateManager::statusJson() const {
   out += chargerDetected_ ? "true" : "false";
   out += ",\"charge_state\":\"";
   out += chargeStateName();
-  out += "\"}";
+  out += "\"";
+#if defined(NHOS_BOARD_V15F)
+  out += ",\"power_topology\":\"physical_switch_cuts_main_rails\"";
+  out += ",\"physical_switch_behavior\":\"cuts_main_rails\"";
+  out += ",\"soft_off_behavior\":\"light_sleep\"";
+#endif
+  out += "}";
   return out;
 }
 

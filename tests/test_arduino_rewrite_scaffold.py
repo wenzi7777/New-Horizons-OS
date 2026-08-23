@@ -66,10 +66,14 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
     def test_config_declares_new_protocol_packet_version_and_ports(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+        packet_wire = (ARDUINO_ROOT / "PacketWire.h").read_text(encoding="utf-8")
 
         self.assertIn('#include "BoardConfig.h"', config)
         self.assertIn('kProtocolName[] = "NHO/Arduino/1"', config)
-        self.assertIn("kPacketVersion = 3", config)
+        self.assertIn('#include "PacketWire.h"', config)
+        self.assertIn("kPacketVersion = 5", packet_wire)
+        self.assertIn("kPacketFlagExtensions = 0x20", packet_wire)
+        self.assertIn("kPacketHeaderLen = 24", packet_wire)
         self.assertIn("kUdpStreamPort = 13250", config)
         self.assertIn("kDiscoveryPort = 22346", config)
         self.assertIn("kControlPort = 22345", config)
@@ -634,9 +638,10 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("fast_800mah_only", power)
         self.assertIn("updateRegister(kBq25180ChargeCtrl0Register, 0x70, 0x20)", power)
         self.assertIn("updateRegister(kBq25180IcCtrlRegister, 0x0C, 0x04)", power)
-        self.assertIn('\\"charge_current_ma\\"', power)
-        self.assertIn('\\"input_limit_ma\\"', power)
-        self.assertIn('\\"configured\\"', power)
+        power_status = (ARDUINO_ROOT / "PowerStatusJson.cpp").read_text(encoding="utf-8")
+        self.assertIn('\\"charge_current_ma\\"', power_status)
+        self.assertIn('\\"input_limit_ma\\"', power_status)
+        self.assertIn('\\"configured\\"', power_status)
         self.assertIn('cmd == "set_charge_profile"', control)
         self.assertIn('storage_->putString("charge_profile"', control)
 
@@ -700,7 +705,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         board_pins = (ARDUINO_ROOT / "BoardPins.cpp").read_text(encoding="utf-8")
         config = (ARDUINO_ROOT / "Config.cpp").read_text(encoding="utf-8")
 
-        self.assertIn("#if defined(NHOS_BOARD_GCU_V21_LTS)", board_pins)
+        self.assertIn("#elif defined(NHOS_BOARD_GCU_V21_LTS)", board_pins)
         self.assertIn("{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}", board_pins)
         self.assertIn("{18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45}", board_pins)
         self.assertIn("const uint8_t kI2cScl = 47;", board_pins)
@@ -711,12 +716,14 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_v21_lts_power_path_reports_non_bq25180_fallback(self):
         power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
         power_impl = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
+        power_status = (ARDUINO_ROOT / "PowerStatusJson.cpp").read_text(encoding="utf-8")
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
 
         self.assertIn("bool supportsChargeProfiles() const;", power_header)
         self.assertIn("NHOS_BOARD_HAS_BQ25180", power_impl)
-        self.assertIn('\\"charger\\":\\"none\\"', power_impl)
-        self.assertIn('\\"supported\\":false', power_impl)
+        self.assertIn('"bq25180" : "none"', power_impl)
+        self.assertIn('\\"charger\\":\\"', power_status)
+        self.assertIn('\\"supported\\":', power_status)
         self.assertIn("charge_profile_unsupported", control)
         self.assertNotIn('return error(cmd, "charge_profile_failed");', control)
 
@@ -800,14 +807,15 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         board_config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
         imu_header = (ARDUINO_ROOT / "ImuManager.h").read_text(encoding="utf-8")
         imu_impl = (ARDUINO_ROOT / "ImuManager.cpp").read_text(encoding="utf-8")
+        magnetometer_impl = (ARDUINO_ROOT / "MagnetometerManager.cpp").read_text(encoding="utf-8")
         packet_header = (ARDUINO_ROOT / "PacketBuilder.h").read_text(encoding="utf-8")
         packet_impl = (ARDUINO_ROOT / "PacketBuilder.cpp").read_text(encoding="utf-8")
 
         self.assertIn('#include "Arduino_BMI270_BMM150.h"', imu_header)
-        self.assertIn("#if NHOS_BOARD_HAS_MAG", board_config + imu_impl)
+        self.assertIn("NHOS_BOARD_MAG_MODEL", board_config + imu_impl)
         self.assertIn("IMU.begin()", imu_impl)
         self.assertIn("IMU.begin(BOSCH_ACCELEROMETER_ONLY)", imu_impl)
-        self.assertIn("IMU.readMagneticField", imu_impl)
+        self.assertIn("IMU.readMagneticField", magnetometer_impl)
         self.assertIn("boot_stage=imu_ready", sketch)
         self.assertIn("imu.service", sketch)
         self.assertNotIn("imu.readSample", sketch)
@@ -818,10 +826,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("serviceIntervalUs_", imu_header)
         self.assertIn("sampleRateHz", imu_impl)
         self.assertIn("cacheAgeMs", imu_impl)
-        self.assertIn("buildMatrixPacketHeader(frame, packetBuffer, sizeof(packetBuffer), matrixPayloadLen, imuSampleValid ? imuSample : nullptr)", sketch)
+        self.assertIn("buildMatrixPacketHeader(", sketch)
         self.assertIn("const float* imuData", packet_header)
-        self.assertIn("flags |= kPacketFlagImu;", packet_impl)
-        self.assertIn("putFloat(out + offset, imuData[i])", packet_impl)
+        self.assertIn("buildPacketV5", packet_impl)
         self.assertIn("ImuManager& imu", control_header)
         self.assertIn("imu_ ? imu_->statusJson()", control)
         self.assertIn("void setServiceIntervalUs(uint32_t us)", imu_header)
@@ -898,8 +905,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertLess(body.index("sendQueuedPacketIfAny();"), body.index("findme.service();"))
         self.assertLess(body.index("scanAndStreamIfDue();"), body.index("control.service();"))
         self.assertLess(body.index("sendQueuedPacketIfAny();"), body.index("control.service();"))
-        self.assertLess(body.index("scanAndStreamIfDue();"), body.index("imu.service(micros());"))
-        self.assertLess(body.index("sendQueuedPacketIfAny();"), body.index("imu.service(micros());"))
+        self.assertLess(body.index("imu.service(micros());"), body.index("scanAndStreamIfDue();"))
         self.assertLess(body.index("scanAndStreamIfDue();"), body.index("displayManager.service("))
         self.assertLess(body.index("sendQueuedPacketIfAny();"), body.index("displayManager.service("))
 
@@ -1079,6 +1085,25 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             self.assertNotRegex(
                 script,
                 r"arduino-cli upload[^\n]*--build-property",
+            )
+
+    def test_v15f_scripts_preserve_esp32_core_build_defines(self):
+        # ESP32 core seeds build.extra_flags with -DESP32=ESP32. Overriding that
+        # property makes Adafruit_NeoPixel fall through to its unsupported
+        # architecture branch, so board selection must use the compiler-only
+        # extension point instead.
+        for filename in (
+            "build_arduino_release_v15f.sh",
+            "flash_arduino_firmware_v15f.sh",
+        ):
+            script = (SCRIPT_ROOT / filename).read_text(encoding="utf-8")
+            self.assertIn(
+                '--build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V15F"',
+                script,
+            )
+            self.assertNotIn(
+                '--build-property "build.extra_flags=-DNHOS_BOARD_V15F"',
+                script,
             )
 
     def test_release_script_publishes_trackable_artifacts(self):
@@ -1273,6 +1298,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_power_status_and_control_surface_include_soft_off_state(self):
         power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
         power_impl = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
+        power_status = (ARDUINO_ROOT / "PowerStatusJson.cpp").read_text(encoding="utf-8")
         control_header = (ARDUINO_ROOT / "ControlServer.h").read_text(encoding="utf-8")
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
@@ -1280,10 +1306,10 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("bool chargerDetected() const;", power_header)
         self.assertIn("bool softOffRecommended() const;", power_header)
         self.assertIn("uint8_t lastStat0() const;", power_header)
-        self.assertIn('\\"charger_detected\\":', power_impl)
-        self.assertIn('\\"soft_off_recommended\\":', power_impl)
-        self.assertIn('\\"last_stat0\\":', power_impl)
-        self.assertIn('\\"supported\\":', power_impl)
+        self.assertIn('\\"charger_detected\\":', power_status)
+        self.assertIn('\\"soft_off_recommended\\":', power_status)
+        self.assertIn('\\"last_stat0\\":', power_status)
+        self.assertIn('\\"supported\\":', power_status)
         self.assertIn("class PowerStateManager", control_header)
         self.assertIn('cmd == "power_set_state"', control)
         self.assertIn('jsonRawField(data, "power"', control)
@@ -1355,20 +1381,25 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
     def test_packet_builder_and_imu_manager_support_magnetometer_extension(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+        packet_wire = (ARDUINO_ROOT / "PacketWire.h").read_text(encoding="utf-8")
         imu_header = (ARDUINO_ROOT / "ImuManager.h").read_text(encoding="utf-8")
         imu_impl = (ARDUINO_ROOT / "ImuManager.cpp").read_text(encoding="utf-8")
         packet_header = (ARDUINO_ROOT / "PacketBuilder.h").read_text(encoding="utf-8")
         packet_impl = (ARDUINO_ROOT / "PacketBuilder.cpp").read_text(encoding="utf-8")
+        magnetometer_impl = (ARDUINO_ROOT / "MagnetometerManager.cpp").read_text(encoding="utf-8")
+        packet_codec = (ARDUINO_ROOT / "PacketV5Codec.cpp").read_text(encoding="utf-8")
 
-        self.assertIn("kPacketFlagMag = 0x04", config)
+        self.assertIn('#include "PacketWire.h"', config)
+        self.assertIn("kPacketFlagMag = 0x04", packet_wire)
         self.assertIn("kImuSampleFloats", config)
         self.assertIn("copyLatestSample(float out[kImuSampleFloats]) const;", imu_header)
-        self.assertIn("IMU.readMagneticField", imu_impl)
+        self.assertIn("IMU.readMagneticField", magnetometer_impl)
         self.assertIn("BMI270+BMM150", imu_impl)
         self.assertIn("const float* imuData", packet_header)
-        self.assertIn("kPacketFlagMag", packet_impl)
-        self.assertIn("kImuBaseFloatCount", packet_impl)
-        self.assertIn("kMagFloatCount", packet_impl)
+        self.assertIn("buildPacketV5", packet_impl)
+        self.assertIn("kPacketFlagMag", packet_codec)
+        self.assertIn("kPacketBaseImuFloatCount", packet_codec)
+        self.assertIn("kPacketMagFloatCount", packet_codec)
 
 
 if __name__ == "__main__":

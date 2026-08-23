@@ -7,20 +7,26 @@
 
 namespace nhos {
 namespace { constexpr uint8_t kMax17048Address = 0x36; constexpr uint32_t kPollMs = 1000; }
-void BatteryGaugeManager::begin() { sample_ = BatteryGaugeSample(); detected_ = false; diagnostic_ = "not_polled"; lastPollMs_ = 0; hasAppliedChargeLimit_ = false; updateProfile(resolveBatteryProfile(false, false, BatteryIdClass::Unknown, BatteryProfileId::None)); }
+void BatteryGaugeManager::begin() { sample_ = BatteryGaugeSample(); detected_ = false; diagnostic_ = "not_polled"; lastPollMs_ = 0; hasAppliedChargeLimit_ = false; lastBatteryId_ = BatteryIdClass::Unknown; updateProfile(resolveBatteryProfile(false, false, lastBatteryId_, manualProfile_)); }
 void BatteryGaugeManager::setPowerManager(PowerManager& power) { power_ = &power; hasAppliedChargeLimit_ = false; }
+void BatteryGaugeManager::setManualProfile(const ManualBatteryProfile& profile) {
+  manualProfile_ = profile;
+  manualProfile_.configured = manualBatteryProfileIsUsable(profile);
+  updateProfile(resolveBatteryProfile(detected_, sample_.valid, lastBatteryId_, manualProfile_));
+}
 void BatteryGaugeManager::service(uint32_t nowMs) {
   if (lastPollMs_ && nowMs - lastPollMs_ < kPollMs) return;
   lastPollMs_ = nowMs;
 #if !NHOS_BOARD_HAS_MAX17048
-  sample_ = BatteryGaugeSample(); detected_ = false; diagnostic_ = "max17048_not_supported"; updateProfile(resolveBatteryProfile(false, false, BatteryIdClass::Unknown, BatteryProfileId::None)); return;
+  sample_ = BatteryGaugeSample(); detected_ = false; lastBatteryId_ = BatteryIdClass::Unknown; diagnostic_ = "max17048_not_supported"; updateProfile(resolveBatteryProfile(false, false, lastBatteryId_, manualProfile_)); return;
 #else
   uint16_t vcell = 0, soc = 0, rate = 0;
-  if (!readWord(0x02, vcell) || !readWord(0x04, soc) || !readWord(0x16, rate)) { sample_ = BatteryGaugeSample(); detected_ = false; diagnostic_ = "max17048_read_failed"; updateProfile(resolveBatteryProfile(false, false, BatteryIdClass::Unknown, BatteryProfileId::None)); return; }
+  if (!readWord(0x02, vcell) || !readWord(0x04, soc) || !readWord(0x16, rate)) { sample_ = BatteryGaugeSample(); detected_ = false; lastBatteryId_ = BatteryIdClass::Unknown; diagnostic_ = "max17048_read_failed"; updateProfile(resolveBatteryProfile(false, false, lastBatteryId_, manualProfile_)); return; }
   sample_.vbatMv = max17048RawVcellToMv(vcell); sample_.socCentiPercent = max17048RawSocToCentiPercent(soc); sample_.rate = max17048RawRateToCentiPercentPerHour(rate);
   sample_.valid = isValidBatteryVoltageMv(sample_.vbatMv); sample_.status = sample_.valid ? 1 : 0; sample_.fault = sample_.valid ? 0 : 1; detected_ = true;
   diagnostic_ = sample_.valid ? "ok" : "max17048_invalid_vcell";
-  updateProfile(resolveBatteryProfile(true, sample_.valid, readBatteryId(), BatteryProfileId::None));
+  lastBatteryId_ = readBatteryId();
+  updateProfile(resolveBatteryProfile(true, sample_.valid, lastBatteryId_, manualProfile_));
 #endif
 }
 bool BatteryGaugeManager::copyLatestSample(BatteryGaugeSample& out) const { if (!sample_.valid) return false; out = sample_; return true; }

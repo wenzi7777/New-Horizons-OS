@@ -17,7 +17,8 @@
 #define NHOS_BOARD_HAS_NATIVE_USB 1
 #define NHOS_BOARD_HAS_MAX17048 1
 #define NHOS_BOARD_HAS_BMM350   1
-#define NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL ""
+#define NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL \
+  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v15f-latest.json"
 
 #elif defined(NHOS_BOARD_GCU_V21_LTS)
 

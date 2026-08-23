@@ -3,9 +3,9 @@
 namespace nhos {
 
 size_t packetSensorPayloadBytes(PacketSensorBlocks blocks) {
-  size_t bytes = blocks.hasImu ? kPacketBaseImuFloatCount * sizeof(float) : 0;
-  bytes += blocks.hasMag ? kPacketMagFloatCount * sizeof(float) : 0;
-  bytes += blocks.hasBattery ? 4 : 0;
+  size_t bytes = blocks.hasImu ? kPacketBaseImuBytes : 0;
+  bytes += blocks.hasMag ? kPacketMagBytes : 0;
+  bytes += blocks.hasBattery ? kPacketBatteryBytes : 0;
   return bytes;
 }
 

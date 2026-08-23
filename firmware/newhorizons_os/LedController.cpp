@@ -1,11 +1,32 @@
 #include "LedController.h"
 
+#include "BatteryLedPolicy.h"
 #include "BoardPins.h"
 
+#if defined(NHOS_BOARD_V15F)
+#include <Adafruit_NeoPixel.h>
+#endif
+
 namespace nhos {
+namespace {
+
+#if defined(NHOS_BOARD_V15F)
+Adafruit_NeoPixel statusPixels(kBoardStatusLedCount, kStatusLedPin,
+                               NEO_GRB + NEO_KHZ800);
+#endif
+
+bool sameColor(LedColor lhs, LedColor rhs) {
+  return lhs.r == rhs.r && lhs.g == rhs.g && lhs.b == rhs.b;
+}
+
+}  // namespace
 
 void LedController::begin() {
+#if defined(NHOS_BOARD_V15F)
+  statusPixels.begin();
+#else
   pinMode(kStatusLedPin, OUTPUT);
+#endif
   setSignal(LedSignal::Boot);
   service(millis());
 }
@@ -23,12 +44,17 @@ void LedController::service(uint32_t nowMs) {
     }
   }
 
-  LedColor next = colorFor(active, patternMs);
-  if (next.r == current_.r && next.g == current_.g && next.b == current_.b) {
+  const LedColor nextSystem = colorFor(active, patternMs);
+  const LedColor nextBattery = batteryColorFor(nowMs);
+  if (sameColor(nextSystem, currentSystem_) &&
+      sameColor(nextBattery, currentBattery_)) {
     return;
   }
-  current_ = next;
-  writePixel(kStatusLedPin, current_);
+  currentSystem_ = nextSystem;
+  currentBattery_ = nextBattery;
+  // v1.5.F writes both chained WS2812B pixels in one show() transaction.
+  // Older one-pixel boards keep their previous single-pixel write path.
+  writeStatusPixels(currentSystem_, currentBattery_);
 }
 
 void LedController::setSignal(LedSignal signal) {
@@ -41,8 +67,15 @@ void LedController::showEvent(LedSignal signal) {
 }
 
 void LedController::setStatus(LedColor color) {
-  current_ = color;
-  writePixel(kStatusLedPin, color);
+  currentSystem_ = color;
+  writeStatusPixels(currentSystem_, currentBattery_);
+}
+
+void LedController::setBatteryStatus(bool sampleValid, uint16_t socCentiPercent,
+                                     bool charging) {
+  batterySampleValid_ = sampleValid;
+  batterySocCentiPercent_ = socCentiPercent;
+  batteryCharging_ = charging;
 }
 
 void LedController::pulse(LedColor color, uint16_t delayMs) {
@@ -155,6 +188,12 @@ LedColor LedController::colorFor(LedSignal signal, uint32_t nowMs) const {
   }
 }
 
+LedColor LedController::batteryColorFor(uint32_t nowMs) const {
+  const BatteryLedColor color = batteryLedColor(
+      batterySampleValid_, batterySocCentiPercent_, batteryCharging_, nowMs);
+  return {color.r, color.g, color.b};
+}
+
 LedColor LedController::scaleColor(LedColor color, uint8_t level) const {
   if (level >= 255) {
     return color;
@@ -171,6 +210,19 @@ void LedController::writePixel(uint8_t pin, LedColor color) {
   neopixelWrite(pin, color.r, color.g, color.b);
 #else
   digitalWrite(pin, (color.r || color.g || color.b) ? HIGH : LOW);
+#endif
+}
+
+void LedController::writeStatusPixels(LedColor system, LedColor battery) {
+#if defined(NHOS_BOARD_V15F)
+  statusPixels.setPixelColor(kSystemStatusLedPixelIndex, system.r, system.g,
+                             system.b);
+  statusPixels.setPixelColor(kBatteryStatusLedPixelIndex, battery.r, battery.g,
+                             battery.b);
+  statusPixels.show();
+#else
+  (void)battery;
+  writePixel(kStatusLedPin, system);
 #endif
 }
 

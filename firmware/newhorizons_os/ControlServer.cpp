@@ -365,7 +365,7 @@ String ControlServer::processCommand(const String& request) {
     jsonRawField(data, "matrix_layout", scanner_->matrixLayoutJson(), first);
     jsonRawField(data, "runtime", runtime, first);
     jsonRawField(data, "wifi", wifi_->statusJson(), first);
-    jsonRawField(data, "battery", power_ ? power_->statusJson() : "{}", first);
+    jsonRawField(data, "battery", batteryStatusJson(), first);
     jsonRawField(data, "battery_gauge", batteryGauge_ ? batteryGauge_->statusJson() : "{}", first);
     jsonRawField(data, "power", powerState_ ? powerState_->statusJson() : "{}", first);
     jsonRawField(data, "config", deviceConfig_ ? deviceConfig_->statusJson() : "{}", first);
@@ -623,6 +623,34 @@ String ControlServer::processCommand(const String& request) {
     jsonRawField(data, "config", deviceConfig_->statusJson(), first);
     data += "}";
     return ok(cmd, "raw_adc_updated", data);
+  }
+  if (cmd == "set_battery_profile") {
+    if (!batteryGauge_ || !storage_) {
+      return error(cmd, "battery_profile_unavailable");
+    }
+    const int capacityMah = extractInt(request, "capacity_mah", 0);
+    const int maxChargeCurrentMa = extractInt(request, "max_charge_current_ma", 0);
+    if (capacityMah <= 0 || capacityMah > 65535 || maxChargeCurrentMa <= 0 ||
+        maxChargeCurrentMa > 65535 ||
+        !validManualBatteryProfile(static_cast<uint16_t>(capacityMah),
+                                   static_cast<uint16_t>(maxChargeCurrentMa))) {
+      return error(cmd, "battery_profile_invalid");
+    }
+    const ManualBatteryProfile profile{
+        static_cast<uint16_t>(capacityMah),
+        static_cast<uint16_t>(maxChargeCurrentMa), true};
+    // These dedicated NVS keys deliberately bypass DeviceConfig: a battery
+    // identity is hardware safety data, not a transport/UI preference.
+    storage_->putUInt("battery_profile_capacity_mah", profile.capacityMah);
+    storage_->putUInt("battery_profile_max_charge_current_ma",
+                      profile.maxChargeCurrentMa);
+    batteryGauge_->setManualProfile(profile);
+    String data = "{";
+    bool first = true;
+    jsonRawField(data, "battery", batteryStatusJson(), first);
+    jsonRawField(data, "battery_gauge", batteryGauge_->statusJson(), first);
+    data += "}";
+    return ok(cmd, "battery_profile_updated", data);
   }
   if (cmd == "set_imu") {
     const bool enabled = extractBool(request, "enabled", true);
@@ -1197,6 +1225,24 @@ String ControlServer::indicatorsStatusJson() const {
   jsonRawField(data, "oled", display_ ? display_->statusJson() : "{}", first);
   data += "}";
   return data;
+}
+
+String ControlServer::batteryStatusJson() const {
+  const String charger = power_ ? power_->statusJson() : String("{}");
+  const String gauge = batteryGauge_ ? batteryGauge_->statusJson() : String("{}");
+  if (charger.length() < 2 || gauge.length() < 2 || charger[0] != '{' ||
+      gauge[0] != '{' || charger[charger.length() - 1] != '}' ||
+      gauge[gauge.length() - 1] != '}') {
+    return gauge != "{}" ? gauge : charger;
+  }
+  String merged = charger.substring(0, charger.length() - 1);
+  if (gauge.length() > 2) {
+    if (merged.length() > 1) merged += ',';
+    merged += gauge.substring(1);
+  } else {
+    merged += '}';
+  }
+  return merged;
 }
 
 String ControlServer::extractString(const String& request, const char* key) const {

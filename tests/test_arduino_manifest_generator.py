@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -67,6 +69,48 @@ class ArduinoManifestGeneratorTests(unittest.TestCase):
             self.assertEqual(decoded["latest"], "v9.9.9")
             self.assertEqual(decoded["changelog_url"], "https://example.com/notes/v9.9.9.md")
             self.assertEqual(decoded["firmware"]["size"], 8)
+
+    def test_v15f_release_track_emits_its_own_artifact_and_manifest(self):
+        script = REPO_ROOT / "firmware" / "scripts" / "build_arduino_release_v15f.sh"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            fake_bin = tmp / "bin"
+            fake_bin.mkdir()
+            fake_cli = fake_bin / "arduino-cli"
+            fake_cli.write_text(
+                "#!/bin/sh\n"
+                "out=\"\"\n"
+                "while [ $# -gt 0 ]; do\n"
+                "  if [ \"$1\" = \"--output-dir\" ]; then out=$2; shift 2; continue; fi\n"
+                "  shift\n"
+                "done\n"
+                "mkdir -p \"$out\"\n"
+                "printf firmware > \"$out/newhorizons_os.ino.bin\"\n",
+                encoding="utf-8",
+            )
+            fake_cli.chmod(0o755)
+            release_dir = tmp / "releases"
+            build_dir = tmp / "build"
+            result = subprocess.run(
+                [str(script)],
+                check=True,
+                text=True,
+                capture_output=True,
+                env={
+                    **os.environ,
+                    "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+                    "VERSION": "v9.8.7",
+                    "RELEASE_DIR": str(release_dir),
+                    "OUT_DIR": str(build_dir),
+                },
+            )
+            artifact = release_dir / "newhorizons-os-v15f-v9.8.7.bin"
+            latest = release_dir.parent / "arduino-v15f-latest.json"
+            versioned = release_dir.parent / "arduino-v15f-v9.8.7.json"
+            self.assertEqual(Path(result.stdout.strip()), artifact)
+            self.assertEqual(artifact.read_bytes(), b"firmware")
+            self.assertEqual(json.loads(latest.read_text(encoding="utf-8"))["latest"], "v9.8.7")
+            self.assertEqual(json.loads(versioned.read_text(encoding="utf-8"))["model"], "VD-CTL/R v1.5.F 2026.7")
 
 
 if __name__ == "__main__":

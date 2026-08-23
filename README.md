@@ -58,6 +58,7 @@ VERSION=v0.5.4 firmware/scripts/build_arduino_release.sh
 VERSION=v0.5.4 firmware/scripts/build_arduino_release_gcu_lts.sh
 VERSION=v0.5.4 firmware/scripts/build_arduino_release_gcu_v22c_lts.sh
 VERSION=v0.5.4 firmware/scripts/build_arduino_release_gcu_v21_lts.sh
+VERSION=v0.5.4 firmware/scripts/build_arduino_release_v15f.sh
 ```
 
 ## Flash
@@ -76,6 +77,9 @@ firmware/scripts/flash_arduino_firmware_gcu_v22c_lts.sh /dev/cu.usbserial-10
 
 # VD-CTL/R v2.1 GCU LTS
 firmware/scripts/flash_arduino_firmware_gcu_v21_lts.sh /dev/cu.usbserial-10
+
+# VD-CTL/R v1.5.F 2026.7 (native USB CDC; defaults to first /dev/cu.usbmodem*)
+firmware/scripts/flash_arduino_firmware_v15f.sh
 ```
 
 Adjust the serial port after checking:

@@ -208,13 +208,49 @@ bool PowerManager::applyProfileByName(const String& profileName) {
 }
 
 bool PowerManager::applyBatteryChargeLimit(uint16_t requestedMa, uint16_t& actualMa) {
-  // The BQ25180 profiles are the source of truth.  Never report a requested
-  // limit that hardware verification did not accept.
-  const ChargeProfile selected = requestedMa <= 100 ? ChargeProfile::UltraSlow
-      : requestedMa <= 200 ? ChargeProfile::Slow : ChargeProfile::Slow;
-  if (!applyProfile(selected)) { actualMa = 0; return false; }
-  actualMa = chargeCurrentMa_;
-  return actualMa <= requestedMa;
+  // BQ25180's documented ICHG range is linear here: 0x25 is 100 mA and each
+  // following code adds 10 mA.  Verify every register before reporting the
+  // exact requested limit as active.
+  if (!supportsChargeProfiles() || requestedMa < 100 || requestedMa > 350 ||
+      requestedMa % 10 != 0) {
+    actualMa = 0;
+    return failProfile("battery_charge_limit_invalid");
+  }
+  const uint8_t ichg = static_cast<uint8_t>(0x25 + (requestedMa - 100) / 10);
+  lastConfigError_ = "";
+  if (!writeRegister(kBq25180VbatCtrlRegister, kBq25180Vbat4200Mv) ||
+      !writeRegister(kBq25180IchgCtrlRegister, ichg) ||
+      !updateRegister(kBq25180ChargeCtrl0Register, 0x70, 0x20) ||
+      !updateRegister(kBq25180IcCtrlRegister, 0x0C, 0x04) ||
+      !updateRegister(kBq25180TmrIlimRegister, 0x07, 0x05)) {
+    actualMa = 0;
+    return failProfile("battery_charge_limit_write_failed");
+  }
+  uint8_t value = 0;
+  if (!readRegister(kBq25180VbatCtrlRegister, value) ||
+      (value & 0x7F) != kBq25180Vbat4200Mv ||
+      !readRegister(kBq25180IchgCtrlRegister, value) ||
+      (value & 0x7F) != ichg ||
+      !readRegister(kBq25180ChargeCtrl0Register, value) ||
+      (value & 0x70) != 0x20 ||
+      !readRegister(kBq25180IcCtrlRegister, value) ||
+      (value & 0x0C) != 0x04 ||
+      !readRegister(kBq25180TmrIlimRegister, value) ||
+      (value & 0x07) != 0x05) {
+    actualMa = 0;
+    return failProfile("battery_charge_limit_verify_failed");
+  }
+  chargeCurrentMa_ = requestedMa;
+  inputLimitMa_ = 500;
+  vbatRegMv_ = 4200;
+  terminationPercent_ = 10;
+  prechargePercent_ = 20;
+  safetyTimerHours_ = 6;
+  configured_ = true;
+  detected_ = true;
+  lastError_ = "";
+  actualMa = requestedMa;
+  return true;
 }
 
 String PowerManager::profileName() const {

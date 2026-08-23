@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "BatteryManualProfile.h"
 #include "BatteryProfile.h"
 
 namespace nhos {
@@ -11,9 +12,11 @@ class BatteryGaugeManager {
  public:
   void begin();
   void setPowerManager(PowerManager& power);
+  void setManualProfile(const ManualBatteryProfile& profile);
   void service(uint32_t nowMs);
   bool copyLatestSample(BatteryGaugeSample& out) const;
   const BatteryProfile& profile() const { return profile_; }
+  const ManualBatteryProfile& manualProfile() const { return manualProfile_; }
   String statusJson() const;
  private:
   bool readWord(uint8_t reg, uint16_t& value);
@@ -21,6 +24,8 @@ class BatteryGaugeManager {
   void updateProfile(const BatteryProfile& profile);
   BatteryGaugeSample sample_;
   BatteryProfile profile_{BatteryProfileId::Unknown, BatteryProfileSource::Pending, false, true, 0, 100};
+  ManualBatteryProfile manualProfile_{};
+  BatteryIdClass lastBatteryId_ = BatteryIdClass::Unknown;
   bool detected_ = false;
   String diagnostic_;
   uint32_t lastPollMs_ = 0;

@@ -313,12 +313,22 @@ void scanAndStreamIfDue() {
   const bool imuSampleValid = imu.copyLatestSample(imuSample);
   float magSample[nhos::kPacketMagFloatCount] = {0};
   const bool magSampleValid = magnetometer.copyLatestSample(magSample);
+  nhos::BatteryGaugeSample gaugeSample;
+  nhos::BatterySample batterySample;
+  const bool batterySampleValid = batteryGauge.copyLatestSample(gaugeSample);
+  if (batterySampleValid) {
+    batterySample.status = gaugeSample.status;
+    batterySample.fault = gaugeSample.fault;
+    batterySample.vbatMv = gaugeSample.vbatMv;
+    batterySample.socCentiPercent = gaugeSample.socCentiPercent;
+  }
   const bool epochValid = timeSync.hasSynced();
   const uint64_t epochMs = epochValid ? timeSync.nowEpochMs() : 0;
   size_t len = packetBuilder.buildMatrixPacketHeader(
       frame, epochMs, epochValid, packetBuffer, sizeof(packetBuffer),
       matrixPayloadLen, imuSampleValid ? imuSample : nullptr,
-      magSampleValid ? magSample : nullptr);
+      magSampleValid ? magSample : nullptr,
+      batterySampleValid ? &batterySample : nullptr);
   if (!len) {
     scanner.recordUdpSend(false, 0);
     return;
@@ -378,6 +388,11 @@ void sendHeartbeatIfDue() {
 
 void updateLedState() {
   const uint32_t nowMs = millis();
+  nhos::BatteryGaugeSample batterySample;
+  const bool batterySampleValid = batteryGauge.copyLatestSample(batterySample);
+  leds.setBatteryStatus(
+      batterySampleValid, batterySample.socCentiPercent,
+      power.chargeState() == nhos::ChargeState::ChargingOrMissing);
   const nhos::ScanHealth health = scanner.health();
   nhos::ExternalLedInputs extIn;
   extIn.wifiConnected = wifi.isConnected();
@@ -484,6 +499,18 @@ void setup() {
   batteryGauge.setPowerManager(power);
 #endif
   batteryGauge.begin();
+  const uint32_t storedBatteryCapacityMah =
+      storage.getUInt("battery_profile_capacity_mah", 0);
+  const uint32_t storedBatteryMaxCurrentMa =
+      storage.getUInt("battery_profile_max_charge_current_ma", 0);
+  if (storedBatteryCapacityMah <= 65535 && storedBatteryMaxCurrentMa <= 65535) {
+    const nhos::ManualBatteryProfile storedManualProfile{
+        static_cast<uint16_t>(storedBatteryCapacityMah),
+        static_cast<uint16_t>(storedBatteryMaxCurrentMa), true};
+    if (nhos::manualBatteryProfileIsUsable(storedManualProfile)) {
+      batteryGauge.setManualProfile(storedManualProfile);
+    }
+  }
   batteryGauge.service(millis());
   logBoot(String("boot_stage=battery_gauge_ready ") + batteryGauge.statusJson());
   imu.begin(deviceConfig.data().imuEnabled);
@@ -636,6 +663,11 @@ void loop() {
   servicePowerState();
   if (powerState.shouldRunServices()) {
     uint32_t sectionStartUs = micros();
+    imu.service(micros());
+    magnetometer.service(millis());
+    loopProfile.imuUs += micros() - sectionStartUs;
+
+    sectionStartUs = micros();
     scanAndStreamIfDue();
     sendQueuedPacketIfAny();
     loopProfile.scanUs += micros() - sectionStartUs;
@@ -664,11 +696,6 @@ void loop() {
       control.serviceUdpCommand(udpTransport.udp());
     }
     loopProfile.controlUs += micros() - sectionStartUs;
-
-    sectionStartUs = micros();
-    imu.service(micros());
-    magnetometer.service(millis());
-    loopProfile.imuUs += micros() - sectionStartUs;
 
     if (!espNowMode) {
       if (wifi.isConnected()) {

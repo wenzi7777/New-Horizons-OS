@@ -85,6 +85,7 @@ class LedController {
   void setSignal(LedSignal signal);
   void showEvent(LedSignal signal);
   void setStatus(LedColor color);
+  void setBatteryStatus(bool sampleValid, uint16_t socCentiPercent, bool charging);
   void pulse(LedColor color, uint16_t delayMs);
 
  private:
@@ -103,13 +104,19 @@ class LedController {
 
   Pattern patternFor(LedSignal signal) const;
   LedColor colorFor(LedSignal signal, uint32_t nowMs) const;
+  LedColor batteryColorFor(uint32_t nowMs) const;
   LedColor scaleColor(LedColor color, uint8_t level) const;
+  void writeStatusPixels(LedColor system, LedColor battery);
   void writePixel(uint8_t pin, LedColor color);
 
   LedSignal baseSignal_ = LedSignal::Boot;
   LedSignal eventSignal_ = LedSignal::Off;
   uint32_t eventStartedMs_ = 0;
-  LedColor current_{255, 255, 255};
+  LedColor currentSystem_{255, 255, 255};
+  LedColor currentBattery_{0, 0, 0};
+  bool batterySampleValid_ = false;
+  uint16_t batterySocCentiPercent_ = 0;
+  bool batteryCharging_ = false;
 };
 
 }  // namespace nhos

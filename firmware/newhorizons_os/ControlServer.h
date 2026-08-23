@@ -75,6 +75,7 @@ class ControlServer {
   String scanTimingStatusJson() const;
   String layoutStatusJson() const;
   String indicatorsStatusJson() const;
+  String batteryStatusJson() const;
   String extractString(const String& request, const char* key) const;
   int extractInt(const String& request, const char* key, int fallback) const;
   float extractFloat(const String& request, const char* key, float fallback) const;

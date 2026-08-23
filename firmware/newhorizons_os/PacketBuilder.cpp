@@ -7,109 +7,23 @@ void PacketBuilder::setDeviceUid(const uint8_t uid[6]) {
 }
 
 size_t PacketBuilder::build(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, const float* imuData, const float* magData, const BatterySample* battery) {
-  const size_t matrixBytes = static_cast<size_t>(frame.pointCount) * sizeof(float);
-  const size_t rawBytes = frame.hasRaw ? matrixBytes : 0;
-  const PacketSensorBlocks sensors{imuData != nullptr, magData != nullptr, battery != nullptr};
-  const size_t payloadLen = matrixBytes + rawBytes + packetSensorPayloadBytes(sensors);
-  const size_t totalLen = kPacketHeaderLen + payloadLen;
-  if (!out || capacity < totalLen || frame.pointCount > kMaxSensors) {
+  if (frame.pointCount > kMaxSensors) {
     return 0;
   }
-
-  uint8_t flags = 0;
-  flags |= packetSensorFlags(sensors);
-  if (frame.hasRaw) {
-    flags |= kPacketFlagRawAdc;
-  }
-  if (epochValid) {
-    flags |= kPacketFlagEpochValid;
-  }
-
-  putU16(out, kPacketMagic);
-  out[2] = kPacketVersion;
-  out[3] = flags;
-  memcpy(out + 4, deviceUid_, 6);
-  putU32(out + 10, frame.seq);
-  putU64(out + 14, epochValid ? epochMs : 0);
-  putU16(out + 22, static_cast<uint16_t>(payloadLen));
-
-  size_t offset = kPacketHeaderLen;
-  for (uint16_t i = 0; i < frame.pointCount; ++i) {
-    putFloat(out + offset, frame.values[i]);
-    offset += sizeof(float);
-  }
-  if (frame.hasRaw) {
-    for (uint16_t i = 0; i < frame.pointCount; ++i) {
-      putFloat(out + offset, frame.rawValues[i]);
-      offset += sizeof(float);
-    }
-  }
-  if (imuData) {
-    for (uint8_t i = 0; i < kPacketBaseImuFloatCount; ++i) {
-      putFloat(out + offset, imuData[i]);
-      offset += sizeof(float);
-    }
-  }
-  if (magData) {
-    for (uint8_t i = 0; i < kPacketMagFloatCount; ++i) {
-      putFloat(out + offset, magData[i]);
-      offset += sizeof(float);
-    }
-  }
-  if (battery) {
-    out[offset++] = battery->status;
-    out[offset++] = battery->fault;
-    putU16(out + offset, battery->vbatMv);
-    offset += sizeof(uint16_t);
-  }
-  return offset;
+  const PacketV5BuildInput input{
+      deviceUid_, frame.seq, epochMs, epochValid, frame.values, frame.rawValues,
+      frame.pointCount, frame.hasRaw, imuData, magData, battery};
+  return buildPacketV5(input, out, capacity);
 }
 
-size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imuData, const float* magData) {
-  const size_t expectedMatrixBytes = static_cast<size_t>(frame.pointCount) * sizeof(float);
-  const size_t rawBytes = frame.hasRaw ? expectedMatrixBytes : 0;
-  const PacketSensorBlocks sensors{imuData != nullptr, magData != nullptr, false};
-  const size_t payloadLen = matrixPayloadBytes + rawBytes + packetSensorPayloadBytes(sensors);
-  const size_t totalLen = kPacketHeaderLen + payloadLen;
-  if (!out || capacity < totalLen || frame.pointCount > kMaxSensors || matrixPayloadBytes != expectedMatrixBytes) {
+size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imuData, const float* magData, const BatterySample* battery) {
+  if (frame.pointCount > kMaxSensors) {
     return 0;
   }
-
-  putU16(out, kPacketMagic);
-  out[2] = kPacketVersion;
-  uint8_t flags = 0;
-  flags |= packetSensorFlags(sensors);
-  if (frame.hasRaw) {
-    flags |= kPacketFlagRawAdc;
-  }
-  if (epochValid) {
-    flags |= kPacketFlagEpochValid;
-  }
-  out[3] = flags;
-  memcpy(out + 4, deviceUid_, 6);
-  putU32(out + 10, frame.seq);
-  putU64(out + 14, epochValid ? epochMs : 0);
-  putU16(out + 22, static_cast<uint16_t>(payloadLen));
-  size_t offset = kPacketHeaderLen + matrixPayloadBytes;
-  if (frame.hasRaw) {
-    for (uint16_t i = 0; i < frame.pointCount; ++i) {
-      putFloat(out + offset, frame.rawValues[i]);
-      offset += sizeof(float);
-    }
-  }
-  if (imuData) {
-    for (uint8_t i = 0; i < kPacketBaseImuFloatCount; ++i) {
-      putFloat(out + offset, imuData[i]);
-      offset += sizeof(float);
-    }
-  }
-  if (magData) {
-    for (uint8_t i = 0; i < kPacketMagFloatCount; ++i) {
-      putFloat(out + offset, magData[i]);
-      offset += sizeof(float);
-    }
-  }
-  return totalLen;
+  const PacketV5BuildInput input{
+      deviceUid_, frame.seq, epochMs, epochValid, nullptr, frame.rawValues,
+      frame.pointCount, frame.hasRaw, imuData, magData, battery};
+  return buildPacketV5HeaderAndTail(input, out, capacity, matrixPayloadBytes);
 }
 
 size_t PacketBuilder::buildHeartbeat(uint32_t seq, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity) {
@@ -117,36 +31,17 @@ size_t PacketBuilder::buildHeartbeat(uint32_t seq, uint64_t epochMs, bool epochV
     return 0;
   }
 
-  putU16(out, kPacketMagic);
+  out[0] = static_cast<uint8_t>(kPacketMagic & 0xff);
+  out[1] = static_cast<uint8_t>((kPacketMagic >> 8) & 0xff);
   out[2] = kPacketVersion;
   out[3] = kPacketFlagHeartbeat | (epochValid ? kPacketFlagEpochValid : 0);
   memcpy(out + 4, deviceUid_, 6);
-  putU32(out + 10, seq);
-  putU64(out + 14, epochValid ? epochMs : 0);
-  putU16(out + 22, 0);
+  for (uint8_t i = 0; i < 4; ++i) out[10 + i] = static_cast<uint8_t>((seq >> (8 * i)) & 0xff);
+  const uint64_t timestamp = epochValid ? epochMs : 0;
+  for (uint8_t i = 0; i < 8; ++i) out[14 + i] = static_cast<uint8_t>((timestamp >> (8 * i)) & 0xff);
+  out[22] = 0;
+  out[23] = 0;
   return kPacketHeaderLen;
-}
-
-void PacketBuilder::putU16(uint8_t* out, uint16_t value) {
-  out[0] = static_cast<uint8_t>(value & 0xff);
-  out[1] = static_cast<uint8_t>((value >> 8) & 0xff);
-}
-
-void PacketBuilder::putU32(uint8_t* out, uint32_t value) {
-  out[0] = static_cast<uint8_t>(value & 0xff);
-  out[1] = static_cast<uint8_t>((value >> 8) & 0xff);
-  out[2] = static_cast<uint8_t>((value >> 16) & 0xff);
-  out[3] = static_cast<uint8_t>((value >> 24) & 0xff);
-}
-
-void PacketBuilder::putU64(uint8_t* out, uint64_t value) {
-  for (int i = 0; i < 8; ++i) {
-    out[i] = static_cast<uint8_t>((value >> (8 * i)) & 0xff);
-  }
-}
-
-void PacketBuilder::putFloat(uint8_t* out, float value) {
-  memcpy(out, &value, sizeof(float));
 }
 
 }  // namespace nhos
