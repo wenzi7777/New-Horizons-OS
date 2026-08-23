@@ -112,6 +112,21 @@ class ArduinoManifestGeneratorTests(unittest.TestCase):
             self.assertEqual(json.loads(latest.read_text(encoding="utf-8"))["latest"], "v9.8.7")
             self.assertEqual(json.loads(versioned.read_text(encoding="utf-8"))["model"], "VD-CTL/R v1.5.F 2026.7")
 
+    def test_every_release_track_emits_its_own_manifests(self):
+        tracks = {
+            "build_arduino_release.sh": "arduino-v10f",
+            "build_arduino_release_v15f.sh": "arduino-v15f",
+            "build_arduino_release_gcu_lts.sh": "arduino-gcu-v23d-lts",
+            "build_arduino_release_gcu_v22c_lts.sh": "arduino-gcu-v22c-lts",
+            "build_arduino_release_gcu_v21_lts.sh": "arduino-gcu-v21-lts",
+        }
+
+        for script_name, manifest_name in tracks.items():
+            script = (REPO_ROOT / "firmware" / "scripts" / script_name).read_text(encoding="utf-8")
+            self.assertIn("generate_arduino_manifest.py", script, script_name)
+            self.assertIn(f"{manifest_name}-latest.json", script, script_name)
+            self.assertIn(f"{manifest_name}-${{VERSION}}.json", script, script_name)
+
 
 if __name__ == "__main__":
     unittest.main()

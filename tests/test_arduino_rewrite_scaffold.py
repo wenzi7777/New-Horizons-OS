@@ -1173,6 +1173,28 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn(f"newhorizons-os-v10f-{version}.bin", latest["firmware"]["url"])
         self.assertIn(f"/{version}/releases/artifacts", latest["firmware"]["url"])
         self.assertIn(f"/{version}.md", latest["changelog_url"])
+
+    def test_all_hardware_tracks_publish_the_same_latest_version(self):
+        tracks = (
+            "arduino-v10f",
+            "arduino-v15f",
+            "arduino-gcu-v23d-lts",
+            "arduino-gcu-v22c-lts",
+            "arduino-gcu-v21-lts",
+        )
+        versions = set()
+
+        for track in tracks:
+            latest = json.loads((REPO_ROOT / "releases" / f"{track}-latest.json").read_text(encoding="utf-8"))
+            version = latest["latest"]
+            versioned = json.loads((REPO_ROOT / "releases" / f"{track}-{version}.json").read_text(encoding="utf-8"))
+            artifact = REPO_ROOT / "releases" / "artifacts" / latest["firmware"]["url"].rsplit("/", 1)[-1]
+
+            versions.add(version)
+            self.assertEqual(versioned["latest"], version)
+            self.assertTrue(artifact.exists(), track)
+
+        self.assertEqual(len(versions), 1)
         self.assertTrue(artifact.exists())
 
     def test_ota_manifest_and_status_include_changelog_url(self):

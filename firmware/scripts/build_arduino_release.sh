@@ -6,10 +6,13 @@ SKETCH="${ROOT}/firmware/newhorizons_os"
 OUT_DIR="${ROOT}/firmware/build"
 BUILD_PATH="${OUT_DIR}/compile"
 RELEASE_DIR="${ROOT}/releases/artifacts"
+MANIFEST_DIR="${MANIFEST_DIR:-$(dirname "${RELEASE_DIR}")}"
 FQBN="${FQBN:-esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB}"
-VERSION="${VERSION:-v0.11.0}"
+VERSION="${VERSION:-v0.17.2}"
+BASE_URL="${BASE_URL:-https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/${VERSION}/releases/artifacts}"
+CHANGELOG_URL="${CHANGELOG_URL:-https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/${VERSION}/releases/notes/${VERSION}.md}"
 
-mkdir -p "${OUT_DIR}" "${BUILD_PATH}" "${RELEASE_DIR}"
+mkdir -p "${OUT_DIR}" "${BUILD_PATH}" "${RELEASE_DIR}" "${MANIFEST_DIR}"
 
 arduino-cli compile \
   --fqbn "${FQBN}" \
@@ -26,4 +29,13 @@ fi
 
 target="${RELEASE_DIR}/newhorizons-os-v10f-${VERSION}.bin"
 cp "${main_bin}" "${target}"
+for manifest in "${MANIFEST_DIR}/arduino-v10f-latest.json" "${MANIFEST_DIR}/arduino-v10f-${VERSION}.json"; do
+  python3 "${ROOT}/firmware/scripts/generate_arduino_manifest.py" \
+    --firmware "${target}" \
+    --output "${manifest}" \
+    --model "VD-CTL/R v1.0.F 2026.4" \
+    --version "${VERSION}" \
+    --base-url "${BASE_URL}" \
+    --changelog-url "${CHANGELOG_URL}"
+done
 echo "${target}"
