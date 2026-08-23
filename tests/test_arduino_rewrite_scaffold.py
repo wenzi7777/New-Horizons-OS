@@ -1401,6 +1401,28 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kPacketBaseImuFloatCount", packet_codec)
         self.assertIn("kPacketMagFloatCount", packet_codec)
 
+    def test_manual_battery_profile_rejects_old_boards_before_nvs_write(self):
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        command_start = control.index('if (cmd == "set_battery_profile")')
+        command_end = control.index('if (cmd == "set_imu")', command_start)
+        command = control[command_start:command_end]
+        first_nvs_write = command.index('storage_->putUInt("battery_profile_capacity_mah"')
+
+        self.assertIn("#if !NHOS_BOARD_HAS_MAX17048", command)
+        self.assertIn('return error(cmd, "battery_profile_unavailable")', command)
+        self.assertLess(command.index("#else"), first_nvs_write)
+
+    def test_root_battery_keeps_distinct_charger_and_battery_profile_fields(self):
+        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        charger = (ARDUINO_ROOT / "PowerStatusJson.cpp").read_text(encoding="utf-8")
+        gauge = (ARDUINO_ROOT / "BatteryGaugeManager.cpp").read_text(encoding="utf-8")
+
+        self.assertIn('jsonRawField(data, "battery", batteryStatusJson(), first)', control)
+        self.assertIn('\\"profile\\":\\"', charger)
+        self.assertIn('\\"charge_profile\\":\\"', charger)
+        self.assertIn('\\"battery_profile\\":\\"', gauge)
+        self.assertNotIn('\\"profile\\":\\"', gauge)
+
 
 if __name__ == "__main__":
     unittest.main()
