@@ -30,3 +30,14 @@ CXX="${CXX:-c++}"
   -o "$BUILD_DIR/test_v15f_foundation"
 
 "$BUILD_DIR/test_v15f_foundation"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_v15f_regressions.cpp" \
+  "$FIRMWARE_DIR/BatteryChargeSafety.cpp" \
+  "$FIRMWARE_DIR/MagnetometerSamplePolicy.cpp" \
+  "$FIRMWARE_DIR/PacketSensorBlocks.cpp" \
+  "$FIRMWARE_DIR/PowerStatusJson.cpp" \
+  -o "$BUILD_DIR/test_v15f_regressions"
+
+"$BUILD_DIR/test_v15f_regressions"

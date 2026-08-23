@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "BootModeManager.h"
+#include "BatteryGaugeManager.h"
 #include "Calibration.h"
 #include "DeviceConfig.h"
 #include "DisplayManager.h"
@@ -14,6 +15,7 @@
 #include "ImuManager.h"
 #include "LedController.h"
 #include "MatrixScanner.h"
+#include "MagnetometerManager.h"
 #include "OtaManager.h"
 #include "PowerManager.h"
 #include "PowerStateManager.h"
@@ -35,8 +37,10 @@ class ControlServer {
       OtaManager& ota,
       FindMeClient& findme,
       PowerManager& power,
+      BatteryGaugeManager& batteryGauge,
       PowerStateManager& powerState,
       ImuManager& imu,
+      MagnetometerManager& magnetometer,
       LedController& leds,
       DeviceConfig& deviceConfig,
       Calibration& calibration,
@@ -92,8 +96,10 @@ class ControlServer {
   EspNowOtaReceiver* espNowOta_ = nullptr;
   FindMeClient* findme_ = nullptr;
   PowerManager* power_ = nullptr;
+  BatteryGaugeManager* batteryGauge_ = nullptr;
   PowerStateManager* powerState_ = nullptr;
   ImuManager* imu_ = nullptr;
+  MagnetometerManager* magnetometer_ = nullptr;
   LedController* leds_ = nullptr;
   DeviceConfig* deviceConfig_ = nullptr;
   Calibration* calibration_ = nullptr;

@@ -2,39 +2,24 @@
 
 namespace nhos {
 
-namespace {
-constexpr uint8_t kImuBaseFloatCount = 7;
-constexpr uint8_t kMagFloatCount = 3;
-}  // namespace
-
 void PacketBuilder::setDeviceUid(const uint8_t uid[6]) {
   memcpy(deviceUid_, uid, 6);
 }
 
-size_t PacketBuilder::build(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, const float* imuData, const BatterySample* battery) {
+size_t PacketBuilder::build(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, const float* imuData, const float* magData, const BatterySample* battery) {
   const size_t matrixBytes = static_cast<size_t>(frame.pointCount) * sizeof(float);
   const size_t rawBytes = frame.hasRaw ? matrixBytes : 0;
-  const size_t imuBytes = imuData ? kImuBaseFloatCount * sizeof(float) : 0;
-  const size_t magBytes = imuData && NHOS_BOARD_HAS_MAG ? kMagFloatCount * sizeof(float) : 0;
-  const size_t batteryBytes = battery ? 4 : 0;
-  const size_t payloadLen = matrixBytes + rawBytes + imuBytes + magBytes + batteryBytes;
+  const PacketSensorBlocks sensors{imuData != nullptr, magData != nullptr, battery != nullptr};
+  const size_t payloadLen = matrixBytes + rawBytes + packetSensorPayloadBytes(sensors);
   const size_t totalLen = kPacketHeaderLen + payloadLen;
   if (!out || capacity < totalLen || frame.pointCount > kMaxSensors) {
     return 0;
   }
 
   uint8_t flags = 0;
-  if (imuData) {
-    flags |= kPacketFlagImu;
-#if NHOS_BOARD_HAS_MAG
-    flags |= kPacketFlagMag;
-#endif
-  }
+  flags |= packetSensorFlags(sensors);
   if (frame.hasRaw) {
     flags |= kPacketFlagRawAdc;
-  }
-  if (battery) {
-    flags |= kPacketFlagBattery;
   }
   if (epochValid) {
     flags |= kPacketFlagEpochValid;
@@ -60,16 +45,16 @@ size_t PacketBuilder::build(const MatrixFrame& frame, uint64_t epochMs, bool epo
     }
   }
   if (imuData) {
-    for (uint8_t i = 0; i < kImuBaseFloatCount; ++i) {
+    for (uint8_t i = 0; i < kPacketBaseImuFloatCount; ++i) {
       putFloat(out + offset, imuData[i]);
       offset += sizeof(float);
     }
-#if NHOS_BOARD_HAS_MAG
-    for (uint8_t i = 0; i < kMagFloatCount; ++i) {
-      putFloat(out + offset, imuData[kImuBaseFloatCount + i]);
+  }
+  if (magData) {
+    for (uint8_t i = 0; i < kPacketMagFloatCount; ++i) {
+      putFloat(out + offset, magData[i]);
       offset += sizeof(float);
     }
-#endif
   }
   if (battery) {
     out[offset++] = battery->status;
@@ -80,12 +65,11 @@ size_t PacketBuilder::build(const MatrixFrame& frame, uint64_t epochMs, bool epo
   return offset;
 }
 
-size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imuData) {
+size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imuData, const float* magData) {
   const size_t expectedMatrixBytes = static_cast<size_t>(frame.pointCount) * sizeof(float);
   const size_t rawBytes = frame.hasRaw ? expectedMatrixBytes : 0;
-  const size_t imuBytes = imuData ? kImuBaseFloatCount * sizeof(float) : 0;
-  const size_t magBytes = imuData && NHOS_BOARD_HAS_MAG ? kMagFloatCount * sizeof(float) : 0;
-  const size_t payloadLen = matrixPayloadBytes + rawBytes + imuBytes + magBytes;
+  const PacketSensorBlocks sensors{imuData != nullptr, magData != nullptr, false};
+  const size_t payloadLen = matrixPayloadBytes + rawBytes + packetSensorPayloadBytes(sensors);
   const size_t totalLen = kPacketHeaderLen + payloadLen;
   if (!out || capacity < totalLen || frame.pointCount > kMaxSensors || matrixPayloadBytes != expectedMatrixBytes) {
     return 0;
@@ -94,12 +78,7 @@ size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint64_t
   putU16(out, kPacketMagic);
   out[2] = kPacketVersion;
   uint8_t flags = 0;
-  if (imuData) {
-    flags |= kPacketFlagImu;
-#if NHOS_BOARD_HAS_MAG
-    flags |= kPacketFlagMag;
-#endif
-  }
+  flags |= packetSensorFlags(sensors);
   if (frame.hasRaw) {
     flags |= kPacketFlagRawAdc;
   }
@@ -119,16 +98,16 @@ size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint64_t
     }
   }
   if (imuData) {
-    for (uint8_t i = 0; i < kImuBaseFloatCount; ++i) {
+    for (uint8_t i = 0; i < kPacketBaseImuFloatCount; ++i) {
       putFloat(out + offset, imuData[i]);
       offset += sizeof(float);
     }
-#if NHOS_BOARD_HAS_MAG
-    for (uint8_t i = 0; i < kMagFloatCount; ++i) {
-      putFloat(out + offset, imuData[kImuBaseFloatCount + i]);
+  }
+  if (magData) {
+    for (uint8_t i = 0; i < kPacketMagFloatCount; ++i) {
+      putFloat(out + offset, magData[i]);
       offset += sizeof(float);
     }
-#endif
   }
   return totalLen;
 }

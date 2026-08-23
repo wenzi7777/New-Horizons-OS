@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "BoardConfig.h"
+#include "PacketSensorBlocks.h"
 
 namespace nhos {
 
@@ -14,9 +15,9 @@ static constexpr char kFirmwareVersion[] = "v0.16.1";
 static constexpr uint16_t kRows = NHOS_BOARD_ROWS;
 static constexpr uint16_t kCols = NHOS_BOARD_COLS;
 static constexpr uint16_t kMaxSensors = kRows * kCols;
-// Magnetometer samples are now supplied by MagnetometerManager.  Keep the
-// legacy BMM150 combined IMU payload only on existing GCU boards.
-static constexpr uint8_t kImuSampleFloats = 7 + (NHOS_BOARD_MAG_MODEL == 1 ? 3 : 0);
+// Magnetometer samples are supplied as a separately optional three-float
+// block.  This keeps a seven-float IMU buffer from being mistaken for MAG.
+static constexpr uint8_t kImuSampleFloats = 7;
 
 static constexpr uint16_t kUdpStreamPort = 13250;
 static constexpr uint16_t kDiscoveryPort = 22346;
@@ -38,6 +39,7 @@ static constexpr size_t kMaxPacketBytes =
     (kMaxSensors * sizeof(float)) +
     (kMaxSensors * sizeof(float)) +  // optional raw ADC block (parallel to matrix levels)
     (kImuSampleFloats * sizeof(float)) +
+    (NHOS_BOARD_HAS_MAG ? kPacketMagFloatCount * sizeof(float) : 0) +
     4 +
     kPacketHmacLen;
 static constexpr uint32_t kHeartbeatIntervalMs = 5000;

@@ -3,6 +3,7 @@
 #include <Wire.h>
 
 #include "BoardConfig.h"
+#include "PowerStatusJson.h"
 
 namespace nhos {
 namespace {
@@ -221,51 +222,14 @@ String PowerManager::profileName() const {
 }
 
 String PowerManager::statusJson() const {
-  String out = "{";
-  out += "\"state\":\"";
-  out += chargeStateName();
-  out += "\",\"detail\":\"";
-  out += chargeDetailName();
-  out += "\",\"charge_state\":\"";
-  out += chargeStateName();
-  if (supportsChargeProfiles()) {
-    out += "\",\"charger\":\"bq25180\",\"supported\":true";
-  } else {
-    out += "\",\"charger\":\"none\",\"supported\":false";
-  }
-  out += ",\"detected\":";
-  out += detected_ ? "true" : "false";
-  out += ",\"charger_detected\":";
-  out += chargerDetected() ? "true" : "false";
-  out += ",\"soft_off_recommended\":";
-  out += softOffRecommended() ? "true" : "false";
-  out += ",\"configured\":";
-  out += configured_ ? "true" : "false";
-  out += ",\"profile\":\"";
-  out += profileName();
-  out += "\",\"charge_current_ma\":";
-  out += String(chargeCurrentMa_);
-  out += ",\"input_limit_ma\":";
-  out += String(inputLimitMa_);
-  out += ",\"vbat_reg_mv\":";
-  out += String(vbatRegMv_);
-  out += ",\"termination_percent\":";
-  out += String(terminationPercent_);
-  out += ",\"precharge_percent\":";
-  out += String(prechargePercent_);
-  out += ",\"safety_timer_hours\":";
-  out += String(safetyTimerHours_);
-  out += ",\"stat0\":";
-  out += String(stat0_);
-  out += ",\"last_stat0\":";
-  out += String(stat0_);
-  out += ",\"last_error\":\"";
-  out += lastError_;
-  out += "\",\"config_error\":\"";
-  out += lastConfigError_;
-  out += "\",\"temperature_monitoring\":\"bypassed\"";
-  out += "\"}";
-  return out;
+  const std::string json = formatPowerStatusJson({
+      chargeStateName(), chargeDetailName(),
+      supportsChargeProfiles() ? "bq25180" : "none", supportsChargeProfiles(),
+      detected_, chargerDetected(), configured_, profileConfig().name,
+      chargeCurrentMa_, inputLimitMa_, vbatRegMv_, terminationPercent_,
+      prechargePercent_, safetyTimerHours_, stat0_, lastError_.c_str(),
+      lastConfigError_.c_str()});
+  return String(json.c_str());
 }
 
 const PowerManager::ChargeProfileConfig& PowerManager::profileConfig() const {

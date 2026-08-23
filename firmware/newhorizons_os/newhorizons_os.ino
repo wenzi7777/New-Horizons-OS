@@ -311,9 +311,14 @@ void scanAndStreamIfDue() {
 
   float imuSample[nhos::kImuSampleFloats] = {0};
   const bool imuSampleValid = imu.copyLatestSample(imuSample);
+  float magSample[nhos::kPacketMagFloatCount] = {0};
+  const bool magSampleValid = magnetometer.copyLatestSample(magSample);
   const bool epochValid = timeSync.hasSynced();
   const uint64_t epochMs = epochValid ? timeSync.nowEpochMs() : 0;
-  size_t len = packetBuilder.buildMatrixPacketHeader(frame, epochMs, epochValid, packetBuffer, sizeof(packetBuffer), matrixPayloadLen, imuSampleValid ? imuSample : nullptr);
+  size_t len = packetBuilder.buildMatrixPacketHeader(
+      frame, epochMs, epochValid, packetBuffer, sizeof(packetBuffer),
+      matrixPayloadLen, imuSampleValid ? imuSample : nullptr,
+      magSampleValid ? magSample : nullptr);
   if (!len) {
     scanner.recordUdpSend(false, 0);
     return;
@@ -475,18 +480,15 @@ void setup() {
   logBoot(String("boot_stage=display_ready ") + displayManager.statusJson());
   power.begin(storage.getString("charge_profile", "slow"));
   logBoot(String("boot_stage=power_ready ") + power.statusJson());
+#if NHOS_BOARD_HAS_MAX17048
+  batteryGauge.setPowerManager(power);
+#endif
   batteryGauge.begin();
   batteryGauge.service(millis());
-#if NHOS_BOARD_HAS_MAX17048
-  uint16_t actualChargeCurrentMa = 0;
-  if (!power.applyBatteryChargeLimit(batteryGauge.profile().maxChargeCurrentMa, actualChargeCurrentMa)) {
-    logBoot(String("battery_charge_limit_not_applied requested=") + batteryGauge.profile().maxChargeCurrentMa + " actual=" + actualChargeCurrentMa);
-  }
-#endif
   logBoot(String("boot_stage=battery_gauge_ready ") + batteryGauge.statusJson());
   imu.begin(deviceConfig.data().imuEnabled);
   logBoot(String("boot_stage=imu_ready ") + imu.statusJson());
-  magnetometer.begin();
+  magnetometer.begin(imu.initialized());
   logBoot(String("boot_stage=magnetometer_ready ") + magnetometer.statusJson());
 
   if (!nhos::validatePinMap()) {
@@ -609,7 +611,9 @@ void setup() {
   ota.begin(storage);
   logBoot("boot_stage=ota_ready");
   serviceAutoOta(wifiConnected);
-  control.begin(wifi, scanner, storage, bootMode, ota, findme, power, powerState, imu, leds, deviceConfig, calibration, displayManager, externalLeds);
+  control.begin(wifi, scanner, storage, bootMode, ota, findme, power, batteryGauge,
+                powerState, imu, magnetometer, leds, deviceConfig, calibration,
+                displayManager, externalLeds);
   if (espNowMode) {
     // Route check_update/apply_update through the Hub-relayed OTA path --
     // a Direct-mode device has no WiFi, so OtaManager's HTTP fetch can

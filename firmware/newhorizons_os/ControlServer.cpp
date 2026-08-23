@@ -18,8 +18,10 @@ void ControlServer::begin(
     OtaManager& ota,
     FindMeClient& findme,
     PowerManager& power,
+    BatteryGaugeManager& batteryGauge,
     PowerStateManager& powerState,
     ImuManager& imu,
+    MagnetometerManager& magnetometer,
     LedController& leds,
     DeviceConfig& deviceConfig,
     Calibration& calibration,
@@ -32,8 +34,10 @@ void ControlServer::begin(
   ota_ = &ota;
   findme_ = &findme;
   power_ = &power;
+  batteryGauge_ = &batteryGauge;
   powerState_ = &powerState;
   imu_ = &imu;
+  magnetometer_ = &magnetometer;
   leds_ = &leds;
   deviceConfig_ = &deviceConfig;
   calibration_ = &calibration;
@@ -362,6 +366,7 @@ String ControlServer::processCommand(const String& request) {
     jsonRawField(data, "runtime", runtime, first);
     jsonRawField(data, "wifi", wifi_->statusJson(), first);
     jsonRawField(data, "battery", power_ ? power_->statusJson() : "{}", first);
+    jsonRawField(data, "battery_gauge", batteryGauge_ ? batteryGauge_->statusJson() : "{}", first);
     jsonRawField(data, "power", powerState_ ? powerState_->statusJson() : "{}", first);
     jsonRawField(data, "config", deviceConfig_ ? deviceConfig_->statusJson() : "{}", first);
     jsonRawField(data, "logging", storage_ ? storage_->logStatusJson() : "{}", first);
@@ -376,6 +381,7 @@ String ControlServer::processCommand(const String& request) {
     jsonRawField(data, "filter", deviceConfig_ ? deviceConfig_->filterJson() : "{}", first);
     jsonBoolField(data, "stream_raw_adc", deviceConfig_ ? deviceConfig_->data().streamRawAdc : false, first);
     jsonRawField(data, "imu", imu_ ? imu_->statusJson() : "{}", first);
+    jsonRawField(data, "magnetometer", magnetometer_ ? magnetometer_->statusJson() : "{}", first);
     jsonRawField(data, "stream_buffer", streamBuffer, first);
     jsonRawField(data, "calibration", calibration_ ? calibration_->statusJson(maintenanceMode()) : "{}", first);
     jsonRawField(data, "indicators", indicatorsStatusJson(), first);
