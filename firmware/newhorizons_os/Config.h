@@ -5,12 +5,16 @@
 #include "BoardConfig.h"
 #include "PacketWire.h"
 
+#ifndef NHOS_FIRMWARE_VERSION
+#define NHOS_FIRMWARE_VERSION "v0.17.1"
+#endif
+
 namespace nhos {
 
 static constexpr char kProductName[] = "New Horizons OS Arduino";
 static constexpr char kProtocolName[] = "NHO/Arduino/1";
 static constexpr char kHardwareModel[] = NHOS_BOARD_NAME;
-static constexpr char kFirmwareVersion[] = "v0.16.1";
+static constexpr char kFirmwareVersion[] = NHOS_FIRMWARE_VERSION;
 
 static constexpr uint16_t kRows = NHOS_BOARD_ROWS;
 static constexpr uint16_t kCols = NHOS_BOARD_COLS;

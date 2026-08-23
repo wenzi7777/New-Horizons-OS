@@ -81,7 +81,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kRows = NHOS_BOARD_ROWS", config)
         self.assertIn("kCols = NHOS_BOARD_COLS", config)
         self.assertIn("kDefaultUpdateManifestUrl[] =", config)
-        self.assertRegex(config, r'kFirmwareVersion\[\] = "v\d+\.\d+\.\d+"')
+        self.assertIn("kFirmwareVersion[] = NHOS_FIRMWARE_VERSION", config)
+        self.assertRegex(config, r'#define NHOS_FIRMWARE_VERSION "v\d+\.\d+\.\d+"')
         self.assertNotIn('kFirmwareVersion[] = "v0.5.0-arduino"', config)
 
     def test_board_config_declares_three_board_capabilities(self):
@@ -889,6 +890,24 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("update_started", control)
         self.assertIn("servicePendingApplyUpdate", control)
 
+    def test_release_builds_inject_their_version_into_the_firmware(self):
+        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+        release_scripts = (
+            "build_arduino_release.sh",
+            "build_arduino_release_v15f.sh",
+            "build_arduino_release_gcu_lts.sh",
+            "build_arduino_release_gcu_v22c_lts.sh",
+            "build_arduino_release_gcu_v21_lts.sh",
+        )
+
+        self.assertIn("#ifndef NHOS_FIRMWARE_VERSION", config)
+        self.assertIn("#define NHOS_FIRMWARE_VERSION", config)
+        self.assertIn("kFirmwareVersion[] = NHOS_FIRMWARE_VERSION", config)
+        for script_name in release_scripts:
+            script = (SCRIPT_ROOT / script_name).read_text(encoding="utf-8")
+            self.assertIn("NHOS_FIRMWARE_VERSION", script, script_name)
+            self.assertIn("${VERSION}", script, script_name)
+
     def test_main_loop_prioritizes_scan_before_other_runtime_services_and_uses_yield(self):
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
@@ -1098,7 +1117,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         ):
             script = (SCRIPT_ROOT / filename).read_text(encoding="utf-8")
             self.assertIn(
-                '--build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V15F"',
+                '--build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V15F',
                 script,
             )
             self.assertNotIn(
@@ -1120,11 +1139,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn('FlashSize=8M', gcu_script)
 
     def test_latest_manifest_points_to_current_artifact(self):
-        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
-        version_match = re.search(r'kFirmwareVersion\[\] = "(v\d+\.\d+\.\d+)"', config)
-        self.assertIsNotNone(version_match)
-        version = version_match.group(1)
         latest = json.loads((REPO_ROOT / "releases" / "arduino-v10f-latest.json").read_text(encoding="utf-8"))
+        version = latest["latest"]
         versioned = json.loads((REPO_ROOT / "releases" / f"arduino-v10f-{version}.json").read_text(encoding="utf-8"))
         artifact = REPO_ROOT / "releases" / "artifacts" / f"newhorizons-os-v10f-{version}.bin"
 

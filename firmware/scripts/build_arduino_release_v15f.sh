@@ -8,7 +8,7 @@ BUILD_PATH="${BUILD_PATH:-${OUT_DIR}/compile}"
 RELEASE_DIR="${RELEASE_DIR:-${ROOT}/releases/artifacts}"
 MANIFEST_DIR="${MANIFEST_DIR:-$(dirname "${RELEASE_DIR}")}"
 FQBN="${FQBN:-esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc,CDCOnBoot=cdc}"
-VERSION="${VERSION:-v0.16.1}"
+VERSION="${VERSION:-v0.17.1}"
 BASE_URL="${BASE_URL:-https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/${VERSION}/releases/artifacts}"
 CHANGELOG_URL="${CHANGELOG_URL:-https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/${VERSION}/releases/notes/${VERSION}.md}"
 
@@ -17,7 +17,7 @@ mkdir -p "${OUT_DIR}" "${BUILD_PATH}" "${RELEASE_DIR}" "${MANIFEST_DIR}"
 arduino-cli compile \
   --fqbn "${FQBN}" \
   --build-path "${BUILD_PATH}" \
-  --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V15F" \
+  --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V15F -DNHOS_FIRMWARE_VERSION=\"${VERSION}\"" \
   "${SKETCH}" \
   --output-dir "${OUT_DIR}"
 

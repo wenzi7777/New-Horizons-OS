@@ -14,6 +14,7 @@ mkdir -p "${OUT_DIR}" "${BUILD_PATH}" "${RELEASE_DIR}"
 arduino-cli compile \
   --fqbn "${FQBN}" \
   --build-path "${BUILD_PATH}" \
+  --build-property "compiler.cpp.extra_flags=-DNHOS_FIRMWARE_VERSION=\"${VERSION}\"" \
   "${SKETCH}" \
   --output-dir "${OUT_DIR}"
 
