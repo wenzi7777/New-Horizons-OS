@@ -414,6 +414,11 @@ void updateLedState() {
     return;
   }
   if (powerState.state() == nhos::PowerState::SoftOffCharging) {
+#if defined(NHOS_BOARD_V15F)
+    // v1.5.F has a dedicated battery WS2812B. Keep the system pixel reserved
+    // for connectivity even when the legacy soft-off path is exercised.
+    leds.setSignal(nhos::LedSignal::Off);
+#else
     if (power.chargeState() == nhos::ChargeState::ChargingOrMissing) {
       leds.setSignal(nhos::LedSignal::SoftOffCharging);
     } else if (power.chargeState() == nhos::ChargeState::ChargeDone) {
@@ -421,6 +426,7 @@ void updateLedState() {
     } else {
       leds.setSignal(nhos::LedSignal::Off);
     }
+#endif
     leds.service(nowMs);
     extIn.systemSignal = nhos::LedSignal::Off;
     externalLeds.service(nowMs, health, extIn);
@@ -453,10 +459,12 @@ void updateLedState() {
     activeSignal = nhos::LedSignal::WifiConnecting;
   } else if (!findme.hasGateway()) {
     activeSignal = nhos::LedSignal::FindMePending;
+#if !defined(NHOS_BOARD_V15F)
   } else if (power.chargeState() == nhos::ChargeState::ChargeDone) {
     activeSignal = nhos::LedSignal::ChargeDone;
   } else if (power.chargeState() == nhos::ChargeState::ChargingOrMissing) {
     activeSignal = nhos::LedSignal::ChargingOrMissing;
+#endif
   } else {
     activeSignal = nhos::LedSignal::Online;
   }

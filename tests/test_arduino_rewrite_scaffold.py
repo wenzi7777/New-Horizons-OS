@@ -614,6 +614,30 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("LedSignal::SoftOffCharging", sketch)
         self.assertIn("LedSignal::SoftOffChargeDone", sketch)
 
+    def test_v15f_reserves_the_system_pixel_for_connectivity_not_charging(self):
+        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+
+        self.assertRegex(
+            sketch,
+            re.compile(
+                r"#if defined\(NHOS_BOARD_V15F\)(?:(?!#else).)*?"
+                r"leds\.setSignal\(nhos::LedSignal::Off\);\s+"
+                r"#else\s+"
+                r"if \(power\.chargeState\(\) == nhos::ChargeState::ChargingOrMissing\)",
+                re.S,
+            ),
+        )
+        self.assertRegex(
+            sketch,
+            re.compile(
+                r"#if !defined\(NHOS_BOARD_V15F\)\s+"
+                r"\} else if \(power\.chargeState\(\) == nhos::ChargeState::ChargeDone\) \{\s+"
+                r"activeSignal = nhos::LedSignal::ChargeDone;\s+"
+                r"\} else if \(power\.chargeState\(\) == nhos::ChargeState::ChargingOrMissing\)",
+                re.S,
+            ),
+        )
+
     def test_bq25180_charge_profiles_include_safe_and_fast_modes(self):
         power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
         power = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
