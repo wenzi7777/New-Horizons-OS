@@ -56,6 +56,11 @@ struct BatteryLedConfig {
   uint8_t lowBatteryThresholdPercent = 10;
 };
 
+struct ActionButtonConfig {
+  String shortPress = "none";
+  String longPress = "soft_off";
+};
+
 struct OledConfig {
   String mode = "off";
   String page = "live_status";
@@ -101,6 +106,7 @@ struct DeviceConfigData {
   OtaConfig ota;
   BoardLedConfig boardLed;
   BatteryLedConfig batteryLed;
+  ActionButtonConfig actionButton;
   ExternalLedConfig externalLed;
   OledConfig oled;
   TransportConfig transport;
@@ -124,6 +130,7 @@ class DeviceConfig {
   bool setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl);
   bool setBoardLedBrightness(float brightness);
   bool setBatteryLedLowBatteryThreshold(uint8_t lowBatteryThresholdPercent);
+  bool setActionButtonActions(const String& shortPress, const String& longPress);
   bool setExternalLed(const String& mode, const String& preset, float brightness, const String& color);
   bool setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast, uint8_t rotation);
   bool setTransport(const String& mode, const String& hubMac);
@@ -135,6 +142,7 @@ class DeviceConfig {
   String otaJson() const;
   String streamBufferJson() const;
   String transportJson() const;
+  String actionButtonJson() const;
   String configJson() const;
 
   static bool validLogLevel(const String& level);

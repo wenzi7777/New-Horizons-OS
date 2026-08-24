@@ -6,6 +6,7 @@
 
 #include "Config.h"
 #include "BatteryStatusJsonMerge.h"
+#include "ActionButtonPolicy.h"
 #include "EspNowPairing.h"  // kEspNowPairingFailFlagKey, so this stays in sync with EspNowPairing.cpp's own check
 #include "JsonUtils.h"
 
@@ -386,6 +387,7 @@ String ControlServer::processCommand(const String& request) {
     jsonRawField(data, "stream_buffer", streamBuffer, first);
     jsonRawField(data, "calibration", calibration_ ? calibration_->statusJson(maintenanceMode()) : "{}", first);
     jsonRawField(data, "indicators", indicatorsStatusJson(), first);
+    jsonRawField(data, "action_button", actionButtonStatusJson(), first);
     jsonRawField(data, "scan_health", scanner_->healthJson(), first);
     jsonRawField(data, "findme", findme_ ? findme_->statusJson() : "{}", first);
     data += "}";
@@ -587,6 +589,30 @@ String ControlServer::processCommand(const String& request) {
     data += powerState_->statusJson();
     data += "}";
     return ok(cmd, "power_state_updated", data);
+  }
+  if (cmd == "set_action_button") {
+#if !defined(NHOS_BOARD_V15F)
+    return error(cmd, "action_button_unsupported");
+#else
+    if (!deviceConfig_) {
+      return error(cmd, "config_unavailable");
+    }
+    const String shortPress = extractString(request, "short_press");
+    const String longPress = extractString(request, "long_press");
+    const ActionButtonConfig previous = deviceConfig_->data().actionButton;
+    if (shortPress.isEmpty() || longPress.isEmpty() ||
+        !deviceConfig_->setActionButtonActions(shortPress, longPress)) {
+      return error(cmd, "action_button_invalid");
+    }
+    if (!deviceConfig_->save(*storage_)) {
+      deviceConfig_->setActionButtonActions(previous.shortPress, previous.longPress);
+      return error(cmd, "config_write_failed");
+    }
+    String data = "{\"action_button\":";
+    data += actionButtonStatusJson();
+    data += "}";
+    return ok(cmd, "action_button_updated", data);
+#endif
   }
   if (cmd == "set_filter") {
     if (!deviceConfig_ || !scanner_) {
@@ -1288,6 +1314,24 @@ String ControlServer::indicatorsStatusJson() const {
   jsonRawField(data, "battery_led", batteryLed, first);
   jsonRawField(data, "external_led", externalLeds_ ? externalLeds_->statusJson() : "{}", first);
   jsonRawField(data, "oled", display_ ? display_->statusJson() : "{}", first);
+  data += "}";
+  return data;
+}
+
+String ControlServer::actionButtonStatusJson() const {
+  String data = "{\"supported\":";
+#if defined(NHOS_BOARD_V15F)
+  data += "true";
+#else
+  data += "false";
+#endif
+  data += ",\"boot_wifi_setup\":\"fixed_single_press_during_boot\"";
+  data += ",\"short_press\":\"";
+  data += deviceConfig_ ? deviceConfig_->data().actionButton.shortPress : "none";
+  data += "\",\"long_press\":\"";
+  data += deviceConfig_ ? deviceConfig_->data().actionButton.longPress : "soft_off";
+  data += "\",\"runtime\":";
+  data += powerState_ ? powerState_->actionButtonRuntimeJson() : "{}";
   data += "}";
   return data;
 }

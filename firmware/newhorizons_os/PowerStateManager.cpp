@@ -14,7 +14,9 @@ void PowerStateManager::begin() {
 #endif
 }
 
-void PowerStateManager::service(uint32_t nowMs, bool chargerDetected, ChargeState chargeState) {
+ActionButtonGesture PowerStateManager::service(uint32_t nowMs, bool chargerDetected, ChargeState chargeState) {
+  ActionButtonGesture gesture = ActionButtonGesture::None;
+  bool hasGesture = false;
   chargerDetected_ = chargerDetected;
   chargeState_ = chargeState;
 
@@ -32,12 +34,12 @@ void PowerStateManager::service(uint32_t nowMs, bool chargerDetected, ChargeStat
     logButtonDown();
   }
 
-  if (state_ == PowerState::Normal) {
+  const bool wasNormalBeforeRelease = state_ == PowerState::Normal;
+  if (wasNormalBeforeRelease) {
     if (pressed && buttonDown_ && !longPressHandled_ && nowMs - buttonPressedAtMs_ >= kLongPressMs) {
       longPressHandled_ = true;
-      requestState(
-          chargerDetected_ ? PowerState::SoftOffCharging : PowerState::SoftOffBattery,
-          "action_button_long_press");
+      gesture = ActionButtonGesture::LongPress;
+      hasGesture = true;
     }
   } else if (!pressed && buttonDown_) {
     const uint32_t heldMs = nowMs - buttonPressedAtMs_;
@@ -48,7 +50,13 @@ void PowerStateManager::service(uint32_t nowMs, bool chargerDetected, ChargeStat
   }
 
   if (!pressed && buttonDown_) {
-    logButtonUp(nowMs - buttonPressedAtMs_);
+    const uint32_t heldMs = nowMs - buttonPressedAtMs_;
+    if (wasNormalBeforeRelease && !longPressHandled_ &&
+        heldMs >= kShortPressMinMs && heldMs <= kShortPressMaxMs) {
+      gesture = ActionButtonGesture::ShortPress;
+      hasGesture = true;
+    }
+    logButtonUp(heldMs);
     buttonDown_ = false;
     buttonPressedAtMs_ = 0;
     longPressHandled_ = false;
@@ -62,6 +70,7 @@ void PowerStateManager::service(uint32_t nowMs, bool chargerDetected, ChargeStat
     requestState(PowerState::SoftOffBattery, "charger_removed");
     setWakeSource("charger");
   }
+  return hasGesture ? gesture : ActionButtonGesture::None;
 }
 
 void PowerStateManager::requestState(PowerState nextState, const String& reason) {
@@ -194,6 +203,20 @@ void PowerStateManager::lightSleep() {
     Serial.print(F("soft_off_wake cause="));
     Serial.println(wakeSourceName());
   }
+}
+
+void PowerStateManager::setLastAction(ActionButtonAction action, bool succeeded) {
+  lastAction_ = actionButtonActionName(action);
+  lastActionResult_ = succeeded ? "success" : "failed";
+}
+
+String PowerStateManager::actionButtonRuntimeJson() const {
+  String out = "{\"last_action\":\"";
+  out += lastAction_;
+  out += "\",\"last_result\":\"";
+  out += lastActionResult_;
+  out += "\"}";
+  return out;
 }
 
 String PowerStateManager::statusJson() const {

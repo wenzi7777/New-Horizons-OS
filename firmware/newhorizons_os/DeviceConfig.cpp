@@ -1,5 +1,6 @@
 #include "DeviceConfig.h"
 
+#include "ActionButtonPolicy.h"
 #include "BoardPins.h"
 
 namespace nhos {
@@ -343,6 +344,18 @@ bool DeviceConfig::setBatteryLedLowBatteryThreshold(
   return true;
 }
 
+bool DeviceConfig::setActionButtonActions(const String& shortPress, const String& longPress) {
+  const ActionButtonAction shortAction = actionButtonActionFromName(shortPress.c_str());
+  const ActionButtonAction longAction = actionButtonActionFromName(longPress.c_str());
+  if (!actionButtonActionAllowedForGesture(shortAction, ActionButtonGesture::ShortPress) ||
+      !actionButtonActionAllowedForGesture(longAction, ActionButtonGesture::LongPress)) {
+    return false;
+  }
+  data_.actionButton.shortPress = actionButtonActionName(shortAction);
+  data_.actionButton.longPress = actionButtonActionName(longAction);
+  return true;
+}
+
 bool DeviceConfig::setExternalLed(const String& mode, const String& preset, float brightness, const String& color) {
   if (!validExternalLedMode(mode)) {
     return false;
@@ -499,6 +512,15 @@ String DeviceConfig::transportJson() const {
   return out;
 }
 
+String DeviceConfig::actionButtonJson() const {
+  String out = "{\"short_press\":\"";
+  out += jsonEscape(data_.actionButton.shortPress);
+  out += "\",\"long_press\":\"";
+  out += jsonEscape(data_.actionButton.longPress);
+  out += "\"}";
+  return out;
+}
+
 String DeviceConfig::configJson() const {
   return toJson();
 }
@@ -524,7 +546,7 @@ bool DeviceConfig::validOledMode(const String& mode) {
 }
 
 void DeviceConfig::setDefaults() {
-  data_.schemaVersion = 5;
+  data_.schemaVersion = 6;
   defaultMatrixLayout(data_.matrixLayout);
   data_.scanTiming.targetFps = kDefaultTargetFps;
   data_.scanTiming.settleUs = kDefaultSettleUs;
@@ -545,6 +567,8 @@ void DeviceConfig::setDefaults() {
   data_.ota.manifestUrl = kDefaultUpdateManifestUrl;
   data_.boardLed.brightness = 0.30f;
   data_.batteryLed.lowBatteryThresholdPercent = 10;
+  data_.actionButton.shortPress = "none";
+  data_.actionButton.longPress = "soft_off";
   data_.externalLed.mode = "off";
   data_.externalLed.preset = "system_status";
   data_.externalLed.brightness = 0.35f;
@@ -565,7 +589,7 @@ bool DeviceConfig::applyJson(const String& json) {
     return false;
   }
   const uint8_t storedSchemaVersion = static_cast<uint8_t>(extractInt(json, "schema_version", 1));
-  data_.schemaVersion = 5;
+  data_.schemaVersion = 6;
 
   const String matrix = objectForKey(json, "matrix_layout");
   if (!matrix.isEmpty()) {
@@ -655,6 +679,12 @@ bool DeviceConfig::applyJson(const String& json) {
     if (threshold >= 0 && threshold <= 25) {
       setBatteryLedLowBatteryThreshold(static_cast<uint8_t>(threshold));
     }
+  }
+  const String actionButton = objectForKey(json, "action_button");
+  if (!actionButton.isEmpty()) {
+    setActionButtonActions(
+        extractString(actionButton, "short_press", data_.actionButton.shortPress),
+        extractString(actionButton, "long_press", data_.actionButton.longPress));
   }
   const String external = objectForKey(indicators, "external_led");
   if (!external.isEmpty()) {
@@ -746,7 +776,9 @@ String DeviceConfig::toJson() const {
   out += String(static_cast<unsigned int>(data_.oled.contrast));
   out += ",\"rotation\":";
   out += String(static_cast<unsigned int>(data_.oled.rotation));
-  out += "}},\"transport\":";
+  out += "}},\"action_button\":";
+  out += actionButtonJson();
+  out += ",\"transport\":";
   out += transportJson();
   out += "}";
   return out;

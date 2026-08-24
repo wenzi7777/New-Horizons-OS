@@ -3,6 +3,7 @@
 #include <esp_now.h>
 
 #include "BoardPins.h"
+#include "ActionButtonPolicy.h"
 #include "BootModeManager.h"
 #include "Calibration.h"
 #include "Config.h"
@@ -248,7 +249,58 @@ void servicePowerTransition() {
 }
 
 void servicePowerState() {
-  powerState.service(millis(), power.chargerDetected(), power.chargeState());
+  const nhos::ActionButtonGesture gesture = powerState.service(
+      millis(), power.chargerDetected(), power.chargeState());
+#if defined(NHOS_BOARD_V15F)
+  if (gesture != nhos::ActionButtonGesture::None) {
+    const String actionName = gesture == nhos::ActionButtonGesture::ShortPress
+        ? deviceConfig.data().actionButton.shortPress
+        : deviceConfig.data().actionButton.longPress;
+    const nhos::ActionButtonAction action = nhos::actionButtonActionFromName(actionName.c_str());
+    bool succeeded = false;
+    switch (action) {
+      case nhos::ActionButtonAction::None:
+        succeeded = true;
+        break;
+      case nhos::ActionButtonAction::SoftOff:
+        powerState.requestState(
+            power.chargerDetected() ? nhos::PowerState::SoftOffCharging : nhos::PowerState::SoftOffBattery,
+            "action_button_configured_soft_off");
+        succeeded = true;
+        break;
+      case nhos::ActionButtonAction::Identify:
+        leds.showEvent(nhos::LedSignal::ActionButtonIdentify);
+        externalLeds.identify();
+        succeeded = true;
+        break;
+      case nhos::ActionButtonAction::ToggleExternalLed: {
+        const nhos::ExternalLedConfig previous = deviceConfig.data().externalLed;
+        const String nextMode = previous.mode == "enabled" ? "off" : "enabled";
+        if (deviceConfig.setExternalLed(nextMode, previous.preset, previous.brightness, previous.color) &&
+            deviceConfig.save(storage)) {
+          externalLeds.apply(deviceConfig.data().externalLed);
+          leds.showEvent(nhos::LedSignal::CommandSuccess);
+          succeeded = true;
+        } else {
+          deviceConfig.setExternalLed(previous.mode, previous.preset, previous.brightness, previous.color);
+          leds.showEvent(nhos::LedSignal::CommandFailed);
+        }
+        break;
+      }
+      case nhos::ActionButtonAction::Invalid:
+      default:
+        leds.showEvent(nhos::LedSignal::CommandFailed);
+        break;
+    }
+    powerState.setLastAction(action, succeeded);
+  }
+#elif NHOS_BOARD_HAS_BUTTON
+  if (gesture == nhos::ActionButtonGesture::LongPress) {
+    powerState.requestState(
+        power.chargerDetected() ? nhos::PowerState::SoftOffCharging : nhos::PowerState::SoftOffBattery,
+        "action_button_long_press");
+  }
+#endif
   if (!powerState.consumeTransition()) {
     return;
   }

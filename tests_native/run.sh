@@ -42,6 +42,14 @@ CXX="${CXX:-c++}"
 
 "$CXX" -std=c++17 -Wall -Wextra -Werror \
   -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_action_button_policy.cpp" \
+  "$FIRMWARE_DIR/ActionButtonPolicy.cpp" \
+  -o "$BUILD_DIR/test_action_button_policy"
+
+"$BUILD_DIR/test_action_button_policy"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
   "$SCRIPT_DIR/test_ws2812_rmt_encoder.cpp" \
   -o "$BUILD_DIR/test_ws2812_rmt_encoder"
 

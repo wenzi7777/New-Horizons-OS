@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "PowerManager.h"
+#include "ActionButtonPolicy.h"
 
 namespace nhos {
 
@@ -22,7 +23,7 @@ enum class PowerTransitionPhase : uint8_t {
 class PowerStateManager {
  public:
   void begin();
-  void service(uint32_t nowMs, bool chargerDetected, ChargeState chargeState);
+  ActionButtonGesture service(uint32_t nowMs, bool chargerDetected, ChargeState chargeState);
   void requestState(PowerState nextState, const String& reason);
   bool requestStateByName(const String& name, bool chargerDetected);
   PowerState state() const;
@@ -35,6 +36,8 @@ class PowerStateManager {
   uint32_t transitionDurationMs() const;
   bool transitionTimedOut(uint32_t nowMs) const;
   void lightSleep();
+  void setLastAction(ActionButtonAction action, bool succeeded);
+  String actionButtonRuntimeJson() const;
   String statusJson() const;
 
  private:
@@ -69,6 +72,8 @@ class PowerStateManager {
   PowerTransitionPhase transitionPhase_ = PowerTransitionPhase::None;
   uint32_t transitionStartedMs_ = 0;
   bool sleepLogPending_ = false;
+  String lastAction_ = "none";
+  String lastActionResult_ = "idle";
 };
 
 }  // namespace nhos

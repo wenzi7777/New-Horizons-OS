@@ -181,6 +181,8 @@ LedController::Pattern LedController::patternFor(LedSignal signal) const {
       return {PatternMode::BlinkBurst, LedPalette::CommandSuccess, LedPalette::Off, 1000, 260, 0, 1, 420, 0, 255};
     case LedSignal::CommandFailed:
       return {PatternMode::BlinkBurst, LedPalette::Error, LedPalette::Off, 800, 80, 120, 3, 1400, 0, 255};
+    case LedSignal::ActionButtonIdentify:
+      return {PatternMode::BlinkBurst, LedPalette::White, LedPalette::Off, 900, 120, 100, 3, 920, 0, 255};
     case LedSignal::Off:
     default:
       return {PatternMode::Off, LedPalette::Off, LedPalette::Off, 0, 0, 0, 0, 0, 0, 0};

@@ -68,6 +68,7 @@ enum class LedSignal : uint8_t {
   CommandReceived,
   CommandSuccess,
   CommandFailed,
+  ActionButtonIdentify,
   // New Horizons Hub only (newhorizons_hub/): uplink to the Desktop
   // Backend is down but the Hub is still polling/serving its paired
   // ESP-NOW devices locally -- distinct from WifiConnecting (no Wi-Fi at
