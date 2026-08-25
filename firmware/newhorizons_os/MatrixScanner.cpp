@@ -613,6 +613,7 @@ void MatrixScanner::updateScanFps(uint32_t nowMs) {
 }
 
 void MatrixScanner::logPerformanceIfDue(uint32_t nowMs) {
+#if NHOS_ENABLE_SERIAL_PERF_DIAGNOSTICS
   if (lastPerfLogMs_ != 0 && nowMs - lastPerfLogMs_ < 5000) {
     return;
   }
@@ -636,6 +637,9 @@ void MatrixScanner::logPerformanceIfDue(uint32_t nowMs) {
   Serial.print(F(" last_udp_us="));
   Serial.println(lastUdpSendUs_);
   maxScanDurationUs_ = lastScanDurationUs_;
+#else
+  (void)nowMs;
+#endif
 }
 
 }  // namespace nhos

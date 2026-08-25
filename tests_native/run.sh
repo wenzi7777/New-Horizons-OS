@@ -33,6 +33,14 @@ CXX="${CXX:-c++}"
 "$BUILD_DIR/test_v15f_foundation"
 
 "$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_battery_gauge_sync_policy.cpp" \
+  "$FIRMWARE_DIR/BatteryGaugeSyncPolicy.cpp" \
+  -o "$BUILD_DIR/test_battery_gauge_sync_policy"
+
+"$BUILD_DIR/test_battery_gauge_sync_policy"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
   -DNHOS_BOARD_V15F \
   -I"$FIRMWARE_DIR" \
   "$SCRIPT_DIR/test_v15f_board_capabilities.cpp" \

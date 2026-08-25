@@ -91,60 +91,6 @@ uint32_t lastObservedUdpFailures = 0;
 bool runtimeServicesSuspended = false;
 bool softOffOutputsSleeping = false;
 
-// Bug-3 diagnostics: per-section loop timing, to find what caps the
-// achievable IMU poll rate below whatever serviceIntervalUs_ requests.
-// Reported periodically over serial; remove once the bottleneck is found
-// and fixed for good.
-struct LoopProfile {
-  uint32_t totalUs = 0;
-  uint32_t totalMaxUs = 0;
-  uint32_t scanUs = 0;
-  uint32_t wifiUs = 0;
-  uint32_t findmeUs = 0;
-  uint32_t controlUs = 0;
-  uint32_t imuUs = 0;
-  uint32_t ledUs = 0;
-  uint32_t displayUs = 0;
-  uint32_t iterations = 0;
-};
-LoopProfile loopProfile;
-uint32_t lastProfileReportMs = 0;
-constexpr uint32_t kProfileReportIntervalMs = 3000;
-
-void reportLoopProfileIfDue(uint32_t nowMs) {
-  if (nowMs - lastProfileReportMs < kProfileReportIntervalMs) {
-    return;
-  }
-  lastProfileReportMs = nowMs;
-  if (loopProfile.iterations == 0) {
-    return;
-  }
-  const uint32_t n = loopProfile.iterations;
-  Serial.print(F("loop_profile n="));
-  Serial.print(n);
-  Serial.print(F(" avg_total_us="));
-  Serial.print(loopProfile.totalUs / n);
-  Serial.print(F(" max_total_us="));
-  Serial.print(loopProfile.totalMaxUs);
-  Serial.print(F(" avg_scan_us="));
-  Serial.print(loopProfile.scanUs / n);
-  Serial.print(F(" avg_wifi_us="));
-  Serial.print(loopProfile.wifiUs / n);
-  Serial.print(F(" avg_findme_us="));
-  Serial.print(loopProfile.findmeUs / n);
-  Serial.print(F(" avg_control_us="));
-  Serial.print(loopProfile.controlUs / n);
-  Serial.print(F(" avg_imu_us="));
-  Serial.print(loopProfile.imuUs / n);
-  Serial.print(F(" avg_led_us="));
-  Serial.print(loopProfile.ledUs / n);
-  Serial.print(F(" avg_display_us="));
-  Serial.print(loopProfile.displayUs / n);
-  Serial.print(F(" imu_measured_hz="));
-  Serial.println(imu.measuredSampleRateHz());
-  loopProfile = LoopProfile();
-}
-
 void logBoot(const String& message) {
   Serial.println(message);
   storage.logLine(String(millis()) + " " + message);
@@ -541,6 +487,11 @@ void updateLedState() {
 
 void setup() {
   Serial.begin(115200);
+#if defined(NHOS_BOARD_V15F) && ARDUINO_USB_MODE
+  // Native USB must never stall the real-time loop when the host has no
+  // serial reader. Logs remain best-effort and resume when a reader opens.
+  Serial.setTxTimeoutMs(0);
+#endif
   delay(100);
   Serial.println();
   Serial.println("New Horizons OS Arduino boot");
@@ -729,22 +680,16 @@ void setup() {
 }
 
 void loop() {
-  const uint32_t loopStartUs = micros();
   power.service(millis());
   batteryGauge.service(millis());
   servicePowerState();
   if (powerState.shouldRunServices()) {
-    uint32_t sectionStartUs = micros();
     imu.service(micros());
     magnetometer.service(millis());
-    loopProfile.imuUs += micros() - sectionStartUs;
 
-    sectionStartUs = micros();
     scanAndStreamIfDue();
     sendQueuedPacketIfAny();
-    loopProfile.scanUs += micros() - sectionStartUs;
 
-    sectionStartUs = micros();
     if (espNowMode) {
       espNowPairing.service();
       espNowOtaReceiver.service();
@@ -752,22 +697,17 @@ void loop() {
     } else {
       wifi.service();
     }
-    loopProfile.wifiUs += micros() - sectionStartUs;
 
     if (!espNowMode) {
       findme.setModeName(bootMode.modeName());
-      sectionStartUs = micros();
       findme.service();
-      loopProfile.findmeUs += micros() - sectionStartUs;
     }
 
-    sectionStartUs = micros();
     control.service();
     if (!espNowMode) {
       // Poll the same socket used for outbound stream/heartbeat.
       control.serviceUdpCommand(udpTransport.udp());
     }
-    loopProfile.controlUs += micros() - sectionStartUs;
 
     if (!espNowMode) {
       if (wifi.isConnected()) {
@@ -776,13 +716,10 @@ void loop() {
       sendHeartbeatIfDue();
     }
 
-    sectionStartUs = micros();
     updateLedState();
-    loopProfile.ledUs += micros() - sectionStartUs;
 
     servicePowerTransition();
 
-    sectionStartUs = micros();
     displayManager.service(
         millis(),
         wifi.isConnected() ? WiFi.localIP().toString() : WiFi.softAPIP().toString(),
@@ -790,7 +727,6 @@ void loop() {
         scanner.health(),
         ESP.getFreeHeap(),
         ESP.getHeapSize());
-    loopProfile.displayUs += micros() - sectionStartUs;
   } else {
     if (powerState.transitionPhase() != nhos::PowerTransitionPhase::None) {
       servicePowerTransition();
@@ -807,13 +743,6 @@ void loop() {
     delay(100);
     ESP.restart();
   }
-  const uint32_t thisIterationUs = micros() - loopStartUs;
-  loopProfile.totalUs += thisIterationUs;
-  if (thisIterationUs > loopProfile.totalMaxUs) {
-    loopProfile.totalMaxUs = thisIterationUs;
-  }
-  ++loopProfile.iterations;
-  reportLoopProfileIfDue(millis());
   if (!scanner.active() || !scanner.hasLayout() ||
       static_cast<int32_t>(scanner.nextScanDueUs() - micros()) > 2000) {
     yield();

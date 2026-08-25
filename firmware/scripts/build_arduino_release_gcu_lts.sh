@@ -8,7 +8,7 @@ BUILD_PATH="${OUT_DIR}/compile"
 RELEASE_DIR="${ROOT}/releases/artifacts"
 MANIFEST_DIR="${MANIFEST_DIR:-$(dirname "${RELEASE_DIR}")}"
 FQBN="${FQBN:-esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs}"
-VERSION="${VERSION:-v0.17.6}"
+VERSION="${VERSION:-v0.17.7}"
 BASE_URL="${BASE_URL:-https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/${VERSION}/releases/artifacts}"
 CHANGELOG_URL="${CHANGELOG_URL:-https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/${VERSION}/releases/notes/${VERSION}.md}"
 

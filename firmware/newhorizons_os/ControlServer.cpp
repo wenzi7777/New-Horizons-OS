@@ -685,6 +685,27 @@ String ControlServer::processCommand(const String& request) {
     data += "}";
     return ok(cmd, "battery_profile_updated", data);
   }
+  if (cmd == "resync_battery_gauge") {
+    if (!batteryProfileCommandSupported(NHOS_BOARD_HAS_MAX17048) ||
+        !batteryGauge_) {
+      return error(cmd, "battery_gauge_unavailable");
+    }
+    const GaugeResyncResult result = batteryGauge_->requestResync(millis());
+    if (result == GaugeResyncResult::Failed ||
+        result == GaugeResyncResult::Unavailable) {
+      return error(cmd, "battery_gauge_resync_failed");
+    }
+    String data = "{";
+    bool first = true;
+    jsonRawField(data, "battery", batteryStatusJson(), first);
+    jsonRawField(data, "battery_gauge", batteryGauge_->statusJson(), first);
+    data += "}";
+    return ok(cmd,
+              result == GaugeResyncResult::InProgress
+                  ? "battery_gauge_resync_in_progress"
+                  : "battery_gauge_resync_started",
+              data);
+  }
   if (cmd == "detect_battery_profile") {
     if (!batteryProfileCommandSupported(NHOS_BOARD_HAS_MAX17048) ||
         !batteryGauge_) {
