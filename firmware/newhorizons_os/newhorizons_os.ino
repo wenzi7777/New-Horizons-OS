@@ -4,6 +4,8 @@
 
 #include "BoardPins.h"
 #include "ActionButtonPolicy.h"
+#include "AirtimeArbiter.h"
+#include "AppManager.h"
 #include "BootModeManager.h"
 #include "Calibration.h"
 #include "Config.h"
@@ -14,6 +16,8 @@
 #include "EspNowPairing.h"
 #include "EspNowStreamTransport.h"
 #include "ExternalLedController.h"
+#include "FaultRecorder.h"
+#include "FeatureExtractorApp.h"
 #include "FindMeClient.h"
 #include "ImuManager.h"
 #include "MagnetometerManager.h"
@@ -23,19 +27,46 @@
 #include "OtaManager.h"
 #include "PacketBuilder.h"
 #include "PowerAnimation.h"
+#include "PowerGovernor.h"
+#include "RuleEngineApp.h"
 #include "PowerManager.h"
 #include "PowerStateManager.h"
+#include "ProcFs.h"
+#include "Scheduler.h"
+#include "ServiceManager.h"
 #include "StreamTransport.h"
 #include "Storage.h"
 #include "TimeSync.h"
 #include "UdpStreamTransport.h"
+#include "Watchdog.h"
 #include "WifiManager.h"
+
+// Takes the OTA rollback decision away from the Arduino core. The core's
+// initArduino() would otherwise call esp_ota_mark_app_valid_cancel_rollback()
+// before setup() even runs (cores/esp32/esp32-hal-misc.c), which confirms a
+// freshly-OTA'd image before a single line of NHOS has executed -- so a
+// firmware that panics during boot would be kept, not reverted. Returning
+// true defers the decision to BootModeManager::confirmFirmwareValid(), called
+// at the end of a boot that actually reached runtime_ready.
+//
+// Consequence to keep in mind when editing setup(): anything that resets the
+// device before that call now costs the update, not just the boot.
+extern "C" bool verifyRollbackLater() {
+  return true;
+}
 
 namespace {
 
 nhos::Storage storage;
 nhos::DeviceConfig deviceConfig;
 nhos::BootModeManager bootMode;
+nhos::FaultRecorder faults;
+nhos::Scheduler scheduler;
+nhos::ProcFs procFs;
+nhos::ServiceManager services;
+nhos::AppManager apps;
+nhos::FeatureExtractorApp featureApp;
+nhos::RuleEngineApp ruleApp;
 nhos::LedController leds;
 nhos::ExternalLedController externalLeds;
 nhos::DisplayManager displayManager;
@@ -45,6 +76,7 @@ nhos::Calibration calibration;
 nhos::PacketBuilder packetBuilder;
 nhos::PowerManager power;
 nhos::PowerStateManager powerState;
+nhos::PowerGovernor powerGovernor;
 nhos::ImuManager imu;
 nhos::BatteryGaugeManager batteryGauge;
 nhos::MagnetometerManager magnetometer;
@@ -60,6 +92,7 @@ nhos::UdpStreamTransport udpTransport;
 nhos::EspNowStreamTransport espNowTransport;
 nhos::EspNowPairing espNowPairing;
 nhos::EspNowOtaReceiver espNowOtaReceiver;
+nhos::AirtimeArbiter airtime;
 nhos::StreamTransport* activeTransport = nullptr;
 bool espNowMode = false;
 
@@ -78,6 +111,12 @@ void onEspNowRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len)
 void onEspNowSent(const esp_now_send_info_t* /*info*/, esp_now_send_status_t status) {
   espNowPairing.handleSendStatus(status == ESP_NOW_SEND_SUCCESS);
 }
+
+// Airtime claimant predicates. Both read state the owning module already
+// derives, so the arbiter can poll instead of relying on paired
+// acquire/release calls that could leak a claim on an error path.
+bool otaRelayNeedsAirtime(void*) { return espNowOtaReceiver.isRelaying(); }
+bool commandResponseNeedsAirtime(void*) { return espNowPairing.hasPendingCommandWork(); }
 
 uint8_t packetBuffer[
     nhos::kMaxPacketBytes
@@ -102,6 +141,14 @@ void logPowerEvent(const String& message) {
 
 void serviceAutoOta(bool wifiConnected) {
   if (!wifiConnected || !deviceConfig.data().ota.autoApplyOnBoot) {
+    return;
+  }
+  // Never chain an update off an image that is still on probation: this
+  // runs before confirmFirmwareValid(), so the ESP.restart() below would
+  // race the bootloader's revert-on-reset for the running slot. Deferring
+  // to the next boot costs nothing -- by then the image is confirmed.
+  if (bootMode.otaPendingVerify()) {
+    logBoot("auto_ota_deferred ota_pending_verify=true");
     return;
   }
   logBoot("auto_ota_enabled");
@@ -141,7 +188,13 @@ void suspendRuntimeServicesForSoftOff() {
     scanner.stop();
     wifi.suspend();
     imu.setEnabled(false);
-    setCpuFrequencyMhz(80);
+    // Frequency is the governor's call now; it drops to the floor as soon as
+    // runtimeActive goes false on the next tick.
+    // Soft-off light-sleeps for kSoftOffBatterySleepUs == 5s, exactly the
+    // task WDT timeout -- feeding around the sleep would be a coin flip.
+    // Disarming is also the honest semantics: the watchdog exists to catch a
+    // wedged runtime loop, and in soft-off there is deliberately no runtime.
+    nhos::watchdogDisarm();
     runtimeServicesSuspended = true;
     logPowerEvent("runtime_services_suspended");
   }
@@ -164,7 +217,9 @@ void applyNormalRuntimeState() {
   if (!runtimeServicesSuspended) {
     return;
   }
-  setCpuFrequencyMhz(240);
+  // Governor restores the clock; going through it keeps currentMhz_ honest.
+  powerGovernor.service(scanner.active(), true);
+  nhos::watchdogArm();
   wifi.resume();
   imu.setEnabled(deviceConfig.data().imuEnabled);
   if (bootMode.mode() == nhos::RunMode::Normal && scanner.hasLayout() && !scanner.active()) {
@@ -269,23 +324,16 @@ bool streamingGateOk() {
   if (control.maintenanceMode()) {
     return false;
   }
-  // Pause this device's own sensor-data uploads while an ESP-NOW OTA
-  // relay is actively transferring chunks -- both compete for the same
-  // ESP-NOW airtime (real-hardware validated finding, see
-  // EspNowOtaReceiver::isRelaying()'s comment). MatrixScanner's ring
-  // buffer just drops the oldest queued frames while paused (sensor data
-  // is lossy by design already), and resumes normally once the relay
-  // finishes -- no special draining/resume logic needed here.
-  if (espNowMode && espNowOtaReceiver.isRelaying()) {
-    return false;
-  }
-  // Same reasoning as the OTA-relay pause above, applied to control-command
-  // exchanges: a command's response can be up to ~11 fragments, paced out
-  // over several loop() iterations, and would otherwise compete for
-  // ESP-NOW airtime with concurrent sensor streaming -- real-hardware
-  // testing found this reliably starved command responses (see
-  // EspNowPairing::hasPendingCommandWork()'s comment).
-  if (espNowMode && espNowPairing.hasPendingCommandWork()) {
+  // Sensor streaming yields to anything higher priority on the radio: an
+  // OTA relay transferring chunks, or a control response being paced out.
+  // Both used to be separate hardcoded checks here, each discovered the
+  // hard way on real hardware (starved command responses, stalled relays);
+  // they are now the bottom of AirtimeArbiter's priority table.
+  //
+  // MatrixScanner's ring buffer just drops the oldest queued frames while
+  // paused (sensor data is lossy by design already) and resumes normally --
+  // no special draining/resume logic needed here.
+  if (espNowMode && !airtime.canClaim(nhos::AirtimeClass::SensorStream)) {
     return false;
   }
   return espNowMode || wifi.isConnected();
@@ -321,6 +369,12 @@ void scanAndStreamIfDue() {
     batterySample.vbatMv = gaugeSample.vbatMv;
     batterySample.socCentiPercent = gaugeSample.socCentiPercent;
   }
+  // Apps see the frame here, where it already exists and is still live --
+  // after filtering/calibration, before it is serialised. AppManager times
+  // each one against its declared budget and kills a persistent overrunner,
+  // which is what keeps a misbehaving app from costing sample frames.
+  apps.onFrame(frame, imuSampleValid ? imuSample : nullptr, millis());
+
   const bool epochValid = timeSync.hasSynced();
   const uint64_t epochMs = epochValid ? timeSync.nowEpochMs() : 0;
   size_t len = packetBuilder.buildMatrixPacketHeader(
@@ -383,6 +437,45 @@ void sendHeartbeatIfDue() {
   } else {
     findme.recordHeartbeat(now, "heartbeat_send_failed");
   }
+}
+
+// ---------------------------------------------------------------------------
+// Task-table entry points.
+//
+// Each wraps exactly one step of the pre-scheduler loop(). They exist because
+// the table stores plain void(*)() and several of the underlying service()
+// calls take a timestamp argument. Nothing here changes what runs or when --
+// see registerRuntimeTasks() for how the original ordering is preserved.
+// ---------------------------------------------------------------------------
+void taskPower() { power.service(millis()); }
+void taskBatteryGauge() { batteryGauge.service(millis()); }
+void taskImu() { imu.service(micros()); }
+void taskMagnetometer() { magnetometer.service(millis()); }
+
+void taskEspNow() {
+  espNowPairing.service();
+  espNowOtaReceiver.service();
+  // Before the stream transport, so a higher-priority paced burst keeps
+  // making progress rather than queueing behind sensor frames.
+  airtime.service();
+  espNowTransport.service();
+}
+
+void taskWifi() { wifi.service(); }
+
+void taskFindMe() {
+  findme.setModeName(bootMode.modeName());
+  findme.service();
+}
+
+void taskControl() { control.service(); }
+void taskControlUdp() { control.serviceUdpCommand(udpTransport.udp()); }
+
+void taskTimeAndHeartbeat() {
+  if (wifi.isConnected()) {
+    timeSync.begin();  // no-op after first successful call; covers WiFi connecting after boot
+  }
+  sendHeartbeatIfDue();
 }
 
 void updateLedState() {
@@ -483,6 +576,168 @@ void updateLedState() {
   externalLeds.service(nowMs, health, extIn);
 }
 
+void taskDisplay() {
+  displayManager.service(
+      millis(),
+      wifi.isConnected() ? WiFi.localIP().toString() : WiFi.softAPIP().toString(),
+      findme.hasGateway() ? findme.streamHost() : String("-"),
+      scanner.health(),
+      ESP.getFreeHeap(),
+      ESP.getHeapSize());
+}
+
+// The old loop()'s `else` branch. Registered as an alwaysRun task placed
+// after every gated one, so it still only executes when the runtime is
+// parked and still runs last -- same position, same condition.
+void taskSoftOff() {
+  if (powerState.shouldRunServices()) {
+    return;
+  }
+  if (powerState.transitionPhase() != nhos::PowerTransitionPhase::None) {
+    servicePowerTransition();
+    return;
+  }
+  applySoftOffIndicators();
+  updateLedState();
+  // powerState.lightSleep() emits:
+  // soft_off_sleep_enter state=
+  // soft_off_wake cause=
+  powerState.lightSleep();
+}
+
+bool runtimeGate() {
+  return powerState.shouldRunServices();
+}
+
+void taskServices() { services.service(millis()); }
+
+void taskPowerGovernor() {
+  powerGovernor.service(scanner.active(), powerState.shouldRunServices());
+}
+
+// ---------------------------------------------------------------------------
+// Service supervision hooks.
+//
+// Each restartable module gets a start function that re-runs its begin() and
+// reports whether the hardware actually came back, plus a health probe that
+// the supervisor polls once a second. A sensor whose I2C bus wedges now
+// recovers on its own instead of staying disabled for the rest of the boot.
+// ---------------------------------------------------------------------------
+bool imuHealthy(void*) {
+  // A deliberately disabled IMU is healthy, not broken.
+  return !deviceConfig.data().imuEnabled || imu.initialized();
+}
+
+bool imuStart(void*) {
+  imu.begin(deviceConfig.data().imuEnabled);
+  imu.setServiceIntervalUs(scanner.scanIntervalUs());
+  return imuHealthy(nullptr);
+}
+
+#if NHOS_BOARD_HAS_MAG
+bool magnetometerHealthy(void*) { return magnetometer.initialized(); }
+
+bool magnetometerStart(void*) {
+  // Follows the IMU's actual init result, not a board flag -- BMM150 is
+  // hosted by the combined IMU driver.
+  magnetometer.begin(imu.initialized());
+  return magnetometer.initialized();
+}
+#endif
+
+#if NHOS_BOARD_HAS_MAX17048
+bool batteryGaugeHealthy(void*) {
+  nhos::BatteryGaugeSample sample;
+  return batteryGauge.copyLatestSample(sample);
+}
+
+bool batteryGaugeStart(void*) {
+  batteryGauge.begin();
+  batteryGauge.service(millis());
+  return batteryGaugeHealthy(nullptr);
+}
+#endif
+
+bool scannerHealthy(void*) {
+  // No layout configured is a configuration state, not a fault; and the
+  // scanner is deliberately stopped in maintenance mode.
+  if (!scanner.hasLayout() || bootMode.mode() != nhos::RunMode::Normal) {
+    return true;
+  }
+  return scanner.active();
+}
+
+bool scannerStart(void*) {
+  if (!scanner.hasLayout() || bootMode.mode() != nhos::RunMode::Normal) {
+    return true;
+  }
+  return scanner.start();
+}
+
+void registerServices() {
+  // Foundational services: reported, never auto-restarted. Re-running their
+  // begin() mid-flight would be more dangerous than the fault it is meant to
+  // recover from.
+  services.registerService("storage", true);
+  services.registerService("config", true);
+  services.registerService("leds", true);
+  services.registerService("power", true);
+  services.registerService("control", true);
+
+  services.registerService("scanner", scanner.hasLayout(), &scannerStart, &scannerHealthy);
+  services.registerService("imu", imuHealthy(nullptr), &imuStart, &imuHealthy);
+#if NHOS_BOARD_HAS_MAG
+  services.registerService("magnetometer", magnetometer.initialized(), &magnetometerStart,
+                           &magnetometerHealthy);
+#endif
+#if NHOS_BOARD_HAS_MAX17048
+  services.registerService("battery_gauge", batteryGaugeHealthy(nullptr), &batteryGaugeStart,
+                           &batteryGaugeHealthy);
+#endif
+  services.registerService("transport", true);
+  // No start hook: in Direct mode the clock can only be set from outside
+  // (set_time), and under WiFi ESP-IDF's SNTP client re-syncs on its own.
+  services.registerService("clock", true);
+  services.registerService("apps", true);
+}
+
+// Registration order IS the dispatch order, and it reproduces the call
+// sequence the hand-written loop() used. The espNowMode branch is resolved
+// once here rather than re-tested every iteration: transport mode is fixed
+// at boot (set_transport only takes effect on the next one), so the two
+// modes simply register different tables.
+void registerRuntimeTasks() {
+  scheduler.setRuntimeGate(&runtimeGate);
+  scheduler.registerTask("power", &taskPower, true);
+  scheduler.registerTask("battery_gauge", &taskBatteryGauge, true);
+  scheduler.registerTask("power_state", &servicePowerState, true);
+  scheduler.registerTask("services", &taskServices, true);
+  // alwaysRun and placed after power_state so it sees this tick's decision,
+  // including the soft-off transition.
+  scheduler.registerTask("governor", &taskPowerGovernor, true);
+
+  scheduler.registerTask("imu", &taskImu, false);
+  scheduler.registerTask("magnetometer", &taskMagnetometer, false);
+  scheduler.registerTask("scan_stream", &scanAndStreamIfDue, false);
+  scheduler.registerTask("stream_queue", &sendQueuedPacketIfAny, false);
+  if (espNowMode) {
+    scheduler.registerTask("espnow", &taskEspNow, false);
+  } else {
+    scheduler.registerTask("wifi", &taskWifi, false);
+    scheduler.registerTask("findme", &taskFindMe, false);
+  }
+  scheduler.registerTask("control", &taskControl, false);
+  if (!espNowMode) {
+    scheduler.registerTask("control_udp", &taskControlUdp, false);
+    scheduler.registerTask("time_heartbeat", &taskTimeAndHeartbeat, false);
+  }
+  scheduler.registerTask("led", &updateLedState, false);
+  scheduler.registerTask("power_transition", &servicePowerTransition, false);
+  scheduler.registerTask("display", &taskDisplay, false);
+
+  scheduler.registerTask("soft_off", &taskSoftOff, true);
+}
+
 }  // namespace
 
 void setup() {
@@ -508,14 +763,26 @@ void setup() {
   leds.setBrightness(deviceConfig.data().boardLed.brightness);
   externalLeds.begin(deviceConfig.data().externalLed);
   logBoot("boot_stage=leds_ready");
+  faults.begin();
+  logBoot(String("boot_stage=fault_recorder_ready ") + faults.statusJson());
+  if (faults.lastBootCrashed()) {
+    logBoot(String("previous_boot_crashed ") + faults.historyJson());
+  }
   bootMode.begin();
-  logBoot(String("boot_stage=boot_mode_ready mode=") + bootMode.modeName());
+  logBoot(String("boot_stage=boot_mode_ready mode=") + bootMode.modeName() +
+          " ota_rollback=" + bootMode.otaRollbackStatusJson());
+  if (bootMode.rolledBackFrom().length() > 0) {
+    logBoot(String("ota_rolled_back_from=") + bootMode.rolledBackFrom());
+  }
   powerState.begin();
   logBoot(String("boot_stage=power_state_ready ") + powerState.statusJson());
   Wire.begin(nhos::kI2cSda, nhos::kI2cScl, NHOS_BOARD_I2C_HZ);
   logBoot(String("boot_stage=i2c_ready sda=") + String(nhos::kI2cSda) + " scl=" + String(nhos::kI2cScl));
   displayManager.begin(deviceConfig.data().oled);
   logBoot(String("boot_stage=display_ready ") + displayManager.statusJson());
+  powerGovernor.begin(nhos::PowerGovernor::profileFromName(
+      storage.getString("power_profile", "performance").c_str()));
+  logBoot(String("boot_stage=power_governor_ready ") + powerGovernor.statusJson());
   power.begin(storage.getString("charge_profile", "slow"));
   logBoot(String("boot_stage=power_ready ") + power.statusJson());
 #if NHOS_BOARD_HAS_MAX17048
@@ -633,7 +900,12 @@ void setup() {
     if (!espNowPairing.begin(storage, deviceConfig, control, uid)) {
       logBoot("espnow_pairing_begin_failed");
     }
+    espNowPairing.setArbiter(&airtime);
     espNowPairing.setOtaReceiver(&espNowOtaReceiver);
+    espNowOtaReceiver.setArbiter(&airtime);
+    espNowTransport.setArbiter(&airtime);
+    airtime.registerClaimant(nhos::AirtimeClass::OtaRelay, &otaRelayNeedsAirtime, nullptr);
+    airtime.registerClaimant(nhos::AirtimeClass::CommandResponse, &commandResponseNeedsAirtime, nullptr);
     esp_now_register_recv_cb(onEspNowRecv);
     esp_now_register_send_cb(onEspNowSent);
     espNowTransport.attach(espNowPairing);
@@ -664,6 +936,21 @@ void setup() {
   control.begin(wifi, scanner, storage, bootMode, ota, findme, power, batteryGauge,
                 powerState, imu, magnetometer, leds, deviceConfig, calibration,
                 displayManager, externalLeds);
+  control.setFaultRecorder(&faults);
+  control.setScheduler(&scheduler);
+  procFs.attach(scheduler, faults, scanner, bootMode, powerState, wifi, findme, deviceConfig);
+  control.setProcFs(&procFs);
+  control.setArbiter(&airtime);
+  procFs.setArbiter(&airtime);
+  control.setServiceManager(&services);
+  procFs.setServiceManager(&services);
+  procFs.setStorage(&storage);
+  control.setClock(&timeSync);
+  control.setPowerGovernor(&powerGovernor);
+  procFs.setPowerGovernor(&powerGovernor);
+  control.setAppManager(&apps, &ruleApp);
+  procFs.setAppManager(&apps);
+  procFs.setClock(&timeSync);
   if (espNowMode) {
     // Route check_update/apply_update through the Hub-relayed OTA path --
     // a Direct-mode device has no WiFi, so OtaManager's HTTP fetch can
@@ -674,75 +961,60 @@ void setup() {
 
   logBoot(String("runtime_ready protocol=") + nhos::kProtocolName + " firmware=" + nhos::kFirmwareVersion +
           " mode=" + bootMode.modeName());
+  // Only now: setup() deliberately blocks for seconds at a time
+  // (sampleWifiSetupButtonWindow's 3s window, serviceAutoOta's HTTP
+  // download), and the 5s task WDT would fire straight through those.
+  // Until this call the loopTask is watched by nothing at all -- it runs on
+  // CPU1 and the Arduino core only subscribes CPU0's idle task, so any hang
+  // inside loop() used to wedge the device silently and forever.
+  nhos::watchdogArm();
+  logBoot(String("boot_stage=loop_wdt_armed timeout_s=") + String(CONFIG_ESP_TASK_WDT_TIMEOUT_S));
   bootMode.markBootOk();
   logBoot("boot_ok_marked");
+  // SafeMaintenance means earlier boots already failed repeatedly, so this
+  // one is not evidence the image is good -- leave it on probation and let
+  // the bootloader revert on the next reset. criticalError likewise (an
+  // invalid pin map means the device never really came up).
+  if (bootMode.otaPendingVerify()) {
+    if (bootMode.mode() != nhos::RunMode::SafeMaintenance && !criticalError) {
+      logBoot(bootMode.confirmFirmwareValid() ? "ota_image_confirmed"
+                                              : "ota_image_confirm_failed");
+    } else {
+      logBoot(String("ota_image_left_pending mode=") + bootMode.modeName() +
+              " critical_error=" + (criticalError ? "true" : "false"));
+    }
+  }
+  apps.begin(&storage);
+  ruleApp.attach(storage);
+  apps.install(&featureApp);
+  apps.install(&ruleApp);
+  {
+    // A rule graph is optional: most devices have no /files/apps/rules.json
+    // and simply run with an empty graph.
+    String ruleError;
+    if (ruleApp.loadFromFile("apps/rules.json", nhos::kMaxSensors, ruleError)) {
+      logBoot(String("rule_graph_loaded ") + ruleApp.statusJson());
+    } else if (ruleError != "file_not_found") {
+      logBoot(String("rule_graph_rejected reason=") + ruleError);
+    }
+  }
+  logBoot(String("boot_stage=apps_ready ") + apps.statusJson());
+  registerServices();
+  logBoot(String("boot_stage=services_ready ") + services.statusJson());
+  registerRuntimeTasks();
+  logBoot(String("boot_stage=scheduler_ready ") + scheduler.statusJson());
   updateLedState();
 }
 
 void loop() {
-  power.service(millis());
-  batteryGauge.service(millis());
-  servicePowerState();
-  if (powerState.shouldRunServices()) {
-    imu.service(micros());
-    magnetometer.service(millis());
+  scheduler.tick();
 
-    scanAndStreamIfDue();
-    sendQueuedPacketIfAny();
-
-    if (espNowMode) {
-      espNowPairing.service();
-      espNowOtaReceiver.service();
-      espNowTransport.service();
-    } else {
-      wifi.service();
-    }
-
-    if (!espNowMode) {
-      findme.setModeName(bootMode.modeName());
-      findme.service();
-    }
-
-    control.service();
-    if (!espNowMode) {
-      // Poll the same socket used for outbound stream/heartbeat.
-      control.serviceUdpCommand(udpTransport.udp());
-    }
-
-    if (!espNowMode) {
-      if (wifi.isConnected()) {
-        timeSync.begin();  // no-op after first successful call; covers WiFi connecting after boot
-      }
-      sendHeartbeatIfDue();
-    }
-
-    updateLedState();
-
-    servicePowerTransition();
-
-    displayManager.service(
-        millis(),
-        wifi.isConnected() ? WiFi.localIP().toString() : WiFi.softAPIP().toString(),
-        findme.hasGateway() ? findme.streamHost() : String("-"),
-        scanner.health(),
-        ESP.getFreeHeap(),
-        ESP.getHeapSize());
-  } else {
-    if (powerState.transitionPhase() != nhos::PowerTransitionPhase::None) {
-      servicePowerTransition();
-    } else {
-      applySoftOffIndicators();
-      updateLedState();
-      // powerState.lightSleep() emits:
-      // soft_off_sleep_enter state=
-      // soft_off_wake cause=
-      powerState.lightSleep();
-    }
-  }
   if (bootMode.rebootRequested()) {
     delay(100);
     ESP.restart();
   }
+  // Unchanged idle heuristic: hand the CPU to the WiFi stack and background
+  // tasks whenever the next scan is not imminent.
   if (!scanner.active() || !scanner.hasLayout() ||
       static_cast<int32_t>(scanner.nextScanDueUs() - micros()) > 2000) {
     yield();

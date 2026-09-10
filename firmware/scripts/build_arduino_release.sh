@@ -8,7 +8,7 @@ BUILD_PATH="${OUT_DIR}/compile"
 RELEASE_DIR="${ROOT}/releases/artifacts"
 MANIFEST_DIR="${MANIFEST_DIR:-$(dirname "${RELEASE_DIR}")}"
 FQBN="${FQBN:-esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB}"
-VERSION="${VERSION:-v0.17.7}"
+VERSION="${VERSION:-v1.0.0}"
 BASE_URL="${BASE_URL:-https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/${VERSION}/releases/artifacts}"
 CHANGELOG_URL="${CHANGELOG_URL:-https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/${VERSION}/releases/notes/${VERSION}.md}"
 
@@ -29,7 +29,12 @@ fi
 
 target="${RELEASE_DIR}/newhorizons-os-v10f-${VERSION}.bin"
 cp "${main_bin}" "${target}"
-for manifest in "${MANIFEST_DIR}/arduino-v10f-latest.json" "${MANIFEST_DIR}/arduino-v10f-${VERSION}.json"; do
+# arduino-latest.json is a legacy alias of the v10f track. Older Desktop
+# builds handed it to v1.0.F devices as their default manifest URL, so it
+# can still be sitting in a device's NVS; it is regenerated here so those
+# devices keep getting updates instead of being pinned to whatever it last
+# happened to contain. New configs should use arduino-v10f-latest.json.
+for manifest in "${MANIFEST_DIR}/arduino-v10f-latest.json" "${MANIFEST_DIR}/arduino-v10f-${VERSION}.json" "${MANIFEST_DIR}/arduino-latest.json"; do
   python3 "${ROOT}/firmware/scripts/generate_arduino_manifest.py" \
     --firmware "${target}" \
     --output "${manifest}" \

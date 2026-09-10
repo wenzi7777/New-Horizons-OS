@@ -10,6 +10,21 @@ namespace nhos {
 
 class Calibration;
 
+// Units of MatrixFrame::values.
+//
+// Readings are filtered millivolts passed through the calibration curve, so
+// they are NOT normalised -- a value of a few thousand is ordinary. These two
+// constants are the scale: divide by kPressureFullScale for a 0..1 reading,
+// and compare against kPressureActiveThreshold to decide whether a cell is
+// being touched at all.
+//
+// Promoted out of MatrixScanner.cpp so consumers share one definition. An app
+// that invented its own threshold reported permanent contact on real hardware
+// (0.02 is effectively zero at this scale), which is exactly the divergence
+// having a single source of truth prevents.
+static constexpr float kPressureFullScale = 2000.0f;
+static constexpr float kPressureActiveThreshold = 50.0f;
+
 struct MatrixFrame {
   uint32_t seq = 0;
   uint32_t timestampMs = 0;

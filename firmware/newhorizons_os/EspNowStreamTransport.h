@@ -18,9 +18,12 @@
 
 namespace nhos {
 
+class AirtimeArbiter;
+
 class EspNowStreamTransport : public StreamTransport {
  public:
   void attach(EspNowPairing& pairing);
+  void setArbiter(AirtimeArbiter* arbiter) { arbiter_ = arbiter; }
 
   bool ready() const override;
   bool sendFrame(const uint8_t* data, size_t len) override;
@@ -31,6 +34,7 @@ class EspNowStreamTransport : public StreamTransport {
 
  private:
   EspNowPairing* pairing_ = nullptr;
+  AirtimeArbiter* arbiter_ = nullptr;
 
   uint8_t frameBuffer_[kMaxPacketBytes];
   size_t frameBufferLen_ = 0;

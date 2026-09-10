@@ -6,12 +6,12 @@
 #include "PacketWire.h"
 
 #ifndef NHOS_FIRMWARE_VERSION
-#define NHOS_FIRMWARE_VERSION "v0.17.7"
+#define NHOS_FIRMWARE_VERSION "v1.0.0"
 #endif
 
 namespace nhos {
 
-static constexpr char kProductName[] = "New Horizons OS Arduino";
+static constexpr char kProductName[] = "NHOS Arduino";
 static constexpr char kProtocolName[] = "NHO/Arduino/1";
 static constexpr char kHardwareModel[] = NHOS_BOARD_NAME;
 static constexpr char kFirmwareVersion[] = NHOS_FIRMWARE_VERSION;
@@ -66,9 +66,9 @@ static constexpr uint8_t kSafeModeBootFailures = 3;
 static constexpr size_t kDefaultLogMaxBytes = 12 * 1024;
 static constexpr size_t kExtendedLogMaxBytes = 24 * 1024;
 
-static constexpr char kDefaultApSsidPrefix[] = "NewHorizonsOS";
+static constexpr char kDefaultApSsidPrefix[] = "NHOS";
 static constexpr char kDefaultApPassword[] = "";
-static constexpr char kSetupPortalDomain[] = "newhorizons.os";
+static constexpr char kSetupPortalDomain[] = "nhos.os";
 static constexpr uint16_t kSetupPortalPort = 80;
 static constexpr char kDefaultUpdateManifestUrl[] =
     NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL;

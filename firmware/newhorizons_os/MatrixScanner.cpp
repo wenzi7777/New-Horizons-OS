@@ -1,5 +1,7 @@
 #include "MatrixScanner.h"
 
+#include "Watchdog.h"
+
 #include "BoardPins.h"
 #include "Calibration.h"
 
@@ -206,8 +208,6 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
 
   // Indicator metrics: empirical full-scale / active threshold used only to
   // normalize the LED pressure meter. Tune against real calibrated readings.
-  constexpr float kPressureFullScale = 2000.0f;
-  constexpr float kPressureActiveThreshold = 50.0f;
   float peakValue = 0.0f;
   uint16_t activeCells = 0;
 
@@ -285,6 +285,9 @@ bool MatrixScanner::captureCellAverage(uint16_t sensorIndex, uint32_t durationMs
     }
     total += value;
     ++samples;
+    // durationMs comes straight from the operator's calibration command and
+    // is not clamped, so this can legitimately run past the 5s task WDT.
+    watchdogFeed();
   } while ((millis() - startedMs) < max<uint32_t>(1, durationMs));
   outValue = samples ? total / static_cast<float>(samples) : 0;
   return samples > 0;
@@ -308,6 +311,7 @@ bool MatrixScanner::captureAllAverages(float* outValues, size_t count, uint32_t 
       captureTotalsScratch_[i] += captureSampleScratch_[i];
     }
     ++samples;
+    watchdogFeed();  // same unbounded durationMs as captureCellAverage()
   } while ((millis() - startedMs) < max<uint32_t>(1, durationMs));
   if (samples == 0) {
     return false;

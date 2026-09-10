@@ -358,7 +358,7 @@ String ControlServer::processCommand(const String& request) {
     data.reserve(1536);
     bool first = true;
     jsonStringField(data, "device_uid", uid, first);
-    jsonStringField(data, "device_name", String("New Horizons OS-") + uid, first);
+    jsonStringField(data, "device_name", String("NHOS-") + uid, first);
     jsonStringField(data, "protocol", kProtocolName, first);
     jsonStringField(data, "mode", boot_->modeName(), first);
     jsonStringField(data, "firmware_version", kFirmwareVersion, first);
@@ -380,6 +380,14 @@ String ControlServer::processCommand(const String& request) {
                  espNowOta_ != nullptr ? espNowOta_->statusJson()
                                         : (ota_ ? ota_->lastStatusJson() : String("{}")),
                  first);
+    jsonRawField(data, "ota_rollback", boot_ ? boot_->otaRollbackStatusJson() : "{}", first);
+    jsonRawField(data, "faults", faults_ ? faults_->statusJson() : "{}", first);
+    jsonRawField(data, "scheduler", scheduler_ ? scheduler_->statusJson() : "{}", first);
+    jsonRawField(data, "airtime", arbiter_ ? arbiter_->statusJson() : "{}", first);
+    jsonRawField(data, "services", services_ ? services_->statusJson() : "{}", first);
+    jsonRawField(data, "clock", clock_ ? clock_->statusJson() : "{}", first);
+    jsonRawField(data, "power_governor", governor_ ? governor_->statusJson() : "{}", first);
+    jsonRawField(data, "apps", apps_ ? apps_->statusJson() : "{}", first);
     jsonRawField(data, "filter", deviceConfig_ ? deviceConfig_->filterJson() : "{}", first);
     jsonBoolField(data, "stream_raw_adc", deviceConfig_ ? deviceConfig_->data().streamRawAdc : false, first);
     jsonRawField(data, "imu", imu_ ? imu_->statusJson() : "{}", first);
@@ -409,6 +417,273 @@ String ControlServer::processCommand(const String& request) {
     data += ESP.getMinFreeHeap();
     data += "}";
     return ok(cmd, "memory_status", data);
+  }
+  if (cmd == "task_list") {
+    if (!scheduler_) {
+      return error(cmd, "scheduler_unavailable");
+    }
+    return ok(cmd, "task_list", scheduler_->statusJson());
+  }
+  if (cmd == "app_list") {
+    if (!apps_) {
+      return error(cmd, "app_manager_unavailable");
+    }
+    return ok(cmd, "app_list", apps_->statusJson());
+  }
+  if (cmd == "app_enable" || cmd == "app_disable") {
+    if (!apps_) {
+      return error(cmd, "app_manager_unavailable");
+    }
+    const String name = extractString(request, "name");
+    if (name.isEmpty()) {
+      return error(cmd, "name_required");
+    }
+    const bool enable = cmd == "app_enable";
+    if (!apps_->setEnabled(name, enable)) {
+      // setEnabled() refuses to silently un-kill an app that blew its budget;
+      // app_revive is the deliberate acknowledgement.
+      return error(cmd, "app_state_change_rejected");
+    }
+    return ok(cmd, enable ? "app_enabled" : "app_disabled", apps_->statusJson());
+  }
+  if (cmd == "app_revive") {
+    if (!apps_) {
+      return error(cmd, "app_manager_unavailable");
+    }
+    const String name = extractString(request, "name");
+    if (name.isEmpty()) {
+      return error(cmd, "name_required");
+    }
+    if (!apps_->revive(name)) {
+      return error(cmd, "app_revive_failed");
+    }
+    return ok(cmd, "app_revived", apps_->statusJson());
+  }
+  if (cmd == "app_load_rules") {
+    if (!rules_ || !scanner_) {
+      return error(cmd, "rule_engine_unavailable");
+    }
+    String path = extractString(request, "path");
+    if (path.isEmpty()) {
+      path = "apps/rules.json";
+    }
+    String loadError;
+    // Cell count drives the load-time cost estimate, so the same graph is
+    // judged against the board it will actually run on.
+    if (!rules_->loadFromFile(path, scanner_->health().pointCount, loadError)) {
+      return error(cmd, String("rule_load_failed:") + loadError);
+    }
+    return ok(cmd, "rule_graph_loaded", rules_->statusJson());
+  }
+  if (cmd == "app_unload_rules") {
+    if (!rules_) {
+      return error(cmd, "rule_engine_unavailable");
+    }
+    rules_->unload();
+    return ok(cmd, "rule_graph_unloaded", rules_->statusJson());
+  }
+  if (cmd == "config_schema") {
+    return ok(cmd, "config_schema", ConfigRegistry::schemaJson());
+  }
+  if (cmd == "config_get") {
+    if (!deviceConfig_) {
+      return error(cmd, "config_unavailable");
+    }
+    const String path = extractString(request, "path");
+    if (path.isEmpty()) {
+      return ok(cmd, "config_get", ConfigRegistry::valuesJson(*deviceConfig_, governor_, storage_));
+    }
+    String value;
+    if (!ConfigRegistry::readValue(path, *deviceConfig_, governor_, storage_, value)) {
+      return error(cmd, "unknown_config_path");
+    }
+    String data = "{\"path\":\"";
+    data += jsonEscape(path);
+    data += "\",\"value\":\"";
+    data += jsonEscape(value);
+    data += "\"}";
+    return ok(cmd, "config_get", data);
+  }
+  if (cmd == "config_set") {
+    const String path = extractString(request, "path");
+    const String value = extractString(request, "value");
+    if (path.isEmpty()) {
+      return error(cmd, "path_required");
+    }
+    if (!deviceConfig_) {
+      return error(cmd, "config_unavailable");
+    }
+    const ConfigEntry* entry = ConfigRegistry::find(path);
+    if (entry == nullptr) {
+      return error(cmd, "unknown_config_path");
+    }
+    if (value.isEmpty()) {
+      return error(cmd, "value_required");
+    }
+    // Depth-1 by construction: every table entry points at a set_* handler,
+    // never back here. Asserted rather than assumed because the recursion
+    // costs a second String-heavy processCommand() stack frame, and this
+    // task's stack has overflowed before under exactly that pressure (see
+    // EspNowPairing.h's responseFrags_ comment).
+    if (strncmp(entry->command, "config_", 7) == 0) {
+      return error(cmd, "config_path_not_writable");
+    }
+    // Validate and render before dispatching. Without this a value the
+    // handler's extractor cannot parse is silently replaced by that
+    // argument's compile-time default and still reported as success --
+    // observed on hardware with a quoted "30" for scan.target_fps.
+    String encoded;
+    String encodeError;
+    if (!ConfigRegistry::encodeValue(*entry, value, encoded, encodeError)) {
+      return error(cmd, String("value_rejected:") + encodeError);
+    }
+    // Synthesise the request the owning set_* handler already accepts and
+    // dispatch to it, rather than reimplementing its validation here. That
+    // handler stays the single owner of range-checking, persistence and the
+    // apply step, so this generic path cannot drift away from the specific
+    // one.
+    //
+    // EVERY argument that handler consumes is included, filled from the
+    // current value and overridden only for the requested path. The set_*
+    // handlers default an argument they did not receive to its compile-time
+    // default rather than to its current value, so a single-field write that
+    // omitted its siblings would silently reset them -- e.g. writing
+    // scan.target_fps alone would also snap settle_us and
+    // send_every_n_frames back to their defaults.
+    String synthesized = "{\"command\":\"";
+    synthesized += entry->command;
+    synthesized += "\"";
+    const ConfigEntry* all = ConfigRegistry::entries();
+    for (size_t i = 0; i < ConfigRegistry::entryCount(); ++i) {
+      const ConfigEntry& sibling = all[i];
+      if (strcmp(sibling.command, entry->command) != 0) {
+        continue;
+      }
+      String rendered;
+      if (strcmp(sibling.path, entry->path) == 0) {
+        rendered = encoded;
+      } else {
+        String current;
+        String siblingError;
+        if (!ConfigRegistry::readValue(String(sibling.path), *deviceConfig_, governor_, storage_,
+                                       current) ||
+            !ConfigRegistry::encodeValue(sibling, current, rendered, siblingError)) {
+          continue;
+        }
+      }
+      synthesized += ",\"";
+      synthesized += sibling.argument;
+      synthesized += "\":";
+      synthesized += rendered;
+    }
+    synthesized += "}";
+    return processCommand(synthesized);
+  }
+  if (cmd == "capabilities") {
+    // What a client needs to know before talking to this device: which
+    // protocol, which config surface, and which board features exist. Lets
+    // the Desktop generate its settings UI instead of hardcoding it.
+    String data = "{\"protocol\":\"";
+    data += kProtocolName;
+    data += "\",\"firmware_version\":\"";
+    data += kFirmwareVersion;
+    data += "\",\"hardware_model\":\"";
+    data += jsonEscape(kHardwareModel);
+    data += "\",\"config_schema_hash\":";
+    data += String(ConfigRegistry::schemaHash());
+    data += ",\"config_entry_count\":";
+    data += String(static_cast<unsigned>(ConfigRegistry::entryCount()));
+    data += ",\"features\":{\"magnetometer\":";
+    data += NHOS_BOARD_HAS_MAG ? "true" : "false";
+    data += ",\"battery_gauge\":";
+    data += NHOS_BOARD_HAS_MAX17048 ? "true" : "false";
+    data += ",\"action_button\":";
+    data += NHOS_BOARD_HAS_BUTTON ? "true" : "false";
+    data += ",\"external_led\":";
+    data += NHOS_BOARD_HAS_EXT_LED ? "true" : "false";
+    data += ",\"oled\":";
+    data += NHOS_BOARD_HAS_OLED ? "true" : "false";
+    data += ",\"gpio_wake\":";
+    data += NHOS_BOARD_SUPPORTS_GPIO_WAKE ? "true" : "false";
+    data += "},\"subsystems\":{\"scheduler\":";
+    data += scheduler_ != nullptr ? "true" : "false";
+    data += ",\"services\":";
+    data += services_ != nullptr ? "true" : "false";
+    data += ",\"faults\":";
+    data += faults_ != nullptr ? "true" : "false";
+    data += ",\"procfs\":";
+    data += proc_ != nullptr ? "true" : "false";
+    data += ",\"airtime_arbiter\":";
+    data += arbiter_ != nullptr ? "true" : "false";
+    data += ",\"apps\":";
+    data += apps_ != nullptr ? "true" : "false";
+    data += ",\"rule_engine\":";
+    data += rules_ != nullptr ? "true" : "false";
+    data += "}}";
+    return ok(cmd, "capabilities", data);
+  }
+  if (cmd == "set_power_profile") {
+    if (!governor_ || !storage_) {
+      return error(cmd, "governor_unavailable");
+    }
+    const String name = extractString(request, "profile");
+    if (name.isEmpty()) {
+      return error(cmd, "profile_required");
+    }
+    const PowerProfile profile = PowerGovernor::profileFromName(name.c_str());
+    // profileFromName() falls back to performance for anything it does not
+    // recognise; reject rather than silently applying the wrong profile.
+    if (strcmp(PowerGovernor::profileName(profile), name.c_str()) != 0) {
+      return error(cmd, "profile_invalid");
+    }
+    governor_->setProfile(profile);
+    storage_->putString("power_profile", name);
+    return ok(cmd, "power_profile_updated", governor_->statusJson());
+  }
+  if (cmd == "set_time") {
+    if (!clock_) {
+      return error(cmd, "clock_unavailable");
+    }
+    // Milliseconds since the Unix epoch. Sent as a string because a
+    // millisecond epoch overflows the int the other extractors use.
+    const String epochText = extractString(request, "epoch_ms");
+    if (epochText.isEmpty()) {
+      return error(cmd, "epoch_ms_required");
+    }
+    const uint64_t epochMs = strtoull(epochText.c_str(), nullptr, 10);
+    if (!clock_->setEpochMs(epochMs, TimeSource::Host)) {
+      return error(cmd, "epoch_rejected");
+    }
+    return ok(cmd, "time_set", clock_->statusJson());
+  }
+  if (cmd == "service_list") {
+    if (!services_) {
+      return error(cmd, "service_manager_unavailable");
+    }
+    return ok(cmd, "service_list", services_->statusJson());
+  }
+  if (cmd == "service_restart") {
+    if (!services_) {
+      return error(cmd, "service_manager_unavailable");
+    }
+    const String name = extractString(request, "name");
+    if (name.isEmpty()) {
+      return error(cmd, "name_required");
+    }
+    if (!services_->exists(name.c_str())) {
+      return error(cmd, "unknown_service");
+    }
+    // Reports the post-restart state either way: a restart that fails still
+    // leaves the service supervised and retrying, which is worth seeing.
+    const bool running = services_->restart(name.c_str());
+    String data = "{\"name\":\"";
+    data += jsonEscape(name);
+    data += "\",\"running\":";
+    data += running ? "true" : "false";
+    data += ",\"services\":";
+    data += services_->statusJson();
+    data += "}";
+    return ok(cmd, running ? "service_restarted" : "service_restart_failed", data);
   }
   if (cmd == "scan_health") {
     return ok(cmd, "scan_health", scanner_->healthJson());
@@ -741,6 +1016,20 @@ String ControlServer::processCommand(const String& request) {
     if (!deviceConfig_) {
       return error(cmd, "config_unavailable");
     }
+    // With a tag, this sets that subsystem's level only and leaves the
+    // persisted global logging config alone -- per-tag levels are a runtime
+    // debugging lever, not device configuration.
+    const String tag = extractString(request, "tag");
+    if (!tag.isEmpty()) {
+      const String tagLevel = extractString(request, "level");
+      if (tagLevel.isEmpty()) {
+        return error(cmd, "level_required");
+      }
+      if (!storage_->setTagLevel(tag.c_str(), Storage::parseLogLevel(tagLevel))) {
+        return error(cmd, "tag_level_rejected");
+      }
+      return ok(cmd, "log_tag_level_updated", storage_->tagLevelsJson());
+    }
     const bool enabled = extractBool(request, "enabled", deviceConfig_->data().logging.enabled);
     String level = extractString(request, "level");
     if (level.isEmpty()) {
@@ -1042,6 +1331,9 @@ String ControlServer::processCommand(const String& request) {
     if (scope.isEmpty()) {
       scope = "user";
     }
+    if (proc_ && ProcFs::isProcScope(scope)) {
+      return ok(cmd, "file_list", proc_->list());
+    }
     return ok(cmd, "file_list", storage_->listFiles(scope));
   }
   if (cmd == "file_read_begin") {
@@ -1064,6 +1356,10 @@ String ControlServer::processCommand(const String& request) {
       return error(cmd, "maintenance_required");
     }
     writeScope_ = extractString(request, "scope");
+    if (ProcFs::isProcScope(writeScope_)) {
+      writeScope_ = "";
+      return error(cmd, "read_only_scope");
+    }
     if (writeScope_.isEmpty()) {
       writeScope_ = "user";
     }
@@ -1140,6 +1436,9 @@ String ControlServer::processCommand(const String& request) {
       return error(cmd, "maintenance_required");
     }
     String scope = extractString(request, "scope");
+    if (ProcFs::isProcScope(scope)) {
+      return error(cmd, "read_only_scope");
+    }
     if (scope.isEmpty()) {
       scope = "user";
     }
@@ -1157,9 +1456,39 @@ String ControlServer::processCommand(const String& request) {
   if (cmd == "log_tail") {
     return ok(cmd, "log_tail", storage_->tailLog(extractInt(request, "max_lines", 50)));
   }
+  if (cmd == "dmesg") {
+    // Serves the RAM ring, not the flash log: no SPIFFS reads, and it still
+    // works when logging to flash has been switched off.
+    return ok(cmd, "dmesg", storage_->kmsgJson());
+  }
   if (cmd == "log_clear") {
     storage_->clearLog();
     return ok(cmd, "log_cleared");
+  }
+  if (cmd == "crash_log") {
+    if (!faults_) {
+      return error(cmd, "fault_recorder_unavailable");
+    }
+    String data = "{\"summary\":";
+    data += faults_->statusJson();
+    data += ",\"faults\":";
+    data += faults_->historyJson();
+    data += ",\"core_dump\":{\"available\":";
+    data += faults_->coreDumpAvailable() ? "true" : "false";
+    data += ",\"bytes\":";
+    data += String(static_cast<uint32_t>(faults_->coreDumpSize()));
+    // The raw ELF rides the existing file channel rather than a new command:
+    // file_read_chunk --scope proc --path crash.elf, then analyse offline
+    // with esp-coredump.
+    data += ",\"scope\":\"proc\",\"path\":\"crash.elf\"}}";
+    return ok(cmd, "crash_log", data);
+  }
+  if (cmd == "crash_clear") {
+    if (!faults_) {
+      return error(cmd, "fault_recorder_unavailable");
+    }
+    const bool erased = faults_->clear();
+    return ok(cmd, erased ? "crash_log_cleared" : "crash_log_cleared_dump_retained");
   }
   if (cmd == "set_ota_config") {
     if (!deviceConfig_) {
@@ -1403,6 +1732,18 @@ String ControlServer::fileSizeJson(const String& command, const String& scopeVal
   if (scope.isEmpty()) {
     scope = "user";
   }
+  if (proc_ && ProcFs::isProcScope(scope)) {
+    if (!proc_->exists(path)) {
+      return error(command, "invalid_path");
+    }
+    String data = "{";
+    bool procFirst = true;
+    jsonStringField(data, "scope", scope, procFirst);
+    jsonStringField(data, "path", path, procFirst);
+    jsonUnsignedField(data, "size", static_cast<unsigned long>(proc_->size(path)), procFirst);
+    data += "}";
+    return ok(command, "file_read_ready", data);
+  }
   if (path.isEmpty() || !storage_->validUserPath(path)) {
     return error(command, "invalid_path");
   }
@@ -1418,15 +1759,20 @@ String ControlServer::fileSizeJson(const String& command, const String& scopeVal
 }
 
 String ControlServer::fileChunkJson(const String& command, const String& scope, const String& path, size_t offset, size_t length) const {
-  if (path.isEmpty() || !storage_->validUserPath(path)) {
+  const bool fromProc = proc_ && ProcFs::isProcScope(scope);
+  if (!fromProc && (path.isEmpty() || !storage_->validUserPath(path))) {
     return error(command, "invalid_path");
   }
   std::vector<uint8_t> bytes;
-  if (!storage_->readFile(scope, path, bytes, offset, length)) {
+  if (fromProc) {
+    if (!proc_->exists(path) || !proc_->read(path, offset, length, bytes)) {
+      return error(command, "file_read_failed");
+    }
+  } else if (!storage_->readFile(scope, path, bytes, offset, length)) {
     return error(command, "file_read_failed");
   }
   size_t nextOffset = offset + bytes.size();
-  size_t totalSize = storage_->fileSize(scope, path);
+  size_t totalSize = fromProc ? proc_->size(path) : storage_->fileSize(scope, path);
   String data = "{";
   data.reserve(path.length() + scope.length() + (bytes.size() * 2) + 96);
   bool first = true;

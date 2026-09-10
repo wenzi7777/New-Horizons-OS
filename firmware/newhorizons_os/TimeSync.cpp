@@ -30,6 +30,60 @@ void TimeSync::begin() {
 
 void TimeSync::recordSync() {
   synced_ = true;
+  source_ = TimeSource::Sntp;
+  lastSetMs_ = millis();
+}
+
+const char* TimeSync::sourceName(TimeSource source) {
+  switch (source) {
+    case TimeSource::Sntp: return "sntp";
+    case TimeSource::Host: return "host";
+    case TimeSource::None:
+    default: return "none";
+  }
+}
+
+bool TimeSync::setEpochMs(uint64_t epochMs, TimeSource source) {
+  if (epochMs / 1000ULL < static_cast<uint64_t>(kTimeSyncValidEpochS)) {
+    return false;
+  }
+  // Measure before stepping, so the reported adjustment is the error this
+  // push corrected rather than zero.
+  if (hasSynced()) {
+    lastAdjustMs_ = static_cast<int64_t>(epochMs) - static_cast<int64_t>(nowEpochMs());
+  } else {
+    lastAdjustMs_ = 0;
+  }
+  struct timeval tv;
+  tv.tv_sec = static_cast<time_t>(epochMs / 1000ULL);
+  tv.tv_usec = static_cast<suseconds_t>((epochMs % 1000ULL) * 1000ULL);
+  if (settimeofday(&tv, nullptr) != 0) {
+    return false;
+  }
+  synced_ = true;
+  source_ = source;
+  lastSetMs_ = millis();
+  ++adjustCount_;
+  return true;
+}
+
+String TimeSync::statusJson() const {
+  String json = "{\"source\":\"";
+  json += sourceName(source_);
+  json += "\",\"synced\":";
+  json += hasSynced() ? "true" : "false";
+  json += ",\"uptime_ms\":";
+  json += String(millis());
+  json += ",\"epoch_ms\":";
+  json += hasSynced() ? String(static_cast<unsigned long long>(nowEpochMs())) : String("null");
+  json += ",\"age_ms\":";
+  json += lastSetMs_ != 0 ? String(millis() - lastSetMs_) : String("null");
+  json += ",\"last_adjust_ms\":";
+  json += String(static_cast<long long>(lastAdjustMs_));
+  json += ",\"adjust_count\":";
+  json += String(adjustCount_);
+  json += "}";
+  return json;
 }
 
 bool TimeSync::hasSynced() const {

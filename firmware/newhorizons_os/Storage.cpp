@@ -241,12 +241,28 @@ String Storage::logStatusJson() const {
   out += String(static_cast<unsigned int>(file ? file.size() : 0));
   out += ",\"path\":\"";
   out += kLogPath;
-  out += "\"}";
+  out += "\",\"tag_levels\":";
+  out += tagLevelsJson();
+  out += "}";
   return out;
 }
 
 void Storage::logLine(const String& line, LogLevel level) {
-  if (!logEnabled_ || static_cast<uint8_t>(level) > static_cast<uint8_t>(logLevel_)) {
+  logTagged("sys", line, level);
+}
+
+void Storage::logTagged(const char* tag, const String& line, LogLevel level) {
+  if (tag == nullptr) {
+    tag = "sys";
+  }
+  if (!tagAllows(tag, level)) {
+    return;
+  }
+  // The RAM ring is filled even when logging to flash is switched off: a
+  // live tail is exactly what you want when you have deliberately stopped
+  // writing to flash.
+  pushRing(tag, line, level);
+  if (!logEnabled_) {
     return;
   }
   rotateLogIfNeeded(line.length() + 1);
@@ -257,6 +273,126 @@ void Storage::logLine(const String& line, LogLevel level) {
   current.println(line);
   current.close();
   rotateLogIfNeeded(0);
+}
+
+bool Storage::tagAllows(const char* tag, LogLevel level) const {
+  for (uint8_t i = 0; i < tagLevelCount_; ++i) {
+    if (strncmp(tagLevels_[i].tag, tag, kLogTagLen - 1) == 0) {
+      return static_cast<uint8_t>(level) <= static_cast<uint8_t>(tagLevels_[i].level);
+    }
+  }
+  return static_cast<uint8_t>(level) <= static_cast<uint8_t>(logLevel_);
+}
+
+bool Storage::setTagLevel(const char* tag, LogLevel level) {
+  if (tag == nullptr || *tag == '\0') {
+    return false;
+  }
+  for (uint8_t i = 0; i < tagLevelCount_; ++i) {
+    if (strncmp(tagLevels_[i].tag, tag, kLogTagLen - 1) == 0) {
+      tagLevels_[i].level = level;
+      return true;
+    }
+  }
+  if (tagLevelCount_ >= kMaxTagLevels) {
+    return false;
+  }
+  TagLevel& entry = tagLevels_[tagLevelCount_++];
+  strncpy(entry.tag, tag, kLogTagLen - 1);
+  entry.tag[kLogTagLen - 1] = '\0';
+  entry.level = level;
+  return true;
+}
+
+void Storage::pushRing(const char* tag, const String& line, LogLevel level) {
+  LogRingEntry& entry = ring_[ringWrite_];
+  entry.ms = millis();
+  entry.level = static_cast<uint8_t>(level);
+  entry.valid = true;
+  strncpy(entry.tag, tag, kLogTagLen - 1);
+  entry.tag[kLogTagLen - 1] = '\0';
+  strncpy(entry.text, line.c_str(), kLogRingTextLen - 1);
+  entry.text[kLogRingTextLen - 1] = '\0';
+  ringWrite_ = static_cast<uint8_t>((ringWrite_ + 1) % kLogRingEntries);
+}
+
+const char* Storage::logLevelName(LogLevel level) {
+  switch (level) {
+    case LogLevel::Error: return "error";
+    case LogLevel::Warn: return "warn";
+    case LogLevel::Debug: return "debug";
+    case LogLevel::Info:
+    default: return "info";
+  }
+}
+
+String Storage::tagLevelsJson() const {
+  String json = "{\"global\":\"";
+  json += logLevelName_;
+  json += "\",\"tags\":[";
+  for (uint8_t i = 0; i < tagLevelCount_; ++i) {
+    if (i != 0) {
+      json += ",";
+    }
+    json += "{\"tag\":\"";
+    json += jsonEscape(String(tagLevels_[i].tag));
+    json += "\",\"level\":\"";
+    json += logLevelName(tagLevels_[i].level);
+    json += "\"}";
+  }
+  json += "]}";
+  return json;
+}
+
+String Storage::kmsgJson() const {
+  String json = "[";
+  bool first = true;
+  for (uint8_t i = 0; i < kLogRingEntries; ++i) {
+    const LogRingEntry& entry = ring_[(ringWrite_ + i) % kLogRingEntries];
+    if (!entry.valid) {
+      continue;
+    }
+    if (!first) {
+      json += ",";
+    }
+    first = false;
+    String line = "[";
+    line += String(entry.ms);
+    line += "] ";
+    line += logLevelName(static_cast<LogLevel>(entry.level));
+    line += " ";
+    line += entry.tag;
+    line += ": ";
+    line += entry.text;
+    json += "\"";
+    // Boot lines embed status JSON, so escaping is not optional here.
+    json += jsonEscape(line);
+    json += "\"";
+  }
+  json += "]";
+  return json;
+}
+
+String Storage::kmsgText() const {
+  String out;
+  out.reserve(kLogRingEntries * (kLogRingTextLen / 2));
+  // Oldest first, so a tail reads like a console scrollback.
+  for (uint8_t i = 0; i < kLogRingEntries; ++i) {
+    const LogRingEntry& entry = ring_[(ringWrite_ + i) % kLogRingEntries];
+    if (!entry.valid) {
+      continue;
+    }
+    out += "[";
+    out += String(entry.ms);
+    out += "] ";
+    out += logLevelName(static_cast<LogLevel>(entry.level));
+    out += " ";
+    out += entry.tag;
+    out += ": ";
+    out += entry.text;
+    out += "\n";
+  }
+  return out;
 }
 
 String Storage::tailLog(size_t maxLines) {
@@ -281,7 +417,9 @@ String Storage::tailLog(size_t maxLines) {
       out += ",";
     }
     out += "\"";
-    out += lines[i];
+    // Pre-existing: boot lines carry embedded status JSON, whose quotes made
+    // log_tail's response unparseable.
+    out += jsonEscape(lines[i]);
     out += "\"";
   }
   out += "]";

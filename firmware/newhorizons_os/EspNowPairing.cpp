@@ -1,5 +1,7 @@
 #include "EspNowPairing.h"
 
+#include "AirtimeArbiter.h"
+
 #include <cstring>
 #include <esp_now.h>
 #include <esp_wifi.h>
@@ -174,7 +176,7 @@ void EspNowPairing::startScanIfNeeded() {
 
 void EspNowPairing::sendHello() {
   const uint8_t payload[1] = {kEspNowHelloMagic};
-  esp_now_send(hubMac_, payload, sizeof(payload));
+  arbiter_->send(AirtimeClass::Pairing, hubMac_, payload, sizeof(payload));
 }
 
 void EspNowPairing::onPaired() {
@@ -301,7 +303,7 @@ void EspNowPairing::failPairingAndRestart(const char* reason) {
 
 void EspNowPairing::sendDiscoveryHello() {
   const uint8_t payload[1] = {kEspNowHelloMagic};
-  esp_now_send(kEspNowBroadcastMac, payload, sizeof(payload));
+  arbiter_->send(AirtimeClass::Pairing, kEspNowBroadcastMac, payload, sizeof(payload));
 }
 
 void EspNowPairing::onHubDiscovered(const uint8_t mac[6]) {
@@ -367,7 +369,7 @@ void EspNowPairing::handleFragmentedPacket(const uint8_t* data, size_t len) {
   // Sent unconditionally on every reassembled frame, including duplicates
   // from pre-ack resends still in flight -- idempotent and cheap.
   const uint8_t ackPayload[1] = {kEspNowControlAckMagic};
-  esp_now_send(hubMac_, ackPayload, sizeof(ackPayload));
+  arbiter_->send(AirtimeClass::Pairing, hubMac_, ackPayload, sizeof(ackPayload));
 
   memcpy(pendingCommandBuffer_, frame.data, frame.len);
   pendingCommandLen_ = frame.len;
@@ -419,7 +421,8 @@ void EspNowPairing::serviceCommand() {
     if (static_cast<int32_t>(nowUs - responseNextFragDueUs_) >= 0) {
       responseSendAwaitingCb_ = true;
       responseSendStartedUs_ = nowUs;
-      if (esp_now_send(hubMac_, responseFrags_[responseFragsSent_].bytes,
+      if (arbiter_->send(AirtimeClass::CommandResponse, hubMac_,
+                         responseFrags_[responseFragsSent_].bytes,
                         responseFrags_[responseFragsSent_].len) != ESP_OK) {
         // Rejected outright (e.g. ESP_ERR_ESPNOW_NO_MEM) -- no callback
         // will ever arrive for this one, so fail it immediately.

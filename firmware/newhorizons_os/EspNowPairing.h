@@ -32,6 +32,8 @@
 
 namespace nhos {
 
+class AirtimeArbiter;
+
 class ControlServer;
 class EspNowOtaReceiver;
 
@@ -136,6 +138,7 @@ class EspNowPairing {
   // boot-time OTA manifest check to it; service() dispatches completed
   // kEspNowFragTypeOta/kEspNowFragTypeHubRequest frames to it. Optional --
   // left null, this device simply never attempts Direct-mode OTA.
+  void setArbiter(AirtimeArbiter* arbiter) { arbiter_ = arbiter; }
   void setOtaReceiver(EspNowOtaReceiver* receiver) { otaReceiver_ = receiver; }
 
  private:
@@ -210,6 +213,7 @@ class EspNowPairing {
   volatile bool hubRequestFrameReady_ = false;
 
   EspNowOtaReceiver* otaReceiver_ = nullptr;
+  AirtimeArbiter* arbiter_ = nullptr;
 
   // A fully-reassembled control command is copied here and only handed to
   // ControlServer::serviceEspNowCommand() from service() (main-loop

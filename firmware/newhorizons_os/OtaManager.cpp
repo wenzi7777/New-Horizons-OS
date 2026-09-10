@@ -1,5 +1,7 @@
 #include "OtaManager.h"
 
+#include "Watchdog.h"
+
 #include <HTTPClient.h>
 #include <NetworkClient.h>
 #include <Update.h>
@@ -124,6 +126,8 @@ String OtaManager::lastError() const {
 bool OtaManager::fetchManifest(const String& url, String& payload) {
   WiFiClientSecure client;
   client.setInsecure();
+  // 6s connect + 8s read, in single blocking calls -- see WatchdogPause.
+  WatchdogPause watchdogPause;
   HTTPClient http;
   http.setTimeout(8000);
   http.setConnectTimeout(6000);
@@ -185,7 +189,13 @@ bool OtaManager::downloadAndApply(const UpdateInfo& info) {
     lastResult_ = "error";
     return false;
   }
-  int code = http.GET();
+  int code;
+  {
+    // Up to 12s connect + 12s read before the streaming loop below (which
+    // does feed) ever starts.
+    WatchdogPause watchdogPause;
+    code = http.GET();
+  }
   if (code != HTTP_CODE_OK) {
     lastError_ = "firmware_http_" + String(code);
     lastPhase_ = "error";
@@ -211,6 +221,10 @@ bool OtaManager::downloadAndApply(const UpdateInfo& info) {
   const uint32_t downloadStartedMs = millis();
   uint32_t lastProgressMs = downloadStartedMs;
   while (http.connected()) {
+    // An OTA download legitimately outlasts the 5s task WDT armed at the end
+    // of setup(). This loop is the one place in the runtime that blocks that
+    // long on purpose, so it feeds the watchdog rather than tripping it.
+    watchdogFeed();
     const uint32_t now = millis();
     if (now - downloadStartedMs > kOtaDownloadOverallTimeoutMs) {
       lastError_ = "firmware_download_overall_timeout";
@@ -283,6 +297,8 @@ bool OtaManager::downloadAndApply(const UpdateInfo& info) {
     lastResult_ = "error";
     return false;
   }
+  // Finalises and verifies the whole written image in one call.
+  WatchdogPause finalizePause;
   if (!Update.end(true) || !Update.isFinished()) {
     lastError_ = "update_end_failed";
     lastPhase_ = "error";

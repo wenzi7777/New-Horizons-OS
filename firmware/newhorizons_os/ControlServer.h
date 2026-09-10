@@ -8,9 +8,12 @@
 #include "BootModeManager.h"
 #include "BatteryGaugeManager.h"
 #include "Calibration.h"
+#include "AppManager.h"
+#include "ConfigRegistry.h"
 #include "DeviceConfig.h"
 #include "DisplayManager.h"
 #include "ExternalLedController.h"
+#include "FaultRecorder.h"
 #include "FindMeClient.h"
 #include "ImuManager.h"
 #include "LedController.h"
@@ -18,8 +21,15 @@
 #include "MagnetometerManager.h"
 #include "OtaManager.h"
 #include "PowerManager.h"
+#include "PowerGovernor.h"
 #include "PowerStateManager.h"
+#include "AirtimeArbiter.h"
+#include "ProcFs.h"
+#include "RuleEngineApp.h"
+#include "Scheduler.h"
+#include "ServiceManager.h"
 #include "Storage.h"
+#include "TimeSync.h"
 #include "WifiManager.h"
 
 namespace nhos {
@@ -60,6 +70,18 @@ class ControlServer {
   // device has no WiFi at all, so the HTTP path can only ever fail there
   // (it surfaced in the WebUI as an opaque `manifest_http_-1`).
   void setEspNowOtaReceiver(EspNowOtaReceiver* receiver) { espNowOta_ = receiver; }
+
+  // Wired from setup(). Optional for the same reason the OTA receiver is:
+  // begin()'s parameter list is already at its useful limit, and nothing in
+  // ControlServer needs the recorder to exist.
+  void setFaultRecorder(FaultRecorder* recorder) { faults_ = recorder; }
+  void setScheduler(Scheduler* scheduler) { scheduler_ = scheduler; }
+  void setProcFs(ProcFs* proc) { proc_ = proc; }
+  void setArbiter(AirtimeArbiter* arbiter) { arbiter_ = arbiter; }
+  void setServiceManager(ServiceManager* services) { services_ = services; }
+  void setClock(TimeSync* clock) { clock_ = clock; }
+  void setPowerGovernor(PowerGovernor* governor) { governor_ = governor; }
+  void setAppManager(AppManager* apps, RuleEngineApp* rules) { apps_ = apps; rules_ = rules; }
   bool maintenanceMode() const;
   const String& streamHost() const;
   uint16_t streamPort() const;
@@ -96,6 +118,15 @@ class ControlServer {
   BootModeManager* boot_ = nullptr;
   OtaManager* ota_ = nullptr;
   EspNowOtaReceiver* espNowOta_ = nullptr;
+  FaultRecorder* faults_ = nullptr;
+  Scheduler* scheduler_ = nullptr;
+  ProcFs* proc_ = nullptr;
+  AirtimeArbiter* arbiter_ = nullptr;
+  ServiceManager* services_ = nullptr;
+  TimeSync* clock_ = nullptr;
+  PowerGovernor* governor_ = nullptr;
+  AppManager* apps_ = nullptr;
+  RuleEngineApp* rules_ = nullptr;
   FindMeClient* findme_ = nullptr;
   PowerManager* power_ = nullptr;
   BatteryGaugeManager* batteryGauge_ = nullptr;

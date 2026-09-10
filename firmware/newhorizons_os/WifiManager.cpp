@@ -1,5 +1,7 @@
 #include "WifiManager.h"
 
+#include "Watchdog.h"
+
 #include "Config.h"
 #include "DeviceConfig.h"
 #include "EspNowPairing.h"  // kEspNowPairingFailFlagKey, so this stays in sync with EspNowPairing.cpp's own check
@@ -164,6 +166,10 @@ bool WifiManager::connectStored() {
     if (isConnected()) {
       return true;
     }
+    // Reached from the setup portal's form handler inside wifi.service(),
+    // i.e. from loop() with the 5s task WDT armed -- an 8s association
+    // attempt would otherwise reboot the device mid-provisioning.
+    watchdogFeed();
     delay(50);
   }
   return false;
@@ -328,14 +334,14 @@ String WifiManager::portalPage(const String& message, bool success) const {
   out.reserve(1800);
   out += F("<!doctype html><html><head><meta charset=\"utf-8\">");
   out += F("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
-  out += F("<title>New Horizons OS Wi-Fi Setup</title>");
+  out += F("<title>NHOS Wi-Fi Setup</title>");
   out += F("<style>body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;margin:0;background:#101417;color:#eef2f5}");
   out += F("main{max-width:440px;margin:0 auto;padding:28px 20px}h1{font-size:24px;margin:0 0 8px}");
   out += F("p{color:#b9c2ca;line-height:1.45}label{display:block;margin:16px 0 6px;color:#dce3e8}");
   out += F("input,select{box-sizing:border-box;width:100%;font-size:16px;padding:12px;border-radius:6px;border:1px solid #5f6b74;background:#151b20;color:#fff}");
   out += F("button{width:100%;margin-top:20px;padding:12px;font-size:16px;border:0;border-radius:6px;background:#2dd4bf;color:#041011;font-weight:700}");
   out += F(".msg{padding:10px 12px;border-radius:6px;background:#1f2930}.ok{background:#12382f}</style></head><body><main>");
-  out += F("<h1>New Horizons OS Wi-Fi Setup</h1>");
+  out += F("<h1>NHOS Wi-Fi Setup</h1>");
   out += F("<p>Connect this board to your local Wi-Fi network.</p>");
   if (!message.isEmpty()) {
     out += success ? F("<p class=\"msg ok\">") : F("<p class=\"msg\">");

@@ -34,7 +34,7 @@ class ArduinoManifestGeneratorTests(unittest.TestCase):
                 changelog_url="https://example.com/notes/v1.2.3.md",
             )
 
-            self.assertEqual(manifest["product"], "New Horizons OS Arduino")
+            self.assertEqual(manifest["product"], "NHOS Arduino")
             self.assertEqual(manifest["protocol"], "NHO/Arduino/1")
             self.assertEqual(manifest["model"], "VD-CTL/R v1.0.F 2026.4")
             self.assertEqual(manifest["latest"], "v1.2.3")

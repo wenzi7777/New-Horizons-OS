@@ -112,10 +112,10 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
 
-        self.assertIn('kDefaultApSsidPrefix[] = "NewHorizonsOS"', config)
+        self.assertIn('kDefaultApSsidPrefix[] = "NHOS"', config)
         self.assertNotIn('kDefaultApSsidPrefix[] = "NewHorizonsOS-Arduino"', config)
         self.assertIn('kDefaultApPassword[] = ""', config)
-        self.assertIn('kSetupPortalDomain[] = "newhorizons.os"', config)
+        self.assertIn('kSetupPortalDomain[] = "nhos.os"', config)
         self.assertIn("kSetupPortalPort = 80", config)
 
     def test_findme_is_primary_gateway_attachment_flow(self):
@@ -938,22 +938,32 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_main_loop_prioritizes_scan_before_other_runtime_services_and_uses_yield(self):
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
+        # The ordering guarantee moved from a hardcoded call list in loop()
+        # into the scheduler's task table; loop() is now the tick plus the
+        # same idle heuristic. The invariant under test is unchanged: scan
+        # and stream are serviced ahead of every other runtime service.
         loop_match = re.search(r"void loop\(\) \{(?P<body>.*?)\n\}", sketch, re.S)
         self.assertIsNotNone(loop_match)
         body = loop_match.group("body")
 
-        self.assertRegex(body, re.compile(r"scanAndStreamIfDue\(\);\s+sendQueuedPacketIfAny\(\);", re.S))
+        self.assertIn("scheduler.tick();", body)
         self.assertIn("yield();", body)
         self.assertNotIn("delay(1);", body)
-        self.assertLess(body.index("scanAndStreamIfDue();"), body.index("wifi.service();"))
-        self.assertLess(body.index("sendQueuedPacketIfAny();"), body.index("wifi.service();"))
-        self.assertLess(body.index("scanAndStreamIfDue();"), body.index("findme.service();"))
-        self.assertLess(body.index("sendQueuedPacketIfAny();"), body.index("findme.service();"))
-        self.assertLess(body.index("scanAndStreamIfDue();"), body.index("control.service();"))
-        self.assertLess(body.index("sendQueuedPacketIfAny();"), body.index("control.service();"))
-        self.assertLess(body.index("imu.service(micros());"), body.index("scanAndStreamIfDue();"))
-        self.assertLess(body.index("scanAndStreamIfDue();"), body.index("displayManager.service("))
-        self.assertLess(body.index("sendQueuedPacketIfAny();"), body.index("displayManager.service("))
+
+        table_match = re.search(
+            r"void registerRuntimeTasks\(\) \{(?P<body>.*?)\n\}", sketch, re.S
+        )
+        self.assertIsNotNone(table_match)
+        table = table_match.group("body")
+
+        self.assertRegex(
+            table,
+            re.compile(r'"scan_stream", &scanAndStreamIfDue.*?"stream_queue", &sendQueuedPacketIfAny', re.S),
+        )
+        for later in ('"wifi"', '"espnow"', '"findme"', '"control"', '"display"'):
+            self.assertLess(table.index('"scan_stream"'), table.index(later), later)
+            self.assertLess(table.index('"stream_queue"'), table.index(later), later)
+        self.assertLess(table.index('"imu"'), table.index('"scan_stream"'))
 
     def test_release_scripts_use_stock_8mb_dual_ota_partition(self):
         build_script = (SCRIPT_ROOT / "build_arduino_release.sh").read_text(encoding="utf-8")

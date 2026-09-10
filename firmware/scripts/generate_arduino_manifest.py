@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 
-PRODUCT = "New Horizons OS Arduino"
+PRODUCT = "NHOS Arduino"
 PROTOCOL = "NHO/Arduino/1"
 
 

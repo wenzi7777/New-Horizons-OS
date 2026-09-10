@@ -47,6 +47,8 @@
 
 namespace nhos {
 
+class AirtimeArbiter;
+
 // MUST match New-Horizons-Hub/newhorizons_hub/EspNowHubManager.h's
 // kOtaChunkAckMagic/kOtaChunkAckLen exactly -- duplicated, not shared (see
 // EspNowPairing.h's magic-byte comment for why: separate Arduino sketch
@@ -131,6 +133,7 @@ class EspNowOtaReceiver {
   // the relay far slower than expected when sensor streaming continued
   // unpaused alongside it.
   bool isRelaying() const { return phase_ == Phase::kRelaying; }
+  void setArbiter(AirtimeArbiter* arbiter) { arbiter_ = arbiter; }
 
  private:
   enum class Phase : uint8_t {
@@ -154,6 +157,7 @@ class EspNowOtaReceiver {
   int compareVersion(const String& remote, const String& local) const;
 
   DeviceConfig* deviceConfig_ = nullptr;
+  AirtimeArbiter* arbiter_ = nullptr;
   uint8_t hubMac_[6] = {0};
   String manifestUrl_;
 

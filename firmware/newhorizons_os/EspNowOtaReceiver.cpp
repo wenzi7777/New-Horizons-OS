@@ -1,5 +1,7 @@
 #include "EspNowOtaReceiver.h"
 
+#include "AirtimeArbiter.h"
+
 #include <cstring>
 #include <esp_now.h>
 #include <Update.h>
@@ -106,18 +108,22 @@ String EspNowOtaReceiver::statusJson() const {
 }
 
 void EspNowOtaReceiver::sendHubRequest(const String& json) {
-  // static, not a stack local: kEspNowMaxFragCount * sizeof(EspNowFragment)
-  // is ~8KB, far too much for this task's stack (the same mistake is
-  // documented in EspNowPairing.h's responseFrags_ comment, where a ~4KB
-  // stack array was enough to corrupt the heap). Safe as static because
-  // this only ever runs on the main loop task, never from a recv callback.
-  static EspNowFragment frags[kEspNowDataFragCount];
-  const uint8_t count = EspNowFragmenter::fragment(
-      reinterpret_cast<const uint8_t*>(json.c_str()), json.length(), 0,
-      kEspNowFragTypeHubRequest, frags, kEspNowDataFragCount);
-  for (uint8_t i = 0; i < count; ++i) {
-    esp_now_send(hubMac_, frags[i].bytes, frags[i].len);
+  // This used to fire every fragment back-to-back in a loop -- the exact
+  // shape that has silently dropped fragments three times before on this
+  // project. It only ever got away with it because a fetch_manifest /
+  // ota_relay_start JSON usually fits in one 240-byte fragment; a longer
+  // manifest URL would have made it the fourth. The arbiter owns the paced
+  // burst buffer now, so the local static array is gone too.
+  //
+  // The ~4KB fragment scratch this function used to keep as a local static
+  // is gone: the arbiter fragments straight into the single shared burst
+  // buffer, so there is no second copy of it anywhere.
+  if (arbiter_ == nullptr) {
+    return;
   }
+  arbiter_->beginPacedBurstFromBytes(AirtimeClass::OtaRelay, hubMac_,
+                                     reinterpret_cast<const uint8_t*>(json.c_str()),
+                                     json.length(), kEspNowFragTypeHubRequest);
 }
 
 void EspNowOtaReceiver::sendManifestRequest() {
@@ -146,7 +152,7 @@ void EspNowOtaReceiver::sendChunkAck(uint16_t chunkIndex) {
       static_cast<uint8_t>(chunkIndex & 0xFF),
       static_cast<uint8_t>((chunkIndex >> 8) & 0xFF),
   };
-  esp_now_send(hubMac_, payload, sizeof(payload));
+  arbiter_->send(AirtimeClass::OtaRelay, hubMac_, payload, sizeof(payload));
 }
 
 void EspNowOtaReceiver::service() {

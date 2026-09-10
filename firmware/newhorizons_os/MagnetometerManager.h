@@ -17,6 +17,9 @@ class MagnetometerManager {
   void begin(bool bmm150HostReady = false);
   void service(uint32_t nowMs);
   bool copyLatestSample(float out[3]) const;
+  // Exposed for ServiceManager's health probe; the sensor's readiness was
+  // previously only observable through statusJson()'s text.
+  bool initialized() const { return initialized_; }
   String statusJson() const;
 
  private:

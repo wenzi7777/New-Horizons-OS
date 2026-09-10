@@ -4,6 +4,8 @@
 #include <cstring>
 #include <esp_now.h>
 
+#include "AirtimeArbiter.h"
+
 namespace nhos {
 
 namespace {
@@ -31,13 +33,15 @@ bool EspNowStreamTransport::sendFrame(const uint8_t* data, size_t len) {
 }
 
 void EspNowStreamTransport::service() {
-  if (pairing_ == nullptr) return;
+  if (pairing_ == nullptr || arbiter_ == nullptr) return;
   const uint32_t nowUs = micros();
 
   if (pendingSent_ < pendingCount_) {
     if (static_cast<int32_t>(nowUs - nextFragDueUs_) >= 0) {
-      esp_now_send(pairing_->hubMac(), pendingFrags_[pendingSent_].bytes,
-                    pendingFrags_[pendingSent_].len);
+      // Own pacing state machine (hardware-tuned), so fragments go out one
+      // at a time through the arbiter rather than as a burst.
+      arbiter_->send(AirtimeClass::SensorStream, pairing_->hubMac(),
+                     pendingFrags_[pendingSent_].bytes, pendingFrags_[pendingSent_].len);
       ++pendingSent_;
       nextFragDueUs_ += fragIntervalUs_;
     }

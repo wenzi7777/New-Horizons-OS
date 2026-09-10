@@ -376,7 +376,7 @@ String FindMeClient::encodeDiscoverJson() const {
   out += ",\"device_uid\":\"";
   out += uid;
   out += "\",\"device_name\":\"";
-  out += jsonEscape(String("New Horizons OS-") + uid);
+  out += jsonEscape(String("NHOS-") + uid);
   out += "\",\"mode\":\"";
   out += jsonEscape(mode_);
   out += "\",\"firmware_version\":\"";

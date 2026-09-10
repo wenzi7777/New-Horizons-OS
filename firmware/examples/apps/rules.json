@@ -1,0 +1,52 @@
+{
+  "name": "grip-detect",
+  "_comment": [
+    "Example rule graph for the on-device rule engine (the `rules` app).",
+    "Upload with: file-write-begin/chunk/finish --scope user --path apps/rules.json",
+    "then load with: app-load-rules --path apps/rules.json",
+    "and enable with: app-enable --name rules",
+    "",
+    "Nodes evaluate in array order and may only reference EARLIER nodes by",
+    "their index via \"in\", which is what makes a cycle impossible to write.",
+    "Every operator has a fixed per-frame cost, so the engine computes the",
+    "whole graph's worst case at load time and refuses anything that would",
+    "not fit inside the frame budget -- an over-budget graph is rejected",
+    "before it can cost a single sample."
+  ],
+
+  "nodes": [
+    {
+      "_": "0: total force over the whole mat",
+      "op": "total"
+    },
+    {
+      "_": "1: force in the palm region only (rows 4-9, cols 4-9)",
+      "op": "region_sum",
+      "r0": 4, "c0": 4, "r1": 9, "c1": 9
+    },
+    {
+      "_": "2: how many cells are actually being touched (kPressureActiveThreshold)",
+      "op": "active_cells",
+      "value": 50
+    },
+    {
+      "_": "3: palm loaded? values are calibrated millivolts (see kPressureFullScale=2000 per cell), NOT 0..1 -- a 36-cell region under firm pressure sums into the thousands. Hysteresis stops it chattering on the threshold.",
+      "op": "threshold",
+      "in": 1,
+      "value": 12000,
+      "hysteresis": 2000
+    },
+    {
+      "_": "4: require the grip to be held for 120ms before believing it",
+      "op": "debounce",
+      "in": 3,
+      "ms": 120
+    },
+    {
+      "_": "5: fire on both edges of the debounced grip",
+      "op": "emit",
+      "in": 4,
+      "event": "grip"
+    }
+  ]
+}
