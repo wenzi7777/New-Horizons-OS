@@ -25,7 +25,9 @@
 #include "PowerStateManager.h"
 #include "AirtimeArbiter.h"
 #include "ProcFs.h"
-#include "RuleEngineApp.h"
+#include "AppGovernor.h"
+#include "AppRegistry.h"
+#include "FlowApp.h"
 #include "Scheduler.h"
 #include "ServiceManager.h"
 #include "Storage.h"
@@ -81,7 +83,13 @@ class ControlServer {
   void setServiceManager(ServiceManager* services) { services_ = services; }
   void setClock(TimeSync* clock) { clock_ = clock; }
   void setPowerGovernor(PowerGovernor* governor) { governor_ = governor; }
-  void setAppManager(AppManager* apps, RuleEngineApp* rules) { apps_ = apps; rules_ = rules; }
+  void setAppManager(AppManager* apps, FlowApp* flow, AppRegistry* registry,
+                     AppGovernor* governor) {
+    apps_ = apps;
+    flow_ = flow;
+    appRegistry_ = registry;
+    appGovernor_ = governor;
+  }
   bool maintenanceMode() const;
   const String& streamHost() const;
   uint16_t streamPort() const;
@@ -126,7 +134,9 @@ class ControlServer {
   TimeSync* clock_ = nullptr;
   PowerGovernor* governor_ = nullptr;
   AppManager* apps_ = nullptr;
-  RuleEngineApp* rules_ = nullptr;
+  FlowApp* flow_ = nullptr;
+  AppRegistry* appRegistry_ = nullptr;
+  AppGovernor* appGovernor_ = nullptr;
   FindMeClient* findme_ = nullptr;
   PowerManager* power_ = nullptr;
   BatteryGaugeManager* batteryGauge_ = nullptr;

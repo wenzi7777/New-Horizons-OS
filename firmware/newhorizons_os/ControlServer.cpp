@@ -459,28 +459,168 @@ String ControlServer::processCommand(const String& request) {
     }
     return ok(cmd, "app_revived", apps_->statusJson());
   }
-  if (cmd == "app_load_rules") {
-    if (!rules_ || !scanner_) {
-      return error(cmd, "rule_engine_unavailable");
+  if (cmd == "app_events") {
+    if (!apps_) {
+      return error(cmd, "app_manager_unavailable");
+    }
+    const int since = extractInt(request, "since_seq", 0);
+    const int limit = extractInt(request, "limit", 0);
+    return ok(cmd, "app_events", apps_->eventsJson(static_cast<uint32_t>(since < 0 ? 0 : since),
+                                                   static_cast<uint8_t>(limit < 0 ? 0 : limit)));
+  }
+  if (cmd == "app_load_flow") {
+    if (!flow_ || !scanner_) {
+      return error(cmd, "flow_engine_unavailable");
     }
     String path = extractString(request, "path");
     if (path.isEmpty()) {
-      path = "apps/rules.json";
+      path = "apps/flow.json";
     }
     String loadError;
     // Cell count drives the load-time cost estimate, so the same graph is
     // judged against the board it will actually run on.
-    if (!rules_->loadFromFile(path, scanner_->health().pointCount, loadError)) {
-      return error(cmd, String("rule_load_failed:") + loadError);
+    if (!flow_->loadFromFile(path, scanner_->health().pointCount, loadError)) {
+      return error(cmd, String("flow_load_failed:") + loadError);
     }
-    return ok(cmd, "rule_graph_loaded", rules_->statusJson());
+    return ok(cmd, "flow_graph_loaded", flow_->statusJson());
   }
-  if (cmd == "app_unload_rules") {
-    if (!rules_) {
-      return error(cmd, "rule_engine_unavailable");
+  if (cmd == "app_unload_flow") {
+    if (!flow_) {
+      return error(cmd, "flow_engine_unavailable");
     }
-    rules_->unload();
-    return ok(cmd, "rule_graph_unloaded", rules_->statusJson());
+    flow_->unload();
+    return ok(cmd, "flow_graph_unloaded", flow_->statusJson());
+  }
+  if (cmd == "app_list_packages") {
+    if (!appRegistry_) {
+      return error(cmd, "app_registry_unavailable");
+    }
+    return ok(cmd, "app_list_packages", appRegistry_->statusJson());
+  }
+  if (cmd == "app_install") {
+    if (!appRegistry_) {
+      return error(cmd, "app_registry_unavailable");
+    }
+    // Consumes a file written by the already maintenance-only file_write_*
+    // sequence; gating it the same way stops a half-written package being
+    // installed mid-scan.
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    const String path = extractString(request, "path");
+    if (path.isEmpty()) {
+      return error(cmd, "path_required");
+    }
+    String installedId;
+    String installError;
+    if (!appRegistry_->install(path, extractString(request, "sha256"),
+                               extractBool(request, "replace", false), installedId, installError)) {
+      return error(cmd, installError);
+    }
+    String data = "{\"id\":\"";
+    data += jsonEscape(installedId);
+    data += "\",\"registry\":";
+    data += appRegistry_->statusJson();
+    data += "}";
+    return ok(cmd, "app_installed", data);
+  }
+  if (cmd == "app_uninstall") {
+    if (!appRegistry_) {
+      return error(cmd, "app_registry_unavailable");
+    }
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    const String id = extractString(request, "id");
+    if (id.isEmpty()) {
+      return error(cmd, "id_required");
+    }
+    String uninstallError;
+    if (!appRegistry_->uninstall(id, extractBool(request, "keep_file", false), uninstallError)) {
+      return error(cmd, uninstallError);
+    }
+    return ok(cmd, "app_uninstalled", appRegistry_->statusJson());
+  }
+  if (cmd == "app_activate") {
+    if (!appRegistry_) {
+      return error(cmd, "app_registry_unavailable");
+    }
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    const String id = extractString(request, "id");
+    if (id.isEmpty()) {
+      return error(cmd, "id_required");
+    }
+    const int slot = extractInt(request, "slot", -1);
+    String activateError;
+    if (!appRegistry_->activate(id, static_cast<int8_t>(slot), activateError)) {
+      return error(cmd, activateError);
+    }
+    return ok(cmd, "app_activated", appRegistry_->statusJson());
+  }
+  if (cmd == "app_deactivate") {
+    if (!appRegistry_) {
+      return error(cmd, "app_registry_unavailable");
+    }
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    const String id = extractString(request, "id");
+    const int slot = extractInt(request, "slot", -1);
+    if (id.isEmpty() && slot < 0) {
+      return error(cmd, "id_or_slot_required");
+    }
+    String deactivateError;
+    if (!appRegistry_->deactivate(id, static_cast<int8_t>(slot), deactivateError)) {
+      return error(cmd, deactivateError);
+    }
+    return ok(cmd, "app_deactivated", appRegistry_->statusJson());
+  }
+  if (cmd == "app_verify") {
+    if (!appRegistry_) {
+      return error(cmd, "app_registry_unavailable");
+    }
+    const String id = extractString(request, "id");
+    if (id.isEmpty()) {
+      return error(cmd, "id_required");
+    }
+    String computed;
+    bool match = false;
+    String verifyError;
+    if (!appRegistry_->verify(id, computed, match, verifyError)) {
+      return error(cmd, verifyError);
+    }
+    String data = "{\"id\":\"";
+    data += jsonEscape(id);
+    data += "\",\"sha256\":\"";
+    data += jsonEscape(computed);
+    data += "\",\"match\":";
+    data += match ? "true" : "false";
+    data += "}";
+    return ok(cmd, "app_verified", data);
+  }
+  if (cmd == "app_reindex") {
+    if (!appRegistry_) {
+      return error(cmd, "app_registry_unavailable");
+    }
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    uint16_t recovered = 0;
+    uint16_t dropped = 0;
+    String reindexError;
+    if (!appRegistry_->reindex(recovered, dropped, reindexError)) {
+      return error(cmd, reindexError);
+    }
+    String data = "{\"recovered\":";
+    data += String(recovered);
+    data += ",\"dropped\":";
+    data += String(dropped);
+    data += ",\"registry\":";
+    data += appRegistry_->statusJson();
+    data += "}";
+    return ok(cmd, "app_reindexed", data);
   }
   if (cmd == "config_schema") {
     return ok(cmd, "config_schema", ConfigRegistry::schemaJson());
@@ -617,8 +757,10 @@ String ControlServer::processCommand(const String& request) {
     data += arbiter_ != nullptr ? "true" : "false";
     data += ",\"apps\":";
     data += apps_ != nullptr ? "true" : "false";
-    data += ",\"rule_engine\":";
-    data += rules_ != nullptr ? "true" : "false";
+    data += ",\"flow_engine\":";
+    data += flow_ != nullptr ? "true" : "false";
+    data += ",\"app_registry\":";
+    data += appRegistry_ != nullptr ? "true" : "false";
     data += "}}";
     return ok(cmd, "capabilities", data);
   }
@@ -1418,12 +1560,40 @@ String ControlServer::processCommand(const String& request) {
     if (path != writePath_ || writeWritten_ != writeExpectedSize_) {
       return error(cmd, "file_write_incomplete");
     }
+    // Optional integrity check. file_write_chunk verifies only that offsets are
+    // sequential, so a chunk that is the right LENGTH but wrong content passes
+    // silently -- which for a package means installing something nobody wrote.
+    const String expectedSha = extractString(request, "sha256");
+    String actualSha;
+    if (!expectedSha.isEmpty()) {
+      std::vector<uint8_t> written;
+      if (storage_ == nullptr ||
+          !storage_->readFile(writeScope_, writePath_, written, 0, writeWritten_)) {
+        return error(cmd, "file_read_failed");
+      }
+      actualSha = AppPackage::sha256Hex(written.data(), written.size());
+      if (!actualSha.equalsIgnoreCase(expectedSha)) {
+        // Delete it: a corrupt half-file that looks complete is worse than no
+        // file at all, because the next step would happily consume it.
+        storage_->deleteFile(writeScope_, writePath_);
+        writeScope_ = "";
+        writePath_ = "";
+        writeExpectedSize_ = 0;
+        writeWritten_ = 0;
+        return error(cmd, "file_checksum_mismatch");
+      }
+    }
     String data = "{\"scope\":\"";
     data += writeScope_;
     data += "\",\"path\":\"";
     data += writePath_;
     data += "\",\"size\":";
     data += String(static_cast<unsigned int>(writeWritten_));
+    if (!actualSha.isEmpty()) {
+      data += ",\"sha256\":\"";
+      data += actualSha;
+      data += "\"";
+    }
     data += "}";
     writeScope_ = "";
     writePath_ = "";

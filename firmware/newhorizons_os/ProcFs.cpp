@@ -4,6 +4,7 @@
 
 #include "AirtimeArbiter.h"
 #include "AppManager.h"
+#include "AppRegistry.h"
 #include "BootModeManager.h"
 #include "Config.h"
 #include "DeviceConfig.h"
@@ -23,7 +24,7 @@ namespace {
 
 // Ordering is the listing order. crash.elf is the only binary entry.
 constexpr const char* kEntries[] = {
-    "version", "uptime", "tasks", "services", "apps", "mem", "scan", "net", "power", "crash",
+    "version", "uptime", "tasks", "services", "apps", "packages", "mem", "scan", "net", "power", "crash",
     "kmsg", "crash.elf",
 };
 constexpr size_t kEntryCount = sizeof(kEntries) / sizeof(kEntries[0]);
@@ -172,6 +173,13 @@ bool ProcFs::generate(const String& path, String& out) const {
       return false;
     }
     out = apps_->appsText();
+    return true;
+  }
+  if (path == "packages") {
+    if (appRegistry_ == nullptr) {
+      return false;
+    }
+    out = appRegistry_->packagesText();
     return true;
   }
   if (path == "mem") {

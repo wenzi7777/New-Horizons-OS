@@ -7,6 +7,7 @@ namespace nhos {
 
 class AirtimeArbiter;
 class AppManager;
+class AppRegistry;
 class BootModeManager;
 class DeviceConfig;
 class FaultRecorder;
@@ -42,6 +43,7 @@ class ProcFs {
   void setClock(TimeSync* clock) { clock_ = clock; }
   void setPowerGovernor(PowerGovernor* governor) { governor_ = governor; }
   void setAppManager(AppManager* apps) { apps_ = apps; }
+  void setAppRegistry(AppRegistry* registry) { appRegistry_ = registry; }
 
   // JSON array matching Storage::listFiles()'s shape, so the caller cannot
   // tell a proc listing from a real one.
@@ -69,6 +71,7 @@ class ProcFs {
   TimeSync* clock_ = nullptr;
   PowerGovernor* governor_ = nullptr;
   AppManager* apps_ = nullptr;
+  AppRegistry* appRegistry_ = nullptr;
 };
 
 }  // namespace nhos

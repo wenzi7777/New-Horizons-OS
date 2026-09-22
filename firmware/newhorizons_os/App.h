@@ -6,9 +6,14 @@
 
 namespace nhos {
 
-// What an app is allowed to touch. Declared up front in its manifest, so the
-// permission set is inspectable before the app ever runs rather than being
-// whatever its code happens to call.
+// What an app is allowed to touch, and -- for the event sources -- what it is
+// woken for. Declared up front in its manifest, so the permission set is
+// inspectable before the app ever runs rather than being whatever its code
+// happens to call.
+//
+// Permission and subscription are the same bit on purpose: an app that may not
+// read the matrix has no business being woken when a frame arrives, and having
+// two lists that could disagree is a bug waiting to happen.
 enum AppCapability : uint16_t {
   kAppCapNone = 0,
   kAppCapReadMatrix = 1 << 0,
@@ -16,59 +21,93 @@ enum AppCapability : uint16_t {
   kAppCapEmitEvent = 1 << 2,
   kAppCapDriveLed = 1 << 3,
   kAppCapWriteFile = 1 << 4,
+  kAppCapTick = 1 << 5,      // periodic wakeup, independent of scanning
+  kAppCapButton = 1 << 6,    // action button edges
+  kAppCapPower = 1 << 7,     // charge/battery state changes
+  kAppCapLink = 1 << 8,      // gateway/hub connectivity changes
+  // Budget pressure is delivered to every app that asks for it, so an app can
+  // shed work before it is stopped. Ignoring it is a valid choice.
+  kAppCapBudget = 1 << 9,
 };
 
 struct AppManifest {
   const char* name = nullptr;
   const char* version = "0.0.0";
   uint16_t capabilities = kAppCapNone;
-  // Per-invocation time budget. This is the containment mechanism: the
-  // runtime has no preemption, so an app cannot be interrupted mid-frame --
+  // Per-invocation time allocation. This is the containment mechanism: the
+  // runtime has no preemption, so an app cannot be interrupted mid-call --
   // but it can be measured and, after repeated overruns, taken out of the
   // dispatch list before it costs enough frames to matter.
+  //
+  // Not a constant: AppGovernor divides the apps' share of CPU among whatever
+  // is actually running, so this shrinks as more apps are enabled.
   uint32_t frameBudgetUs = 500;
   const char* summary = "";
 };
 
-// Services the runtime lends an app for the duration of one frame. An app
-// never reaches into modules directly; everything it may do arrives here, and
-// each entry point re-checks the manifest's capability bits.
+// Why an app is being called. The scanned frame is one source among several --
+// an app that only subscribes to Tick keeps running while scanning is stopped,
+// and an app that only subscribes to Frame costs nothing when it is.
+enum class AppEventKind : uint8_t {
+  Frame = 0,   // a matrix frame was just scanned
+  Imu,         // a fresh IMU sample
+  Tick,        // periodic, whether or not the scanner is running
+  Button,      // action button edge
+  Power,       // charge or battery state change
+  Link,        // gateway/hub connectivity change
+  Budget,      // this app is over its allocation; see load/graceLeft
+  Custom,      // an event emitted by another app
+};
+
+// Services the runtime lends an app for the duration of one call. An app never
+// reaches into modules directly; everything it may do arrives here, and each
+// entry point re-checks the manifest's capability bits.
 class AppHost {
  public:
   virtual ~AppHost() = default;
-  // Named observation, surfaced through /proc/apps and app_status. Kept off
+  // Named observation, surfaced through /proc/apps and app_events. Kept off
   // the sensor wire format deliberately: adding an event block to
   // NHO/Arduino/1 would mean matching changes in the Gateway, Hub and
   // Backend parsers, which is a protocol decision, not an app-framework one.
   virtual void emitEvent(const char* app, const char* event, const String& detail) = 0;
+  // As above, but carrying a number -- the common case for a measurement.
+  virtual void emitValue(const char* app, const char* event, float value) = 0;
+  virtual void setLed(const char* app, uint8_t r, uint8_t g, uint8_t b) = 0;
   virtual void logLine(const char* app, const String& line) = 0;
 };
 
-// Read-only view of one scanned frame plus whatever else the app is cleared
-// for. Points at the scanner's own buffer -- valid only for this call.
-struct AppFrameContext {
-  const MatrixFrame* frame = nullptr;
-  const float* imuSample = nullptr;  // nullptr unless kAppCapReadImu and valid
+// One delivery. Read-only, and every pointer is valid only for this call.
+struct AppEvent {
+  AppEventKind kind = AppEventKind::Tick;
   uint32_t nowMs = 0;
+  // Sequence of the frame this event belongs to, so an app's output can be
+  // lined up against recorded samples afterwards.
+  uint32_t frameSeq = 0;
+  const MatrixFrame* frame = nullptr;  // nullptr unless kind == Frame
+  const float* imuSample = nullptr;    // nullptr unless kAppCapReadImu and valid
   AppHost* host = nullptr;
+  // Budget events only: measured cost over allocation, and how many more
+  // overruns this app has before it is stopped.
+  float load = 0.0f;
+  uint8_t graceLeft = 0;
 };
 
-// An application: compiled in, but with its own lifecycle, declared
-// permissions, measured cost, and the ability to be enabled, disabled or
-// killed at runtime without touching the rest of the firmware.
+// An application: its own lifecycle, declared permissions, measured cost, and
+// the ability to be enabled, disabled, suspended or killed at runtime without
+// touching the rest of the firmware.
 //
-// Deliberately static rather than dynamically loaded. On a device with no
-// preemption and a hard 60-120Hz sampling obligation, the thing that makes
-// third-party code safe is a bounded time budget, not a separate address
-// space -- and a budget works just as well for compiled-in code, at none of
-// the cost of an interpreter or a WASM runtime.
+// Apps are hosts for installed packages rather than compiled-in features. The
+// thing that makes third-party content safe here is a measured, shrinking time
+// allocation -- not a separate address space, which this MCU cannot offer and
+// which would not help against the failure that actually matters (missing a
+// sampling deadline).
 class App {
  public:
   virtual ~App() = default;
   virtual const AppManifest& manifest() const = 0;
   virtual bool start() { return true; }
   virtual void stop() {}
-  virtual void onFrame(const AppFrameContext& context) = 0;
+  virtual void onEvent(const AppEvent& event) = 0;
   // Optional app-specific state for /proc/apps; must be cheap.
   virtual String statusJson() const { return "{}"; }
 };

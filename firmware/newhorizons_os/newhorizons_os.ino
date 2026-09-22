@@ -17,7 +17,6 @@
 #include "EspNowStreamTransport.h"
 #include "ExternalLedController.h"
 #include "FaultRecorder.h"
-#include "FeatureExtractorApp.h"
 #include "FindMeClient.h"
 #include "ImuManager.h"
 #include "MagnetometerManager.h"
@@ -28,7 +27,9 @@
 #include "PacketBuilder.h"
 #include "PowerAnimation.h"
 #include "PowerGovernor.h"
-#include "RuleEngineApp.h"
+#include "AppGovernor.h"
+#include "AppRegistry.h"
+#include "FlowApp.h"
 #include "PowerManager.h"
 #include "PowerStateManager.h"
 #include "ProcFs.h"
@@ -65,8 +66,17 @@ nhos::Scheduler scheduler;
 nhos::ProcFs procFs;
 nhos::ServiceManager services;
 nhos::AppManager apps;
-nhos::FeatureExtractorApp featureApp;
-nhos::RuleEngineApp ruleApp;
+nhos::AppGovernor appGovernor;
+nhos::AppRegistry appRegistry;
+nhos::FlowApp flowApps[nhos::AppRegistry::kMaxSlots];
+nhos::FlowApp& flowApp = flowApps[0];  // slot 0, the target of app_load_flow
+// The last scanned frame, kept at file scope so the apps task can read it
+// after scan_stream has returned. Single-threaded, so this is a handover, not
+// sharing -- and it is the same buffer the scanner filled, not a copy.
+nhos::MatrixFrame lastFrame;
+bool lastFrameReady = false;
+float lastImuSample[nhos::kImuSampleFloats] = {0};
+bool lastImuValid = false;
 nhos::LedController leds;
 nhos::ExternalLedController externalLeds;
 nhos::DisplayManager displayManager;
@@ -339,6 +349,41 @@ bool streamingGateOk() {
   return espNowMode || wifi.isConnected();
 }
 
+// kAppCapDriveLed was declared in v1.0.0 but had nothing behind it, so an app
+// could ask for the LED and then discover there was no way to use it. This is
+// that way. AppManager re-checks the capability before calling through.
+void applyAppLed(uint8_t r, uint8_t g, uint8_t b) {
+  leds.setStatus(nhos::LedColor{r, g, b});
+}
+
+// Runs after scan_stream in the same tick, so the frame it dispatches is the
+// one just scanned and is still the scanner's own data.
+void taskApps() {
+  const uint32_t nowMs = millis();
+  appGovernor.update(scanner.health(), nowMs);
+
+  if (lastFrameReady) {
+    lastFrameReady = false;
+    nhos::AppEvent event;
+    event.kind = nhos::AppEventKind::Frame;
+    event.nowMs = nowMs;
+    event.frameSeq = lastFrame.seq;
+    event.frame = &lastFrame;
+    event.imuSample = lastImuValid ? lastImuSample : nullptr;
+    apps.dispatch(event);
+  }
+
+  static uint32_t lastTickMs = 0;
+  if (nowMs - lastTickMs >= 100) {
+    lastTickMs = nowMs;
+    nhos::AppEvent tick;
+    tick.kind = nhos::AppEventKind::Tick;
+    tick.nowMs = nowMs;
+    tick.frameSeq = lastFrame.seq;
+    apps.dispatch(tick);
+  }
+}
+
 void scanAndStreamIfDue() {
   if (!streamingGateOk()) {
     return;
@@ -369,11 +414,16 @@ void scanAndStreamIfDue() {
     batterySample.vbatMv = gaugeSample.vbatMv;
     batterySample.socCentiPercent = gaugeSample.socCentiPercent;
   }
-  // Apps see the frame here, where it already exists and is still live --
-  // after filtering/calibration, before it is serialised. AppManager times
-  // each one against its declared budget and kills a persistent overrunner,
-  // which is what keeps a misbehaving app from costing sample frames.
-  apps.onFrame(frame, imuSampleValid ? imuSample : nullptr, millis());
+  // Handed to the apps task rather than dispatched here. Apps are no longer
+  // passengers on the scan: they have their own scheduler entry, so an app
+  // that only wants a periodic tick keeps running when scanning stops, and
+  // the scan's cost stays attributable to the scan.
+  lastFrame = frame;
+  lastImuValid = imuSampleValid;
+  if (imuSampleValid) {
+    memcpy(lastImuSample, imuSample, sizeof(lastImuSample));
+  }
+  lastFrameReady = true;
 
   const bool epochValid = timeSync.hasSynced();
   const uint64_t epochMs = epochValid ? timeSync.nowEpochMs() : 0;
@@ -720,6 +770,8 @@ void registerRuntimeTasks() {
   scheduler.registerTask("magnetometer", &taskMagnetometer, false);
   scheduler.registerTask("scan_stream", &scanAndStreamIfDue, false);
   scheduler.registerTask("stream_queue", &sendQueuedPacketIfAny, false);
+  // MUST follow scan_stream: taskApps reads the frame it just produced.
+  scheduler.registerTask("apps", &taskApps, false);
   if (espNowMode) {
     scheduler.registerTask("espnow", &taskEspNow, false);
   } else {
@@ -948,8 +1000,9 @@ void setup() {
   control.setClock(&timeSync);
   control.setPowerGovernor(&powerGovernor);
   procFs.setPowerGovernor(&powerGovernor);
-  control.setAppManager(&apps, &ruleApp);
+  control.setAppManager(&apps, &flowApp, &appRegistry, &appGovernor);
   procFs.setAppManager(&apps);
+  procFs.setAppRegistry(&appRegistry);
   procFs.setClock(&timeSync);
   if (espNowMode) {
     // Route check_update/apply_update through the Hub-relayed OTA path --
@@ -985,17 +1038,37 @@ void setup() {
     }
   }
   apps.begin(&storage);
-  ruleApp.attach(storage);
-  apps.install(&featureApp);
-  apps.install(&ruleApp);
+  apps.setLedSink(&applyAppLed);
+  appGovernor.begin(&apps);
   {
-    // A rule graph is optional: most devices have no /files/apps/rules.json
-    // and simply run with an empty graph.
-    String ruleError;
-    if (ruleApp.loadFromFile("apps/rules.json", nhos::kMaxSensors, ruleError)) {
-      logBoot(String("rule_graph_loaded ") + ruleApp.statusJson());
-    } else if (ruleError != "file_not_found") {
-      logBoot(String("rule_graph_rejected reason=") + ruleError);
+    const uint16_t cellCount =
+        scanner.health().pointCount != 0 ? scanner.health().pointCount : nhos::kMaxSensors;
+    static const char* kSlotNames[nhos::AppRegistry::kMaxSlots] = {"flow", "flow1", "flow2",
+                                                                   "flow3"};
+    nhos::FlowApp* slotPtrs[nhos::AppRegistry::kMaxSlots];
+    for (uint8_t i = 0; i < nhos::AppRegistry::kMaxSlots; ++i) {
+      flowApps[i].attach(storage);
+      // MUST precede install(): install() indexes by name and persists
+      // app_en_<name>, so a slot renamed afterwards would be unreachable.
+      flowApps[i].setIdentity(kSlotNames[i]);
+      slotPtrs[i] = &flowApps[i];
+    }
+    for (uint8_t i = 0; i < nhos::AppRegistry::kMaxSlots; ++i) {
+      apps.install(slotPtrs[i]);
+    }
+    appRegistry.begin(storage, apps, slotPtrs, cellCount);
+    appRegistry.restore();
+    logBoot(String("boot_stage=packages_ready ") + appRegistry.statusJson());
+
+    // A standalone graph is optional: a device with no packages and no
+    // /files/apps/flow.json simply runs with empty slots.
+    if (!flowApp.loaded()) {
+      String flowError;
+      if (flowApp.loadFromFile("apps/flow.json", cellCount, flowError)) {
+        logBoot(String("flow_graph_loaded ") + flowApp.statusJson());
+      } else if (flowError != "file_not_found") {
+        logBoot(String("flow_graph_rejected reason=") + flowError);
+      }
     }
   }
   logBoot(String("boot_stage=apps_ready ") + apps.statusJson());

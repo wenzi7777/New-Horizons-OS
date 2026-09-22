@@ -258,38 +258,232 @@ class AppFrameworkTests(unittest.TestCase):
     def test_capabilities_are_enforced_by_the_host_not_the_app(self):
         impl = read("AppManager.cpp")
 
-        dispatch = impl[impl.index("void AppManager::onFrame") : impl.index("void AppManager::emitEvent")]
-        self.assertIn("kAppCapReadMatrix) != 0 ? &frame : nullptr", dispatch)
-        self.assertIn("kAppCapReadImu) != 0 ? imuSample : nullptr", dispatch)
+        dispatch = impl[impl.index("void AppManager::dispatch") : impl.index("void AppManager::recordEvent")]
+        # An app that never declared a capability is not handed the data, even
+        # if some other bit subscribed it to the event.
+        self.assertIn("kAppCapReadMatrix) == 0", dispatch)
+        self.assertIn("delivered.frame = nullptr;", dispatch)
+        self.assertIn("kAppCapReadImu) == 0", dispatch)
+        self.assertIn("delivered.imuSample = nullptr;", dispatch)
 
-    def test_rule_graph_cost_is_checked_before_it_ever_runs(self):
-        impl = read("RuleEngineApp.cpp")
+    def test_subscription_and_permission_are_the_same_bit(self):
+        impl = read("AppManager.cpp")
 
-        parse = impl[impl.index("bool RuleEngineApp::parse") : impl.index("bool RuleEngineApp::loadFromFile")]
+        # Two separate lists could disagree; one bit cannot. An app that may
+        # not read the matrix is simply never woken for a frame.
+        table = impl[impl.index("uint16_t subscriptionBit") : impl.index("}  // namespace")]
+        self.assertIn("case AppEventKind::Frame: return kAppCapReadMatrix;", table)
+        self.assertIn("case AppEventKind::Imu: return kAppCapReadImu;", table)
+
+    def test_flow_graph_cost_is_checked_before_it_ever_runs(self):
+        impl = read("FlowApp.cpp")
+
+        parse = impl[impl.index("bool FlowApp::parse") : impl.index("bool FlowApp::loadFromFile")]
         self.assertIn("estimateUs(cellCount)", parse)
         self.assertIn("over_budget:", parse)
         # A rejected graph must not disturb the one already running.
         self.assertIn("nodeCount_ = previousCount;", parse)
 
-    def test_rule_graphs_cannot_express_a_cycle(self):
-        impl = read("RuleEngineApp.cpp")
+    def test_flow_graphs_cannot_express_a_cycle(self):
+        impl = read("FlowApp.cpp")
 
-        parse = impl[impl.index("bool RuleEngineApp::parse") : impl.index("bool RuleEngineApp::loadFromFile")]
-        self.assertIn("input >= count", parse)
+        parse = impl[impl.index("bool FlowApp::parse") : impl.index("bool FlowApp::loadFromFile")]
         self.assertIn("input_out_of_order", parse)
+        # Every reference, including the multi-input forms, is checked against
+        # the count of nodes parsed SO FAR.
+        self.assertEqual(parse.count("value >= count") + parse.count("input >= count"), 2)
 
     def test_threshold_has_hysteresis_so_events_do_not_chatter(self):
-        impl = read("RuleEngineApp.cpp")
+        impl = read("FlowApp.cpp")
 
         self.assertIn("releaseAt", impl)
         self.assertIn("node.boolResult ? (input > releaseAt) : (input >= node.value)", impl)
 
-    def test_apps_run_where_the_frame_exists(self):
-        sketch = read("newhorizons_os.ino")
+    def test_gate_is_costed_at_its_worst_case(self):
+        impl = read("FlowApp.cpp")
 
+        estimate = impl[impl.index("uint32_t FlowApp::estimateUs") : impl.index("bool FlowApp::parse")]
+        # Costing the average would understate the bound on exactly the frames
+        # where the gate does not fire, so the estimator has no Gate case at
+        # all -- every node is charged as if it runs.
+        self.assertIn("never skips", estimate)
+        self.assertNotIn("FlowOp::Gate", estimate)
+
+
+class AppEventModelTests(unittest.TestCase):
+    """Apps are their own scheduler entry, not passengers on the scan."""
+
+    def test_apps_have_their_own_task(self):
+        sketch = read("newhorizons_os.ino")
+        self.assertIn('scheduler.registerTask("apps", &taskApps, false)', sketch)
+
+    def test_the_apps_task_runs_after_the_scan_that_feeds_it(self):
+        sketch = read("newhorizons_os.ino")
+        # Registration order IS dispatch order, so the wrong order would hand
+        # apps the PREVIOUS frame -- with no error, just data one frame stale.
+        self.assertLess(sketch.index('registerTask("scan_stream"'),
+                        sketch.index('registerTask("apps"'))
+
+    def test_the_frame_is_handed_over_not_dispatched_inline(self):
+        sketch = read("newhorizons_os.ino")
         scan = sketch[sketch.index("void scanAndStreamIfDue()") : sketch.index("void sendQueuedPacketIfAny()")]
-        self.assertIn("apps.onFrame(frame,", scan)
-        self.assertLess(scan.index("apps.onFrame("), scan.index("buildMatrixPacketHeader"))
+        self.assertIn("lastFrameReady = true;", scan)
+        self.assertNotIn("apps.dispatch(", scan)
+
+    def test_dispatched_frames_carry_their_sequence(self):
+        sketch = read("newhorizons_os.ino")
+        task = sketch[sketch.index("void taskApps()") : sketch.index("void scanAndStreamIfDue()")]
+        # frameSeq is what lets an app's output be lined up against recorded
+        # samples afterwards.
+        self.assertIn("event.frameSeq = lastFrame.seq;", task)
+
+    def test_a_tick_only_app_does_not_depend_on_scanning(self):
+        sketch = read("newhorizons_os.ino")
+        task = sketch[sketch.index("void taskApps()") : sketch.index("void scanAndStreamIfDue()")]
+        # The tick is emitted outside the lastFrameReady branch.
+        self.assertGreater(task.index("AppEventKind::Tick"), task.index("lastFrameReady = false;"))
+
+    def test_slot_identity_is_set_before_install(self):
+        sketch = read("newhorizons_os.ino")
+        # install() indexes by manifest().name and persists app_en_<name>, so a
+        # slot renamed afterwards would be unreachable forever.
+        self.assertLess(sketch.index("setIdentity(kSlotNames[i])"),
+                        sketch.index("apps.install(slotPtrs[i])"))
+
+    def test_the_flow_engine_has_per_instance_identity(self):
+        header = read("FlowApp.h")
+        impl = read("FlowApp.cpp")
+        # A file-static manifest cannot name four coexisting instances, and
+        # AppManager::install() rejects the second one by name.
+        self.assertNotIn("const AppManifest kManifest", impl)
+        self.assertIn("AppManifest manifest_;", header)
+        self.assertIn("FlowApp(const FlowApp&) = delete;", header)
+
+    def test_events_are_attributed_to_the_emitting_slot(self):
+        impl = read("FlowApp.cpp")
+        evaluate = impl[impl.index("void FlowApp::evaluate") : impl.index("void FlowApp::onEvent")]
+        emit = evaluate[evaluate.index("case FlowOp::Emit:") : evaluate.index("case FlowOp::EmitValue:")]
+        # Four slots share this class, so a file-static name would credit every
+        # slot's events to the first one.
+        self.assertIn("emitEvent(manifest_.name", emit)
+
+
+class AppBudgetTests(unittest.TestCase):
+    """Scanning wins. Apps are what gives way."""
+
+    def test_the_governor_reads_scan_health_not_scheduler_load(self):
+        impl = read("AppGovernor.cpp")
+        header = read("AppGovernor.h")
+        # A tick that performs a scan legitimately consumes most of a frame, so
+        # busyPermille would fire constantly; overrunFrames is the authority on
+        # missed sampling deadlines.
+        self.assertIn("health.overrunFrames", impl)
+        self.assertNotIn("busyPermille", impl)
+        self.assertIn("NOT Scheduler::busyPermille()", header)
+
+    def test_giving_ground_is_faster_than_taking_it_back(self):
+        impl = read("AppGovernor.cpp")
+        header = read("AppGovernor.h")
+        self.assertIn("allowanceUs_ >> kDecreaseShift", impl)
+        self.assertIn("ceilingUs_ / kIncreaseSteps", impl)
+        # Multiplicative decrease, additive increase: the asymmetry is what
+        # stops the loop oscillating.
+        self.assertIn("kIncreaseSteps = 5", header)
+
+    def test_the_floor_is_zero_apps_not_a_degraded_scan(self):
+        impl = read("AppGovernor.cpp")
+        self.assertIn("apply(reduced > 100 ? reduced : 0, nowMs)", impl)
+
+    def test_suspension_is_not_a_kill(self):
+        header = read("AppManager.h")
+        impl = read("AppManager.cpp")
+        # A suspension that needed an operator to clear it would mean one busy
+        # moment takes an app away permanently.
+        self.assertIn("Suspended = 4", header)
+        budget = impl[impl.index("void AppManager::setTotalBudgetUs") : impl.index("void AppManager::reallocate")]
+        self.assertIn("AppState::Suspended", budget)
+        self.assertIn('recordEvent(slots_[i].app->manifest().name, "resumed"', budget)
+
+    def test_a_resumption_does_not_flap(self):
+        impl = read("AppGovernor.cpp")
+        header = read("AppGovernor.h")
+        self.assertIn("kMinSuspendMs", impl)
+        self.assertIn("kMinSuspendMs = 5000", header)
+
+    def test_allocation_is_divided_among_what_is_actually_running(self):
+        impl = read("AppManager.cpp")
+        realloc = impl[impl.index("void AppManager::reallocate") : impl.index("void AppManager::warnOverBudget")]
+        self.assertIn("totalBudgetUs_ / running", realloc)
+
+    def test_the_app_is_warned_before_it_is_stopped(self):
+        impl = read("AppManager.cpp")
+        warn = impl[impl.index("void AppManager::warnOverBudget") : impl.index("void AppManager::dispatch")]
+        # Both audiences: the operator has levers the app does not, and the app
+        # may shed work if it asked to be told.
+        self.assertIn('recordEvent(manifest.name, "over_budget"', warn)
+        self.assertIn("kAppCapBudget", warn)
+        self.assertIn("AppEventKind::Budget", warn)
+
+    def test_budget_events_are_not_charged_against_the_budget(self):
+        impl = read("AppManager.cpp")
+        dispatch = impl[impl.index("void AppManager::dispatch") : impl.index("void AppManager::recordEvent")]
+        # Charging the runtime's own warning against the allocation it is
+        # warning about would be circular.
+        self.assertIn("if (event.kind == AppEventKind::Budget) {", dispatch)
+
+
+class AppRegistryTests(unittest.TestCase):
+    def test_package_ids_fit_the_spiffs_path_cap(self):
+        header = read("AppPackage.h")
+        impl = read("AppPackage.cpp")
+        # "/files/" + "apps/" + id + ".nha" must stay within 31 characters.
+        self.assertIn("kIdLen = 16", header)
+        self.assertIn("31-character path limit", impl)
+
+    def test_a_package_is_validated_before_it_is_indexed(self):
+        impl = read("AppRegistry.cpp")
+        install = impl[impl.index("bool AppRegistry::install") : impl.index("bool AppRegistry::uninstall")]
+        self.assertLess(install.index("parseManifest"), install.index("saveIndex()"))
+        # Dry-run, so a broken package is refused at install rather than
+        # discovered at activation.
+        self.assertIn("graph_invalid:", install)
+        self.assertLess(install.index("scratch.loadFromJson"), install.index("saveIndex()"))
+
+    def test_the_manifest_id_must_match_the_filename(self):
+        impl = read("AppRegistry.cpp")
+        install = impl[impl.index("bool AppRegistry::install") : impl.index("bool AppRegistry::uninstall")]
+        # Otherwise uninstall and reindex key on a name nothing can remove.
+        self.assertIn("id_path_mismatch:", install)
+
+    def test_index_writes_are_not_assumed_atomic(self):
+        impl = read("AppRegistry.cpp")
+        load = impl[impl.index("bool AppRegistry::loadIndex") : impl.index("void AppRegistry::restore")]
+        # writeTextFileAtomic removes the target before renaming, so the tmp
+        # file is the only evidence a torn write leaves behind.
+        self.assertIn("kIndexTmpPath", load)
+
+    def test_a_lost_index_is_rebuilt_from_the_packages(self):
+        impl = read("AppRegistry.cpp")
+        restore = impl[impl.index("void AppRegistry::restore") : impl.index("String AppRegistry::statusJson")]
+        self.assertIn("reindex(", restore)
+
+    def test_uninstall_writes_the_index_before_deleting_the_file(self):
+        impl = read("AppRegistry.cpp")
+        uninstall = impl[impl.index("bool AppRegistry::uninstall") : impl.index("bool AppRegistry::bind")]
+        # An orphan file is recoverable; an index entry pointing at a deleted
+        # file is not.
+        self.assertLess(uninstall.index("saveIndex()"), uninstall.index("deleteFile"))
+
+    def test_a_bad_graph_does_not_stop_the_device_booting(self):
+        impl = read("AppRegistry.cpp")
+        restore = impl[impl.index("void AppRegistry::restore") : impl.index("String AppRegistry::statusJson")]
+        self.assertIn("entry.loadFailed = true;", restore)
+        self.assertIn("app_restore_failed", restore)
+
+    def test_a_package_cannot_widen_its_own_permissions(self):
+        impl = read("FlowApp.cpp")
+        apply = impl[impl.index("void FlowApp::applyPackageManifest") : impl.index("FlowOp FlowApp::opFromName")]
+        self.assertIn("capabilities & allowed", apply)
 
 
 if __name__ == "__main__":
