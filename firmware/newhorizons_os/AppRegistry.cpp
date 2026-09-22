@@ -140,14 +140,19 @@ bool AppRegistry::install(const String& path, const String& expectedSha256, bool
   }
 
   // Dry-run the graph before it is indexed, so a broken package is refused at
-  // install time rather than discovered at activation.
-  FlowApp scratch;
-  scratch.setIdentity("scratch", manifest.declaredBudgetUs != 0 ? manifest.declaredBudgetUs
-                                                                : FlowApp::kDefaultBudgetUs);
-  String graphError;
-  if (!scratch.loadFromJson(json, path, cellCount_, graphError)) {
-    error = String("graph_invalid:") + graphError;
-    return false;
+  // install time rather than discovered at activation. A readout has no graph
+  // -- the device stores and reports it without interpreting it.
+  uint32_t estimatedUs = 0;
+  if (manifest.kind != kAppPackageReadout) {
+    FlowApp scratch;
+    scratch.setIdentity("scratch", manifest.declaredBudgetUs != 0 ? manifest.declaredBudgetUs
+                                                                  : FlowApp::kDefaultBudgetUs);
+    String graphError;
+    if (!scratch.loadFromJson(json, path, cellCount_, graphError)) {
+      error = String("graph_invalid:") + graphError;
+      return false;
+    }
+    estimatedUs = scratch.estimatedUs();
   }
 
   int8_t index = existing;
@@ -167,7 +172,7 @@ bool AppRegistry::install(const String& path, const String& expectedSha256, bool
   entry.manifest = manifest;
   copyField(entry.manifest.sha256, sizeof(entry.manifest.sha256), sha);
   entry.sizeBytes = size;
-  entry.estimatedUs = scratch.estimatedUs();
+  entry.estimatedUs = estimatedUs;
   entry.loadFailed = false;
   if (existing < 0) {
     entry.slot = -1;
@@ -254,6 +259,12 @@ bool AppRegistry::activate(const String& id, int8_t slot, String& error) {
     return false;
   }
   Entry& entry = entries_[index];
+  if (entry.manifest.kind == kAppPackageReadout) {
+    // Nothing to dispatch. Saying so is better than binding it to a slot that
+    // would then sit idle and mislead anyone reading the roster.
+    error = "not_activatable:readout";
+    return false;
+  }
   if (entry.slot >= 0) {
     error = String("already_active:") + String(entry.slot);
     return false;
@@ -440,6 +451,8 @@ bool AppRegistry::saveIndex() {
     json += jsonEscape(String(entry.manifest.minOs));
     json += "\",\"sha256\":\"";
     json += jsonEscape(String(entry.manifest.sha256));
+    json += "\",\"kind\":\"";
+    json += entry.manifest.kind == kAppPackageReadout ? "readout" : "flow";
     json += "\",\"capabilities\":";
     json += String(entry.manifest.capabilities);
     json += ",\"budget_us\":";
@@ -501,6 +514,9 @@ bool AppRegistry::loadIndex() {
               jsonExtractString(object, "min_os", "v1.0.0"));
     copyField(entry.manifest.sha256, sizeof(entry.manifest.sha256),
               jsonExtractString(object, "sha256", ""));
+    entry.manifest.kind =
+        jsonExtractString(object, "kind", "flow") == "readout" ? kAppPackageReadout
+                                                               : kAppPackageFlow;
     long number = 0;
     if (jsonExtractInt(object, "capabilities", number)) {
       entry.manifest.capabilities = static_cast<uint16_t>(number);
@@ -548,6 +564,10 @@ void AppRegistry::restore() {
   for (uint8_t i = 0; i < kMaxPackages; ++i) {
     Entry& entry = entries_[i];
     if (!entry.valid || entry.slot < 0) continue;
+    if (entry.manifest.kind == kAppPackageReadout) {
+      entry.slot = -1;
+      continue;
+    }
     const int8_t wanted = entry.slot;
     entry.slot = -1;
     String json;
@@ -610,6 +630,8 @@ String AppRegistry::statusJson() const {
     json += jsonEscape(String(entry.manifest.minOs));
     json += "\",\"sha256\":\"";
     json += jsonEscape(String(entry.manifest.sha256));
+    json += "\",\"kind\":\"";
+    json += entry.manifest.kind == kAppPackageReadout ? "readout" : "flow";
     json += "\",\"capabilities\":";
     json += String(entry.manifest.capabilities);
     json += ",\"size\":";

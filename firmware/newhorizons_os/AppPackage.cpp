@@ -107,9 +107,10 @@ bool AppPackage::parseManifest(const String& json, AppPackageManifest& out, Stri
     return false;
   }
   const String kind = jsonExtractString(json, "kind", "flow");
-  if (kind != "flow") {
-    // Reserved for a future runtime. An older firmware must refuse a kind it
-    // does not understand rather than misread it as a flow graph.
+  const bool isReadout = kind == "readout";
+  if (kind != "flow" && !isReadout) {
+    // An older firmware must refuse a kind it does not understand rather than
+    // misread it as a flow graph.
     error = String("unsupported_kind:") + kind;
     return false;
   }
@@ -125,7 +126,7 @@ bool AppPackage::parseManifest(const String& json, AppPackageManifest& out, Stri
   }
 
   out = AppPackageManifest();
-  out.kind = kAppPackageFlow;
+  out.kind = isReadout ? kAppPackageReadout : kAppPackageFlow;
 
   const String id = jsonExtractString(manifest, "id", "");
   if (id.length() == 0) {
@@ -181,7 +182,8 @@ bool AppPackage::parseManifest(const String& json, AppPackageManifest& out, Stri
     }
   }
   if (out.capabilities == kAppCapNone) {
-    out.capabilities = kAppCapReadMatrix | kAppCapEmitEvent;
+    // A readout runs nowhere on the device, so it is granted nothing.
+    out.capabilities = isReadout ? kAppCapNone : (kAppCapReadMatrix | kAppCapEmitEvent);
   }
   // A flow package has no business writing files, whatever it declares.
   if ((out.capabilities & kAppCapWriteFile) != 0) {

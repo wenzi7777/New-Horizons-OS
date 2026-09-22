@@ -506,6 +506,48 @@ class HardwareRegressionTests(unittest.TestCase):
         self.assertIn("kMinAppSharePermille", update)
 
 
+class ReadoutPackageTests(unittest.TestCase):
+    """A readout is stored by the device but never runs on it."""
+
+    def test_the_kind_is_a_discriminator_not_an_assumption(self):
+        impl = read("AppPackage.cpp")
+        # An older firmware must refuse a kind it does not understand rather
+        # than misread it as a flow graph.
+        self.assertIn('kind != "flow" && !isReadout', impl)
+        self.assertIn("unsupported_kind:", impl)
+
+    def test_a_readout_is_granted_nothing(self):
+        impl = read("AppPackage.cpp")
+        # It runs nowhere on the device, so it needs no capability at all.
+        self.assertIn("isReadout ? kAppCapNone :", impl)
+
+    def test_a_readout_has_no_graph_to_dry_run(self):
+        impl = read("AppRegistry.cpp")
+        install = impl[impl.index("bool AppRegistry::install"):impl.index("bool AppRegistry::uninstall")]
+        self.assertIn("manifest.kind != kAppPackageReadout", install)
+
+    def test_a_readout_cannot_be_bound_to_a_slot(self):
+        impl = read("AppRegistry.cpp")
+        activate = impl[impl.index("bool AppRegistry::activate"):impl.index("bool AppRegistry::deactivate")]
+        # Binding it would leave a slot that looks occupied but dispatches
+        # nothing, which misleads anyone reading the roster.
+        self.assertIn("not_activatable:readout", activate)
+
+    def test_restore_never_binds_a_readout(self):
+        impl = read("AppRegistry.cpp")
+        restore = impl[impl.index("void AppRegistry::restore"):impl.index("String AppRegistry::statusJson")]
+        self.assertIn("kAppPackageReadout", restore)
+
+    def test_the_index_persists_the_kind(self):
+        impl = read("AppRegistry.cpp")
+        # Without this a readout comes back as a flow after a reboot, and the
+        # device would then try to run it.
+        save = impl[impl.index("bool AppRegistry::saveIndex"):impl.index("bool AppRegistry::loadIndex")]
+        load = impl[impl.index("bool AppRegistry::loadIndex"):impl.index("void AppRegistry::restore")]
+        self.assertIn('\\"kind\\":', save)
+        self.assertIn('jsonExtractString(object, "kind", "flow")', load)
+
+
 class CostModelTests(unittest.TestCase):
     def test_the_constants_are_the_measured_ones(self):
         header = read("FlowApp.h")

@@ -31,9 +31,15 @@ struct AppPackageManifest {
   uint32_t declaredBudgetUs = 0;  // 0 -> use the slot's allocation
 };
 
-// Package "kind" discriminator. v1.1.0 ships exactly one; the field exists so
-// a later kind cannot be mistaken for a flow graph by an older firmware.
-enum AppPackageKind : uint8_t { kAppPackageFlow = 0 };
+// Package "kind" discriminator, so a kind this firmware does not understand is
+// refused rather than misread as a flow graph.
+//
+// A readout is a declarative view of what the device measures. It is stored
+// and reported like any other package -- so what a device has travels with the
+// device rather than living in whichever Desktop installed it -- but it is
+// never dispatched: no slot, no budget, no frame time. The firmware does not
+// interpret its contents at all; the Desktop renders it.
+enum AppPackageKind : uint8_t { kAppPackageFlow = 0, kAppPackageReadout = 1 };
 
 class AppPackage {
  public:
