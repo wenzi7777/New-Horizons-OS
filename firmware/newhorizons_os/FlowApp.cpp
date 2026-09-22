@@ -240,8 +240,12 @@ bool FlowApp::parse(const String& json, uint16_t cellCount, String& error) {
       uint8_t parsed = 0;
       int cursor = 0;
       while (parsed < 3 && cursor < static_cast<int>(inputArray.length())) {
+        // The captured value still carries its enclosing brackets, so they
+        // have to be skipped like any other separator -- stopping at '['
+        // silently left every multi-input operator with no inputs at all.
         while (cursor < static_cast<int>(inputArray.length()) &&
-               (inputArray[cursor] == ' ' || inputArray[cursor] == ',')) {
+               (inputArray[cursor] == ' ' || inputArray[cursor] == ',' ||
+                inputArray[cursor] == '[' || inputArray[cursor] == ']')) {
           ++cursor;
         }
         int start = cursor;

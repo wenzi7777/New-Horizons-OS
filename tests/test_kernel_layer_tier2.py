@@ -241,12 +241,16 @@ class AppFrameworkTests(unittest.TestCase):
         self.assertIn("slot.state = AppState::Installed;", install)
         self.assertIn("enabledKey", install)
 
-    def test_budget_overruns_kill_the_app(self):
+    def test_budget_overruns_stop_the_app(self):
         impl = read("AppManager.cpp")
         header = read("AppManager.h")
 
         self.assertIn("kMaxConsecutiveOverruns = 5", header)
-        self.assertIn("slot.state = AppState::Killed;", impl)
+        # Killed when it blew an allocation nobody moved; Suspended when the
+        # governor had just cut it. See HardwareRegressionTests for why that
+        # distinction is not cosmetic.
+        self.assertIn("slot.consecutiveOverruns >= kMaxConsecutiveOverruns", impl)
+        self.assertIn("AppState::Killed", impl)
 
     def test_a_killed_app_is_not_silently_re_enabled(self):
         impl = read("AppManager.cpp")
@@ -430,6 +434,88 @@ class AppBudgetTests(unittest.TestCase):
         # Charging the runtime's own warning against the allocation it is
         # warning about would be circular.
         self.assertIn("if (event.kind == AppEventKind::Budget) {", dispatch)
+
+
+class HardwareRegressionTests(unittest.TestCase):
+    """Bugs that only showed up on a real device.
+
+    Each of these passed every desk check and then failed on hardware, so each
+    one gets an assertion rather than a memory.
+    """
+
+    def test_multi_input_parsing_skips_the_array_brackets(self):
+        impl = read("FlowApp.cpp")
+        # jsonExtractArray hands back the value WITH its brackets, so a parser
+        # that stops at a non-digit stopped at '[' -- and every multi-input
+        # operator (add, sub, mul, div, min, max, select, gate, emit_value)
+        # silently had no inputs at all.
+        parse = impl[impl.index("String inputArray;"):impl.index("float number = 0;")]
+        self.assertIn("'['", parse)
+        self.assertIn("']'", parse)
+
+    def test_reindex_uses_paths_it_can_reopen(self):
+        registry = read("AppRegistry.cpp")
+        storage_h = read("Storage.h")
+        # SPIFFS is flat, so the directory is part of the filename and
+        # File::name() drops it: listFiles() reports "x.nha" for a file that
+        # can only be opened as "apps/x.nha".
+        self.assertIn("listFilePaths", registry)
+        self.assertNotIn('listFiles("user")', registry)
+        self.assertIn("std::vector<String> listFilePaths", storage_h)
+
+    def test_listed_paths_are_relative_to_the_scope_root(self):
+        impl = read("Storage.cpp")
+        listing = impl[impl.index("std::vector<String> Storage::listFilePaths"):
+                       impl.index("String Storage::listFiles")]
+        # scopedPath(scope, "") has no trailing separator, so a strip of just
+        # its length leaves a leading '/' that scopedPath cannot rebuild.
+        self.assertIn('const String prefix = root + "/";', listing)
+
+    def test_a_fruitless_rebuild_does_not_cement_an_empty_index(self):
+        registry = read("AppRegistry.cpp")
+        restore = registry[registry.index("void AppRegistry::restore"):
+                           registry.index("String AppRegistry::statusJson")]
+        # An empty index written by a failed rebuild loads cleanly forever,
+        # so the device never tries to rebuild again.
+        self.assertIn("persistWhenEmpty=*/false", restore)
+        self.assertIn("if (recovered == 0 && !persistWhenEmpty)", registry)
+
+    def test_a_cut_allocation_suspends_rather_than_kills(self):
+        impl = read("AppManager.cpp")
+        dispatch = impl[impl.index("void AppManager::dispatch"):
+                        impl.index("void AppManager::recordEvent")]
+        # Observed on hardware: the governor cut the allocation and two apps
+        # were Killed for overrunning the new, smaller one. Killed needs an
+        # operator, so a transient scan overload disabled them permanently.
+        self.assertIn("throttled_ ? AppState::Suspended : AppState::Killed", dispatch)
+
+    def test_moving_the_yardstick_clears_the_tally(self):
+        impl = read("AppManager.cpp")
+        setter = impl[impl.index("void AppManager::setTotalBudgetUs"):
+                      impl.index("void AppManager::reallocate")]
+        self.assertIn("slots_[i].consecutiveOverruns = 0;", setter)
+
+    def test_an_unreachable_target_does_not_cost_the_apps_anything(self):
+        impl = read("AppGovernor.cpp")
+        update = impl[impl.index("void AppGovernor::update"):]
+        # If one scan already takes longer than the whole frame period, no
+        # amount of app-shedding can make the target reachable. Verified on
+        # hardware: the scan rate was identical with apps running and with
+        # every one of them suspended.
+        self.assertIn("health.lastScanDurationUs >= periodUs", update)
+        self.assertIn("kMinAppSharePermille", update)
+
+
+class CostModelTests(unittest.TestCase):
+    def test_the_constants_are_the_measured_ones(self):
+        header = read("FlowApp.h")
+        # The originals were guesses and under-estimated the real cost by 1.4x
+        # to 9x, which made the install-time estimate optimistic exactly where
+        # an author relies on it.
+        self.assertIn("kCellOpNsPerCell = 300", header)
+        self.assertIn("kFeaturesNsPerCell = 500", header)
+        self.assertIn("kScalarOpNs = 600", header)
+        self.assertIn("MEASURED", header)
 
 
 class AppRegistryTests(unittest.TestCase):

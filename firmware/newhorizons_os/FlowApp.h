@@ -85,12 +85,20 @@ class FlowApp : public App {
  public:
   static constexpr uint8_t kMaxNodes = 12;
   // Per-cell cost of a sweep operator, and flat cost of a scalar one.
-  // Deliberate over-estimates -- the point is a bound, not a prediction.
-  // These constants are a compatibility contract with the App Library's
-  // tools/opset.py; if they drift, an app passes there and is refused here.
-  static constexpr uint32_t kCellOpNsPerCell = 60;
-  static constexpr uint32_t kFeaturesNsPerCell = 120;
-  static constexpr uint32_t kScalarOpNs = 400;
+  //
+  // MEASURED on v1.5.F (ESP32-S3 @ 240MHz, 14x14): a flat sweep runs about
+  // 86ns per cell, a features sweep about 235ns, and region_sum -- which does
+  // two-dimensional index arithmetic per cell -- considerably more. The
+  // original 60/120/400 were guesses and under-estimated by 1.4x to 9x, which
+  // made the install-time estimate optimistic exactly where it was relied on.
+  // These values carry roughly 2x margin over the measurements.
+  //
+  // A compatibility contract with the App Library's tools/opset.py: if they
+  // drift, an app passes there and is refused here, and the author cannot see
+  // the other side. tests/test_firmware_contract.py pins them together.
+  static constexpr uint32_t kCellOpNsPerCell = 300;
+  static constexpr uint32_t kFeaturesNsPerCell = 500;
+  static constexpr uint32_t kScalarOpNs = 600;
   // 128 frames is ~2s at 60Hz -- long enough to average a gait cycle, and
   // the pool is per slot, so every float here is paid for four times over.
   static constexpr uint16_t kMaxWindow = 128;

@@ -21,7 +21,7 @@ void AppGovernor::apply(uint32_t allowanceUs, uint32_t nowMs) {
   }
   allowanceUs_ = allowanceUs;
   if (apps_ != nullptr) {
-    apps_->setTotalBudgetUs(allowanceUs_);
+    apps_->setTotalBudgetUs(allowanceUs_, allowanceUs_ < ceilingUs_);
   }
 }
 
@@ -53,6 +53,22 @@ void AppGovernor::update(const ScanHealth& health, uint32_t nowMs) {
                            health.actualScanFps + (targetFps / 10) < targetFps;
 
   if (missedDeadlines || belowTarget) {
+    // Are the apps actually implicated?
+    //
+    // If a single scan already takes longer than the whole frame period, the
+    // target is unreachable on the scan's own account and no amount of
+    // app-shedding can change that. Verified on hardware: at an unreachable
+    // target_fps the scan rate was identical with four apps running and with
+    // all of them suspended.
+    if (health.lastScanDurationUs >= periodUs) {
+      return;
+    }
+    // And if what they spend is negligible against the frame, cutting them is
+    // punishment without meaningful benefit.
+    const uint32_t spent = apps_ != nullptr ? apps_->lastTotalUs() : 0;
+    if (periodUs == 0 || (spent * 1000UL) / periodUs < kMinAppSharePermille) {
+      return;
+    }
     ++shrinks_;
     const uint32_t reduced = allowanceUs_ >> kDecreaseShift;
     // Below a useful floor there is no point pretending: take it all away and

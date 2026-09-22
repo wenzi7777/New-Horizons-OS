@@ -59,7 +59,12 @@ class AppManager : public AppHost {
   // --- allocation, driven by AppGovernor -----------------------------------
   // Sets the total the apps may spend per dispatch and divides it among the
   // running ones. Zero suspends them all.
-  void setTotalBudgetUs(uint32_t totalUs);
+  //
+  // `throttled` says the governor has cut this below its ceiling. While that
+  // holds, an app that overruns is SUSPENDED rather than killed: it is being
+  // measured against a yardstick the system just moved, and killing it would
+  // need an operator to undo something the app did not do.
+  void setTotalBudgetUs(uint32_t totalUs, bool throttled = false);
   uint32_t totalBudgetUs() const { return totalBudgetUs_; }
   uint8_t runningCount() const;
   uint32_t lastTotalUs() const { return lastTotalUs_; }
@@ -125,6 +130,7 @@ class AppManager : public AppHost {
   uint32_t dispatches_ = 0;
   uint32_t frameSeq_ = 0;
   uint32_t totalBudgetUs_ = 0;
+  bool throttled_ = false;
   uint32_t lastTotalUs_ = 0;
   uint32_t maxTotalUs_ = 0;
   LedSink ledSink_ = nullptr;

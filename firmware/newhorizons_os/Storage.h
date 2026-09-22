@@ -34,6 +34,11 @@ class Storage {
   size_t fileSize(const String& scope, const String& path);
   bool deleteFile(const String& scope, const String& path);
   String listFiles(const String& scope);
+  // Full scope-relative paths ("apps/x.nha"), not the basenames
+  // listFiles() reports. SPIFFS is flat, so the directory is part of
+  // the filename and File::name() drops it -- which makes a listing
+  // useless for anything that has to open the file again.
+  std::vector<String> listFilePaths(const String& scope);
   String storageStatusJson();
 
   void configureLog(bool enabled, size_t maxBytes, const String& level);

@@ -337,7 +337,8 @@ bool AppRegistry::verify(const String& id, String& computedSha, bool& match, Str
   return true;
 }
 
-bool AppRegistry::reindex(uint16_t& recovered, uint16_t& dropped, String& error) {
+bool AppRegistry::reindex(uint16_t& recovered, uint16_t& dropped, String& error,
+                          bool persistWhenEmpty) {
   if (storage_ == nullptr) {
     error = "storage_unavailable";
     return false;
@@ -358,17 +359,12 @@ bool AppRegistry::reindex(uint16_t& recovered, uint16_t& dropped, String& error)
     entries_[i] = Entry();
   }
 
-  const String listing = storage_->listFiles("user");
-  int cursor = 0;
+  // listFiles() reports basenames, which cannot be reopened -- SPIFFS is flat
+  // and the directory is part of the filename. listFilePaths() keeps it.
+  const std::vector<String> paths = storage_->listFilePaths("user");
   uint8_t next = 0;
-  while (next < kMaxPackages) {
-    const int open = listing.indexOf("\"path\":\"", cursor);
-    if (open < 0) break;
-    const int start = open + 8;
-    const int close = listing.indexOf('"', start);
-    if (close < 0) break;
-    const String path = listing.substring(start, close);
-    cursor = close + 1;
+  for (const String& path : paths) {
+    if (next >= kMaxPackages) break;
     if (!path.startsWith("apps/") || !path.endsWith(".nha")) {
       continue;
     }
@@ -406,6 +402,9 @@ bool AppRegistry::reindex(uint16_t& recovered, uint16_t& dropped, String& error)
     dropped = static_cast<uint16_t>(dropped - recovered);
   } else {
     dropped = 0;
+  }
+  if (recovered == 0 && !persistWhenEmpty) {
+    return true;
   }
   if (!saveIndex()) {
     error = "index_write_failed";
@@ -536,7 +535,7 @@ void AppRegistry::restore() {
     uint16_t recovered = 0;
     uint16_t dropped = 0;
     String error;
-    if (reindex(recovered, dropped, error) && recovered > 0) {
+    if (reindex(recovered, dropped, error, /*persistWhenEmpty=*/false) && recovered > 0) {
       rebuilt_ = true;
       if (storage_ != nullptr) {
         storage_->logTagged("apps", String("app_index_rebuilt count=") + String(recovered),

@@ -1,8 +1,8 @@
 {
   "changelog_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v1.1.0/releases/notes/v1.1.0.md",
   "firmware": {
-    "sha256": "9cfdcaf64b58168d9b45aaeb4dce164f4c5185518705c8295f55c7c8e5894311",
-    "size": 1534016,
+    "sha256": "915fc022c9a8b37c3b8dc4a387c028d147a5ef11ec635e6a1fdbba4bec70e519",
+    "size": 1534880,
     "url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v1.1.0/releases/artifacts/newhorizons-os-gcu-v23d-lts-v1.1.0.bin"
   },
   "latest": "v1.1.0",

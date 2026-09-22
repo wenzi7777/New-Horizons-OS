@@ -120,11 +120,18 @@ bool AppManager::revive(const String& name) {
   return slot.state == AppState::Running;
 }
 
-void AppManager::setTotalBudgetUs(uint32_t totalUs) {
+void AppManager::setTotalBudgetUs(uint32_t totalUs, bool throttled) {
+  throttled_ = throttled;
   if (totalUs == totalBudgetUs_) {
     return;
   }
   totalBudgetUs_ = totalUs;
+  // The yardstick moved, so the tally of consecutive overruns against the old
+  // one means nothing. Without this an app is killed for the first few frames
+  // after a cut it had no part in.
+  for (uint8_t i = 0; i < count_; ++i) {
+    slots_[i].consecutiveOverruns = 0;
+  }
   if (totalUs == 0) {
     // The scanner needs everything. Suspend rather than kill: this is not the
     // apps' fault and they must come back by themselves.
@@ -244,12 +251,18 @@ void AppManager::dispatch(const AppEvent& event) {
         // bounds the damage to a handful of frames instead of every frame
         // for the rest of the session.
         slot.app->stop();
-        slot.state = AppState::Killed;
-        recordEvent(manifest.name, "killed", String("last_us=") + String(elapsedUs), false, 0);
+        // Whose fault was it? Under throttling the app is being judged against
+        // an allocation the governor just cut, so this is the system's doing
+        // and must clear itself. Killing would make a transient scan overload
+        // permanently disable an app until someone noticed and revived it.
+        slot.state = throttled_ ? AppState::Suspended : AppState::Killed;
+        recordEvent(manifest.name, throttled_ ? "suspended" : "killed",
+                    String("last_us=") + String(elapsedUs), false, 0);
         if (storage_ != nullptr) {
           storage_->logTagged("apps",
-                              String("app_killed name=") + manifest.name + " last_us=" +
-                                  String(elapsedUs) + " budget_us=" + String(allocated),
+                              String(throttled_ ? "app_suspended name=" : "app_killed name=") +
+                                  manifest.name + " last_us=" + String(elapsedUs) +
+                                  " budget_us=" + String(allocated),
                               LogLevel::Warn);
         }
         reallocate();

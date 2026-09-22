@@ -50,7 +50,11 @@ class AppRegistry {
   bool deactivate(const String& id, int8_t slot, String& error);
   // Rebuilds the index from the .nha files actually present: the recovery path
   // for a torn write, and the reason a lost index is survivable at all.
-  bool reindex(uint16_t& recovered, uint16_t& dropped, String& error);
+  // `persistWhenEmpty` is false on the boot path: a rebuild that finds
+  // nothing must not write an empty index, because that index would then
+  // load cleanly forever and stop the device ever trying again.
+  bool reindex(uint16_t& recovered, uint16_t& dropped, String& error,
+               bool persistWhenEmpty = true);
   bool verify(const String& id, String& computedSha, bool& match, String& error);
 
   String statusJson() const;

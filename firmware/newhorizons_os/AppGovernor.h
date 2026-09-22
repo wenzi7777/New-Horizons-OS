@@ -34,6 +34,10 @@ class AppGovernor {
   // recovers immediately -- otherwise a marginal app resumes straight into the
   // same overload and flaps.
   static constexpr uint32_t kMinSuspendMs = 5000;
+  // Below this share of the frame period, the apps are not worth blaming:
+  // taking their time away would give the scan almost nothing back, while
+  // disabling them for a fault they had little part in.
+  static constexpr uint16_t kMinAppSharePermille = 20;
 
   void begin(AppManager* apps) { apps_ = apps; }
   void setCeilingPermille(uint16_t permille);

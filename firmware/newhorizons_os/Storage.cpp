@@ -149,6 +149,28 @@ bool Storage::deleteFile(const String& scope, const String& path) {
   return !full.isEmpty() && SPIFFS.remove(full);
 }
 
+std::vector<String> Storage::listFilePaths(const String& scope) {
+  std::vector<String> out;
+  const String root = scopedPath(scope, "");
+  File dir = SPIFFS.open(root);
+  if (!dir || !dir.isDirectory()) {
+    return out;
+  }
+  // scopedPath(scope, "") has no trailing separator, so drop it too -- the
+  // result has to be something scopedPath() will rebuild into the same
+  // absolute name, and a stray leading '/' is not.
+  const String prefix = root + "/";
+  File file = dir.openNextFile();
+  while (file) {
+    String full(file.path());
+    if (full.startsWith(prefix) && full.length() > prefix.length()) {
+      out.push_back(full.substring(prefix.length()));
+    }
+    file = dir.openNextFile();
+  }
+  return out;
+}
+
 String Storage::listFiles(const String& scope) {
   const String dirPath = scopedPath(scope, "");
   File root = SPIFFS.open(dirPath);
