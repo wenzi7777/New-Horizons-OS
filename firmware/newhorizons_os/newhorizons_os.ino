@@ -262,6 +262,19 @@ void servicePowerTransition() {
 void servicePowerState() {
   const nhos::ActionButtonGesture gesture = powerState.service(
       millis(), power.chargerDetected(), power.chargeState());
+#if NHOS_BOARD_HAS_BUTTON
+  // Apps see short presses on every board with a button, beside whatever the
+  // press is configured to do. A long press never reaches them: it is the
+  // soft-off gesture, and an app must not be able to make it mean anything
+  // else.
+  if (gesture == nhos::ActionButtonGesture::ShortPress) {
+    nhos::AppEvent press;
+    press.kind = nhos::AppEventKind::Button;
+    press.nowMs = millis();
+    press.frameSeq = lastFrame.seq;
+    apps.dispatch(press);
+  }
+#endif
 #if defined(NHOS_BOARD_V15F)
   if (gesture != nhos::ActionButtonGesture::None) {
     const String actionName = gesture == nhos::ActionButtonGesture::ShortPress
@@ -354,6 +367,10 @@ bool streamingGateOk() {
 // that way. AppManager re-checks the capability before calling through.
 void applyAppLed(uint8_t r, uint8_t g, uint8_t b) {
   leds.setStatus(nhos::LedColor{r, g, b});
+}
+
+bool appDisplayLine(uint8_t row, nhos::AppDisplayLine& out) {
+  return apps.displayLine(row, out);
 }
 
 // Runs after scan_stream in the same tick, so the frame it dispatches is the
@@ -830,6 +847,7 @@ void setup() {
   logBoot(String("boot_stage=power_state_ready ") + powerState.statusJson());
   Wire.begin(nhos::kI2cSda, nhos::kI2cScl, NHOS_BOARD_I2C_HZ);
   logBoot(String("boot_stage=i2c_ready sda=") + String(nhos::kI2cSda) + " scl=" + String(nhos::kI2cScl));
+  displayManager.setAppLineSource(&appDisplayLine);
   displayManager.begin(deviceConfig.data().oled);
   logBoot(String("boot_stage=display_ready ") + displayManager.statusJson());
   powerGovernor.begin(nhos::PowerGovernor::profileFromName(

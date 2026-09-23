@@ -353,6 +353,20 @@ void AppManager::setLed(const char* app, uint8_t r, uint8_t g, uint8_t b) {
   }
 }
 
+bool AppManager::displayLine(uint8_t row, AppDisplayLine& out) const {
+  for (uint8_t i = 0; i < count_; ++i) {
+    const Slot& slot = slots_[i];
+    if (slot.state != AppState::Running || slot.app->idle() ||
+        (slot.app->manifest().capabilities & kAppCapDisplay) == 0) {
+      continue;
+    }
+    if (slot.app->displayLine(row, out)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void AppManager::logLine(const char* app, const String& line) {
   if (storage_ == nullptr) {
     return;

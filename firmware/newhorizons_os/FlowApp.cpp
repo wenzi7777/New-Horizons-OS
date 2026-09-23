@@ -100,7 +100,8 @@ void FlowApp::applyPackageManifest(const char* version, const char* summary,
   // Never widened: a package cannot grant itself a permission the host slot
   // does not already allow.
   const uint16_t allowed = kAppCapReadMatrix | kAppCapReadImu | kAppCapEmitEvent |
-                           kAppCapDriveLed | kAppCapTick | kAppCapBudget;
+                           kAppCapDriveLed | kAppCapTick | kAppCapBudget |
+                           kAppCapButton | kAppCapDisplay;
   manifest_.capabilities = capabilities & allowed;
 }
 
@@ -137,6 +138,10 @@ FlowOp FlowApp::opFromName(const String& name) {
   if (name == "gate") return FlowOp::Gate;
   if (name == "budget_load") return FlowOp::BudgetLoad;
   if (name == "grace_left") return FlowOp::GraceLeft;
+  if (name == "mod") return FlowOp::Mod;
+  if (name == "button") return FlowOp::Button;
+  if (name == "oled_text") return FlowOp::OledText;
+  if (name == "oled_bar") return FlowOp::OledBar;
   return FlowOp::Invalid;
 }
 
@@ -174,6 +179,10 @@ const char* FlowApp::opName(FlowOp op) {
     case FlowOp::Gate: return "gate";
     case FlowOp::BudgetLoad: return "budget_load";
     case FlowOp::GraceLeft: return "grace_left";
+    case FlowOp::Mod: return "mod";
+    case FlowOp::Button: return "button";
+    case FlowOp::OledText: return "oled_text";
+    case FlowOp::OledBar: return "oled_bar";
     case FlowOp::Invalid:
     default: return "invalid";
   }
@@ -338,6 +347,41 @@ bool FlowApp::parseNodes(const String& json, FlowNode* scratch, uint8_t& count,
       }
     }
 
+    if (node.op == FlowOp::OledText || node.op == FlowOp::OledBar) {
+      long row = -1;
+      if (!jsonExtractInt(object, "row", row) || row < 0 || row >= kOledRows) {
+        error = "invalid_oled_row";
+        return false;
+      }
+      node.r0 = static_cast<uint8_t>(row);
+      // The label lands in `event`, which the Emit ops never share with an
+      // Oled op. Printable ASCII only: that is all the panel's font draws.
+      const String label = jsonExtractString(object, "label", "");
+      if (label.length() > kMaxOledLabel) {
+        error = "invalid_oled_label";
+        return false;
+      }
+      for (unsigned int c = 0; c < label.length(); ++c) {
+        if (label[c] < 0x20 || label[c] > 0x7E) {
+          error = "invalid_oled_label";
+          return false;
+        }
+      }
+      memset(node.event, 0, sizeof(node.event));
+      strncpy(node.event, label.c_str(), sizeof(node.event) - 1);
+      if (node.op == FlowOp::OledText) {
+        long digits = 0;
+        if (jsonExtractInt(object, "digits", digits) && (digits < 0 || digits > kMaxOledDigits)) {
+          error = "invalid_oled_digits";
+          return false;
+        }
+        node.c0 = static_cast<uint8_t>(digits);
+      } else if (!(node.hi > node.lo)) {
+        error = "invalid_bar_range";
+        return false;
+      }
+    }
+
     // Ring buffers are reserved here, at load time, from a fixed pool. There
     // is no runtime allocation anywhere in this engine.
     if (node.op == FlowOp::Mean || node.op == FlowOp::MaxHold || node.op == FlowOp::Integrate) {
@@ -361,10 +405,11 @@ bool FlowApp::parseNodes(const String& json, FlowNode* scratch, uint8_t& count,
       case FlowOp::Threshold: case FlowOp::Debounce: case FlowOp::Emit:
       case FlowOp::Abs: case FlowOp::Clamp: case FlowOp::Mean: case FlowOp::MaxHold:
       case FlowOp::Delta: case FlowOp::Integrate: case FlowOp::Counter:
-      case FlowOp::FeatureGet: case FlowOp::Led:
+      case FlowOp::FeatureGet: case FlowOp::Led: case FlowOp::OledText: case FlowOp::OledBar:
         needed = 1; break;
       case FlowOp::Add: case FlowOp::Sub: case FlowOp::Mul: case FlowOp::Div:
       case FlowOp::Min: case FlowOp::Max: case FlowOp::EmitValue: case FlowOp::Gate:
+      case FlowOp::Mod:
         needed = 2; break;
       case FlowOp::Select:
         needed = 3; break;
@@ -473,6 +518,11 @@ void FlowApp::unload() {
   estimatedUs_ = 0;
   windowUsed_ = 0;
   degraded_ = false;
+  pendingPresses_ = 0;
+  pressShown_ = false;
+  for (uint8_t row = 0; row < kOledRows; ++row) {
+    displayNode_[row] = -1;
+  }
   packageId_[0] = '\0';
   sourcePath_ = "";
   graphName_ = "";
@@ -542,6 +592,17 @@ void FlowApp::evaluate(const AppEvent& event) {
   const uint16_t cells = frame != nullptr ? frame->pointCount : 0;
   uint8_t skipUntil = 0;
   bool skippedAny = false;
+  bool pressed = false;
+  if (pressShown_) {
+    pressShown_ = false;
+  } else if (pendingPresses_ != 0) {
+    --pendingPresses_;
+    pressed = true;
+    pressShown_ = true;
+  }
+  for (uint8_t row = 0; row < kOledRows; ++row) {
+    displayNode_[row] = -1;
+  }
 
   for (uint8_t i = 0; i < nodeCount_; ++i) {
     FlowNode& node = nodes_[i];
@@ -746,6 +807,25 @@ void FlowApp::evaluate(const AppEvent& event) {
         }
         break;
       }
+      case FlowOp::Mod: {
+        const float divisor = nodes_[node.input2].result;
+        // Zero rather than NaN, as Div does.
+        node.result = divisor != 0 ? fmodf(nodes_[node.input].result, divisor) : 0;
+        break;
+      }
+      case FlowOp::Button: {
+        node.boolResult = pressed;
+        node.result = pressed ? 1.0f : 0.0f;
+        break;
+      }
+      case FlowOp::OledText:
+      case FlowOp::OledBar: {
+        // Only recorded here; the display pulls it at its own rate. Two nodes
+        // on one row is legitimate (two gated pages), so the later one wins.
+        node.result = nodes_[node.input].result;
+        displayNode_[node.r0] = static_cast<int8_t>(i);
+        break;
+      }
       case FlowOp::BudgetLoad: node.result = budgetLoad_; break;
       case FlowOp::GraceLeft: node.result = static_cast<float>(graceLeft_); break;
       case FlowOp::Invalid:
@@ -774,11 +854,29 @@ void FlowApp::onEvent(const AppEvent& event) {
     graceLeft_ = event.graceLeft;
     return;
   }
+  if (event.kind == AppEventKind::Button) {
+    if (pendingPresses_ < kMaxPendingPresses) ++pendingPresses_;
+    return;
+  }
   if (event.kind != AppEventKind::Frame || event.frame == nullptr || nodeCount_ == 0) {
     return;
   }
   ++frames_;
   evaluate(event);
+}
+
+bool FlowApp::displayLine(uint8_t row, AppDisplayLine& out) const {
+  if (row >= kOledRows || nodeCount_ == 0 || displayNode_[row] < 0) {
+    return false;
+  }
+  const FlowNode& node = nodes_[displayNode_[row]];
+  out.kind = node.op == FlowOp::OledBar ? AppDisplayKind::Bar : AppDisplayKind::Text;
+  out.label = node.event;
+  out.value = node.result;
+  out.digits = node.c0;
+  out.lo = node.lo;
+  out.hi = node.hi;
+  return true;
 }
 
 String FlowApp::statusJson(bool withOutputs) const {

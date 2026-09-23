@@ -93,6 +93,7 @@ uint16_t AppPackage::capabilityFromName(const String& name) {
   if (name == "power") return kAppCapPower;
   if (name == "link") return kAppCapLink;
   if (name == "budget") return kAppCapBudget;
+  if (name == "display") return kAppCapDisplay;
   return 0;
 }
 

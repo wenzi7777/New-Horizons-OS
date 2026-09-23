@@ -76,6 +76,12 @@ class AppManager : public AppHost {
   void setLed(const char* app, uint8_t r, uint8_t g, uint8_t b) override;
   void logLine(const char* app, const String& line) override;
 
+  // The OLED row the display should draw, composed across slots: the
+  // lowest-numbered running slot that drew `row` on its last frame wins, so
+  // two apps can share the panel by using different rows. Capability-checked
+  // here rather than in the app, like every other AppHost entry point.
+  bool displayLine(uint8_t row, AppDisplayLine& out) const;
+
   using LedSink = void (*)(uint8_t r, uint8_t g, uint8_t b);
   void setLedSink(LedSink sink) { ledSink_ = sink; }
 

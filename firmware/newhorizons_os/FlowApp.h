@@ -32,6 +32,11 @@ enum class FlowOp : uint8_t {
   Led, EmitValue,
   // --- v1.1.0: conditionals, for self-degradation ---
   Select, Gate, BudgetLoad, GraceLeft,
+  // --- v1.4.0: interaction ---
+  Mod,       // a mod b (C fmodf), or 0 when b is 0 -- paging a counter
+  Button,    // bool: true for one frame per short press of the action button
+  OledText,  // shows a label and the input's value on an OLED row
+  OledBar,   // shows a label and the input as a bar over [lo, hi]
 };
 
 // Fields a single Features sweep produces, in wire order.
@@ -54,6 +59,8 @@ struct FlowNode {
   uint16_t ms = 0;
   uint16_t window = 0;     // frames of history, for the time-series operators
   uint16_t windowAt = 0;   // this node's slice of the shared ring pool
+  // OledText/OledBar reuse r0 as the row and c0 as the decimals, and `event`
+  // as the label, rather than growing a struct every slot holds 24 of.
   uint8_t r0 = 0, c0 = 0, r1 = 0, c1 = 0;
   uint8_t field = 0;       // FeatureField, for FeatureGet
   uint8_t span = 0;        // Gate: how many FOLLOWING nodes it may skip
@@ -112,6 +119,9 @@ class FlowApp : public App {
   static constexpr uint16_t kWindowPool = 128;
   static constexpr size_t kMaxPackageBytes = 4096;
   static constexpr uint32_t kDefaultBudgetUs = 1500;
+  // Presses held for frames not yet evaluated. Small on purpose: presses made
+  // while no frames arrive (streaming paused) must not replay as a burst later.
+  static constexpr uint8_t kMaxPendingPresses = 3;
 
   FlowApp();
   // The manifest points into this object's own buffers, so a copy's manifest
@@ -142,6 +152,7 @@ class FlowApp : public App {
   bool start() override;
   void onEvent(const AppEvent& event) override;
   String statusJson(bool withOutputs) const override;
+  bool displayLine(uint8_t row, AppDisplayLine& out) const override;
 
   // Everything loading would check -- parse, references, windows, budget --
   // without touching any slot. The registry uses it to refuse a package at
@@ -183,6 +194,17 @@ class FlowApp : public App {
   // Budget pressure, updated by Budget events and read by BudgetLoad/GraceLeft.
   float budgetLoad_ = 0;
   uint8_t graceLeft_ = 0;
+  // Short presses not yet shown to a frame. Each one is true for exactly one
+  // frame, with a false frame after it, so two presses are always two rising
+  // edges -- even when they land in consecutive frames on a slow scan, which
+  // counter() would otherwise see as one long press. Taken at the start of the
+  // frame, so one whose Button node a gate skips is a press nobody looked at.
+  uint8_t pendingPresses_ = 0;
+  bool pressShown_ = false;
+  // Which node drew each OLED row on the last frame, or -1. Rebuilt every
+  // evaluation, so a row drawn only inside a gate disappears when the gate
+  // closes instead of freezing on its last value.
+  int8_t displayNode_[kOledRows] = {-1, -1, -1, -1};
   String sourcePath_;
   String graphName_;
 };

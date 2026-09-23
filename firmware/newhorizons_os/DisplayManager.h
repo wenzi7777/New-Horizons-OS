@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 
+#include "AppDisplay.h"
 #include "BoardConfig.h"
 #include "DeviceConfig.h"
 #include "MatrixScanner.h"
@@ -13,7 +14,7 @@
 #else
 class Adafruit_SSD1306 {
  public:
-  Adafruit_SSD1306(int16_t, int16_t, TwoWire*, int8_t) {}
+  Adafruit_SSD1306(int16_t, int16_t, TwoWire*, int8_t, uint32_t = 0, uint32_t = 0) {}
 
   bool begin(uint8_t, uint8_t) { return false; }
   void clearDisplay() {}
@@ -26,6 +27,7 @@ class Adafruit_SSD1306 {
   void dim(bool) {}
   void fillCircle(int16_t, int16_t, int16_t, uint16_t) {}
   void drawRoundRect(int16_t, int16_t, int16_t, int16_t, int16_t, uint16_t) {}
+  void drawRect(int16_t, int16_t, int16_t, int16_t, uint16_t) {}
   void fillRect(int16_t, int16_t, int16_t, int16_t, uint16_t) {}
   void drawLine(int16_t, int16_t, int16_t, int16_t, uint16_t) {}
   template <typename T>
@@ -65,6 +67,11 @@ class DisplayManager {
   void service(uint32_t nowMs, const String& ip, const String& gatewayIp, const ScanHealth& health, uint32_t heapFree, uint32_t heapTotal);
   String statusJson() const;
 
+  // Where the "app" page gets its rows. A plain function rather than an
+  // AppManager reference, so the display does not depend on the app runtime.
+  using AppLineSource = bool (*)(uint8_t row, AppDisplayLine& out);
+  void setAppLineSource(AppLineSource source) { appLineSource_ = source; }
+
  private:
   bool configure();
   void renderPowerAnimation(const char* label, uint32_t elapsedMs, uint32_t durationMs);
@@ -73,6 +80,7 @@ class DisplayManager {
   void renderLiveStatus(const String& ip, const String& gatewayIp, const ScanHealth& health, uint32_t heapFree, uint32_t heapTotal);
   void renderSensorSnapshot(const ScanHealth& health);
   void renderRecordingStatus(const ScanHealth& health);
+  void renderAppPage();
   String addressString() const;
 
   Adafruit_SSD1306 display_;
@@ -86,6 +94,7 @@ class DisplayManager {
   uint8_t powerAnimation_ = 0;
   uint32_t powerAnimationStartedMs_ = 0;
   String lastError_;
+  AppLineSource appLineSource_ = nullptr;
 };
 
 }  // namespace nhos

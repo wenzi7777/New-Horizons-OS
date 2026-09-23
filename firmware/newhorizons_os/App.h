@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "AppDisplay.h"
 #include "MatrixScanner.h"
 
 namespace nhos {
@@ -28,6 +29,9 @@ enum AppCapability : uint16_t {
   // Budget pressure is delivered to every app that asks for it, so an app can
   // shed work before it is stopped. Ignoring it is a valid choice.
   kAppCapBudget = 1 << 9,
+  // Rows on the OLED. Shown only while the operator has the OLED on its "app"
+  // page: an installed app never takes the screen over by itself.
+  kAppCapDisplay = 1 << 10,
 };
 
 struct AppManifest {
@@ -120,6 +124,14 @@ class App {
   // bound. It is not dispatched and takes no share of the budget, but keeps
   // its enabled state so binding a package later starts it straight away.
   virtual bool idle() const { return false; }
+  // What this app last put on OLED row `row`, if anything. Pulled by the
+  // display at its own rate rather than pushed per frame, so drawing costs the
+  // app nothing and the panel's I2C traffic stays outside every budget.
+  virtual bool displayLine(uint8_t row, AppDisplayLine& out) const {
+    (void)row;
+    (void)out;
+    return false;
+  }
 };
 
 }  // namespace nhos

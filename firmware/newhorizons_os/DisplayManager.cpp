@@ -29,8 +29,13 @@ String jsonEscape(const String& value) {
 }
 }  // namespace
 
+// The last two arguments are the bus clock during a transfer and the one to
+// leave behind. The library's default for the second is 100kHz, so every
+// refresh used to drop the shared bus -- IMU, magnetometer, fuel gauge -- to a
+// quarter of its speed (or a tenth, on a 1MHz board) until something else
+// happened to set it back. 400kHz is the SSD1306's own ceiling.
 DisplayManager::DisplayManager()
-    : display_(kOledWidth, kOledHeight, &Wire, -1) {}
+    : display_(kOledWidth, kOledHeight, &Wire, -1, 400000UL, NHOS_BOARD_I2C_HZ) {}
 
 void DisplayManager::begin(const OledConfig& config) {
   apply(config);
@@ -154,6 +159,8 @@ void DisplayManager::service(uint32_t nowMs, const String& ip, const String& gat
     renderSensorSnapshot(health);
   } else if (config_.page == "recording_status") {
     renderRecordingStatus(health);
+  } else if (config_.page == "app") {
+    renderAppPage();
   } else {
     renderLiveStatus(ip, gatewayIp, health, heapFree, heapTotal);
   }
@@ -317,6 +324,40 @@ void DisplayManager::renderRecordingStatus(const ScanHealth& health) {
   display_.print("UDP ");
   display_.print(health.lastUdpSendUs);
   display_.println("us");
+}
+
+void DisplayManager::renderAppPage() {
+  bool drewAny = false;
+  for (uint8_t row = 0; row < kOledRows; ++row) {
+    AppDisplayLine line;
+    if (appLineSource_ == nullptr || !appLineSource_(row, line)) {
+      continue;
+    }
+    drewAny = true;
+    const int16_t y = static_cast<int16_t>(row * kOledRowPx);
+    display_.setCursor(0, y);
+    if (line.kind == AppDisplayKind::Text) {
+      char text[kOledCols + 1];
+      formatOledTextLine(line.label, line.value, line.digits, text);
+      display_.print(text);
+    } else {
+      const size_t labelLen = strlen(line.label);
+      display_.print(line.label);
+      const OledBarGeometry bar = oledBarGeometry(
+          static_cast<uint8_t>(labelLen), line.value, line.lo, line.hi);
+      display_.drawRect(bar.x0, y, bar.width, kOledRowPx - 1, SSD1306_WHITE);
+      if (bar.fillPx > 0) {
+        display_.fillRect(static_cast<int16_t>(bar.x0 + 1), static_cast<int16_t>(y + 1),
+                          bar.fillPx, kOledRowPx - 3, SSD1306_WHITE);
+      }
+    }
+  }
+  if (!drewAny) {
+    // Said plainly, so a blank panel is not mistaken for a dead one.
+    display_.println("App page");
+    display_.println("No running app is");
+    display_.println("drawing on the OLED.");
+  }
 }
 
 String DisplayManager::addressString() const {

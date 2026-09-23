@@ -12,7 +12,9 @@
 #define NHOS_BOARD_HAS_BQ25180  1
 #define NHOS_BOARD_HAS_BUTTON   1
 #define NHOS_BOARD_HAS_EXT_LED  1
-#define NHOS_BOARD_HAS_OLED     0
+// Not a panel on the board but an exposed I2C bus: an SSD1306 on 0x3C/0x3D
+// is picked up once the operator turns the OLED on.
+#define NHOS_BOARD_HAS_OLED     1
 #define NHOS_BOARD_SUPPORTS_GPIO_WAKE 1
 #define NHOS_BOARD_HAS_NATIVE_USB 1
 #define NHOS_BOARD_HAS_MAX17048 1
