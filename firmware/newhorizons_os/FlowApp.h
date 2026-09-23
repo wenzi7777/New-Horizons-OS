@@ -37,6 +37,9 @@ enum class FlowOp : uint8_t {
   Button,    // bool: true for one frame per short press of the action button
   OledText,  // shows a label and the input's value on an OLED row
   OledBar,   // shows a label and the input as a bar over [lo, hi]
+  // --- v1.5.0: the external LED strip ---
+  ExtPixel,  // lights one external pixel in a colour while a bool is true
+  ExtMeter,  // shows the input as a meter along the strip over [lo, hi]
 };
 
 // Fields a single Features sweep produces, in wire order.
@@ -61,6 +64,7 @@ struct FlowNode {
   uint16_t windowAt = 0;   // this node's slice of the shared ring pool
   // OledText/OledBar reuse r0 as the row and c0 as the decimals, and `event`
   // as the label, rather than growing a struct every slot holds 24 of.
+  // ExtPixel reuses r0 as the pixel index.
   uint8_t r0 = 0, c0 = 0, r1 = 0, c1 = 0;
   uint8_t field = 0;       // FeatureField, for FeatureGet
   uint8_t span = 0;        // Gate: how many FOLLOWING nodes it may skip
@@ -153,6 +157,7 @@ class FlowApp : public App {
   void onEvent(const AppEvent& event) override;
   String statusJson(bool withOutputs) const override;
   bool displayLine(uint8_t row, AppDisplayLine& out) const override;
+  void extLedFrame(AppExtLedFrame& out) const override;
 
   // Everything loading would check -- parse, references, windows, budget --
   // without touching any slot. The registry uses it to refuse a package at
@@ -205,6 +210,10 @@ class FlowApp : public App {
   // evaluation, so a row drawn only inside a gate disappears when the gate
   // closes instead of freezing on its last value.
   int8_t displayNode_[kOledRows] = {-1, -1, -1, -1};
+  // The same for the external strip: the node that lit each pixel, and the
+  // meter's node, on the last frame.
+  int8_t extPixelNode_[kMaxAppExtLeds] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
+  int8_t extMeterNode_ = -1;
   String sourcePath_;
   String graphName_;
 };

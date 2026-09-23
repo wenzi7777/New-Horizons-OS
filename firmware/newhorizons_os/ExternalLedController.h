@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "AppExtLed.h"
 #include "BoardConfig.h"
 #include "BoardPins.h"
 #include "DeviceConfig.h"
@@ -26,6 +27,9 @@ struct ExternalLedInputs {
   bool hasGateway = false;
   float pressure01 = 0.0f;  // current matrix peak, normalized 0..1
   bool calibrating = false;
+  // What the running apps put on the strip. While an app holds it, it is
+  // shown in place of the configured preset.
+  AppExtLedFrame app;
 };
 
 class ExternalLedController {
@@ -50,6 +54,7 @@ class ExternalLedController {
   void showSegments(const LedColor* colors, size_t count, uint32_t nowMs);
   void showMeter(uint8_t litCount, LedColor low, LedColor high, uint32_t nowMs);
   void showPulse(LedColor color, uint8_t flashes, uint16_t intervalMs, uint16_t onMs, uint16_t gapMs, uint32_t nowMs);
+  void showApp(const AppExtLedFrame& frame, uint32_t nowMs);
   void renderSystemStatus(const ExternalLedInputs& inputs, bool recentWarning, uint32_t nowMs);
   void setPixelColor(uint16_t index, uint32_t rgb);
   void clearPixels();
@@ -57,6 +62,9 @@ class ExternalLedController {
   static LedColor markerColor(const String& name);
   uint32_t color(LedColor color) const;
   uint8_t scale(uint8_t value) const;
+  // An app's channels are 0..255 throughout; scale() would read the dim end
+  // of a meter's gradient (<= 32) as a palette value at full strength.
+  uint8_t scaleFull(uint8_t value) const;
 
   // v1.5.F's FPC 3.0 uses WS2812B-2020-V6 and needs a dedicated RMT channel:
   // Adafruit_NeoPixel's ESP-IDF v5 backend owns one static channel for every

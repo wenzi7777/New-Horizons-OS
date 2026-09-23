@@ -101,7 +101,7 @@ void FlowApp::applyPackageManifest(const char* version, const char* summary,
   // does not already allow.
   const uint16_t allowed = kAppCapReadMatrix | kAppCapReadImu | kAppCapEmitEvent |
                            kAppCapDriveLed | kAppCapTick | kAppCapBudget |
-                           kAppCapButton | kAppCapDisplay;
+                           kAppCapButton | kAppCapDisplay | kAppCapExtLed;
   manifest_.capabilities = capabilities & allowed;
 }
 
@@ -142,6 +142,8 @@ FlowOp FlowApp::opFromName(const String& name) {
   if (name == "button") return FlowOp::Button;
   if (name == "oled_text") return FlowOp::OledText;
   if (name == "oled_bar") return FlowOp::OledBar;
+  if (name == "ext_pixel") return FlowOp::ExtPixel;
+  if (name == "ext_meter") return FlowOp::ExtMeter;
   return FlowOp::Invalid;
 }
 
@@ -183,6 +185,8 @@ const char* FlowApp::opName(FlowOp op) {
     case FlowOp::Button: return "button";
     case FlowOp::OledText: return "oled_text";
     case FlowOp::OledBar: return "oled_bar";
+    case FlowOp::ExtPixel: return "ext_pixel";
+    case FlowOp::ExtMeter: return "ext_meter";
     case FlowOp::Invalid:
     default: return "invalid";
   }
@@ -382,6 +386,23 @@ bool FlowApp::parseNodes(const String& json, FlowNode* scratch, uint8_t& count,
       }
     }
 
+    if (node.op == FlowOp::ExtPixel) {
+      long index = -1;
+      if (!jsonExtractInt(object, "index", index) || index < 0 || index >= kMaxAppExtLeds) {
+        error = "invalid_ext_led_index";
+        return false;
+      }
+      node.r0 = static_cast<uint8_t>(index);
+      if (rgb.length() == 0) {
+        error = "missing_colour";
+        return false;
+      }
+    }
+    if (node.op == FlowOp::ExtMeter && !(node.hi > node.lo)) {
+      error = "invalid_meter_range";
+      return false;
+    }
+
     // Ring buffers are reserved here, at load time, from a fixed pool. There
     // is no runtime allocation anywhere in this engine.
     if (node.op == FlowOp::Mean || node.op == FlowOp::MaxHold || node.op == FlowOp::Integrate) {
@@ -406,6 +427,7 @@ bool FlowApp::parseNodes(const String& json, FlowNode* scratch, uint8_t& count,
       case FlowOp::Abs: case FlowOp::Clamp: case FlowOp::Mean: case FlowOp::MaxHold:
       case FlowOp::Delta: case FlowOp::Integrate: case FlowOp::Counter:
       case FlowOp::FeatureGet: case FlowOp::Led: case FlowOp::OledText: case FlowOp::OledBar:
+      case FlowOp::ExtPixel: case FlowOp::ExtMeter:
         needed = 1; break;
       case FlowOp::Add: case FlowOp::Sub: case FlowOp::Mul: case FlowOp::Div:
       case FlowOp::Min: case FlowOp::Max: case FlowOp::EmitValue: case FlowOp::Gate:
@@ -523,6 +545,10 @@ void FlowApp::unload() {
   for (uint8_t row = 0; row < kOledRows; ++row) {
     displayNode_[row] = -1;
   }
+  for (uint8_t pixel = 0; pixel < kMaxAppExtLeds; ++pixel) {
+    extPixelNode_[pixel] = -1;
+  }
+  extMeterNode_ = -1;
   packageId_[0] = '\0';
   sourcePath_ = "";
   graphName_ = "";
@@ -603,6 +629,10 @@ void FlowApp::evaluate(const AppEvent& event) {
   for (uint8_t row = 0; row < kOledRows; ++row) {
     displayNode_[row] = -1;
   }
+  for (uint8_t pixel = 0; pixel < kMaxAppExtLeds; ++pixel) {
+    extPixelNode_[pixel] = -1;
+  }
+  extMeterNode_ = -1;
 
   for (uint8_t i = 0; i < nodeCount_; ++i) {
     FlowNode& node = nodes_[i];
@@ -826,6 +856,22 @@ void FlowApp::evaluate(const AppEvent& event) {
         displayNode_[node.r0] = static_cast<int8_t>(i);
         break;
       }
+      case FlowOp::ExtPixel: {
+        // Recorded, not drawn, as the OLED ops are. A pixel is lit only on
+        // frames its node runs with a true input, so one inside a closed
+        // gate goes dark; the later of two nodes on one pixel wins.
+        node.boolResult = nodes_[node.input].boolResult;
+        node.result = node.boolResult ? 1.0f : 0.0f;
+        if (node.boolResult) {
+          extPixelNode_[node.r0] = static_cast<int8_t>(i);
+        }
+        break;
+      }
+      case FlowOp::ExtMeter: {
+        node.result = nodes_[node.input].result;
+        extMeterNode_ = static_cast<int8_t>(i);
+        break;
+      }
       case FlowOp::BudgetLoad: node.result = budgetLoad_; break;
       case FlowOp::GraceLeft: node.result = static_cast<float>(graceLeft_); break;
       case FlowOp::Invalid:
@@ -877,6 +923,30 @@ bool FlowApp::displayLine(uint8_t row, AppDisplayLine& out) const {
   out.lo = node.lo;
   out.hi = node.hi;
   return true;
+}
+
+void FlowApp::extLedFrame(AppExtLedFrame& out) const {
+  if (nodeCount_ == 0) {
+    return;
+  }
+  if (!out.hasMeter && extMeterNode_ >= 0) {
+    const FlowNode& node = nodes_[extMeterNode_];
+    out.hasMeter = true;
+    out.meterValue = node.result;
+    out.meterLo = node.lo;
+    out.meterHi = node.hi;
+  }
+  for (uint8_t pixel = 0; pixel < kMaxAppExtLeds; ++pixel) {
+    const uint16_t bit = static_cast<uint16_t>(1U << pixel);
+    if ((out.pixelMask & bit) != 0 || extPixelNode_[pixel] < 0) {
+      continue;
+    }
+    const FlowNode& node = nodes_[extPixelNode_[pixel]];
+    out.pixelMask |= bit;
+    out.pixelRgb[pixel][0] = node.rgb[0];
+    out.pixelRgb[pixel][1] = node.rgb[1];
+    out.pixelRgb[pixel][2] = node.rgb[2];
+  }
 }
 
 String FlowApp::statusJson(bool withOutputs) const {

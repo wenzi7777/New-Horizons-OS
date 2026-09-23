@@ -560,6 +560,7 @@ void updateLedState() {
   extIn.hasGateway = findme.hasGateway();
   extIn.pressure01 = scanner.lastPeak01();
   extIn.calibrating = calibration.sessionActive();
+  apps.extLedFrame(extIn.app);
   const bool transportAttached =
       espNowMode ? espNowPairing.hasHub() : findme.hasGateway();
   // Treat failures observed while finding a Gateway/Hub as startup history,

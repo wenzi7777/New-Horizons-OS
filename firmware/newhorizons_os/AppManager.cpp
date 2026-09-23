@@ -367,6 +367,19 @@ bool AppManager::displayLine(uint8_t row, AppDisplayLine& out) const {
   return false;
 }
 
+void AppManager::extLedFrame(AppExtLedFrame& out) const {
+  out = AppExtLedFrame();
+  for (uint8_t i = 0; i < count_; ++i) {
+    const Slot& slot = slots_[i];
+    if (slot.state != AppState::Running || slot.app->idle() ||
+        (slot.app->manifest().capabilities & kAppCapExtLed) == 0) {
+      continue;
+    }
+    out.active = true;
+    slot.app->extLedFrame(out);
+  }
+}
+
 void AppManager::logLine(const char* app, const String& line) {
   if (storage_ == nullptr) {
     return;

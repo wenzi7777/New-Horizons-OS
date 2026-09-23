@@ -209,6 +209,15 @@ void ExternalLedController::service(uint32_t nowMs, const ScanHealth& health, co
     identifyStartedMs_ = 0;
   }
 
+  // A running app outranks every preset: the operator chose to run it, and
+  // it hands the strip back the moment it stops. The mode still decides
+  // whether the strip is on at all, and the brightness still applies.
+  if (in.app.active) {
+    activePreset_ = "app";
+    showApp(in.app, nowMs);
+    return;
+  }
+
   const String& preset = config_.preset;
 
   if (preset == "off") {
@@ -419,6 +428,24 @@ void ExternalLedController::showMeter(uint8_t litCount, LedColor low, LedColor h
   lastShowMs_ = nowMs;
 }
 
+void ExternalLedController::showApp(const AppExtLedFrame& frame, uint32_t nowMs) {
+#if NHOS_BOARD_HAS_EXT_LED
+  uint8_t shown[kExternalLedCount][3];
+  renderAppExtLeds(frame, static_cast<uint8_t>(kExternalLedCount), shown);
+  clearPixels();
+  for (uint16_t i = 0; i < kExternalLedCount; ++i) {
+    setPixelColor(i, (static_cast<uint32_t>(scaleFull(shown[i][0])) << 16U) |
+                         (static_cast<uint32_t>(scaleFull(shown[i][1])) << 8U) |
+                         static_cast<uint32_t>(scaleFull(shown[i][2])));
+  }
+  showPixels();
+  lastShowMs_ = nowMs;
+#else
+  (void)frame;
+  (void)nowMs;
+#endif
+}
+
 LedColor ExternalLedController::markerColor(const String& name) {
   if (name == "green") {
     return LedColor{0, 24, 0};
@@ -552,6 +579,20 @@ uint8_t ExternalLedController::scale(uint8_t value) const {
   }
   const float normalized = value <= 32 ? static_cast<float>(value) / 32.0f : static_cast<float>(value) / 255.0f;
   const float scaled = normalized * config_.brightness * kExternalLedMaxChannel;
+  if (scaled < 1.0f) {
+    return 1;
+  }
+  if (scaled > 255.0f) {
+    return 255;
+  }
+  return static_cast<uint8_t>(scaled);
+}
+
+uint8_t ExternalLedController::scaleFull(uint8_t value) const {
+  if (!value || config_.brightness <= 0.0f) {
+    return 0;
+  }
+  const float scaled = (static_cast<float>(value) / 255.0f) * config_.brightness * kExternalLedMaxChannel;
   if (scaled < 1.0f) {
     return 1;
   }

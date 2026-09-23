@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "AppDisplay.h"
+#include "AppExtLed.h"
 #include "MatrixScanner.h"
 
 namespace nhos {
@@ -32,6 +33,9 @@ enum AppCapability : uint16_t {
   // Rows on the OLED. Shown only while the operator has the OLED on its "app"
   // page: an installed app never takes the screen over by itself.
   kAppCapDisplay = 1 << 10,
+  // The external LED strip. Unlike the OLED, a running app that may drive it
+  // takes it over from the configured preset, and hands it back when it stops.
+  kAppCapExtLed = 1 << 11,
 };
 
 struct AppManifest {
@@ -132,6 +136,10 @@ class App {
     (void)out;
     return false;
   }
+  // Adds what this app put on the external LED strip on its last frame to
+  // `out`, leaving the meter and every pixel an earlier slot already set.
+  // Pulled by the LED service, like displayLine.
+  virtual void extLedFrame(AppExtLedFrame& out) const { (void)out; }
 };
 
 }  // namespace nhos

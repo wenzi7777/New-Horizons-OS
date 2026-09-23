@@ -82,6 +82,12 @@ class AppManager : public AppHost {
   // here rather than in the app, like every other AppHost entry point.
   bool displayLine(uint8_t row, AppDisplayLine& out) const;
 
+  // What the external LED strip shows, composed across slots the same way:
+  // the lowest-numbered running slot's meter, and for each pixel the
+  // lowest-numbered slot that lit it. `out.active` is set while any running
+  // slot may drive the strip, whether or not it lit anything.
+  void extLedFrame(AppExtLedFrame& out) const;
+
   using LedSink = void (*)(uint8_t r, uint8_t g, uint8_t b);
   void setLedSink(LedSink sink) { ledSink_ = sink; }
 
