@@ -548,6 +548,53 @@ class ReadoutPackageTests(unittest.TestCase):
         self.assertIn('jsonExtractString(object, "kind", "flow")', load)
 
 
+class ImuReadPathTests(unittest.TestCase):
+    """One bus transaction per sample, with the Bosch compensation intact.
+
+    Measured on v1.5.F in one session, 200 interleaved samples: the old
+    per-sensor pair took 4568us, the single read 2272us, and the values agreed
+    to a tenth of one gyro LSB -- including gyro X, which carries the chip's
+    factory cross-axis correction.
+    """
+
+    def test_service_reads_once(self):
+        impl = read("ImuManager.cpp")
+        service = impl[impl.index("void ImuManager::service"):]
+        # The library's per-sensor readers each fetch BOTH sensors and discard
+        # half, so calling the pair read the device twice per sample.
+        self.assertIn("imuDriver.readAccelGyro(acc, gyr)", service)
+        self.assertNotIn("readGyroscope(", service)
+        self.assertNotIn("readAcceleration(", service)
+
+    def test_the_read_goes_through_the_bosch_api(self):
+        driver = read("ImuDriver.cpp")
+        # bmi2_get_sensor_data applies the factory cross-axis correction to
+        # gyro X and the axis remap. A raw register read would silently drop
+        # both; this asserts nobody "optimises" it into one.
+        self.assertIn("bmi2_get_sensor_data(&data, dev_)", driver)
+        self.assertNotIn("Wire.beginTransmission", driver)
+        self.assertNotIn("requestFrom", driver)
+
+    def test_the_scale_factors_match_the_library(self):
+        driver = read("ImuDriver.cpp")
+        self.assertIn("kInt16ToG = 8192.0f", driver)
+        self.assertIn("kInt16ToDps = 16.384f", driver)
+
+    def test_one_driver_instance_serves_both_managers(self):
+        # On BMM150 boards the magnetometer is hosted by the same driver, so it
+        # must be the instance that was begun.
+        self.assertIn("imuDriver.readMagneticField(", read("MagnetometerManager.cpp"))
+        self.assertIn("imuDriver.begin(", read("ImuManager.cpp"))
+        for name in ("ImuManager.cpp", "MagnetometerManager.cpp"):
+            with self.subTest(file=name):
+                self.assertNotIn("IMU.", read(name))
+
+    def test_the_unused_fifo_mode_is_gone(self):
+        # It was enabled but never drained, so it bought nothing.
+        self.assertNotIn("setContinuousMode()", read("ImuManager.cpp").replace(
+            "No continuous (FIFO) mode", ""))
+
+
 class CostModelTests(unittest.TestCase):
     def test_the_constants_are_the_measured_ones(self):
         header = read("FlowApp.h")

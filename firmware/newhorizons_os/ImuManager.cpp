@@ -1,5 +1,7 @@
 #include "ImuManager.h"
 
+#include "ImuDriver.h"
+
 #include <Wire.h>
 
 #include "BoardConfig.h"
@@ -30,16 +32,19 @@ void ImuManager::begin(bool enabled) {
   }
 
 #if NHOS_BOARD_MAG_MODEL == 1
-  if (!IMU.begin()) {
+  if (!imuDriver.begin()) {
     lastError_ = "bmi270_bmm150_init_failed";
 #else
-  if (!IMU.begin(BOSCH_ACCELEROMETER_ONLY)) {
+  if (!imuDriver.begin(BOSCH_ACCELEROMETER_ONLY)) {
     lastError_ = "bmi270_init_failed";
 #endif
     heapAfter_ = ESP.getFreeHeap();
     return;
   }
-  IMU.setContinuousMode();
+  // No continuous (FIFO) mode. It was enabled before but never drained --
+  // only accelerationAvailable()/gyroscopeAvailable() drain it, and nothing
+  // called them -- so it cost FIFO setup and bought nothing. Samples come from
+  // the data registers via ImuDriver::readAccelGyro(), once per service().
   initialized_ = true;
   heapAfter_ = ESP.getFreeHeap();
 }
@@ -85,11 +90,19 @@ void ImuManager::service(uint32_t nowUs) {
   float az = sample_[2];
 
   const uint32_t readStartedUs = micros();
-  const bool gyroUpdated = IMU.readGyroscope(gx, gy, gz);
-  const bool accelUpdated = IMU.readAcceleration(ax, ay, az);
+  // One bus transaction for both sensors. The library's per-sensor readers
+  // each fetched both and discarded half, so calling the pair read the
+  // device twice per sample. See ImuDriver.h.
+  float acc[3];
+  float gyr[3];
+  const bool updated = imuDriver.readAccelGyro(acc, gyr);
   lastReadDurationUs_ = micros() - readStartedUs;
+  if (updated) {
+    ax = acc[0]; ay = acc[1]; az = acc[2];
+    gx = gyr[0]; gy = gyr[1]; gz = gyr[2];
+  }
 
-  if (!gyroUpdated && !accelUpdated) {
+  if (!updated) {
     if (!sampleValid_) {
       lastError_ = "bmi270_sample_unavailable";
     }
@@ -161,6 +174,14 @@ String ImuManager::statusJson() const {
   out += heapAfter_;
   out += ",\"sample_cached\":";
   out += sampleValid_ ? "true" : "false";
+  // The latest sample itself, so a change to the read path can be checked
+  // against real values rather than only against its timing.
+  out += ",\"sample\":[";
+  for (uint8_t i = 0; i < 6; ++i) {
+    if (i) out += ",";
+    out += String(sample_[i], 4);
+  }
+  out += "]";
   out += ",\"sample_rate_hz\":";
   out += sampleRateHz;
   out += ",\"measured_rate_hz\":";

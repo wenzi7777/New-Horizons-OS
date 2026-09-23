@@ -8,6 +8,7 @@
 
 #if NHOS_BOARD_MAG_MODEL == 1
 #include "Arduino_BMI270_BMM150.h"
+#include "ImuDriver.h"
 #endif
 
 namespace nhos {
@@ -47,7 +48,7 @@ void MagnetometerManager::service(uint32_t nowMs) {
 
 #if NHOS_BOARD_MAG_MODEL == 1
   float next[3];
-  const bool readSucceeded = IMU.readMagneticField(next[0], next[1], next[2]);
+  const bool readSucceeded = imuDriver.readMagneticField(next[0], next[1], next[2]);
   if (!magnetometerCanPublish(MagnetometerModel::Bmm150, initialized_,
                               calibrationAvailable_, readSucceeded)) {
     sample_.clear();
