@@ -83,7 +83,13 @@ struct FlowNode {
 // simply that nothing is skipped. Only loops would, and there are none.
 class FlowApp : public App {
  public:
-  static constexpr uint8_t kMaxNodes = 12;
+  // v1.3.0 raised this from 12. What the limit protects is not time -- the
+  // per-frame budget below does that -- but RAM and reply size: every slot
+  // holds kMaxNodes FlowNodes (~76 bytes each) for as long as it exists, and
+  // app_list used to carry every node's output. At 12 a two-region gait app
+  // (heel strike, toe off, step count, LED) did not fit, at ~250us of a
+  // 1500us budget. The App Library derives min_os v1.3.0 for graphs over 12.
+  static constexpr uint8_t kMaxNodes = 24;
   // Per-cell cost of a sweep operator, and flat cost of a scalar one.
   //
   // MEASURED on v1.5.F (ESP32-S3 @ 240MHz, 14x14): a flat sweep runs about
@@ -135,7 +141,13 @@ class FlowApp : public App {
   const AppManifest& manifest() const override { return manifest_; }
   bool start() override;
   void onEvent(const AppEvent& event) override;
-  String statusJson() const override;
+  String statusJson(bool withOutputs) const override;
+
+  // Everything loading would check -- parse, references, windows, budget --
+  // without touching any slot. The registry uses it to refuse a package at
+  // install time; it needs no FlowApp of its own to do so.
+  static bool dryRun(const String& json, uint16_t cellCount, uint32_t budgetUs,
+                     uint32_t& estimatedUs, String& error);
 
   static FlowOp opFromName(const String& name);
   static const char* opName(FlowOp op);
@@ -143,7 +155,10 @@ class FlowApp : public App {
 
  private:
   bool parse(const String& json, uint16_t cellCount, String& error);
+  static bool parseNodes(const String& json, FlowNode* scratch, uint8_t& count,
+                         uint16_t& windowUsed, String& error);
   uint32_t estimateUs(uint16_t cellCount) const;
+  static uint32_t estimateNodesUs(const FlowNode* nodes, uint8_t count, uint16_t cellCount);
   void evaluate(const AppEvent& event);
   void computeFeatures(const MatrixFrame& frame);
   float pushWindow(FlowNode& node, float sample, FlowOp op);

@@ -282,16 +282,19 @@ class AppFrameworkTests(unittest.TestCase):
     def test_flow_graph_cost_is_checked_before_it_ever_runs(self):
         impl = read("FlowApp.cpp")
 
-        parse = impl[impl.index("bool FlowApp::parse") : impl.index("bool FlowApp::loadFromFile")]
-        self.assertIn("estimateUs(cellCount)", parse)
+        parse = impl[impl.index("bool FlowApp::parse(") : impl.index("bool FlowApp::loadFromFile")]
+        self.assertIn("estimateNodesUs(g_parseScratch, count, cellCount)", parse)
         self.assertIn("over_budget:", parse)
-        # A rejected graph must not disturb the one already running.
-        self.assertIn("nodeCount_ = previousCount;", parse)
+        # A rejected graph must not disturb the one already running: the cost
+        # is checked on the scratch copy, BEFORE anything reaches nodes_.
+        # (Until v1.3.0 the nodes were copied first and only the count was
+        # restored, so an over-budget load overwrote the running graph.)
+        self.assertLess(parse.index("over_budget:"), parse.index("nodes_[i] = g_parseScratch[i];"))
 
     def test_flow_graphs_cannot_express_a_cycle(self):
         impl = read("FlowApp.cpp")
 
-        parse = impl[impl.index("bool FlowApp::parse") : impl.index("bool FlowApp::loadFromFile")]
+        parse = impl[impl.index("bool FlowApp::parseNodes") : impl.index("bool FlowApp::dryRun")]
         self.assertIn("input_out_of_order", parse)
         # Every reference, including the multi-input forms, is checked against
         # the count of nodes parsed SO FAR.
@@ -702,7 +705,7 @@ class AppRegistryTests(unittest.TestCase):
         # Dry-run, so a broken package is refused at install rather than
         # discovered at activation.
         self.assertIn("graph_invalid:", install)
-        self.assertLess(install.index("scratch.loadFromJson"), install.index("saveIndex()"))
+        self.assertLess(install.index("FlowApp::dryRun"), install.index("saveIndex()"))
 
     def test_the_manifest_id_must_match_the_filename(self):
         impl = read("AppRegistry.cpp")
@@ -739,6 +742,45 @@ class AppRegistryTests(unittest.TestCase):
         impl = read("FlowApp.cpp")
         apply = impl[impl.index("void FlowApp::applyPackageManifest") : impl.index("FlowOp FlowApp::opFromName")]
         self.assertIn("capabilities & allowed", apply)
+
+
+
+class TwentyFourNodeTests(unittest.TestCase):
+    """v1.3.0 raised the node limit from 12 to 24.
+
+    The limit guards RAM and reply size, not time -- the per-frame budget does
+    that -- so raising it had to come with keeping graph parsing off the stack
+    and per-node outputs out of every app_list reply.
+    """
+
+    def test_the_limit_is_24(self):
+        self.assertIn("static constexpr uint8_t kMaxNodes = 24;", read("FlowApp.h"))
+
+    def test_parsing_does_not_put_a_graph_on_the_stack(self):
+        impl = read("FlowApp.cpp")
+        # One static buffer, not a FlowNode array per call on the 8 KB loop task.
+        self.assertIn("FlowNode g_parseScratch[FlowApp::kMaxNodes];", impl)
+        self.assertNotIn("FlowNode scratch[kMaxNodes];", impl)
+        # The install-time dry run needs no FlowApp (24 nodes + a window pool).
+        install = read("AppRegistry.cpp")
+        self.assertNotIn("FlowApp scratch", install)
+        self.assertIn("FlowApp::dryRun(", install)
+
+    def test_the_dry_run_checks_everything_loading_would(self):
+        impl = read("FlowApp.cpp")
+        dry = impl[impl.index("bool FlowApp::dryRun") : impl.index("bool FlowApp::parse(")]
+        self.assertIn("parseNodes(json, g_parseScratch", dry)
+        self.assertIn("over_budget:", dry)
+
+    def test_app_list_carries_outputs_only_for_the_slot_asked_for(self):
+        # Four slots of 24 outputs each would not fit an ESP-NOW reply (7680 B).
+        manager = read("AppManager.cpp")
+        self.assertIn("statusJson(outputsFor.length() > 0 && outputsFor == manifest.name)", manager)
+        flow = read("FlowApp.cpp")
+        body = flow[flow.index("String FlowApp::statusJson(bool withOutputs)"):]
+        self.assertLess(body.index("if (!withOutputs)"), body.index('\\"outputs\\":['))
+        control = read("ControlServer.cpp")
+        self.assertIn('apps_->statusJson(extractString(request, "outputs"))', control)
 
 
 if __name__ == "__main__":

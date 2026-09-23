@@ -80,7 +80,9 @@ class AppManager : public AppHost {
   void setLedSink(LedSink sink) { ledSink_ = sink; }
 
   static const char* stateName(AppState state);
-  String statusJson() const;
+  // Per-node outputs are included only for the slot named by `outputsFor`
+  // (or none): four slots of 24 nodes each would not fit an ESP-NOW reply.
+  String statusJson(const String& outputsFor = String()) const;
   String appsText() const;
   // Events after `sinceSeq`, plus how many were overwritten before being read.
   String eventsJson(uint32_t sinceSeq, uint8_t limit) const;

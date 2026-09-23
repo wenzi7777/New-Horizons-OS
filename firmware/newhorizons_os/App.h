@@ -108,8 +108,14 @@ class App {
   virtual bool start() { return true; }
   virtual void stop() {}
   virtual void onEvent(const AppEvent& event) = 0;
-  // Optional app-specific state for /proc/apps; must be cheap.
-  virtual String statusJson() const { return "{}"; }
+  // Optional app-specific state for /proc/apps and app_list; must be cheap.
+  // `withOutputs` asks for per-node values too, which app_list includes only
+  // for the one slot a caller names: for every slot at once they would not fit
+  // an ESP-NOW reply.
+  virtual String statusJson(bool withOutputs) const {
+    (void)withOutputs;
+    return "{}";
+  }
   // True while an enabled app has nothing to run -- a flow slot with no graph
   // bound. It is not dispatched and takes no share of the budget, but keeps
   // its enabled state so binding a package later starts it straight away.

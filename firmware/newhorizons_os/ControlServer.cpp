@@ -445,7 +445,8 @@ String ControlServer::processCommand(const String& request) {
     if (!apps_) {
       return error(cmd, "app_manager_unavailable");
     }
-    return ok(cmd, "app_list", apps_->statusJson());
+    // {"command":"app_list","outputs":"flow1"} adds that slot's per-node values.
+    return ok(cmd, "app_list", apps_->statusJson(extractString(request, "outputs")));
   }
   if (cmd == "app_enable" || cmd == "app_disable") {
     if (!apps_) {
@@ -499,14 +500,14 @@ String ControlServer::processCommand(const String& request) {
     if (!flow_->loadFromFile(path, scanner_->health().pointCount, loadError)) {
       return error(cmd, String("flow_load_failed:") + loadError);
     }
-    return ok(cmd, "flow_graph_loaded", flow_->statusJson());
+    return ok(cmd, "flow_graph_loaded", flow_->statusJson(false));
   }
   if (cmd == "app_unload_flow") {
     if (!flow_) {
       return error(cmd, "flow_engine_unavailable");
     }
     flow_->unload();
-    return ok(cmd, "flow_graph_unloaded", flow_->statusJson());
+    return ok(cmd, "flow_graph_unloaded", flow_->statusJson(false));
   }
   if (cmd == "app_list_packages") {
     if (!appRegistry_) {

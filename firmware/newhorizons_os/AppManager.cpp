@@ -371,7 +371,7 @@ const char* AppManager::stateName(AppState state) {
   }
 }
 
-String AppManager::statusJson() const {
+String AppManager::statusJson(const String& outputsFor) const {
   String json = "{\"dispatches\":";
   json += String(dispatches_);
   json += ",\"count\":";
@@ -419,7 +419,7 @@ String AppManager::statusJson() const {
     json += ",\"events\":";
     json += String(slot.events);
     json += ",\"state_detail\":";
-    json += slot.app->statusJson();
+    json += slot.app->statusJson(outputsFor.length() > 0 && outputsFor == manifest.name);
     json += "}";
   }
   json += "]}";

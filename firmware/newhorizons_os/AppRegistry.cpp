@@ -144,15 +144,14 @@ bool AppRegistry::install(const String& path, const String& expectedSha256, bool
   // -- the device stores and reports it without interpreting it.
   uint32_t estimatedUs = 0;
   if (manifest.kind != kAppPackageReadout) {
-    FlowApp scratch;
-    scratch.setIdentity("scratch", manifest.declaredBudgetUs != 0 ? manifest.declaredBudgetUs
-                                                                  : FlowApp::kDefaultBudgetUs);
     String graphError;
-    if (!scratch.loadFromJson(json, path, cellCount_, graphError)) {
+    if (!FlowApp::dryRun(json, cellCount_,
+                         manifest.declaredBudgetUs != 0 ? manifest.declaredBudgetUs
+                                                        : FlowApp::kDefaultBudgetUs,
+                         estimatedUs, graphError)) {
       error = String("graph_invalid:") + graphError;
       return false;
     }
-    estimatedUs = scratch.estimatedUs();
   }
 
   int8_t index = existing;

@@ -1065,7 +1065,7 @@ void setup() {
     if (!flowApp.loaded()) {
       String flowError;
       if (flowApp.loadFromFile("apps/flow.json", cellCount, flowError)) {
-        logBoot(String("flow_graph_loaded ") + flowApp.statusJson());
+        logBoot(String("flow_graph_loaded ") + flowApp.statusJson(false));
       } else if (flowError != "file_not_found") {
         logBoot(String("flow_graph_rejected reason=") + flowError);
       }
@@ -1076,6 +1076,11 @@ void setup() {
   logBoot(String("boot_stage=services_ready ") + services.statusJson());
   registerRuntimeTasks();
   logBoot(String("boot_stage=scheduler_ready ") + scheduler.statusJson());
+  // What setup() left for everything that allocates later -- WiFi's large
+  // buffers in particular -- on a board with no PSRAM. The same figures as
+  // memory_status, but readable over USB without a network.
+  logBoot(String("boot_heap free=") + ESP.getFreeHeap() + " largest=" + ESP.getMaxAllocHeap() +
+          " min=" + ESP.getMinFreeHeap());
   updateLedState();
 }
 

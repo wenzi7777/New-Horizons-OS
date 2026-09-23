@@ -185,14 +185,29 @@ bool FlowApp::isSweepOp(FlowOp op) {
          op == FlowOp::RowCentroid || op == FlowOp::ColCentroid;
 }
 
+namespace {
+
+// One parse buffer for every slot. Static rather than on the stack: at 24
+// nodes it is ~1.8 KB, and graphs are parsed inside a command handler on the
+// 8 KB loop task, beside the JSON strings. Every graph load happens on that
+// one task (nothing here runs from an ISR or another task), so it is never
+// shared between two parses.
+FlowNode g_parseScratch[FlowApp::kMaxNodes];
+
+}  // namespace
+
 uint32_t FlowApp::estimateUs(uint16_t cellCount) const {
+  return estimateNodesUs(nodes_, nodeCount_, cellCount);
+}
+
+uint32_t FlowApp::estimateNodesUs(const FlowNode* nodes, uint8_t count, uint16_t cellCount) {
   uint64_t totalNs = 0;
-  for (uint8_t i = 0; i < nodeCount_; ++i) {
+  for (uint8_t i = 0; i < count; ++i) {
     // Gate is charged as if it never skips: costing the average would
     // understate the bound on exactly the frames that matter.
-    if (nodes_[i].op == FlowOp::Features) {
+    if (nodes[i].op == FlowOp::Features) {
       totalNs += static_cast<uint64_t>(cellCount) * kFeaturesNsPerCell;
-    } else if (isSweepOp(nodes_[i].op)) {
+    } else if (isSweepOp(nodes[i].op)) {
       totalNs += static_cast<uint64_t>(cellCount) * kCellOpNsPerCell;
     } else {
       totalNs += kScalarOpNs;
@@ -201,7 +216,10 @@ uint32_t FlowApp::estimateUs(uint16_t cellCount) const {
   return static_cast<uint32_t>((totalNs + 999) / 1000);
 }
 
-bool FlowApp::parse(const String& json, uint16_t cellCount, String& error) {
+bool FlowApp::parseNodes(const String& json, FlowNode* scratch, uint8_t& count,
+                         uint16_t& windowUsed, String& error) {
+  count = 0;
+  windowUsed = 0;
   String arrayBody;
   if (!jsonExtractArray(json, "nodes", arrayBody)) {
     error = "missing_nodes";
@@ -218,11 +236,6 @@ bool FlowApp::parse(const String& json, uint16_t cellCount, String& error) {
     return false;
   }
 
-  // Parsed into scratch first, so a rejected graph leaves the running one
-  // alone -- same transactional shape as a calibration session.
-  FlowNode scratch[kMaxNodes];
-  uint16_t windowUsed = 0;
-  uint8_t count = 0;
   for (const String& object : objects) {
     FlowNode& node = scratch[count];
     node = FlowNode();
@@ -369,21 +382,47 @@ bool FlowApp::parse(const String& json, uint16_t cellCount, String& error) {
     }
     ++count;
   }
+  return true;
+}
+
+bool FlowApp::dryRun(const String& json, uint16_t cellCount, uint32_t budgetUs,
+                     uint32_t& estimatedUs, String& error) {
+  uint8_t count = 0;
+  uint16_t windowUsed = 0;
+  if (!parseNodes(json, g_parseScratch, count, windowUsed, error)) {
+    return false;
+  }
+  estimatedUs = estimateNodesUs(g_parseScratch, count, cellCount);
+  if (estimatedUs > budgetUs) {
+    error = String("over_budget:") + String(estimatedUs) + "us>" + String(budgetUs) + "us";
+    return false;
+  }
+  return true;
+}
+
+bool FlowApp::parse(const String& json, uint16_t cellCount, String& error) {
+  // Parsed into scratch first, so a rejected graph leaves the running one
+  // alone -- same transactional shape as a calibration session.
+  uint8_t count = 0;
+  uint16_t windowUsed = 0;
+  if (!parseNodes(json, g_parseScratch, count, windowUsed, error)) {
+    return false;
+  }
 
   // Cost check before commit. This is the whole safety argument for the
-  // declarative model: an over-budget graph is refused at load time.
-  uint8_t previousCount = nodeCount_;
-  for (uint8_t i = 0; i < count; ++i) {
-    nodes_[i] = scratch[i];
-  }
-  nodeCount_ = count;
-  const uint32_t estimated = estimateUs(cellCount);
+  // declarative model: an over-budget graph is refused at load time. Checked
+  // on the scratch copy: committing first, as before v1.3.0, overwrote the
+  // running graph's nodes with a graph that was then refused.
+  const uint32_t estimated = estimateNodesUs(g_parseScratch, count, cellCount);
   if (estimated > manifest_.frameBudgetUs) {
-    nodeCount_ = previousCount;
     error = String("over_budget:") + String(estimated) + "us>" +
             String(manifest_.frameBudgetUs) + "us";
     return false;
   }
+  for (uint8_t i = 0; i < count; ++i) {
+    nodes_[i] = g_parseScratch[i];
+  }
+  nodeCount_ = count;
   estimatedUs_ = estimated;
   windowUsed_ = windowUsed;
   for (uint16_t i = 0; i < kWindowPool; ++i) {
@@ -742,7 +781,7 @@ void FlowApp::onEvent(const AppEvent& event) {
   evaluate(event);
 }
 
-String FlowApp::statusJson() const {
+String FlowApp::statusJson(bool withOutputs) const {
   String json = "{\"graph\":\"";
   json += jsonEscape(graphName_);
   json += "\",\"package\":\"";
@@ -765,6 +804,10 @@ String FlowApp::statusJson() const {
   json += degraded_ ? "true" : "false";
   json += ",\"degradations\":";
   json += String(degradations_);
+  if (!withOutputs) {
+    json += "}";
+    return json;
+  }
   json += ",\"outputs\":[";
   for (uint8_t i = 0; i < nodeCount_; ++i) {
     if (i != 0) json += ",";
