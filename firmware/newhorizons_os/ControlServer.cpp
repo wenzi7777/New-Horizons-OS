@@ -12,6 +12,13 @@
 
 namespace nhos {
 
+namespace {
+// Sections a Direct-mode status leaves out; see the "status" handler.
+constexpr char kCompactStatusOmitted[] =
+    "[\"battery_gauge\",\"config\",\"ota_rollback\",\"faults\",\"scheduler\",\"airtime\","
+    "\"services\",\"power_governor\",\"apps\",\"magnetometer\"]";
+}  // namespace
+
 void ControlServer::begin(
     WifiManager& wifi,
     MatrixScanner& scanner,
@@ -354,6 +361,13 @@ String ControlServer::processCommand(const String& request) {
     jsonStringField(runtime, "mode", boot_->modeName(), runtimeFirst);
     runtime += "}";
 
+    // Over ESP-NOW a reply is capped at kEspNowMaxFragCount fragments
+    // (7680 B), and the full status is ~13 KB since v1.1.0 added the app and
+    // scheduler sections. Direct mode therefore leaves out the sections no
+    // status consumer reads -- the big three each have their own command
+    // (app_list, task_list, service_list) -- and names them in "omitted", so
+    // a reader can tell "not sent" from "empty". The UDP reply is unchanged.
+    const bool compact = espNowOta_ != nullptr;
     String data = "{";
     data.reserve(1536);
     bool first = true;
@@ -368,9 +382,9 @@ String ControlServer::processCommand(const String& request) {
     jsonRawField(data, "runtime", runtime, first);
     jsonRawField(data, "wifi", wifi_->statusJson(), first);
     jsonRawField(data, "battery", batteryStatusJson(), first);
-    jsonRawField(data, "battery_gauge", batteryGauge_ ? batteryGauge_->statusJson() : "{}", first);
+    if (!compact) jsonRawField(data, "battery_gauge", batteryGauge_ ? batteryGauge_->statusJson() : "{}", first);
     jsonRawField(data, "power", powerState_ ? powerState_->statusJson() : "{}", first);
-    jsonRawField(data, "config", deviceConfig_ ? deviceConfig_->statusJson() : "{}", first);
+    if (!compact) jsonRawField(data, "config", deviceConfig_ ? deviceConfig_->statusJson() : "{}", first);
     jsonRawField(data, "logging", storage_ ? storage_->logStatusJson() : "{}", first);
     jsonRawField(data, "ota", deviceConfig_ ? deviceConfig_->otaJson() : "{}", first);
     // In Direct mode the HTTP OtaManager is never used (no WiFi), so its
@@ -380,24 +394,27 @@ String ControlServer::processCommand(const String& request) {
                  espNowOta_ != nullptr ? espNowOta_->statusJson()
                                         : (ota_ ? ota_->lastStatusJson() : String("{}")),
                  first);
-    jsonRawField(data, "ota_rollback", boot_ ? boot_->otaRollbackStatusJson() : "{}", first);
-    jsonRawField(data, "faults", faults_ ? faults_->statusJson() : "{}", first);
-    jsonRawField(data, "scheduler", scheduler_ ? scheduler_->statusJson() : "{}", first);
-    jsonRawField(data, "airtime", arbiter_ ? arbiter_->statusJson() : "{}", first);
-    jsonRawField(data, "services", services_ ? services_->statusJson() : "{}", first);
+    if (!compact) jsonRawField(data, "ota_rollback", boot_ ? boot_->otaRollbackStatusJson() : "{}", first);
+    if (!compact) jsonRawField(data, "faults", faults_ ? faults_->statusJson() : "{}", first);
+    if (!compact) jsonRawField(data, "scheduler", scheduler_ ? scheduler_->statusJson() : "{}", first);
+    if (!compact) jsonRawField(data, "airtime", arbiter_ ? arbiter_->statusJson() : "{}", first);
+    if (!compact) jsonRawField(data, "services", services_ ? services_->statusJson() : "{}", first);
     jsonRawField(data, "clock", clock_ ? clock_->statusJson() : "{}", first);
-    jsonRawField(data, "power_governor", governor_ ? governor_->statusJson() : "{}", first);
-    jsonRawField(data, "apps", apps_ ? apps_->statusJson() : "{}", first);
+    if (!compact) jsonRawField(data, "power_governor", governor_ ? governor_->statusJson() : "{}", first);
+    if (!compact) jsonRawField(data, "apps", apps_ ? apps_->statusJson() : "{}", first);
     jsonRawField(data, "filter", deviceConfig_ ? deviceConfig_->filterJson() : "{}", first);
     jsonBoolField(data, "stream_raw_adc", deviceConfig_ ? deviceConfig_->data().streamRawAdc : false, first);
     jsonRawField(data, "imu", imu_ ? imu_->statusJson() : "{}", first);
-    jsonRawField(data, "magnetometer", magnetometer_ ? magnetometer_->statusJson() : "{}", first);
+    if (!compact) jsonRawField(data, "magnetometer", magnetometer_ ? magnetometer_->statusJson() : "{}", first);
     jsonRawField(data, "stream_buffer", streamBuffer, first);
     jsonRawField(data, "calibration", calibration_ ? calibration_->statusJson(maintenanceMode()) : "{}", first);
     jsonRawField(data, "indicators", indicatorsStatusJson(), first);
     jsonRawField(data, "action_button", actionButtonStatusJson(), first);
     jsonRawField(data, "scan_health", scanner_->healthJson(), first);
     jsonRawField(data, "findme", findme_ ? findme_->statusJson() : "{}", first);
+    if (compact) {
+      jsonRawField(data, "omitted", kCompactStatusOmitted, first);
+    }
     data += "}";
     return ok(cmd, "status", data);
   }

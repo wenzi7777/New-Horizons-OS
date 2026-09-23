@@ -548,6 +548,49 @@ class ReadoutPackageTests(unittest.TestCase):
         self.assertIn('jsonExtractString(object, "kind", "flow")', load)
 
 
+class CompactStatusTests(unittest.TestCase):
+    """A Direct-mode status has to fit one ESP-NOW reply (7680 B).
+
+    The full status grew to ~13 KB with v1.1.0's app and scheduler sections,
+    so over ESP-NOW every status came back response_too_large and the Desktop
+    showed "unknown" for everything. Direct mode leaves out only sections no
+    status consumer reads.
+    """
+
+    OMITTED = ["battery_gauge", "config", "ota_rollback", "faults", "scheduler",
+               "airtime", "services", "power_governor", "apps", "magnetometer"]
+    # Read from status by the Desktop frontend or backend; must never be dropped.
+    KEPT = ["device_uid", "device_name", "protocol", "mode", "firmware_version",
+            "hardware_model", "matrix_shape", "matrix_layout", "runtime", "wifi",
+            "battery", "power", "logging", "ota", "update_state", "clock", "filter",
+            "stream_raw_adc", "imu", "stream_buffer", "calibration", "indicators",
+            "action_button", "scan_health", "findme"]
+
+    def handler(self):
+        impl = read("ControlServer.cpp")
+        start = impl.index('if (cmd == "status" || cmd == "query")')
+        return impl, impl[start:impl.index('return ok(cmd, "status", data);', start)]
+
+    def test_compact_only_in_direct_mode(self):
+        _, body = self.handler()
+        self.assertIn("const bool compact = espNowOta_ != nullptr;", body)
+
+    def test_omitted_sections_are_guarded_and_named(self):
+        impl, body = self.handler()
+        listing = impl[impl.index("kCompactStatusOmitted[] ="):]
+        listing = listing[:listing.index(";")]
+        for key in self.OMITTED:
+            self.assertIn(f'if (!compact) jsonRawField(data, "{key}"', body)
+            self.assertIn(f'\\"{key}\\"', listing)
+        self.assertIn('jsonRawField(data, "omitted", kCompactStatusOmitted, first);', body)
+
+    def test_fields_the_desktop_reads_are_always_sent(self):
+        _, body = self.handler()
+        for key in self.KEPT:
+            line = next(l for l in body.splitlines() if f'(data, "{key}"' in l)
+            self.assertNotIn("compact", line, key)
+
+
 class ImuReadPathTests(unittest.TestCase):
     """One bus transaction per sample, with the Bosch compensation intact.
 
