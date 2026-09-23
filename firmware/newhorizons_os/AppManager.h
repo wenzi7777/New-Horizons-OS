@@ -122,6 +122,10 @@ class AppManager : public AppHost {
 
   Slot slots_[kMaxApps];
   uint8_t count_ = 0;
+  // Which running slots had work at the last dispatch; a change (a package
+  // bound or removed) re-divides the budget.
+  uint8_t activeMask_ = 0;
+  uint8_t activeMask() const;
   Storage* storage_ = nullptr;
   EventRecord events_[kEventLogEntries];
   uint8_t eventWrite_ = 0;

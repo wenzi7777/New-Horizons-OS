@@ -127,6 +127,7 @@ class FlowApp : public App {
   bool loadFromJson(const String& json, const String& sourcePath,
                     uint16_t cellCount, String& error);
   bool loaded() const { return nodeCount_ > 0; }
+  bool idle() const override { return !loaded(); }
   void unload();
   uint32_t estimatedUs() const { return estimatedUs_; }
   const char* packageId() const { return packageId_; }

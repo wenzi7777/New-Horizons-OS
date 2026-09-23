@@ -110,6 +110,10 @@ class App {
   virtual void onEvent(const AppEvent& event) = 0;
   // Optional app-specific state for /proc/apps; must be cheap.
   virtual String statusJson() const { return "{}"; }
+  // True while an enabled app has nothing to run -- a flow slot with no graph
+  // bound. It is not dispatched and takes no share of the budget, but keeps
+  // its enabled state so binding a package later starts it straight away.
+  virtual bool idle() const { return false; }
 };
 
 }  // namespace nhos

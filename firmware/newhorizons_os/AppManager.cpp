@@ -69,14 +69,26 @@ int8_t AppManager::indexOfApp(const char* name) const {
   return -1;
 }
 
+// Running AND with something to run. An empty slot counted here took an equal
+// share of the budget: one real app beside three empty slots got a quarter.
 uint8_t AppManager::runningCount() const {
   uint8_t running = 0;
   for (uint8_t i = 0; i < count_; ++i) {
-    if (slots_[i].state == AppState::Running) {
+    if (slots_[i].state == AppState::Running && !slots_[i].app->idle()) {
       ++running;
     }
   }
   return running;
+}
+
+uint8_t AppManager::activeMask() const {
+  uint8_t mask = 0;
+  for (uint8_t i = 0; i < count_ && i < 8; ++i) {
+    if (slots_[i].state == AppState::Running && !slots_[i].app->idle()) {
+      mask |= static_cast<uint8_t>(1u << i);
+    }
+  }
+  return mask;
 }
 
 bool AppManager::setEnabled(const String& name, bool enabled) {
@@ -160,7 +172,8 @@ void AppManager::reallocate() {
   const uint8_t running = runningCount();
   const uint32_t share = running > 0 ? totalBudgetUs_ / running : 0;
   for (uint8_t i = 0; i < count_; ++i) {
-    slots_[i].allocatedUs = slots_[i].state == AppState::Running ? share : 0;
+    slots_[i].allocatedUs =
+        slots_[i].state == AppState::Running && !slots_[i].app->idle() ? share : 0;
   }
 }
 
@@ -198,12 +211,19 @@ void AppManager::dispatch(const AppEvent& event) {
   if (event.kind == AppEventKind::Frame) {
     frameSeq_ = event.frameSeq;
   }
+  // Binding and removing packages happens in the registry, which does not
+  // tell us; noticing it here keeps the split right without wiring every path.
+  const uint8_t mask = activeMask();
+  if (mask != activeMask_) {
+    activeMask_ = mask;
+    reallocate();
+  }
   const uint16_t required = subscriptionBit(event.kind);
   uint32_t totalUs = 0;
 
   for (uint8_t i = 0; i < count_; ++i) {
     Slot& slot = slots_[i];
-    if (slot.state != AppState::Running) {
+    if (slot.state != AppState::Running || slot.app->idle()) {
       continue;
     }
     const AppManifest& manifest = slot.app->manifest();
@@ -379,10 +399,15 @@ String AppManager::statusJson() const {
     json += jsonEscape(String(manifest.version));
     json += "\",\"state\":\"";
     json += stateName(slot.state);
-    json += "\",\"capabilities\":";
+    json += "\",\"idle\":";
+    json += slot.app->idle() ? "true" : "false";
+    json += ",\"capabilities\":";
     json += String(manifest.capabilities);
     json += ",\"budget_us\":";
-    json += String(slot.allocatedUs != 0 ? slot.allocatedUs : manifest.frameBudgetUs);
+    // An idle slot holds no share; showing the manifest default would claim
+    // budget it does not have.
+    json += String(slot.app->idle() ? 0
+                   : slot.allocatedUs != 0 ? slot.allocatedUs : manifest.frameBudgetUs);
     json += ",\"invocations\":";
     json += String(slot.invocations);
     json += ",\"last_us\":";
@@ -453,13 +478,15 @@ String AppManager::appsText() const {
       name += ' ';
     }
     out += name;
-    String state(stateName(slot.state));
+    String state(slot.state == AppState::Running && slot.app->idle() ? "idle"
+                                                                     : stateName(slot.state));
     while (state.length() < 11) {
       state += ' ';
     }
     out += state;
-    String budget(slot.allocatedUs != 0 ? slot.allocatedUs
-                                        : slot.app->manifest().frameBudgetUs);
+    String budget(slot.app->idle() ? 0
+                  : slot.allocatedUs != 0 ? slot.allocatedUs
+                                          : slot.app->manifest().frameBudgetUs);
     while (budget.length() < 10) {
       budget = " " + budget;
     }

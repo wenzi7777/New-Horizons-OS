@@ -548,6 +548,43 @@ class ReadoutPackageTests(unittest.TestCase):
         self.assertIn('jsonExtractString(object, "kind", "flow")', load)
 
 
+class IdleSlotTests(unittest.TestCase):
+    """An enabled slot with no package is idle, not running.
+
+    Seen after uninstalling every package: all four slots still said Running
+    and each took a quarter of the budget, so one real app beside three empty
+    slots would have been held to 25% of the ceiling.
+    """
+
+    def test_flow_slots_are_idle_without_a_graph(self):
+        self.assertIn("virtual bool idle() const { return false; }", read("App.h"))
+        self.assertIn("bool idle() const override { return !loaded(); }", read("FlowApp.h"))
+
+    def test_idle_slots_take_no_share(self):
+        impl = read("AppManager.cpp")
+        count = impl[impl.index("uint8_t AppManager::runningCount"):impl.index("uint8_t AppManager::activeMask")]
+        self.assertIn("!slots_[i].app->idle()", count)
+        realloc = impl[impl.index("void AppManager::reallocate"):impl.index("void AppManager::warnOverBudget")]
+        self.assertIn("!slots_[i].app->idle() ? share : 0", realloc)
+
+    def test_idle_slots_are_not_dispatched(self):
+        impl = read("AppManager.cpp")
+        dispatch = impl[impl.index("void AppManager::dispatch"):]
+        self.assertIn("slot.state != AppState::Running || slot.app->idle()", dispatch)
+
+    def test_binding_or_removing_a_package_redivides_the_budget(self):
+        impl = read("AppManager.cpp")
+        dispatch = impl[impl.index("void AppManager::dispatch"):]
+        head = dispatch[:dispatch.index("for (uint8_t i = 0; i < count_; ++i)")]
+        self.assertIn("if (mask != activeMask_)", head)
+        self.assertIn("reallocate();", head)
+
+    def test_idle_is_reported(self):
+        impl = read("AppManager.cpp")
+        self.assertIn('json += "\\",\\"idle\\":";', impl)
+        self.assertIn('"idle"', impl[impl.index('String out = "NAME'):])
+
+
 class CompactStatusTests(unittest.TestCase):
     """A Direct-mode status has to fit one ESP-NOW reply (7680 B).
 
