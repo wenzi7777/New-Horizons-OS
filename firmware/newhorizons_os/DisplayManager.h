@@ -28,6 +28,7 @@ class Adafruit_SSD1306 {
   void fillCircle(int16_t, int16_t, int16_t, uint16_t) {}
   void drawRoundRect(int16_t, int16_t, int16_t, int16_t, int16_t, uint16_t) {}
   void drawRect(int16_t, int16_t, int16_t, int16_t, uint16_t) {}
+  uint8_t* getBuffer() { return nullptr; }
   void fillRect(int16_t, int16_t, int16_t, int16_t, uint16_t) {}
   void drawLine(int16_t, int16_t, int16_t, int16_t, uint16_t) {}
   template <typename T>
@@ -64,6 +65,11 @@ class DisplayManager {
   bool powerAnimationActive() const;
   void sleep();
   void wake();
+  // Whether service() has anything to do now. Checked BEFORE the caller
+  // builds service()'s arguments: those are Strings, and building them on
+  // every loop pass only for service() to return at once was most of this
+  // task's cost -- with the OLED off entirely.
+  bool refreshDue(uint32_t nowMs) const;
   void service(uint32_t nowMs, const String& ip, const String& gatewayIp, const ScanHealth& health, uint32_t heapFree, uint32_t heapTotal);
   String statusJson() const;
 
@@ -82,6 +88,12 @@ class DisplayManager {
   void renderRecordingStatus(const ScanHealth& health);
   void renderAppPage();
   String addressString() const;
+  // Sends one changed page (8 pixel rows, i.e. one text row) of the frame
+  // buffer, rather than all four at once: a full 512-byte refresh held the
+  // loop for ~13ms at 400kHz, longer than a scan period, and most refreshes
+  // change one or two rows.
+  void flushOnePage();
+  void invalidateShadow() { shadowValid_ = false; dirtyPages_ = 0; }
 
   Adafruit_SSD1306 display_;
   OledConfig config_;
@@ -95,6 +107,12 @@ class DisplayManager {
   uint32_t powerAnimationStartedMs_ = 0;
   String lastError_;
   AppLineSource appLineSource_ = nullptr;
+  // What the panel shows, page by page, so an unchanged page is never sent.
+  static constexpr uint8_t kPages = 4;  // 32 rows / 8
+  static constexpr uint16_t kPageBytes = 128;
+  uint8_t shadow_[kPages * kPageBytes] = {};
+  bool shadowValid_ = false;
+  uint8_t dirtyPages_ = 0;
 };
 
 }  // namespace nhos

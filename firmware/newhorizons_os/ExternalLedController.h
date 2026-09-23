@@ -70,13 +70,27 @@ class ExternalLedController {
   Adafruit_NeoPixel pixels_{kExternalLedCount, kExternalLedPin,
                             NEO_GRB + NEO_KHZ800};
 #endif
+  // What the strip is actually showing. Every preset re-renders on every
+  // call, and the service runs every loop pass, so writing unconditionally
+  // cost a full blocking transfer each time (~270us for v1.5.F's nine
+  // pixels) for a frame that had not changed -- about a fifth of the loop.
+  // An unchanged frame is now skipped, and re-sent once a second anyway so a
+  // strip that glitched or lost power does not stay wrong.
+  static constexpr size_t kShownByteCount =
+      NHOS_BOARD_EXTERNAL_LED_COUNT > 0 ? NHOS_BOARD_EXTERNAL_LED_COUNT * 3U : 1U;
+  static constexpr uint32_t kReassertMs = 1000;
+  uint8_t shownBytes_[kShownByteCount] = {};
+  bool shownValid_ = false;
+  uint32_t lastWriteMs_ = 0;
   ExternalLedConfig config_;
   bool initialized_ = false;
   bool rmtReady_ = false;
   bool sleeping_ = false;
   uint8_t powerAnimation_ = 0;
   uint32_t powerAnimationStartedMs_ = 0;
-  String activePreset_ = "off";
+  // A literal, not a String: assigned on every call, and "system_status" is
+  // past the short-string buffer, so a String allocated each loop pass.
+  const char* activePreset_ = "off";
   uint32_t identifyStartedMs_ = 0;
   uint32_t lastShowMs_ = 0;
   String lastError_ = "";

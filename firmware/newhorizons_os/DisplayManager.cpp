@@ -43,6 +43,7 @@ void DisplayManager::begin(const OledConfig& config) {
 
 void DisplayManager::apply(const OledConfig& config) {
   config_ = config;
+  invalidateShadow();
 #if !NHOS_BOARD_HAS_OLED
   enabled_ = false;
   detected_ = false;
@@ -120,6 +121,7 @@ bool DisplayManager::powerAnimationActive() const {
 }
 
 void DisplayManager::sleep() {
+  invalidateShadow();
   if (!initialized_) {
     return;
   }
@@ -131,6 +133,7 @@ void DisplayManager::sleep() {
 
 void DisplayManager::wake() {
   sleeping_ = false;
+  invalidateShadow();
   if (!initialized_ || !enabled_) {
     return;
   }
@@ -140,13 +143,25 @@ void DisplayManager::wake() {
   lastUpdateMs_ = 0;
 }
 
-void DisplayManager::service(uint32_t nowMs, const String& ip, const String& gatewayIp, const ScanHealth& health, uint32_t heapFree, uint32_t heapTotal) {
+bool DisplayManager::refreshDue(uint32_t nowMs) const {
   if (!enabled_ || sleeping_ || powerAnimationActive()) {
-    return;
+    return false;
+  }
+  if (dirtyPages_ != 0) {
+    return true;
   }
   const uint8_t hz = config_.updateHz ? config_.updateHz : 1;
   const uint32_t intervalMs = 1000UL / hz;
-  if (lastUpdateMs_ && nowMs - lastUpdateMs_ < intervalMs) {
+  return !lastUpdateMs_ || nowMs - lastUpdateMs_ >= intervalMs;
+}
+
+void DisplayManager::service(uint32_t nowMs, const String& ip, const String& gatewayIp, const ScanHealth& health, uint32_t heapFree, uint32_t heapTotal) {
+  if (!refreshDue(nowMs)) {
+    return;
+  }
+  // Finish sending the last frame before drawing the next one.
+  if (dirtyPages_ != 0) {
+    flushOnePage();
     return;
   }
   lastUpdateMs_ = nowMs;
@@ -164,10 +179,59 @@ void DisplayManager::service(uint32_t nowMs, const String& ip, const String& gat
   } else {
     renderLiveStatus(ip, gatewayIp, health, heapFree, heapTotal);
   }
-  display_.display();
+  const uint8_t* buffer = display_.getBuffer();
+  if (buffer == nullptr) {
+    return;
+  }
+  for (uint8_t page = 0; page < kPages; ++page) {
+    const uint8_t* now = buffer + page * kPageBytes;
+    if (!shadowValid_ || memcmp(now, shadow_ + page * kPageBytes, kPageBytes) != 0) {
+      dirtyPages_ |= static_cast<uint8_t>(1u << page);
+    }
+  }
+  shadowValid_ = true;
+  if (dirtyPages_ != 0) {
+    flushOnePage();
+  }
+}
+
+void DisplayManager::flushOnePage() {
+  const uint8_t* buffer = display_.getBuffer();
+  if (buffer == nullptr || address_ == 0) {
+    dirtyPages_ = 0;
+    return;
+  }
+  uint8_t page = 0;
+  while (page < kPages && (dirtyPages_ & (1u << page)) == 0) {
+    ++page;
+  }
+  if (page >= kPages) {
+    dirtyPages_ = 0;
+    return;
+  }
+  // Horizontal addressing (set by begin()): bound the write to this page and
+  // the full width, then stream its 128 bytes as data.
+  display_.ssd1306_command(0x22);  // SSD1306_PAGEADDR
+  display_.ssd1306_command(page);
+  display_.ssd1306_command(page);
+  display_.ssd1306_command(0x21);  // SSD1306_COLUMNADDR
+  display_.ssd1306_command(0);
+  display_.ssd1306_command(kOledWidth - 1);
+  const uint8_t* bytes = buffer + page * kPageBytes;
+  // 64 at a time: the control byte plus data must fit the Wire buffer.
+  constexpr uint16_t kChunk = 64;
+  for (uint16_t offset = 0; offset < kPageBytes; offset += kChunk) {
+    Wire.beginTransmission(address_);
+    Wire.write(static_cast<uint8_t>(0x40));  // Co=0, D/C#=1: data follows
+    Wire.write(bytes + offset, kChunk);
+    Wire.endTransmission();
+  }
+  memcpy(shadow_ + page * kPageBytes, bytes, kPageBytes);
+  dirtyPages_ = static_cast<uint8_t>(dirtyPages_ & ~(1u << page));
 }
 
 void DisplayManager::renderPowerAnimation(const char* label, uint32_t elapsedMs, uint32_t durationMs) {
+  invalidateShadow();
   // label == "Powering off" / label == "Waking" are the only supported variants.
   const bool isPoweringOff = String(label) == "Powering off";
   const bool isWaking = String(label) == "Waking";
@@ -262,6 +326,7 @@ bool DisplayManager::configure() {
   display_.ssd1306_command(config_.contrast);
   display_.clearDisplay();
   display_.display();
+  invalidateShadow();
   return true;
 }
 

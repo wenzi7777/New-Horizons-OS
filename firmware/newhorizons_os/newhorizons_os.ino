@@ -644,8 +644,12 @@ void updateLedState() {
 }
 
 void taskDisplay() {
+  const uint32_t nowMs = millis();
+  if (!displayManager.refreshDue(nowMs)) {
+    return;
+  }
   displayManager.service(
-      millis(),
+      nowMs,
       wifi.isConnected() ? WiFi.localIP().toString() : WiFi.softAPIP().toString(),
       findme.hasGateway() ? findme.streamHost() : String("-"),
       scanner.health(),
@@ -800,7 +804,11 @@ void registerRuntimeTasks() {
     scheduler.registerTask("control_udp", &taskControlUdp, false);
     scheduler.registerTask("time_heartbeat", &taskTimeAndHeartbeat, false);
   }
-  scheduler.registerTask("led", &updateLedState, false);
+  // 100Hz, not every loop pass. The loop spins tens of thousands of times a
+  // second, and each pass here reads the heap's largest free block (a walk
+  // under a lock) and re-renders every pattern; no LED animation changes
+  // faster than 10ms, so the rest of those passes produced nothing.
+  scheduler.registerTask("led", &updateLedState, false, 10000);
   scheduler.registerTask("power_transition", &servicePowerTransition, false);
   scheduler.registerTask("display", &taskDisplay, false);
 

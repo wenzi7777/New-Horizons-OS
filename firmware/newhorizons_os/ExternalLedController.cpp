@@ -160,6 +160,8 @@ void ExternalLedController::sleep() {
 
 void ExternalLedController::wake() {
   sleeping_ = false;
+  // The strip may have lost power while asleep: what it shows is unknown.
+  shownValid_ = false;
 }
 
 void ExternalLedController::service(uint32_t nowMs, const ScanHealth& health, const ExternalLedInputs& in) {
@@ -320,7 +322,7 @@ String ExternalLedController::statusJson() const {
   out += "\",\"color\":\"";
   out += jsonEscape(config_.color);
   out += "\",\"active_preset\":\"";
-  out += jsonEscape(activePreset_);
+  out += jsonEscape(String(activePreset_));
   out += "\",\"brightness\":";
   out += String(config_.brightness, 2);
   out += ",\"count\":";
@@ -492,6 +494,18 @@ void ExternalLedController::clearPixels() {
 }
 
 bool ExternalLedController::showPixels() {
+#if defined(NHOS_BOARD_V15F) || NHOS_BOARD_HAS_EXT_LED
+#if defined(NHOS_BOARD_V15F)
+  const uint8_t* current = pixelBytes_;
+#else
+  const uint8_t* current = pixels_.getPixels();
+#endif
+  const uint32_t nowMs = millis();
+  if (shownValid_ && nowMs - lastWriteMs_ < kReassertMs &&
+      memcmp(current, shownBytes_, kShownByteCount) == 0) {
+    return true;
+  }
+#endif
 #if defined(NHOS_BOARD_V15F)
   if (!rmtReady_) {
     return false;
@@ -515,10 +529,16 @@ bool ExternalLedController::showPixels() {
     lastError_ = "rmt_write_failed";
     return false;
   }
+  memcpy(shownBytes_, current, kShownByteCount);
+  shownValid_ = true;
+  lastWriteMs_ = nowMs;
   lastError_ = "";
   return true;
 #elif NHOS_BOARD_HAS_EXT_LED
   pixels_.show();
+  memcpy(shownBytes_, current, kShownByteCount);
+  shownValid_ = true;
+  lastWriteMs_ = nowMs;
   lastError_ = "";
   return true;
 #else
