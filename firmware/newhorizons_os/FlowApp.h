@@ -93,9 +93,9 @@ class FlowApp : public App {
   // made the install-time estimate optimistic exactly where it was relied on.
   // These values carry roughly 2x margin over the measurements.
   //
-  // A compatibility contract with the App Library's tools/opset.py: if they
+  // A compatibility contract with the App Library's sdk/lib/opset.mjs: if they
   // drift, an app passes there and is refused here, and the author cannot see
-  // the other side. tests/test_firmware_contract.py pins them together.
+  // the other side. sdk/test/firmware-contract.test.mjs pins them together.
   static constexpr uint32_t kCellOpNsPerCell = 300;
   static constexpr uint32_t kFeaturesNsPerCell = 500;
   static constexpr uint32_t kScalarOpNs = 600;
