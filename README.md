@@ -48,8 +48,13 @@ The old MicroPython runtime layout (`device/root`, `device/os`, `device/recovery
 
 ```bash
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
-arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB firmware/newhorizons_os
+arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V10F" firmware/newhorizons_os
 ```
+
+Every build must name its board (`-DNHOS_BOARD_V10F`, `-DNHOS_BOARD_V15F`,
+`-DNHOS_BOARD_GCU_V21_LTS`, `-DNHOS_BOARD_GCU_V22C_LTS` or
+`-DNHOS_BOARD_GCU_V23D_LTS`); a build with none fails with `#error` instead of
+silently becoming v1.0.F. The per-board scripts below pass it for you.
 
 Or use the release helper:
 
@@ -81,6 +86,21 @@ firmware/scripts/flash_arduino_firmware_gcu_v21_lts.sh /dev/cu.usbserial-10
 # VD-CTL/R v1.5.F 2026.7 (native USB CDC; defaults to first /dev/cu.usbmodem*)
 firmware/scripts/flash_arduino_firmware_v15f.sh
 ```
+
+On Windows, the same per-board scripts exist as PowerShell (compile + upload;
+pass the COM port shown by `arduino-cli board list`):
+
+```powershell
+cd NewHorizonsOS-OTA
+.\firmware\scripts\flash_arduino_firmware.ps1 COM5              # v1.0.F (hold Action Button)
+.\firmware\scripts\flash_arduino_firmware_gcu_v23d_lts.ps1 COM5  # v2.3.D GCU LTS
+.\firmware\scripts\flash_arduino_firmware_gcu_v22c_lts.ps1 COM5  # v2.2.C GCU LTS
+.\firmware\scripts\flash_arduino_firmware_gcu_v21_lts.ps1 COM5   # v2.1 GCU LTS
+.\firmware\scripts\flash_arduino_firmware_v15f.ps1               # v1.5.F (auto-detects native USB)
+```
+
+If script execution is blocked, run it as
+`powershell -ExecutionPolicy Bypass -File .\firmware\scripts\<script>.ps1 COM5`.
 
 Adjust the serial port after checking:
 
@@ -151,7 +171,7 @@ The manifest shape is JSON:
 
 ```bash
 python3 -m unittest discover -s tests -q
-arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB firmware/newhorizons_os
+arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V10F" firmware/newhorizons_os
 arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "build.extra_flags=-DNHOS_BOARD_GCU_V23D_LTS" firmware/newhorizons_os
 arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "build.extra_flags=-DNHOS_BOARD_GCU_V22C_LTS" firmware/newhorizons_os
 arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "build.extra_flags=-DNHOS_BOARD_GCU_V21_LTS" firmware/newhorizons_os

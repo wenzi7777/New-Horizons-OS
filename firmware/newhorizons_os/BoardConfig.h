@@ -1,5 +1,17 @@
 #pragma once
 
+// The board is chosen at compile time and nothing else: hardware model,
+// matrix size, LEDs and the default OTA manifest all come from here, so a
+// build must name exactly one board. There is deliberately no default --
+// a build that silently fell back to v1.0.F once got flashed onto a v2.1
+// GCU LTS board. Use the per-board firmware/scripts/*.sh (or .ps1), which
+// pass the right define.
+#if (defined(NHOS_BOARD_V10F) + defined(NHOS_BOARD_V15F) + \
+     defined(NHOS_BOARD_GCU_V21_LTS) + defined(NHOS_BOARD_GCU_V22C_LTS) + \
+     defined(NHOS_BOARD_GCU_V23D_LTS)) > 1
+#error "More than one NHOS_BOARD_* is defined; pass exactly one."
+#endif
+
 #if defined(NHOS_BOARD_V15F)
 
 #define NHOS_BOARD_NAME         "VD-CTL/R v1.5.F 2026.7"
@@ -74,7 +86,7 @@
 #define NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL \
   "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v23d-lts-latest.json"
 
-#else
+#elif defined(NHOS_BOARD_V10F)
 
 #define NHOS_BOARD_NAME         "VD-CTL/R v1.0.F 2026.4"
 #define NHOS_BOARD_ROWS         10
@@ -91,6 +103,10 @@
 #define NHOS_BOARD_EXTERNAL_LED_COUNT 3
 #define NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL \
   "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v10f-latest.json"
+
+#else
+
+#error "No board selected: pass one of -DNHOS_BOARD_V10F, -DNHOS_BOARD_V15F, -DNHOS_BOARD_GCU_V21_LTS, -DNHOS_BOARD_GCU_V22C_LTS, -DNHOS_BOARD_GCU_V23D_LTS (the firmware/scripts/ flash and build scripts do this for you)."
 
 #endif
 

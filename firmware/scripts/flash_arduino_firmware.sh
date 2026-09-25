@@ -12,6 +12,7 @@ mkdir -p "${BUILD_PATH}"
 arduino-cli compile \
   --fqbn "${FQBN}" \
   --build-path "${BUILD_PATH}" \
+  --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V10F" \
   "${SKETCH}"
 
 arduino-cli upload \

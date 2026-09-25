@@ -684,6 +684,41 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('-DNHOS_BOARD_GCU_V21_LTS', script)
         self.assertIn('newhorizons-os-gcu-v21-lts-${VERSION}.bin', script)
 
+    def test_board_selection_has_no_silent_default(self):
+        # A build without a board define used to fall through to v1.0.F and
+        # got flashed onto a v2.1 GCU LTS board; it must fail to compile.
+        config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
+        branches = re.findall(r"^#(?:if|elif) defined\((NHOS_BOARD_\w+)\)", config, re.MULTILINE)
+
+        self.assertEqual(
+            sorted(branches),
+            sorted(["NHOS_BOARD_V10F", "NHOS_BOARD_V15F", "NHOS_BOARD_GCU_V21_LTS",
+                    "NHOS_BOARD_GCU_V22C_LTS", "NHOS_BOARD_GCU_V23D_LTS"]),
+        )
+        self.assertRegex(config, r'#else\s+#error "No board selected')
+        self.assertIn('#error "More than one NHOS_BOARD_* is defined', config)
+
+    def test_every_flash_and_build_script_passes_its_board_define(self):
+        expected = {
+            "flash_arduino_firmware": "-DNHOS_BOARD_V10F",
+            "build_arduino_release": "-DNHOS_BOARD_V10F",
+            "flash_arduino_firmware_v15f": "-DNHOS_BOARD_V15F",
+            "build_arduino_release_v15f": "-DNHOS_BOARD_V15F",
+            "flash_arduino_firmware_gcu_v21_lts": "-DNHOS_BOARD_GCU_V21_LTS",
+            "build_arduino_release_gcu_v21_lts": "-DNHOS_BOARD_GCU_V21_LTS",
+            "flash_arduino_firmware_gcu_v22c_lts": "-DNHOS_BOARD_GCU_V22C_LTS",
+            "build_arduino_release_gcu_v22c_lts": "-DNHOS_BOARD_GCU_V22C_LTS",
+            "flash_arduino_firmware_gcu_v23d_lts": "-DNHOS_BOARD_GCU_V23D_LTS",
+            "build_arduino_release_gcu_lts": "-DNHOS_BOARD_GCU_V23D_LTS",
+        }
+        for stem, define in expected.items():
+            suffixes = (".sh", ".ps1") if stem.startswith("flash_") else (".sh",)
+            for suffix in suffixes:
+                with self.subTest(script=stem + suffix):
+                    script = (SCRIPT_ROOT / (stem + suffix)).read_text(encoding="utf-8")
+                    self.assertIn(define, script)
+                    self.assertEqual(len(re.findall(r"-DNHOS_BOARD_\w+", script)), 1)
+
     def test_v22c_lts_board_config_declares_correct_capabilities(self):
         config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
 
