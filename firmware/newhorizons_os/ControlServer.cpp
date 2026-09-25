@@ -1352,10 +1352,16 @@ String ControlServer::processCommand(const String& request) {
     if (!maintenanceMode()) {
       return error(cmd, "maintenance_required");
     }
-    if (!calibration_ || !calibration_->sessionBegin()) {
+    if (!calibration_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    // A retried begin must not reset a draft that already holds captures.
+    const bool alreadyActive = calibration_->sessionActive();
+    if (!calibration_->sessionBegin()) {
       return error(cmd, "calibration_session_begin_failed");
     }
-    return ok(cmd, "calibration_session_started", calibration_->statusJson(maintenanceMode()));
+    return ok(cmd, alreadyActive ? "calibration_session_already_active" : "calibration_session_started",
+              calibration_->statusJson(maintenanceMode()));
   }
   if (cmd == "calibration_session_abort") {
     if (!maintenanceMode()) {
@@ -1436,19 +1442,39 @@ String ControlServer::processCommand(const String& request) {
     return ok(cmd, "calibration_tare_captured", tareJson);
   }
   if (cmd == "calibration_tare_capture") {
-    if (!maintenanceMode()) {
-      return error(cmd, "maintenance_required");
-    }
+    // One-tap zero. Works in normal mode too: the scan pauses for the
+    // capture and resumes, so the operator never has to enter maintenance.
     if (!calibration_ || !scanner_) {
       return error(cmd, "calibration_unavailable");
+    }
+    if (calibration_->sessionActive()) {
+      // Inside a session the baseline is the draft's (calibration_capture_tare);
+      // writing the saved tare here would be undone by the commit.
+      return error(cmd, "calibration_session_active");
     }
     const ScanHealth health = scanner_->health();
     std::vector<float> values(health.pointCount, 0);
     const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 1000));
-    if (!scanner_->captureAllAverages(values.data(), values.size(), durationMs) || !calibration_->applyTareDirect(values.data(), values.size())) {
+    const bool pauseScan = !maintenanceMode() && scanner_->active();
+    if (pauseScan) scanner_->stop();
+    const bool captured = scanner_->captureAllAverages(values.data(), values.size(), durationMs);
+    if (pauseScan) scanner_->start();
+    if (!captured || !calibration_->applyTareDirect(values.data(), values.size())) {
       return error(cmd, "calibration_tare_capture_failed");
     }
     return ok(cmd, "calibration_tare_captured", calibration_->statusJson(maintenanceMode()));
+  }
+  if (cmd == "calibration_tare_clear") {
+    if (!calibration_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    if (calibration_->sessionActive()) {
+      return error(cmd, "calibration_session_active");
+    }
+    if (!calibration_->clearTare()) {
+      return error(cmd, "calibration_tare_clear_failed");
+    }
+    return ok(cmd, "calibration_tare_cleared", calibration_->statusJson(maintenanceMode()));
   }
   if (cmd == "calibration_capture_cell") {
     if (!maintenanceMode()) {
@@ -1460,6 +1486,10 @@ String ControlServer::processCommand(const String& request) {
     const uint16_t sensorIndex = static_cast<uint16_t>(extractInt(request, "sensor_index", -1));
     const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 3000));
     const float level = extractFloat(request, "level", 0);
+    // Levels are stored relative to the draft baseline, so it comes first.
+    if (calibration_->sessionActive() && !calibration_->draftTareCaptured(sensorIndex)) {
+      return error(cmd, "calibration_tare_required");
+    }
     float value = 0;
     if (!scanner_->captureCellAverage(sensorIndex, durationMs, value) || !calibration_->captureCell(sensorIndex, level, value)) {
       return error(cmd, "calibration_capture_failed");
@@ -1479,6 +1509,9 @@ String ControlServer::processCommand(const String& request) {
     std::vector<float> values(health.pointCount, 0);
     const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 3000));
     const float level = extractFloat(request, "level", 0);
+    if (calibration_->sessionActive() && !calibration_->draftTareCaptured()) {
+      return error(cmd, "calibration_tare_required");
+    }
     if (!scanner_->captureAllAverages(values.data(), values.size(), durationMs) || !calibration_->captureAll(level, values.data(), values.size())) {
       return error(cmd, "calibration_capture_failed");
     }

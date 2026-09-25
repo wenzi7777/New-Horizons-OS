@@ -101,7 +101,11 @@ String Calibration::statusJson(bool modeActive) const {
   out += savedLevelsComplete_ ? "true" : "false";
   out += ",\"legacy_missing_tare\":";
   out += legacyMissingTare_ ? "true" : "false";
-  out += ",\"tare\":";
+  out += ",\"tare_enabled\":";
+  out += tareEnabled_ ? "true" : "false";
+  out += ",\"output_mode\":\"";
+  out += calibration_curve::outputModeName(outputMode());
+  out += "\",\"tare\":";
   out += tareSummaryJson(tare_, "saved");
   out += ",\"draft_tare\":";
   out += tareSummaryJson(draftTare_, "draft");
@@ -116,6 +120,9 @@ String Calibration::statusJson(bool modeActive) const {
 }
 
 bool Calibration::sessionBegin() {
+  if (sessionActive_) {
+    return true;
+  }
   draftTare_ = tare_;
   draftLevels_ = levels_;
   sessionActive_ = true;
@@ -147,6 +154,7 @@ bool Calibration::sessionCommit(bool autoEnable, String& outError) {
 
   tare_ = nextTare;
   levels_ = nextLevels;
+  convertAbsoluteLevels(levels_, tare_);
   draftTare_.clear();
   draftLevels_.clear();
   sessionActive_ = false;
@@ -197,6 +205,7 @@ bool Calibration::setEnabled(bool enabled, String& outError) {
 
 bool Calibration::clearProfile() {
   enabled_ = false;
+  tareEnabled_ = false;
   tare_.clear();
   draftTare_.clear();
   levels_.clear();
@@ -272,6 +281,8 @@ bool Calibration::dumpLevelJson(float level, String& out) const {
     buffer += String(static_cast<unsigned int>(total));
     buffer += ",\"complete\":";
     buffer += captured >= total && total > 0 ? "true" : "false";
+    buffer += ",\"relative\":";
+    buffer += item->relative ? "true" : "false";
     buffer += ",\"cells\":[";
     for (size_t sensorIndex = 0; sensorIndex < total; ++sensorIndex) {
       if (sensorIndex) {
@@ -321,7 +332,7 @@ bool Calibration::captureTare(const float* values, size_t count) {
 }
 
 bool Calibration::captureCell(uint16_t sensorIndex, float level, float value) {
-  if (!sessionActive_ || sensorIndex >= totalPointCount()) {
+  if (!sessionActive_ || sensorIndex >= totalPointCount() || !draftTareCaptured(sensorIndex)) {
     return false;
   }
   LevelData* item = mutableLevel(draftLevels_, level, true);
@@ -331,7 +342,11 @@ bool Calibration::captureCell(uint16_t sensorIndex, float level, float value) {
   if (item->values.size() < totalPointCount()) {
     item->values.resize(totalPointCount(), NAN);
   }
-  item->values[sensorIndex] = value;
+  if (!item->relative) {
+    calibration_curve::toRelative(item->values, draftTare_);
+    item->relative = true;
+  }
+  item->values[sensorIndex] = value - draftTare_[sensorIndex];
   return true;
 }
 
@@ -343,20 +358,40 @@ bool Calibration::captureAll(float level, const float* values, size_t count) {
   if (total == 0 || count < total) {
     return false;
   }
+  if (!draftTareCaptured()) {
+    return false;
+  }
   LevelData* item = mutableLevel(draftLevels_, level, true);
   if (!item) {
     return false;
   }
   item->values.assign(values, values + total);
+  calibration_curve::toRelative(item->values, draftTare_);
+  item->relative = true;
   return true;
+}
+
+bool Calibration::draftTareCaptured(int sensorIndex) const {
+  if (!sessionActive_) {
+    return false;
+  }
+  if (sensorIndex < 0) {
+    return tareComplete(draftTare_);
+  }
+  const size_t index = static_cast<size_t>(sensorIndex);
+  return index < draftTare_.size() && !std::isnan(draftTare_[index]);
 }
 
 bool Calibration::applyTareDirect(const float* values, size_t count) {
   const size_t total = totalPointCount();
-  if (total == 0 || !values || count < total) {
+  if (total == 0 || !values || count < total || sessionActive_) {
     return false;
   }
   tare_.assign(values, values + total);
+  // A pre-v1.5.1 profile that never had a tare becomes usable with this one,
+  // exactly as capturing a tare for it used to do.
+  convertAbsoluteLevels(levels_, tare_);
+  tareEnabled_ = true;
   refreshSavedStateCache();
   if (!complete()) {
     enabled_ = false;
@@ -365,47 +400,45 @@ bool Calibration::applyTareDirect(const float* values, size_t count) {
   return saveToStorage();
 }
 
+bool Calibration::clearTare() {
+  if (sessionActive_) {
+    return false;
+  }
+  tareEnabled_ = false;
+  updatedAtMs_ = millis();
+  return saveToStorage();
+}
+
+bool Calibration::tareEnabled() const {
+  return tareEnabled_;
+}
+
+calibration_curve::OutputMode Calibration::outputMode() const {
+  return calibration_curve::resolveOutputMode(enabled_, runtimeReady_, tareEnabled_, savedTareComplete_);
+}
+
 bool Calibration::apply(float rawMv, uint16_t sensorIndex, float& outValue) const {
   outValue = rawMv;
-  if (!enabled_ || !runtimeReady_ || sensorIndex >= totalPointCount() || sensorIndex >= tare_.size() || sensorIndex >= runtimeCurves_.size()) {
+  if (sensorIndex >= totalPointCount() || sensorIndex >= tare_.size()) {
     return false;
   }
   const float tareValue = tare_[sensorIndex];
   if (std::isnan(tareValue)) {
     return false;
   }
-
-  const float adjustedRaw = std::max(0.0f, rawMv - tareValue);
-  const RuntimeCurve& curve = runtimeCurves_[sensorIndex];
-  if (curve.raws.empty() || curve.levels.empty() || curve.tangents.empty()) {
-    return false;
+  switch (outputMode()) {
+    case calibration_curve::OutputMode::Calibrated:
+      if (sensorIndex >= runtimeCurves_.size()) {
+        return false;
+      }
+      return calibration_curve::evaluateCurve(runtimeCurves_[sensorIndex], calibration_curve::applyTare(rawMv, tareValue), outValue);
+    case calibration_curve::OutputMode::Tared:
+      outValue = calibration_curve::applyTare(rawMv, tareValue);
+      return true;
+    case calibration_curve::OutputMode::Raw:
+    default:
+      return false;
   }
-  if (curve.raws.size() == 1 || adjustedRaw <= curve.raws.front()) {
-    outValue = curve.levels.front();
-    return true;
-  }
-  if (adjustedRaw >= curve.raws.back()) {
-    outValue = curve.levels.back();
-    return true;
-  }
-  const auto upper = std::lower_bound(curve.raws.begin() + 1, curve.raws.end(), adjustedRaw);
-  const size_t i = static_cast<size_t>(upper - curve.raws.begin());
-  const float h = curve.raws[i] - curve.raws[i - 1];
-  if (h < 0.0001f) {
-    outValue = std::min(curve.levels[i - 1], curve.levels[i]);
-    return true;
-  }
-  const float t = (adjustedRaw - curve.raws[i - 1]) / h;
-  const float t2 = t * t;
-  const float t3 = t2 * t;
-  outValue = (2.0f * t3 - 3.0f * t2 + 1.0f) * curve.levels[i - 1]
-           + (t3 - 2.0f * t2 + t) * h * curve.tangents[i - 1]
-           + (-2.0f * t3 + 3.0f * t2) * curve.levels[i]
-           + (t3 - t2) * h * curve.tangents[i];
-  if (outValue < 0.0f) {
-    outValue = 0.0f;
-  }
-  return true;
 }
 
 Calibration::LevelData* Calibration::mutableLevel(std::vector<LevelData>& levels, float level, bool createIfMissing) {
@@ -472,6 +505,21 @@ void Calibration::refreshSavedStateCache() {
   runtimeReady_ = !legacyMissingTare_ && savedTareComplete_ && savedLevelsComplete_ && runtimeCurves_.size() == totalPointCount();
 }
 
+bool Calibration::convertAbsoluteLevels(std::vector<LevelData>& levels, const std::vector<float>& tare) {
+  if (tare.empty()) {
+    return false;
+  }
+  bool changed = false;
+  for (LevelData& item : levels) {
+    if (!item.relative) {
+      calibration_curve::toRelative(item.values, tare);
+      item.relative = true;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 void Calibration::rebuildRuntimeCurves() {
   runtimeCurves_.clear();
   const size_t total = totalPointCount();
@@ -480,80 +528,30 @@ void Calibration::rebuildRuntimeCurves() {
   }
 
   runtimeCurves_.resize(total);
+  std::vector<float> levelValues;
+  std::vector<float> relativeRaws;
+  levelValues.reserve(levels_.size());
+  relativeRaws.reserve(levels_.size());
   for (size_t sensorIndex = 0; sensorIndex < total; ++sensorIndex) {
-    RuntimeCurve& curve = runtimeCurves_[sensorIndex];
-    if (sensorIndex >= tare_.size()) {
+    if (sensorIndex >= tare_.size() || std::isnan(tare_[sensorIndex])) {
       continue;
     }
-
-    const float tareValue = tare_[sensorIndex];
-    if (std::isnan(tareValue)) {
-      continue;
-    }
-
-    struct SamplePoint {
-      float raw;
-      float level;
-    };
-
-    std::vector<SamplePoint> points;
-    points.reserve(levels_.size() + 1);
-    points.push_back({0.0f, 0.0f});
-
+    levelValues.clear();
+    relativeRaws.clear();
     for (const LevelData& item : levels_) {
-      if (sensorIndex >= item.values.size()) {
+      if (!item.relative || sensorIndex >= item.values.size()) {
         continue;
       }
-      const float raw = item.values[sensorIndex];
-      if (std::isnan(raw)) {
-        continue;
-      }
-      const float adjustedLevelRaw = raw - tareValue;
-      if (adjustedLevelRaw <= 0.0001f) {
-        continue;
-      }
-      points.push_back({adjustedLevelRaw, item.level});
+      levelValues.push_back(item.level);
+      relativeRaws.push_back(item.values[sensorIndex]);
     }
-
-    std::sort(points.begin(), points.end(), [](const SamplePoint& a, const SamplePoint& b) {
-      if (a.raw == b.raw) {
-        return a.level < b.level;
-      }
-      return a.raw < b.raw;
-    });
-
-    curve.raws.reserve(points.size());
-    curve.levels.reserve(points.size());
-    curve.tangents.assign(points.size(), 0.0f);
-    for (const SamplePoint& point : points) {
-      curve.raws.push_back(point.raw);
-      curve.levels.push_back(point.level);
-    }
-
-    if (points.size() <= 1) {
-      continue;
-    }
-
-    std::vector<float> slopes(points.size() - 1, 0.0f);
-    for (size_t i = 0; i < points.size() - 1; ++i) {
-      const float dx = points[i + 1].raw - points[i].raw;
-      slopes[i] = (dx < 0.0001f) ? 0.0f : (points[i + 1].level - points[i].level) / dx;
-    }
-
-    curve.tangents[0] = slopes[0];
-    curve.tangents[points.size() - 1] = slopes[points.size() - 2];
-    for (size_t i = 1; i < points.size() - 1; ++i) {
-      if (slopes[i - 1] * slopes[i] <= 0.0f) {
-        curve.tangents[i] = 0.0f;
-      } else {
-        curve.tangents[i] = 2.0f / (1.0f / slopes[i - 1] + 1.0f / slopes[i]);
-      }
-    }
+    calibration_curve::buildCurve(levelValues.data(), relativeRaws.data(), levelValues.size(), runtimeCurves_[sensorIndex]);
   }
 }
 
 bool Calibration::loadFromStorage() {
   enabled_ = false;
+  tareEnabled_ = false;
   sessionActive_ = false;
   legacyMissingTare_ = false;
   savedTareComplete_ = false;
@@ -581,6 +579,8 @@ bool Calibration::loadFromStoragePath(const char* metaPath, const char* dirPath,
   if (!storage_ || !storage_->readTextFile(metaPath, meta)) {
     return false;
   }
+  // Absent in profiles saved before v1.5.1, whose levels are absolute mV.
+  bool levelsRelative = false;
   int cursor = 0;
   while (cursor <= meta.length()) {
     int end = meta.indexOf('\n', cursor);
@@ -598,6 +598,10 @@ bool Calibration::loadFromStoragePath(const char* metaPath, const char* dirPath,
         value.trim();
         if (key == "enabled") {
           enabled_ = value == "1" || value == "true";
+        } else if (key == "tare_enabled") {
+          tareEnabled_ = value == "1" || value == "true";
+        } else if (key == "levels_relative") {
+          levelsRelative = value == "1" || value == "true";
         } else if (key == "created_at_ms") {
           createdAtMs_ = static_cast<uint32_t>(value.toInt());
         } else if (key == "updated_at_ms") {
@@ -652,9 +656,21 @@ bool Calibration::loadFromStoragePath(const char* metaPath, const char* dirPath,
     }
   }
 
+  if (legacyLayout) {
+    levelsRelative = false;
+  }
+  for (LevelData& item : levels_) {
+    item.relative = levelsRelative;
+  }
+  const bool migrated = convertAbsoluteLevels(levels_, tare_);
+
   refreshSavedStateCache();
   if (!complete()) {
     enabled_ = false;
+  }
+  if (migrated) {
+    Serial.println(F("cal_levels_migrated_to_relative"));
+    saveToStorage();
   }
   Serial.print(F("cal_loaded tare_points="));
   Serial.print(static_cast<unsigned int>(capturedCount(tare_)));
@@ -695,6 +711,17 @@ bool Calibration::saveToStorage() {
   meta += pinCsv(selectPins_, selectCount_);
   meta += "\nlegacy_missing_tare=";
   meta += legacyMissingTare_ ? "1" : "0";
+  meta += "\ntare_enabled=";
+  meta += tareEnabled_ ? "1" : "0";
+  // Every saved level shares one representation: new captures are relative,
+  // and absolute ones are converted the moment a tare exists (load, commit,
+  // applyTareDirect). Only a tare-less legacy profile stays absolute.
+  bool levelsRelative = true;
+  for (const LevelData& item : levels_) {
+    levelsRelative = levelsRelative && item.relative;
+  }
+  meta += "\nlevels_relative=";
+  meta += levelsRelative ? "1" : "0";
   meta += "\n";
   if (!storage_->writeTextFileAtomic(kCalibrationMetaPath, meta)) {
     return false;

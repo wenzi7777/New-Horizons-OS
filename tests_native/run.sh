@@ -87,3 +87,11 @@ CXX="${CXX:-c++}"
   -o "$BUILD_DIR/test_v5_runtime"
 
 "$BUILD_DIR/test_v5_runtime"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_calibration_curve.cpp" \
+  "$FIRMWARE_DIR/CalibrationCurve.cpp" \
+  -o "$BUILD_DIR/test_calibration_curve"
+
+"$BUILD_DIR/test_calibration_curve"

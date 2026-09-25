@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <vector>
 
+#include "CalibrationCurve.h"
 #include "Config.h"
 
 namespace nhos {
@@ -15,6 +16,9 @@ class Calibration {
   void setLayout(const uint8_t* analogPins, size_t analogCount, const uint8_t* selectPins, size_t selectCount);
 
   String statusJson(bool modeActive) const;
+  // Starts a draft from the saved profile. Idempotent: calling it again
+  // while a session is open keeps the draft, so a retried command cannot
+  // discard captures.
   bool sessionBegin();
   void sessionAbort();
   bool sessionCommit(bool autoEnable, String& outError);
@@ -29,20 +33,27 @@ class Calibration {
   bool captureTare(const float* values, size_t count);
   bool captureCell(uint16_t sensorIndex, float level, float value);
   bool captureAll(float level, const float* values, size_t count);
+  // True once the draft holds a baseline for `sensorIndex` (or, with -1, for
+  // every sensor). Level captures are stored relative to it, so they need it.
+  bool draftTareCaptured(int sensorIndex = -1) const;
+  // Zeroes the device outside a session: the saved tare is replaced and
+  // applied even without a pressure calibration (output_mode "tared").
   bool applyTareDirect(const float* values, size_t count);
+  // Stops applying a stand-alone tare; the tare itself stays for any profile.
+  bool clearTare();
+  bool tareEnabled() const;
+  calibration_curve::OutputMode outputMode() const;
   bool apply(float rawMv, uint16_t sensorIndex, float& outValue) const;
 
  private:
   struct LevelData {
     int32_t key = 0;
     float level = 0;
+    // mV relative to the tare active at capture. Profiles saved before
+    // v1.5.1 hold absolute mV (relative = false) until a tare is available
+    // to convert them with.
     std::vector<float> values;
-  };
-
-  struct RuntimeCurve {
-    std::vector<float> raws;
-    std::vector<float> levels;
-    std::vector<float> tangents;
+    bool relative = true;
   };
 
   LevelData* mutableLevel(std::vector<LevelData>& levels, float level, bool createIfMissing);
@@ -50,6 +61,7 @@ class Calibration {
   bool tareComplete(const std::vector<float>& tare) const;
   bool levelsComplete(const std::vector<LevelData>& levels) const;
   void refreshSavedStateCache();
+  static bool convertAbsoluteLevels(std::vector<LevelData>& levels, const std::vector<float>& tare);
   void rebuildRuntimeCurves();
   bool loadFromStorage();
   bool loadFromStoragePath(const char* metaPath, const char* dirPath, const char* tarePath);
@@ -77,6 +89,7 @@ class Calibration {
 
   Storage* storage_ = nullptr;
   bool enabled_ = false;
+  bool tareEnabled_ = false;
   bool sessionActive_ = false;
   uint8_t analogPins_[kRows] = {0};
   uint8_t selectPins_[kCols] = {0};
@@ -92,7 +105,7 @@ class Calibration {
   std::vector<float> draftTare_;
   std::vector<LevelData> levels_;
   std::vector<LevelData> draftLevels_;
-  std::vector<RuntimeCurve> runtimeCurves_;
+  std::vector<calibration_curve::Curve> runtimeCurves_;
 };
 
 }  // namespace nhos

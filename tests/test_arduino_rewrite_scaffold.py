@@ -212,6 +212,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             'cmd == "calibration_capture_tare"',
             'cmd == "calibration_capture_cell"',
             'cmd == "calibration_capture_all"',
+            'cmd == "calibration_tare_capture"',
+            'cmd == "calibration_tare_clear"',
         ):
             self.assertIn(command, control)
         self.assertIn('jsonRawField(data, "calibration"', control)
@@ -230,6 +232,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("tare_", calibration_impl)
         self.assertIn("draftTare_", calibration_impl)
         self.assertIn('"metadata"', calibration_impl)
+        self.assertIn('\\"tare_enabled\\"', calibration_impl)
+        self.assertIn('\\"output_mode\\"', calibration_impl)
+        self.assertIn("levels_relative=", calibration_impl)
         self.assertIn("void setCalibration", scanner_header)
         self.assertIn("bool captureCellAverage", scanner_header)
         self.assertIn("bool captureAllAverages", scanner_header)
@@ -248,11 +253,17 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIsNotNone(apply_match)
         body = apply_match.group("body")
 
-        self.assertIn("struct RuntimeCurve", calibration_header)
-        self.assertIn("std::vector<RuntimeCurve> runtimeCurves_", calibration_header)
+        curve_impl = (ARDUINO_ROOT / "CalibrationCurve.cpp").read_text(encoding="utf-8")
+        evaluate_match = re.search(r"bool evaluateCurve\(.*?\n\}", curve_impl, re.S)
+        self.assertIsNotNone(evaluate_match)
+        evaluate_body = evaluate_match.group(0)
+
+        self.assertIn("std::vector<calibration_curve::Curve> runtimeCurves_", calibration_header)
         self.assertIn("bool runtimeReady_ = false;", calibration_header)
         self.assertIn("runtimeCurves_[sensorIndex]", body)
-        self.assertIn("std::lower_bound", body)
+        self.assertIn("calibration_curve::evaluateCurve", body)
+        self.assertIn("std::lower_bound", evaluate_body)
+        self.assertNotIn("std::sort", evaluate_body)
         self.assertNotIn("complete()", body)
         self.assertNotIn("std::vector<SamplePoint>", body)
         self.assertNotIn("points.reserve", body)
