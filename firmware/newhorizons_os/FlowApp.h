@@ -1,6 +1,7 @@
 #pragma once
 
 #include "App.h"
+#include "FlowMath.h"
 
 namespace nhos {
 
@@ -40,6 +41,22 @@ enum class FlowOp : uint8_t {
   // --- v1.5.0: the external LED strip ---
   ExtPixel,  // lights one external pixel in a colour while a bool is true
   ExtMeter,  // shows the input as a meter along the strip over [lo, hi]
+  // --- v1.6.0: time, logic and counting (no windows, so no 128-frame cap) ---
+  Not,           // bool: the input's negation
+  Duration,      // ms the input has been continuously true, 0 while false
+  Interval,      // ms between the input's last two rising edges
+  PeakSince,     // largest a since b last rose
+  CounterReset,  // counts rises of a; a rise of b zeroes it first
+  Sqrt,          // sqrt, 0 for a negative input
+  Atan2,         // atan2(a, b) in degrees
+  // --- v1.6.0: sweeps over a region (r0..c1, optionally in percent) ---
+  RegionPeak, RegionActive, RegionRowCentroid, RegionColCentroid,
+  // --- v1.6.0: the other sensors ---
+  Imu,     // one ImuField of the delivered sample; holds without one
+  Mag,     // one MagField of the delivered sample; holds without one
+  Battery, // state of charge in percent, -1 without a reading
+  Linked,  // bool: the stream transport has somewhere to send
+  Uptime,  // seconds since boot
 };
 
 // Fields a single Features sweep produces, in wire order.
@@ -66,15 +83,19 @@ struct FlowNode {
   // as the label, rather than growing a struct every slot holds 24 of.
   // ExtPixel reuses r0 as the pixel index.
   uint8_t r0 = 0, c0 = 0, r1 = 0, c1 = 0;
-  uint8_t field = 0;       // FeatureField, for FeatureGet
+  uint8_t field = 0;       // FeatureField, ImuField or MagField
   uint8_t span = 0;        // Gate: how many FOLLOWING nodes it may skip
   uint8_t rgb[3] = {0, 0, 0};
+  uint8_t rel = 0;         // kRegionRelRows/kRegionRelCols: bounds in percent
+  bool persist = false;    // Counter/CounterReset: kept across reboots
+  bool fall = false;       // EmitValue: fire on the fall of a, not the rise
   char event[24] = {0};
 
   // Evaluation state
   float result = 0;
   bool boolResult = false;
   bool lastBool = false;
+  bool lastBool2 = false;  // the second input's previous value (CounterReset)
   bool skipped = false;
   uint32_t sinceMs = 0;
   uint16_t filled = 0;   // valid samples in the ring
@@ -126,6 +147,12 @@ class FlowApp : public App {
   // Presses held for frames not yet evaluated. Small on purpose: presses made
   // while no frames arrive (streaming paused) must not replay as a burst later.
   static constexpr uint8_t kMaxPendingPresses = 3;
+  // A graph that declares kAppCapTick is also evaluated on the 10 Hz tick, but
+  // only once no frame has arrived for this long -- never twice per frame.
+  static constexpr uint32_t kTickFallbackMs = 250;
+  // Persisted counters are written at most this often, from service(), so a
+  // reboot loses at most this much counting and the flash sees few writes.
+  static constexpr uint32_t kPersistIntervalMs = 30000;
 
   FlowApp();
   // The manifest points into this object's own buffers, so a copy's manifest
@@ -154,7 +181,11 @@ class FlowApp : public App {
 
   const AppManifest& manifest() const override { return manifest_; }
   bool start() override;
+  // No stop(): a stopped slot still gets service(), which writes a dirty
+  // count within kPersistIntervalMs. Writing from stop() would put a flash
+  // write exactly where the governor suspends apps -- under scan pressure.
   void onEvent(const AppEvent& event) override;
+  void service(uint32_t nowMs) override;
   String statusJson(bool withOutputs) const override;
   bool displayLine(uint8_t row, AppDisplayLine& out) const override;
   void extLedFrame(AppExtLedFrame& out) const override;
@@ -168,6 +199,9 @@ class FlowApp : public App {
   static FlowOp opFromName(const String& name);
   static const char* opName(FlowOp op);
   static bool isSweepOp(FlowOp op);
+  // Forgets a package's persisted values. The registry calls it on uninstall;
+  // deactivating keeps them, so re-activating carries on counting.
+  static void clearPersisted(Storage& storage, const char* packageId);
 
  private:
   bool parse(const String& json, uint16_t cellCount, String& error);
@@ -178,6 +212,10 @@ class FlowApp : public App {
   void evaluate(const AppEvent& event);
   void computeFeatures(const MatrixFrame& frame);
   float pushWindow(FlowNode& node, float sample, FlowOp op);
+  float sweepRegion(const FlowNode& node, const MatrixFrame& frame) const;
+  bool persists() const;
+  void restorePersisted();
+  void savePersisted();
 
   AppManifest manifest_;
   char nameBuf_[12] = {0};
@@ -195,6 +233,12 @@ class FlowApp : public App {
   uint32_t emissions_ = 0;
   uint32_t frames_ = 0;
   uint32_t degradations_ = 0;
+  uint32_t ticks_ = 0;       // evaluations driven by the tick, not a frame
+  uint32_t lastFrameMs_ = 0;
+  bool framesSeen_ = false;
+  // Persisted counters changed since they were last written.
+  bool persistDirty_ = false;
+  uint32_t lastPersistMs_ = 0;
   bool degraded_ = false;
   // Budget pressure, updated by Budget events and read by BudgetLoad/GraceLeft.
   float budgetLoad_ = 0;

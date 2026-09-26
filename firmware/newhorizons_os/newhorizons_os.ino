@@ -76,6 +76,9 @@ nhos::FlowApp& flowApp = flowApps[0];  // slot 0, the target of app_load_flow
 nhos::MatrixFrame lastFrame;
 bool lastFrameReady = false;
 float lastImuSample[nhos::kImuSampleFloats] = {0};
+// The magnetometer sample taken with the same frame, for apps (read_mag).
+float lastMagSample[nhos::kPacketMagFloatCount] = {0};
+bool lastMagValid = false;
 bool lastImuValid = false;
 nhos::LedController leds;
 nhos::ExternalLedController externalLeds;
@@ -373,6 +376,16 @@ bool appDisplayLine(uint8_t row, nhos::AppDisplayLine& out) {
   return apps.displayLine(row, out);
 }
 
+// What every app event carries besides its own payload: the battery and the
+// link. AppManager strips each one from an app that did not declare it.
+void fillAppContext(nhos::AppEvent& event) {
+  nhos::BatteryGaugeSample gauge;
+  event.batteryPercent = batteryGauge.copyLatestSample(gauge)
+                             ? static_cast<float>(gauge.socCentiPercent) / 100.0f
+                             : -1.0f;
+  event.linked = activeTransport != nullptr && activeTransport->ready();
+}
+
 // Runs after scan_stream in the same tick, so the frame it dispatches is the
 // one just scanned and is still the scanner's own data.
 void taskApps() {
@@ -386,7 +399,11 @@ void taskApps() {
     event.nowMs = nowMs;
     event.frameSeq = lastFrame.seq;
     event.frame = &lastFrame;
+    // The samples streamed with this frame, so an app sees what a recording
+    // of it holds.
     event.imuSample = lastImuValid ? lastImuSample : nullptr;
+    event.magSample = lastMagValid ? lastMagSample : nullptr;
+    fillAppContext(event);
     apps.dispatch(event);
   }
 
@@ -397,8 +414,18 @@ void taskApps() {
     tick.kind = nhos::AppEventKind::Tick;
     tick.nowMs = nowMs;
     tick.frameSeq = lastFrame.seq;
+    // No frame to take them from, so the latest readings: a background app
+    // (kAppCapTick) keeps seeing the sensors while the scanner is stopped.
+    static float tickImu[nhos::kImuSampleFloats] = {0};
+    static float tickMag[nhos::kPacketMagFloatCount] = {0};
+    tick.imuSample = imu.copyLatestSample(tickImu) ? tickImu : nullptr;
+    tick.magSample = magnetometer.copyLatestSample(tickMag) ? tickMag : nullptr;
+    fillAppContext(tick);
     apps.dispatch(tick);
   }
+
+  // Untimed housekeeping, such as writing a persisted counter to NVS.
+  apps.service(nowMs);
 }
 
 void scanAndStreamIfDue() {
@@ -439,6 +466,10 @@ void scanAndStreamIfDue() {
   lastImuValid = imuSampleValid;
   if (imuSampleValid) {
     memcpy(lastImuSample, imuSample, sizeof(lastImuSample));
+  }
+  lastMagValid = magSampleValid;
+  if (magSampleValid) {
+    memcpy(lastMagSample, magSample, sizeof(lastMagSample));
   }
   lastFrameReady = true;
 

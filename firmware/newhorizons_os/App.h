@@ -36,6 +36,10 @@ enum AppCapability : uint16_t {
   // The external LED strip. Unlike the OLED, a running app that may drive it
   // takes it over from the configured preset, and hands it back when it stops.
   kAppCapExtLed = 1 << 11,
+  // Magnetometer samples: a separate sensor (and permission) from the IMU.
+  kAppCapReadMag = 1 << 12,
+  // Keep marked values across reboots, in NVS. Written outside dispatch.
+  kAppCapPersist = 1 << 13,
 };
 
 struct AppManifest {
@@ -93,6 +97,13 @@ struct AppEvent {
   uint32_t frameSeq = 0;
   const MatrixFrame* frame = nullptr;  // nullptr unless kind == Frame
   const float* imuSample = nullptr;    // nullptr unless kAppCapReadImu and valid
+  const float* magSample = nullptr;    // mx, my, mz (uT); nullptr unless kAppCapReadMag and valid
+  // Fuel-gauge state of charge in percent, or -1 without kAppCapPower or a
+  // valid reading.
+  float batteryPercent = -1.0f;
+  // Whether the stream transport has somewhere to send; false without
+  // kAppCapLink.
+  bool linked = false;
   AppHost* host = nullptr;
   // Budget events only: measured cost over allocation, and how many more
   // overruns this app has before it is stopped.
@@ -116,6 +127,10 @@ class App {
   virtual bool start() { return true; }
   virtual void stop() {}
   virtual void onEvent(const AppEvent& event) = 0;
+  // Housekeeping that must not be charged to the app's allocation, such as a
+  // flash write: called outside dispatch, untimed. Must return quickly when
+  // there is nothing to do, since it runs every apps tick.
+  virtual void service(uint32_t nowMs) { (void)nowMs; }
   // Optional app-specific state for /proc/apps and app_list; must be cheap.
   // `withOutputs` asks for per-node values too, which app_list includes only
   // for the one slot a caller names: for every slot at once they would not fit

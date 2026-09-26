@@ -785,3 +785,82 @@ class TwentyFourNodeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FlowV16Tests(unittest.TestCase):
+    """v1.6.0: the other sensors, background running and persisted counters."""
+
+    def test_every_new_sample_is_stripped_unless_declared(self):
+        dispatch = read("AppManager.cpp")
+        dispatch = dispatch[dispatch.index("void AppManager::dispatch") : dispatch.index("void AppManager::recordEvent")]
+        for cap, field in (("kAppCapReadMag", "magSample"), ("kAppCapPower", "batteryPercent"),
+                           ("kAppCapLink", "linked")):
+            self.assertIn("(manifest.capabilities & {}) == 0".format(cap), dispatch)
+            self.assertIn("delivered.{} =".format(field), dispatch)
+
+    def test_a_flow_slot_may_hold_the_new_capabilities(self):
+        impl = read("FlowApp.cpp")
+        apply = impl[impl.index("void FlowApp::applyPackageManifest") : impl.index("FlowOp FlowApp::opFromName")]
+        for cap in ("kAppCapReadMag", "kAppCapPower", "kAppCapLink", "kAppCapPersist"):
+            self.assertIn(cap, apply)
+
+    def test_tick_evaluation_only_fills_in_for_missing_frames(self):
+        impl = read("FlowApp.cpp")
+        on_event = impl[impl.index("void FlowApp::onEvent") : impl.index("bool FlowApp::displayLine")]
+        tick = on_event[on_event.index("AppEventKind::Tick") : on_event.index("++frames_;")]
+        # Only a graph that asked for it, and never while frames are arriving.
+        self.assertIn("kAppCapTick", tick)
+        self.assertIn("kTickFallbackMs", tick)
+        self.assertIn("evaluate(event);", tick)
+
+    def test_matrix_reads_hold_on_a_tick(self):
+        impl = read("FlowApp.cpp")
+        evaluate = impl[impl.index("void FlowApp::evaluate") : impl.index("void FlowApp::onEvent")]
+        self.assertIn("if (frame == nullptr && isSweepOp(node.op)) {", evaluate)
+
+    def test_ticks_carry_the_latest_sensor_readings(self):
+        sketch = read("newhorizons_os.ino")
+        task = sketch[sketch.index("void taskApps()") : sketch.index("void scanAndStreamIfDue()")]
+        tick = task[task.index("AppEventKind::Tick") :]
+        self.assertIn("imu.copyLatestSample(tickImu)", tick)
+        self.assertIn("magnetometer.copyLatestSample(tickMag)", tick)
+        self.assertIn("fillAppContext(tick);", tick)
+
+    def test_persisting_never_happens_inside_the_timed_dispatch(self):
+        impl = read("FlowApp.cpp")
+        evaluate = impl[impl.index("void FlowApp::evaluate") : impl.index("void FlowApp::onEvent")]
+        on_event = impl[impl.index("void FlowApp::onEvent") : impl.index("bool FlowApp::displayLine")]
+        # A flash write is milliseconds: evaluate() only marks the count dirty.
+        for body in (evaluate, on_event):
+            self.assertNotIn("savePersisted()", body)
+            self.assertNotIn("putBytes", body)
+        self.assertIn("persistDirty_ = true;", evaluate)
+        service = impl[impl.index("void FlowApp::service") :]
+        self.assertIn("kPersistIntervalMs", service)
+        # The sketch calls it after dispatching, untimed.
+        sketch = read("newhorizons_os.ino")
+        task = sketch[sketch.index("void taskApps()") : sketch.index("void scanAndStreamIfDue()")]
+        self.assertGreater(task.index("apps.service(nowMs);"), task.rindex("apps.dispatch("))
+        self.assertNotIn("void stop() override;", read("FlowApp.h"))
+
+    def test_uninstall_clears_a_persisted_count_and_deactivate_keeps_it(self):
+        registry = read("AppRegistry.cpp")
+        uninstall = registry[registry.index("bool AppRegistry::uninstall") : registry.index("bool AppRegistry::bind")]
+        self.assertIn("FlowApp::clearPersisted(", uninstall)
+        deactivate = registry[registry.index("bool AppRegistry::deactivate") : registry.index("bool AppRegistry::verify")]
+        self.assertNotIn("clearPersisted", deactivate)
+        impl = read("FlowApp.cpp")
+        unload = impl[impl.index("void FlowApp::unload") : impl.index("bool FlowApp::start")]
+        self.assertLess(unload.index("savePersisted();"), unload.index("nodeCount_ = 0;"))
+
+    def test_a_restore_needs_the_same_package_and_version(self):
+        impl = read("FlowApp.cpp")
+        restore = impl[impl.index("void FlowApp::restorePersisted") : impl.index("void FlowApp::savePersisted")]
+        self.assertIn("strcmp(id, packageId_) != 0 || strcmp(version, versionBuf_) != 0", restore)
+
+    def test_sensor_sample_is_a_read_only_command(self):
+        control = read("ControlServer.cpp")
+        block = control[control.index('if (cmd == "sensor_sample")') : control.index('if (cmd == "memory_status")')]
+        for key in ('"imu"', '"mag"', '"battery"', '"valid"'):
+            self.assertIn(key.replace('"', '\\"'), block)
+        self.assertNotIn("put", block)

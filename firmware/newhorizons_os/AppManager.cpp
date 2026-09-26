@@ -206,6 +206,17 @@ void AppManager::warnOverBudget(Slot& slot, uint32_t elapsedUs, uint32_t nowMs) 
   }
 }
 
+void AppManager::service(uint32_t nowMs) {
+  // Every installed app, running or not: a slot that was just stopped may
+  // still have state to write out, and that write is exactly what service()
+  // is for.
+  for (uint8_t i = 0; i < count_; ++i) {
+    if (slots_[i].app != nullptr) {
+      slots_[i].app->service(nowMs);
+    }
+  }
+}
+
 void AppManager::dispatch(const AppEvent& event) {
   ++dispatches_;
   if (event.kind == AppEventKind::Frame) {
@@ -241,6 +252,15 @@ void AppManager::dispatch(const AppEvent& event) {
     }
     if ((manifest.capabilities & kAppCapReadImu) == 0) {
       delivered.imuSample = nullptr;
+    }
+    if ((manifest.capabilities & kAppCapReadMag) == 0) {
+      delivered.magSample = nullptr;
+    }
+    if ((manifest.capabilities & kAppCapPower) == 0) {
+      delivered.batteryPercent = -1.0f;
+    }
+    if ((manifest.capabilities & kAppCapLink) == 0) {
+      delivered.linked = false;
     }
     delivered.host = this;
 

@@ -418,6 +418,51 @@ String ControlServer::processCommand(const String& request) {
     data += "}";
     return ok(cmd, "status", data);
   }
+  if (cmd == "sensor_sample") {
+    // The latest readings, for a readout to chart: the same numbers the flow
+    // ops imu()/mag()/battery() see. Read-only, and small enough to poll.
+    String data = "{\"imu\":{";
+    float imuSample[kImuSampleFloats] = {0};
+    const bool imuValid = imu_ != nullptr && imu_->copyLatestSample(imuSample);
+    data += "\"valid\":";
+    data += imuValid ? "true" : "false";
+    if (imuValid) {
+      static const char* const kImuKeys[] = {"ax", "ay", "az", "gx", "gy", "gz"};
+      for (uint8_t i = 0; i < 6; ++i) {
+        data += ",\"";
+        data += kImuKeys[i];
+        data += "\":";
+        data += String(imuSample[i], 4);
+      }
+    }
+    data += "},\"mag\":{";
+    float magSample[3] = {0};
+    const bool magValid = magnetometer_ != nullptr && magnetometer_->copyLatestSample(magSample);
+    data += "\"valid\":";
+    data += magValid ? "true" : "false";
+    if (magValid) {
+      static const char* const kMagKeys[] = {"mx", "my", "mz"};
+      for (uint8_t i = 0; i < 3; ++i) {
+        data += ",\"";
+        data += kMagKeys[i];
+        data += "\":";
+        data += String(magSample[i], 3);
+      }
+    }
+    data += "},\"battery\":{";
+    BatteryGaugeSample gauge;
+    const bool gaugeValid = batteryGauge_ != nullptr && batteryGauge_->copyLatestSample(gauge);
+    data += "\"valid\":";
+    data += gaugeValid ? "true" : "false";
+    if (gaugeValid) {
+      data += ",\"percent\":";
+      data += String(static_cast<float>(gauge.socCentiPercent) / 100.0f, 2);
+      data += ",\"mv\":";
+      data += String(gauge.vbatMv);
+    }
+    data += "}}";
+    return ok(cmd, "sensor_sample", data);
+  }
   if (cmd == "memory_status") {
     // Diagnostic JSON fields: "heap_total", "heap_used".
     const uint32_t heapTotal = ESP.getHeapSize();

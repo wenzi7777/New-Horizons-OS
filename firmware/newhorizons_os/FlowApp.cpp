@@ -57,6 +57,45 @@ uint8_t featureFieldFromName(const String& name) {
   return 0xFF;
 }
 
+// Mirrored by IMU_FIELDS / MAG_FIELDS in the App Library's opset.mjs.
+uint8_t imuFieldFromName(const String& name) {
+  static const char* const kNames[] = {"ax", "ay", "az", "gx", "gy", "gz",
+                                       "acc_mag", "gyro_mag", "pitch", "roll"};
+  for (uint8_t i = 0; i < static_cast<uint8_t>(ImuField::Count); ++i) {
+    if (name == kNames[i]) return i;
+  }
+  return 0xFF;
+}
+
+uint8_t magFieldFromName(const String& name) {
+  static const char* const kNames[] = {"mx", "my", "mz", "strength", "heading"};
+  for (uint8_t i = 0; i < static_cast<uint8_t>(MagField::Count); ++i) {
+    if (name == kNames[i]) return i;
+  }
+  return 0xFF;
+}
+
+bool isRegionOp(FlowOp op) {
+  return op == FlowOp::RegionSum || op == FlowOp::RegionPeak || op == FlowOp::RegionActive ||
+         op == FlowOp::RegionRowCentroid || op == FlowOp::RegionColCentroid;
+}
+
+// Persisted counters live in one NVS blob per package, keyed by the id's first
+// 12 characters (NVS keys stop at 15). The blob repeats the whole id and the
+// version, so a prefix collision or a new version restores nothing rather
+// than the wrong numbers.
+constexpr uint8_t kPersistMagic = 0x50;  // 'P'
+constexpr size_t kPersistIdBytes = 16;
+constexpr size_t kPersistVersionBytes = 12;
+constexpr size_t kPersistHeaderBytes = 2 + kPersistIdBytes + kPersistVersionBytes;
+constexpr size_t kPersistItemBytes = 6;  // node index, op, float value
+
+String persistKey(const char* packageId) {
+  String key = "pc_";
+  key += String(packageId).substring(0, 12);
+  return key;
+}
+
 // The scale constants live in MatrixScanner.h and are shared with the scanner
 // itself; the extractor this replaces used exactly these. Redefining them here
 // would silently change every centroid and peak01 the device reports.
@@ -101,8 +140,12 @@ void FlowApp::applyPackageManifest(const char* version, const char* summary,
   // does not already allow.
   const uint16_t allowed = kAppCapReadMatrix | kAppCapReadImu | kAppCapEmitEvent |
                            kAppCapDriveLed | kAppCapTick | kAppCapBudget |
-                           kAppCapButton | kAppCapDisplay | kAppCapExtLed;
+                           kAppCapButton | kAppCapDisplay | kAppCapExtLed |
+                           kAppCapReadMag | kAppCapPower | kAppCapLink | kAppCapPersist;
   manifest_.capabilities = capabilities & allowed;
+  // The package id and capabilities arrive after the graph is parsed, and
+  // both are needed to find -- and be allowed -- the saved values.
+  restorePersisted();
 }
 
 FlowOp FlowApp::opFromName(const String& name) {
@@ -144,6 +187,22 @@ FlowOp FlowApp::opFromName(const String& name) {
   if (name == "oled_bar") return FlowOp::OledBar;
   if (name == "ext_pixel") return FlowOp::ExtPixel;
   if (name == "ext_meter") return FlowOp::ExtMeter;
+  if (name == "not") return FlowOp::Not;
+  if (name == "duration") return FlowOp::Duration;
+  if (name == "interval") return FlowOp::Interval;
+  if (name == "peak_since") return FlowOp::PeakSince;
+  if (name == "counter_reset") return FlowOp::CounterReset;
+  if (name == "sqrt") return FlowOp::Sqrt;
+  if (name == "atan2") return FlowOp::Atan2;
+  if (name == "region_peak") return FlowOp::RegionPeak;
+  if (name == "region_active") return FlowOp::RegionActive;
+  if (name == "region_row_centroid") return FlowOp::RegionRowCentroid;
+  if (name == "region_col_centroid") return FlowOp::RegionColCentroid;
+  if (name == "imu") return FlowOp::Imu;
+  if (name == "mag") return FlowOp::Mag;
+  if (name == "battery") return FlowOp::Battery;
+  if (name == "linked") return FlowOp::Linked;
+  if (name == "uptime") return FlowOp::Uptime;
   return FlowOp::Invalid;
 }
 
@@ -187,6 +246,22 @@ const char* FlowApp::opName(FlowOp op) {
     case FlowOp::OledBar: return "oled_bar";
     case FlowOp::ExtPixel: return "ext_pixel";
     case FlowOp::ExtMeter: return "ext_meter";
+    case FlowOp::Not: return "not";
+    case FlowOp::Duration: return "duration";
+    case FlowOp::Interval: return "interval";
+    case FlowOp::PeakSince: return "peak_since";
+    case FlowOp::CounterReset: return "counter_reset";
+    case FlowOp::Sqrt: return "sqrt";
+    case FlowOp::Atan2: return "atan2";
+    case FlowOp::RegionPeak: return "region_peak";
+    case FlowOp::RegionActive: return "region_active";
+    case FlowOp::RegionRowCentroid: return "region_row_centroid";
+    case FlowOp::RegionColCentroid: return "region_col_centroid";
+    case FlowOp::Imu: return "imu";
+    case FlowOp::Mag: return "mag";
+    case FlowOp::Battery: return "battery";
+    case FlowOp::Linked: return "linked";
+    case FlowOp::Uptime: return "uptime";
     case FlowOp::Invalid:
     default: return "invalid";
   }
@@ -195,7 +270,9 @@ const char* FlowApp::opName(FlowOp op) {
 bool FlowApp::isSweepOp(FlowOp op) {
   return op == FlowOp::Total || op == FlowOp::Peak || op == FlowOp::RegionSum ||
          op == FlowOp::ActiveCells || op == FlowOp::Features || op == FlowOp::ArgMax ||
-         op == FlowOp::RowCentroid || op == FlowOp::ColCentroid;
+         op == FlowOp::RowCentroid || op == FlowOp::ColCentroid ||
+         op == FlowOp::RegionPeak || op == FlowOp::RegionActive ||
+         op == FlowOp::RegionRowCentroid || op == FlowOp::RegionColCentroid;
 }
 
 namespace {
@@ -351,6 +428,44 @@ bool FlowApp::parseNodes(const String& json, FlowNode* scratch, uint8_t& count,
       }
     }
 
+    if (node.op == FlowOp::Imu || node.op == FlowOp::Mag) {
+      const String fieldName = jsonExtractString(object, "field", "");
+      node.field = node.op == FlowOp::Imu ? imuFieldFromName(fieldName) : magFieldFromName(fieldName);
+      if (node.field == 0xFF) {
+        error = String(node.op == FlowOp::Imu ? "unknown_imu_field:" : "unknown_mag_field:") + fieldName;
+        return false;
+      }
+    }
+
+    // A relative region's bounds are percentages, resolved against each
+    // frame's own shape -- so one package fits a 5x7 and a 15x15 matrix.
+    if (jsonExtractInt(object, "rel", integer) && integer != 0) {
+      if (!isRegionOp(node.op) || integer < 0 || integer > (kRegionRelRows | kRegionRelCols)) {
+        error = "invalid_region_rel";
+        return false;
+      }
+      node.rel = static_cast<uint8_t>(integer);
+      if (((node.rel & kRegionRelRows) != 0 && (node.r1 > kMaxRegionPercent || node.r0 > node.r1)) ||
+          ((node.rel & kRegionRelCols) != 0 && (node.c1 > kMaxRegionPercent || node.c0 > node.c1))) {
+        error = "invalid_region_percent";
+        return false;
+      }
+    }
+    if (jsonExtractInt(object, "persist", integer) && integer != 0) {
+      if (node.op != FlowOp::Counter && node.op != FlowOp::CounterReset) {
+        error = "persist_not_a_counter";
+        return false;
+      }
+      node.persist = true;
+    }
+    if (jsonExtractInt(object, "fall", integer) && integer != 0) {
+      if (node.op != FlowOp::EmitValue) {
+        error = "fall_not_an_emit";
+        return false;
+      }
+      node.fall = true;
+    }
+
     if (node.op == FlowOp::OledText || node.op == FlowOp::OledBar) {
       long row = -1;
       if (!jsonExtractInt(object, "row", row) || row < 0 || row >= kOledRows) {
@@ -428,10 +543,12 @@ bool FlowApp::parseNodes(const String& json, FlowNode* scratch, uint8_t& count,
       case FlowOp::Delta: case FlowOp::Integrate: case FlowOp::Counter:
       case FlowOp::FeatureGet: case FlowOp::Led: case FlowOp::OledText: case FlowOp::OledBar:
       case FlowOp::ExtPixel: case FlowOp::ExtMeter:
+      case FlowOp::Not: case FlowOp::Duration: case FlowOp::Interval: case FlowOp::Sqrt:
         needed = 1; break;
       case FlowOp::Add: case FlowOp::Sub: case FlowOp::Mul: case FlowOp::Div:
       case FlowOp::Min: case FlowOp::Max: case FlowOp::EmitValue: case FlowOp::Gate:
       case FlowOp::Mod:
+      case FlowOp::PeakSince: case FlowOp::CounterReset: case FlowOp::Atan2:
         needed = 2; break;
       case FlowOp::Select:
         needed = 3; break;
@@ -523,7 +640,15 @@ bool FlowApp::loadFromFile(const String& path, uint16_t cellCount, String& error
   for (uint8_t byte : bytes) {
     json += static_cast<char>(byte);
   }
-  return loadFromJson(json, path, cellCount, error);
+  if (!loadFromJson(json, path, cellCount, error)) {
+    return false;
+  }
+  // A raw graph (app_load_flow) belongs to no package, so it has nowhere to
+  // persist to -- and must not write its counters under the key of whatever
+  // package this slot held before.
+  packageId_[0] = '\0';
+  persistDirty_ = false;
+  return true;
 }
 
 bool FlowApp::loadFromJson(const String& json, const String& sourcePath,
@@ -536,6 +661,9 @@ bool FlowApp::loadFromJson(const String& json, const String& sourcePath,
 }
 
 void FlowApp::unload() {
+  // Written out before the graph goes: deactivating keeps a count, so
+  // re-activating the package carries on from it.
+  savePersisted();
   nodeCount_ = 0;
   estimatedUs_ = 0;
   windowUsed_ = 0;
@@ -552,9 +680,102 @@ void FlowApp::unload() {
   packageId_[0] = '\0';
   sourcePath_ = "";
   graphName_ = "";
+  framesSeen_ = false;
+  ticks_ = 0;
 }
 
 bool FlowApp::start() { return true; }
+
+bool FlowApp::persists() const {
+  if (storage_ == nullptr || (manifest_.capabilities & kAppCapPersist) == 0 ||
+      packageId_[0] == '\0') {
+    return false;
+  }
+  for (uint8_t i = 0; i < nodeCount_; ++i) {
+    if (nodes_[i].persist) return true;
+  }
+  return false;
+}
+
+void FlowApp::restorePersisted() {
+  persistDirty_ = false;
+  if (!persists()) {
+    return;
+  }
+  uint8_t blob[kPersistHeaderBytes + kMaxNodes * kPersistItemBytes];
+  const String key = persistKey(packageId_);
+  const size_t size = storage_->prefs().getBytesLength(key.c_str());
+  if (size < kPersistHeaderBytes || size > sizeof(blob)) {
+    return;
+  }
+  if (storage_->prefs().getBytes(key.c_str(), blob, size) != size || blob[0] != kPersistMagic) {
+    return;
+  }
+  char id[kPersistIdBytes + 1] = {0};
+  char version[kPersistVersionBytes + 1] = {0};
+  memcpy(id, blob + 2, kPersistIdBytes);
+  memcpy(version, blob + 2 + kPersistIdBytes, kPersistVersionBytes);
+  // A new version may have renumbered its nodes; starting from zero is the
+  // honest outcome, and the one the App Library documents.
+  if (strcmp(id, packageId_) != 0 || strcmp(version, versionBuf_) != 0) {
+    return;
+  }
+  const uint8_t count = blob[1];
+  if (kPersistHeaderBytes + static_cast<size_t>(count) * kPersistItemBytes > size) {
+    return;
+  }
+  for (uint8_t i = 0; i < count; ++i) {
+    const uint8_t* item = blob + kPersistHeaderBytes + i * kPersistItemBytes;
+    const uint8_t index = item[0];
+    if (index >= nodeCount_ || !nodes_[index].persist ||
+        static_cast<uint8_t>(nodes_[index].op) != item[1]) {
+      continue;
+    }
+    float value = 0;
+    memcpy(&value, item + 2, sizeof(value));
+    nodes_[index].result = value;
+  }
+}
+
+void FlowApp::savePersisted() {
+  if (!persistDirty_ || !persists()) {
+    return;
+  }
+  uint8_t blob[kPersistHeaderBytes + kMaxNodes * kPersistItemBytes] = {0};
+  blob[0] = kPersistMagic;
+  strncpy(reinterpret_cast<char*>(blob + 2), packageId_, kPersistIdBytes);
+  strncpy(reinterpret_cast<char*>(blob + 2 + kPersistIdBytes), versionBuf_, kPersistVersionBytes);
+  uint8_t count = 0;
+  for (uint8_t i = 0; i < nodeCount_; ++i) {
+    if (!nodes_[i].persist) continue;
+    uint8_t* item = blob + kPersistHeaderBytes + count * kPersistItemBytes;
+    item[0] = i;
+    item[1] = static_cast<uint8_t>(nodes_[i].op);
+    memcpy(item + 2, &nodes_[i].result, sizeof(float));
+    ++count;
+  }
+  blob[1] = count;
+  storage_->prefs().putBytes(persistKey(packageId_).c_str(), blob,
+                             kPersistHeaderBytes + count * kPersistItemBytes);
+  persistDirty_ = false;
+}
+
+void FlowApp::clearPersisted(Storage& storage, const char* packageId) {
+  const String key = persistKey(packageId);
+  if (storage.prefs().isKey(key.c_str())) {
+    storage.prefs().remove(key.c_str());
+  }
+}
+
+void FlowApp::service(uint32_t nowMs) {
+  // At most every kPersistIntervalMs, and only when a count moved: a flash
+  // write is milliseconds, so it happens here, untimed, never in evaluate().
+  if (!persistDirty_ || nowMs - lastPersistMs_ < kPersistIntervalMs) {
+    return;
+  }
+  lastPersistMs_ = nowMs;
+  savePersisted();
+}
 
 float FlowApp::pushWindow(FlowNode& node, float sample, FlowOp op) {
   float* ring = &windowPool_[node.windowAt];
@@ -576,6 +797,42 @@ float FlowApp::pushWindow(FlowNode& node, float sample, FlowOp op) {
   }
   // Integrate reports the accumulated total over the window; mean divides it.
   return op == FlowOp::Integrate ? sum : (node.filled > 0 ? sum / node.filled : 0);
+}
+
+float FlowApp::sweepRegion(const FlowNode& node, const MatrixFrame& frame) const {
+  const FlowSpan rows = flowResolveSpan(node.r0, node.r1, (node.rel & kRegionRelRows) != 0, frame.rows);
+  const FlowSpan cols = flowResolveSpan(node.c0, node.c1, (node.rel & kRegionRelCols) != 0, frame.cols);
+  const uint16_t cells = frame.pointCount;
+  float sum = 0;
+  float peak = 0;
+  uint16_t active = 0;
+  float weighted = 0;
+  for (uint16_t r = rows.lo; r <= rows.hi && r < frame.rows; ++r) {
+    for (uint16_t c = cols.lo; c <= cols.hi && c < frame.cols; ++c) {
+      const uint16_t index = r * frame.cols + c;
+      if (index >= cells) continue;
+      const float value = frame.values[index];
+      switch (node.op) {
+        case FlowOp::RegionSum: sum += value; break;
+        case FlowOp::RegionPeak: if (value > peak) peak = value; break;
+        case FlowOp::RegionActive: if (value >= node.value) ++active; break;
+        default:
+          // The centroids weight by force, as the whole-matrix ones do, and
+          // report whole-matrix coordinates so the two can be compared.
+          if (value >= kPressureActiveThreshold) {
+            sum += value;
+            weighted += value * static_cast<float>(node.op == FlowOp::RegionRowCentroid ? r : c);
+          }
+          break;
+      }
+    }
+  }
+  switch (node.op) {
+    case FlowOp::RegionSum: return sum;
+    case FlowOp::RegionPeak: return peak;
+    case FlowOp::RegionActive: return static_cast<float>(active);
+    default: return sum > 0 ? weighted / sum : 0;
+  }
 }
 
 void FlowApp::computeFeatures(const MatrixFrame& frame) {
@@ -644,6 +901,10 @@ void FlowApp::evaluate(const AppEvent& event) {
       continue;
     }
     node.skipped = false;
+    // On a tick there is no frame: every read of the matrix holds its value.
+    if (frame == nullptr && isSweepOp(node.op)) {
+      continue;
+    }
 
     switch (node.op) {
       case FlowOp::Total: {
@@ -660,17 +921,13 @@ void FlowApp::evaluate(const AppEvent& event) {
         node.result = peak;
         break;
       }
-      case FlowOp::RegionSum: {
-        float sum = 0;
-        for (uint16_t r = node.r0; r <= node.r1 && frame != nullptr && r < frame->rows; ++r) {
-          for (uint16_t c = node.c0; c <= node.c1 && c < frame->cols; ++c) {
-            const uint16_t index = r * frame->cols + c;
-            if (index < cells) sum += frame->values[index];
-          }
-        }
-        node.result = sum;
+      case FlowOp::RegionSum:
+      case FlowOp::RegionPeak:
+      case FlowOp::RegionActive:
+      case FlowOp::RegionRowCentroid:
+      case FlowOp::RegionColCentroid:
+        node.result = sweepRegion(node, *frame);
         break;
-      }
       case FlowOp::ActiveCells: {
         uint16_t active = 0;
         for (uint16_t c = 0; c < cells; ++c) {
@@ -760,10 +1017,82 @@ void FlowApp::evaluate(const AppEvent& event) {
       }
       case FlowOp::Counter: {
         const bool current = nodes_[node.input].boolResult;
-        if (current && !node.lastBool) node.result += 1.0f;
+        if (current && !node.lastBool) {
+          node.result += 1.0f;
+          if (node.persist) persistDirty_ = true;
+        }
         node.lastBool = current;
         break;
       }
+      case FlowOp::CounterReset: {
+        // The reset first, so an edge that arrives with it still counts.
+        const bool reset = nodes_[node.input2].boolResult;
+        if (reset && !node.lastBool2 && node.result != 0) {
+          node.result = 0;
+          if (node.persist) persistDirty_ = true;
+        }
+        node.lastBool2 = reset;
+        const bool current = nodes_[node.input].boolResult;
+        if (current && !node.lastBool) {
+          node.result += 1.0f;
+          if (node.persist) persistDirty_ = true;
+        }
+        node.lastBool = current;
+        break;
+      }
+      case FlowOp::Not: {
+        node.boolResult = !nodes_[node.input].boolResult;
+        node.result = node.boolResult ? 1.0f : 0.0f;
+        break;
+      }
+      case FlowOp::Duration: {
+        const bool current = nodes_[node.input].boolResult;
+        if (current && !node.lastBool) node.sinceMs = event.nowMs;
+        node.lastBool = current;
+        node.result = current ? static_cast<float>(event.nowMs - node.sinceMs) : 0.0f;
+        break;
+      }
+      case FlowOp::Interval: {
+        const bool current = nodes_[node.input].boolResult;
+        if (current && !node.lastBool) {
+          // `filled` marks that a first rise has been seen.
+          if (node.filled > 0) node.result = static_cast<float>(event.nowMs - node.sinceMs);
+          node.sinceMs = event.nowMs;
+          node.filled = 1;
+        }
+        node.lastBool = current;
+        break;
+      }
+      case FlowOp::PeakSince: {
+        const float value = nodes_[node.input].result;
+        const bool reset = nodes_[node.input2].boolResult;
+        if ((reset && !node.lastBool) || node.filled == 0) {
+          node.result = value;
+          node.filled = 1;
+        } else if (value > node.result) {
+          node.result = value;
+        }
+        node.lastBool = reset;
+        break;
+      }
+      case FlowOp::Sqrt: node.result = flowSqrt(nodes_[node.input].result); break;
+      case FlowOp::Atan2:
+        node.result = flowAtan2Deg(nodes_[node.input].result, nodes_[node.input2].result);
+        break;
+      case FlowOp::Imu:
+        // Held when the frame carried no sample, so a dropped read is a
+        // repeat rather than a spike to zero.
+        if (event.imuSample != nullptr) node.result = flowImuField(event.imuSample, node.field);
+        break;
+      case FlowOp::Mag:
+        if (event.magSample != nullptr) node.result = flowMagField(event.magSample, node.field);
+        break;
+      case FlowOp::Battery: node.result = event.batteryPercent; break;
+      case FlowOp::Linked:
+        node.boolResult = event.linked;
+        node.result = event.linked ? 1.0f : 0.0f;
+        break;
+      case FlowOp::Uptime: node.result = static_cast<float>(event.nowMs) / 1000.0f; break;
       case FlowOp::Threshold: {
         const float input = nodes_[node.input].result;
         // Hysteresis: once latched, hold until the input falls below
@@ -799,7 +1128,8 @@ void FlowApp::evaluate(const AppEvent& event) {
       }
       case FlowOp::EmitValue: {
         const bool current = nodes_[node.input].boolResult;
-        if (current && !node.lastBool && event.host != nullptr) {
+        const bool edge = node.fall ? (!current && node.lastBool) : (current && !node.lastBool);
+        if (edge && event.host != nullptr) {
           event.host->emitValue(manifest_.name, node.event, nodes_[node.input2].result);
           ++emissions_;
         }
@@ -904,10 +1234,24 @@ void FlowApp::onEvent(const AppEvent& event) {
     if (pendingPresses_ < kMaxPendingPresses) ++pendingPresses_;
     return;
   }
+  if (event.kind == AppEventKind::Tick) {
+    // The scanner is stopped or nothing streams: keep a graph that asked for
+    // it running at the tick's 10 Hz, with the matrix reads holding. Only
+    // while frames are absent, so it is never evaluated twice per frame.
+    if (nodeCount_ == 0 || (manifest_.capabilities & kAppCapTick) == 0 ||
+        (framesSeen_ && event.nowMs - lastFrameMs_ < kTickFallbackMs)) {
+      return;
+    }
+    ++ticks_;
+    evaluate(event);
+    return;
+  }
   if (event.kind != AppEventKind::Frame || event.frame == nullptr || nodeCount_ == 0) {
     return;
   }
   ++frames_;
+  framesSeen_ = true;
+  lastFrameMs_ = event.nowMs;
   evaluate(event);
 }
 
@@ -972,6 +1316,10 @@ String FlowApp::statusJson(bool withOutputs) const {
   json += degraded_ ? "true" : "false";
   json += ",\"degradations\":";
   json += String(degradations_);
+  if (ticks_ != 0) {
+    json += ",\"ticks\":";
+    json += String(ticks_);
+  }
   if (!withOutputs) {
     json += "}";
     return json;

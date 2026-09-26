@@ -95,6 +95,8 @@ uint16_t AppPackage::capabilityFromName(const String& name) {
   if (name == "budget") return kAppCapBudget;
   if (name == "display") return kAppCapDisplay;
   if (name == "drive_ext_led") return kAppCapExtLed;
+  if (name == "read_mag") return kAppCapReadMag;
+  if (name == "persist") return kAppCapPersist;
   return 0;
 }
 

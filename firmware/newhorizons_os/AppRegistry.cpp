@@ -205,6 +205,11 @@ bool AppRegistry::uninstall(const String& id, bool keepFile, String& error) {
     unbind(entry.slot);
     entry.slot = -1;
   }
+  // Uninstalling is the one way to start a persisted count over; deactivating
+  // keeps it.
+  if (storage_ != nullptr) {
+    FlowApp::clearPersisted(*storage_, entry.manifest.id);
+  }
   Entry previous = entry;
   entry = Entry();
   // Index first, then the file. A crash between them leaves an orphan file,

@@ -55,6 +55,8 @@ class AppManager : public AppHost {
 
   // Dispatches one event to every running app subscribed to its kind.
   void dispatch(const AppEvent& event);
+  // Lets every installed app do its untimed housekeeping (App::service).
+  void service(uint32_t nowMs);
 
   // --- allocation, driven by AppGovernor -----------------------------------
   // Sets the total the apps may spend per dispatch and divides it among the
