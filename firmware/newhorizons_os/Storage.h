@@ -77,6 +77,7 @@ class Storage {
   static constexpr uint8_t kLogRingTextLen = 96;
   static constexpr uint8_t kLogTagLen = 12;
   static constexpr uint8_t kMaxTagLevels = 10;
+  static constexpr LogLevel kRingDefaultLevel = LogLevel::Info;
 
   struct LogRingEntry {
     uint32_t ms = 0;
@@ -92,7 +93,13 @@ class Storage {
   };
 
   void pushRing(const char* tag, const String& line, LogLevel level);
+  // A tag's explicit level, if one was set.
+  const TagLevel* tagOverride(const char* tag) const;
+  // Whether a line reaches the flash log: the tag's level, else the global.
   bool tagAllows(const char* tag, LogLevel level) const;
+  // Whether a line reaches the RAM ring: the tag's level, else Info --
+  // never the global level, which exists to spare the flash.
+  bool ringAllows(const char* tag, LogLevel level) const;
 
   LogRingEntry ring_[kLogRingEntries];
   uint8_t ringWrite_ = 0;

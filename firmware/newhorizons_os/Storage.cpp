@@ -242,8 +242,11 @@ void Storage::configureLog(bool enabled, size_t maxBytes, const String& level) {
   if (logMaxBytes_ > kExtendedLogMaxBytes) {
     logMaxBytes_ = kExtendedLogMaxBytes;
   }
-  logLevel_ = parseLogLevel(level);
-  logLevelName_ = level.isEmpty() ? String("error") : level;
+  // The name is derived from the level that actually applies. Before, an
+  // empty level reported "error" while filtering at info (parseLogLevel's
+  // fallback), and an unknown one such as "verbose" reported itself verbatim.
+  logLevel_ = parseLogLevel(level.isEmpty() ? String("error") : level);
+  logLevelName_ = logLevelName(logLevel_);
   rotateLogIfNeeded(0);
 }
 
@@ -277,14 +280,18 @@ void Storage::logTagged(const char* tag, const String& line, LogLevel level) {
   if (tag == nullptr) {
     tag = "sys";
   }
-  if (!tagAllows(tag, level)) {
-    return;
+  // The RAM ring is filled even when logging to flash is switched off, or
+  // turned down: a live tail is exactly what you want when you have
+  // deliberately stopped writing to flash, and the ring costs no flash at
+  // all. So the GLOBAL level -- the flash-wear lever, "error" by default --
+  // does not apply to it; only a per-tag override does, which is the explicit
+  // way to quiet one chatty subsystem. Filtering the ring by the global level
+  // too left dmesg holding nothing but the one line logged before the config
+  // loaded, on every device still at the default.
+  if (ringAllows(tag, level)) {
+    pushRing(tag, line, level);
   }
-  // The RAM ring is filled even when logging to flash is switched off: a
-  // live tail is exactly what you want when you have deliberately stopped
-  // writing to flash.
-  pushRing(tag, line, level);
-  if (!logEnabled_) {
+  if (!tagAllows(tag, level) || !logEnabled_) {
     return;
   }
   rotateLogIfNeeded(line.length() + 1);
@@ -297,13 +304,25 @@ void Storage::logTagged(const char* tag, const String& line, LogLevel level) {
   rotateLogIfNeeded(0);
 }
 
-bool Storage::tagAllows(const char* tag, LogLevel level) const {
+const Storage::TagLevel* Storage::tagOverride(const char* tag) const {
   for (uint8_t i = 0; i < tagLevelCount_; ++i) {
     if (strncmp(tagLevels_[i].tag, tag, kLogTagLen - 1) == 0) {
-      return static_cast<uint8_t>(level) <= static_cast<uint8_t>(tagLevels_[i].level);
+      return &tagLevels_[i];
     }
   }
-  return static_cast<uint8_t>(level) <= static_cast<uint8_t>(logLevel_);
+  return nullptr;
+}
+
+bool Storage::tagAllows(const char* tag, LogLevel level) const {
+  const TagLevel* explicitLevel = tagOverride(tag);
+  const LogLevel limit = explicitLevel != nullptr ? explicitLevel->level : logLevel_;
+  return static_cast<uint8_t>(level) <= static_cast<uint8_t>(limit);
+}
+
+bool Storage::ringAllows(const char* tag, LogLevel level) const {
+  const TagLevel* explicitLevel = tagOverride(tag);
+  const LogLevel limit = explicitLevel != nullptr ? explicitLevel->level : kRingDefaultLevel;
+  return static_cast<uint8_t>(level) <= static_cast<uint8_t>(limit);
 }
 
 bool Storage::setTagLevel(const char* tag, LogLevel level) {

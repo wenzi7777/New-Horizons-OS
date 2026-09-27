@@ -89,8 +89,27 @@ class LoggingTests(unittest.TestCase):
     def test_ring_is_filled_even_when_flash_logging_is_off(self):
         impl = read("Storage.cpp")
 
-        tagged = impl[impl.index("void Storage::logTagged") : impl.index("bool Storage::tagAllows")]
-        self.assertLess(tagged.index("pushRing("), tagged.index("if (!logEnabled_)"))
+        tagged = impl[impl.index("void Storage::logTagged") : impl.index("const Storage::TagLevel* Storage::tagOverride")]
+        self.assertLess(tagged.index("pushRing("), tagged.index("!logEnabled_"))
+
+    def test_the_global_level_does_not_filter_the_ring(self):
+        # The global level ("error" by default) spares the flash. Applying it
+        # to the RAM ring too left dmesg with only the pre-config line.
+        impl = read("Storage.cpp")
+        header = read("Storage.h")
+        tagged = impl[impl.index("void Storage::logTagged") : impl.index("const Storage::TagLevel* Storage::tagOverride")]
+        self.assertIn("if (ringAllows(tag, level)) {", tagged)
+        self.assertLess(tagged.index("pushRing("), tagged.index("tagAllows(tag, level)"))
+        ring = impl[impl.index("bool Storage::ringAllows") :]
+        ring = ring[: ring.index("\n}\n")]
+        self.assertIn("kRingDefaultLevel", ring)
+        self.assertNotIn("logLevel_", ring)
+        self.assertIn("kRingDefaultLevel = LogLevel::Info", header)
+
+    def test_the_reported_level_is_the_one_that_applies(self):
+        impl = read("Storage.cpp")
+        configure = impl[impl.index("void Storage::configureLog") : impl.index("String Storage::logStatusJson")]
+        self.assertIn("logLevelName_ = logLevelName(logLevel_);", configure)
 
     def test_untagged_logging_still_works(self):
         impl = read("Storage.cpp")
