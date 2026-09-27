@@ -159,7 +159,7 @@ bool OtaManager::parseManifest(const String& payload, UpdateInfo& out) {
     out.error = "protocol_mismatch";
     return false;
   }
-  if (model != kHardwareModel) {
+  if (model != kHardwareModel && model != kOtaManifestModel) {
     out.error = "model_mismatch";
     return false;
   }

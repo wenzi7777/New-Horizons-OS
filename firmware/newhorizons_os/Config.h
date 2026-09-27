@@ -6,7 +6,7 @@
 #include "PacketWire.h"
 
 #ifndef NHOS_FIRMWARE_VERSION
-#define NHOS_FIRMWARE_VERSION "v1.7.5"
+#define NHOS_FIRMWARE_VERSION "v1.8.0"
 #endif
 
 namespace nhos {
@@ -14,6 +14,8 @@ namespace nhos {
 static constexpr char kProductName[] = "NHOS Arduino";
 static constexpr char kProtocolName[] = "NHO/Arduino/1";
 static constexpr char kHardwareModel[] = NHOS_BOARD_NAME;
+// The pre-rename name OTA manifests still carry (see BoardConfig.h).
+static constexpr char kOtaManifestModel[] = NHOS_BOARD_OTA_MODEL;
 static constexpr char kFirmwareVersion[] = NHOS_FIRMWARE_VERSION;
 
 static constexpr uint16_t kRows = NHOS_BOARD_ROWS;

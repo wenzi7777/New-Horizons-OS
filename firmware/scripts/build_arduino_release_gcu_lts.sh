@@ -31,6 +31,8 @@ fi
 target="${RELEASE_DIR}/newhorizons-os-gcu-v23d-lts-${VERSION}.bin"
 cp "${main_bin}" "${target}"
 for manifest in "${MANIFEST_DIR}/arduino-gcu-v23d-lts-latest.json" "${MANIFEST_DIR}/arduino-gcu-v23d-lts-${VERSION}.json"; do
+  # The manifest keeps the board's pre-rename VD-CTL/R name (NHOS_BOARD_OTA_MODEL):
+  # firmware older than the TIA-CTL/R rename only accepts an exact match.
   python3 "${ROOT}/firmware/scripts/generate_arduino_manifest.py" \
     --firmware "${target}" \
     --output "${manifest}" \

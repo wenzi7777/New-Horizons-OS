@@ -59,6 +59,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate New Horizons Arduino OTA manifest JSON.")
     parser.add_argument("--firmware", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    # Pre-rename board name on purpose -- see NHOS_BOARD_OTA_MODEL in BoardConfig.h.
     parser.add_argument("--model", default="VD-CTL/R v1.0.F 2026.4")
     parser.add_argument("--version", required=True)
     parser.add_argument("--base-url", required=True)

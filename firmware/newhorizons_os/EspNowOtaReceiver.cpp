@@ -233,7 +233,7 @@ void EspNowOtaReceiver::handleManifestReply(const String& payload) {
     phase_ = Phase::kFinished;
     return;
   }
-  if (model != kHardwareModel) {
+  if (model != kHardwareModel && model != kOtaManifestModel) {
     Serial.println(F("[espnow_ota] model_mismatch"));
     lastError_ = "model_mismatch";
     phase_ = Phase::kFinished;

@@ -30,6 +30,8 @@ fi
 target="${RELEASE_DIR}/newhorizons-os-v15f-${VERSION}.bin"
 cp "${main_bin}" "${target}"
 for manifest in "${MANIFEST_DIR}/arduino-v15f-latest.json" "${MANIFEST_DIR}/arduino-v15f-${VERSION}.json"; do
+  # The manifest keeps the board's pre-rename VD-CTL/R name (NHOS_BOARD_OTA_MODEL):
+  # firmware older than the TIA-CTL/R rename only accepts an exact match.
   python3 "${ROOT}/firmware/scripts/generate_arduino_manifest.py" \
     --firmware "${target}" \
     --output "${manifest}" \

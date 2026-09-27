@@ -1,4 +1,4 @@
-# VD-CTL/R v1.0.F 2026.4 Hardware Contract
+# TIA-CTL/R v1.0.F 2026.4 Hardware Contract
 
 This directory documents the fixed hardware target for the active New Horizons OS firmware.
 
