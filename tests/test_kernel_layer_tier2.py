@@ -275,10 +275,15 @@ class AppOutputArbitrationTests(unittest.TestCase):
         # a flash outranks an app's colour, so the preview hid what it showed.
         control = read("ControlServer.cpp")
         rule = control[control.index("bool acknowledgesOnLed") : control.index("}  // namespace")]
+        self.assertIn("return !quiet", rule)
+        # Quiet regardless, for callers from before the flag.
         self.assertIn('cmd != "app_view"', rule)
         self.assertIn('cmd != "app_events"', rule)
-        # All three transports (TCP, UDP, ESP-NOW), both flashes each.
-        self.assertEqual(control.count("if (leds_ && acknowledgesOnLed(cmd)) {"), 6)
+        # All three transports (TCP, UDP, ESP-NOW) read the flag from the
+        # command itself, and gate both flashes on it.
+        self.assertEqual(control.count('extractBool(request, "quiet", false)'), 2)
+        self.assertEqual(control.count('extractBool(payloadStr, "quiet", false)'), 1)
+        self.assertEqual(control.count("if (leds_ && ackLed) {"), 6)
         self.assertEqual(control.count("if (leds_) {\n    leds_->showEvent(LedSignal::CommandReceived);"), 0)
 
     def test_app_view_is_read_only_and_advertised(self):

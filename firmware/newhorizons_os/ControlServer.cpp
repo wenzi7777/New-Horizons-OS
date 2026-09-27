@@ -18,14 +18,16 @@ constexpr char kCompactStatusOmitted[] =
     "[\"battery_gauge\",\"config\",\"ota_rollback\",\"faults\",\"scheduler\",\"airtime\","
     "\"services\",\"power_governor\",\"apps\",\"magnetometer\"]";
 
-// Reads that something polls on a timer: the Desktop's live app preview
-// (app_view, up to twice a second) and the backend's recording capture
-// (app_events, every 0.5s). The received + success flashes take ~660ms, so
-// acknowledging these kept the status LED flashing for as long as the poll
-// ran -- and an event flash outranks an app's colour, so the very preview
-// meant to show that colour hid it. Every other command still flashes.
-bool acknowledgesOnLed(const String& cmd) {
-  return cmd != "app_view" && cmd != "app_events";
+// Whether a command gets the received + success/failed flashes (~660ms).
+// A caller marks what it sends on its own -- a poll, an automatic refresh --
+// with "quiet":true: acknowledging those kept the LED flashing for as long as
+// the poll ran, and an event flash outranks an app's colour, so the Desktop's
+// live preview hid the very colour it was meant to show. The two reads named
+// here are quiet regardless, for callers from before the flag (Desktop
+// v0.14.0 polls app_view unmarked). Anything an operator sends by hand still
+// flashes, since that is the only confirmation the device gives.
+bool acknowledgesOnLed(const String& cmd, bool quiet) {
+  return !quiet && cmd != "app_view" && cmd != "app_events";
 }
 }  // namespace
 
@@ -85,11 +87,12 @@ void ControlServer::service() {
   String cmd = commandName(request);
   String logCmd = cmd.isEmpty() ? String("missing") : cmd;
   String requestId = extractString(request, "request_id");
+  const bool ackLed = acknowledgesOnLed(cmd, extractBool(request, "quiet", false));
   Serial.print(F("control_command_received cmd="));
   Serial.print(logCmd);
   Serial.print(F(" request_id="));
   Serial.println(requestId);
-  if (leds_ && acknowledgesOnLed(cmd)) {
+  if (leds_ && ackLed) {
     leds_->showEvent(LedSignal::CommandReceived);
     leds_->service(millis());
   }
@@ -112,7 +115,7 @@ void ControlServer::service() {
   Serial.print(durationMs);
   Serial.print(F(" message="));
   Serial.println(message);
-  if (leds_ && acknowledgesOnLed(cmd)) {
+  if (leds_ && ackLed) {
     leds_->showEvent(responseOk ? LedSignal::CommandSuccess : LedSignal::CommandFailed);
     leds_->service(millis());
   }
@@ -156,11 +159,12 @@ void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
 
   String cmd = commandName(payloadStr);
   String logCmd = cmd.isEmpty() ? String("missing") : cmd;
+  const bool ackLed = acknowledgesOnLed(cmd, extractBool(payloadStr, "quiet", false));
   Serial.print(F("control_command_received cmd="));
   Serial.print(logCmd);
   Serial.print(F(" request_id="));
   Serial.println(requestId);
-  if (leds_ && acknowledgesOnLed(cmd)) {
+  if (leds_ && ackLed) {
     leds_->showEvent(LedSignal::CommandReceived);
     leds_->service(millis());
   }
@@ -201,7 +205,7 @@ void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
   Serial.print(durationMs);
   Serial.print(F(" message="));
   Serial.println(message);
-  if (leds_ && acknowledgesOnLed(cmd)) {
+  if (leds_ && ackLed) {
     leds_->showEvent(responseOk ? LedSignal::CommandSuccess : LedSignal::CommandFailed);
     leds_->service(millis());
   }
@@ -226,9 +230,10 @@ String ControlServer::serviceEspNowCommand(const uint8_t* data, size_t len) {
   const String request(reinterpret_cast<const char*>(data), len);
   const String cmd = commandName(request);
   const String logCmd = cmd.isEmpty() ? String("missing") : cmd;
+  const bool ackLed = acknowledgesOnLed(cmd, extractBool(request, "quiet", false));
   Serial.print(F("control_command_received transport=espnow cmd="));
   Serial.println(logCmd);
-  if (leds_ && acknowledgesOnLed(cmd)) {
+  if (leds_ && ackLed) {
     leds_->showEvent(LedSignal::CommandReceived);
     leds_->service(millis());
   }
@@ -243,7 +248,7 @@ String ControlServer::serviceEspNowCommand(const uint8_t* data, size_t len) {
   Serial.print(responseOk ? F("true") : F("false"));
   Serial.print(F(" duration_ms="));
   Serial.println(durationMs);
-  if (leds_ && acknowledgesOnLed(cmd)) {
+  if (leds_ && ackLed) {
     leds_->showEvent(responseOk ? LedSignal::CommandSuccess : LedSignal::CommandFailed);
     leds_->service(millis());
   }
