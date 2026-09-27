@@ -27,7 +27,8 @@ class BootModeManager {
   bool otaPendingVerify() const { return otaPendingVerify_; }
   bool firmwareConfirmed() const { return firmwareConfirmed_; }
   // Version of the image the bootloader last reverted away from, or empty
-  // if this device has never been rolled back. Persisted across boots.
+  // if this device has never been rolled back -- or has confirmed an update
+  // since. Persisted across boots.
   const String& rolledBackFrom() const { return rolledBackFrom_; }
   String otaRollbackStatusJson() const;
   void markWifiConnected();

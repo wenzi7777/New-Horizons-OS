@@ -164,6 +164,15 @@ void serviceAutoOta(bool wifiConnected) {
     logBoot("auto_ota_deferred ota_pending_verify=true");
     return;
   }
+  // This boot is healthy: it is a confirmed image that got as far as Wi-Fi
+  // and the OTA check. Say so before the download rather than at the end of
+  // setup(): otherwise the deliberate restart after an update, and any reset
+  // an operator makes during the ~20s download (the LED sits on OtaActive and
+  // it looks hung), each counted as a failed boot. Three of those put the
+  // NEW image's first boot into SafeMaintenance, where it is deliberately
+  // left unconfirmed, so the next reset reverted it and the old image fetched
+  // it again -- a loop an AC14 hit on v1.7.2.
+  bootMode.markBootOk();
   logBoot("auto_ota_enabled");
   leds.setSignal(nhos::LedSignal::OtaActive);
   leds.service(millis());

@@ -44,6 +44,21 @@ class OtaRollbackTests(unittest.TestCase):
         self.assertIn('prefs_.putString("rb_from"', impl)
 
 
+    def test_an_auto_ota_restart_is_not_a_failed_boot(self):
+        # Otherwise the old image's download-and-restart, plus any reset
+        # during the download, counted toward SafeMaintenance -- where the new
+        # image is left unconfirmed and reverted on the next reset.
+        sketch = read("newhorizons_os.ino")
+        auto_ota = sketch[sketch.index("void serviceAutoOta(") : sketch.index("String chargeStateName()")]
+        self.assertLess(auto_ota.index("bootMode.otaPendingVerify()"), auto_ota.index("bootMode.markBootOk();"))
+        self.assertLess(auto_ota.index("bootMode.markBootOk();"), auto_ota.index("ota.autoApplyIfNewer("))
+
+    def test_a_confirmed_update_clears_the_rollback_record(self):
+        impl = read("BootModeManager.cpp")
+        confirm = impl[impl.index("bool BootModeManager::confirmFirmwareValid") : impl.index("void BootModeManager::evaluateOtaRollbackState")]
+        self.assertIn('prefs_.remove("rb_from");', confirm)
+        self.assertLess(confirm.index("esp_ota_mark_app_valid_cancel_rollback()"), confirm.index('prefs_.remove("rb_from");'))
+
 class WatchdogTests(unittest.TestCase):
     def test_loop_watchdog_is_armed_after_the_blocking_part_of_boot(self):
         sketch = read("newhorizons_os.ino")

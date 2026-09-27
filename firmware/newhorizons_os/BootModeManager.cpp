@@ -76,6 +76,13 @@ bool BootModeManager::confirmFirmwareValid() {
   // Probation is over -- the next boot must not mistake this image for one
   // the bootloader reverted away from (see evaluateOtaRollbackState()).
   prefs_.remove("pend_ver");
+  // A confirmed update supersedes an earlier revert. Kept, rb_from reported
+  // "rolled back from v1.7.2" forever, even once v1.7.2 itself (or anything
+  // after it) had been confirmed on this device.
+  if (rolledBackFrom_.length() > 0) {
+    prefs_.remove("rb_from");
+    rolledBackFrom_ = "";
+  }
   return true;
 }
 
