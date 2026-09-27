@@ -1,6 +1,6 @@
 # New Horizons OS Arduino
 
-This repository is now the Arduino/C++ edition of New Horizons OS for the TIA-CTL/R product line, including the mainline `TIA-CTL/R v1.0.F 2026.4`, `TIA-CTL/R v2.3.D GCU LTS`, `TIA-CTL/R v2.2.C GCU LTS`, and `TIA-CTL/R v2.1 GCU LTS`.
+This repository is now the Arduino/C++ edition of New Horizons OS for the TIA-CTL product line, including the mainline `TIA-CTL v1.0.F 2026.4`, `TIA-CTL v2.3.D GCU LTS`, `TIA-CTL v2.2.C GCU LTS`, and `TIA-CTL v2.1 GCU LTS`.
 
 The previous MicroPython New Horizons OS tree was archived outside this repository before the reset:
 
@@ -11,21 +11,21 @@ The previous MicroPython New Horizons OS tree was archived outside this reposito
 
 ## Targets
 
-- `TIA-CTL/R v1.0.F 2026.4`
+- `TIA-CTL v1.0.F 2026.4`
   - MCU: ESP32-S3 Mini 1 N8
   - Flash: 8 MB
   - PSRAM: none
   - Matrix: `10 x 21`
   - Arduino FQBN: `esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB`
-- `TIA-CTL/R v2.3.D GCU LTS`
+- `TIA-CTL v2.3.D GCU LTS`
   - Flash: 4 MB
   - Matrix: `15 x 15`
   - Arduino FQBN: `esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs`
-- `TIA-CTL/R v2.2.C GCU LTS`
+- `TIA-CTL v2.2.C GCU LTS`
   - Flash: 4 MB
   - Matrix: `11 x 13`
   - Arduino FQBN: `esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs`
-- `TIA-CTL/R v2.1 GCU LTS`
+- `TIA-CTL v2.1 GCU LTS`
   - Flash: 4 MB
   - Matrix: `10 x 12`
   - Arduino FQBN: `esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs`
@@ -71,19 +71,19 @@ VERSION=v0.5.4 firmware/scripts/build_arduino_release_v15f.sh
 ```bash
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
 
-# TIA-CTL/R v1.0.F 2026.4
+# TIA-CTL v1.0.F 2026.4
 firmware/scripts/flash_arduino_firmware.sh /dev/cu.usbserial-10
 
-# TIA-CTL/R v2.3.D GCU LTS
+# TIA-CTL v2.3.D GCU LTS
 firmware/scripts/flash_arduino_firmware_gcu_v23d_lts.sh /dev/cu.usbserial-10
 
-# TIA-CTL/R v2.2.C GCU LTS
+# TIA-CTL v2.2.C GCU LTS
 firmware/scripts/flash_arduino_firmware_gcu_v22c_lts.sh /dev/cu.usbserial-10
 
-# TIA-CTL/R v2.1 GCU LTS
+# TIA-CTL v2.1 GCU LTS
 firmware/scripts/flash_arduino_firmware_gcu_v21_lts.sh /dev/cu.usbserial-10
 
-# TIA-CTL/R v1.5.F 2026.7 (native USB CDC; defaults to first /dev/cu.usbmodem*)
+# TIA-CTL v1.5.F 2026.7 (native USB CDC; defaults to first /dev/cu.usbmodem*)
 firmware/scripts/flash_arduino_firmware_v15f.sh
 ```
 
@@ -113,7 +113,7 @@ arduino-cli board list
 Generate the Arduino OTA manifest from a built firmware binary:
 
 ```bash
-# TIA-CTL/R v1.0.F 2026.4
+# TIA-CTL v1.0.F 2026.4
 firmware/scripts/generate_arduino_manifest.py \
   --firmware releases/artifacts/newhorizons-os-v0.5.4.bin \
   --output releases/arduino-v10f-latest.json \
@@ -122,7 +122,7 @@ firmware/scripts/generate_arduino_manifest.py \
   --base-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/artifacts \
   --changelog-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/notes/v0.5.4.md
 
-# TIA-CTL/R v2.3.D GCU LTS
+# TIA-CTL v2.3.D GCU LTS
 firmware/scripts/generate_arduino_manifest.py \
   --firmware releases/artifacts/newhorizons-os-gcu-v23d-lts-v0.5.4.bin \
   --output releases/arduino-gcu-v23d-lts-latest.json \
@@ -131,7 +131,7 @@ firmware/scripts/generate_arduino_manifest.py \
   --base-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/artifacts \
   --changelog-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/notes/v0.5.4.md
 
-# TIA-CTL/R v2.2.C GCU LTS
+# TIA-CTL v2.2.C GCU LTS
 firmware/scripts/generate_arduino_manifest.py \
   --firmware releases/artifacts/newhorizons-os-gcu-v22c-lts-v0.5.4.bin \
   --output releases/arduino-gcu-v22c-lts-latest.json \
@@ -140,7 +140,7 @@ firmware/scripts/generate_arduino_manifest.py \
   --base-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/artifacts \
   --changelog-url https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v0.5.4/releases/notes/v0.5.4.md
 
-# TIA-CTL/R v2.1 GCU LTS
+# TIA-CTL v2.1 GCU LTS
 firmware/scripts/generate_arduino_manifest.py \
   --firmware releases/artifacts/newhorizons-os-gcu-v21-lts-v0.5.4.bin \
   --output releases/arduino-gcu-v21-lts-latest.json \

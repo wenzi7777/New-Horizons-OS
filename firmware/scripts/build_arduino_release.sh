@@ -36,7 +36,7 @@ cp "${main_bin}" "${target}"
 # happened to contain. New configs should use arduino-v10f-latest.json.
 for manifest in "${MANIFEST_DIR}/arduino-v10f-latest.json" "${MANIFEST_DIR}/arduino-v10f-${VERSION}.json" "${MANIFEST_DIR}/arduino-latest.json"; do
   # The manifest keeps the board's pre-rename VD-CTL/R name (NHOS_BOARD_OTA_MODEL):
-  # firmware older than the TIA-CTL/R rename only accepts an exact match.
+  # firmware older than the TIA-CTL rename only accepts an exact match.
   python3 "${ROOT}/firmware/scripts/generate_arduino_manifest.py" \
     --firmware "${target}" \
     --output "${manifest}" \

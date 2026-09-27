@@ -87,7 +87,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
     def test_ota_accepts_the_pre_rename_board_name(self):
         """Manifests keep the VD-CTL/R name so older firmware can still OTA;
-        every model check must take it alongside the TIA-CTL/R name."""
+        every model check must take it alongside the TIA-CTL name."""
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
         self.assertIn("kOtaManifestModel[] = NHOS_BOARD_OTA_MODEL", config)
         for name in ("OtaManager.cpp", "EspNowOtaReceiver.cpp"):
@@ -103,11 +103,11 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertIn("NHOS_BOARD_GCU_V21_LTS", config)
         self.assertIn("NHOS_BOARD_GCU_V23D_LTS", config)
-        self.assertIn('NHOS_BOARD_NAME         "TIA-CTL/R v2.1 GCU LTS"', config)
+        self.assertIn('NHOS_BOARD_NAME         "TIA-CTL v2.1 GCU LTS"', config)
         self.assertIn('NHOS_BOARD_OTA_MODEL    "VD-CTL/R v2.1 GCU LTS"', config)
-        self.assertIn('NHOS_BOARD_NAME         "TIA-CTL/R v2.3.D GCU LTS"', config)
+        self.assertIn('NHOS_BOARD_NAME         "TIA-CTL v2.3.D GCU LTS"', config)
         self.assertIn('NHOS_BOARD_OTA_MODEL    "VD-CTL/R v2.3.D GCU LTS"', config)
-        self.assertIn('NHOS_BOARD_NAME         "TIA-CTL/R v1.0.F 2026.4"', config)
+        self.assertIn('NHOS_BOARD_NAME         "TIA-CTL v1.0.F 2026.4"', config)
         self.assertIn('NHOS_BOARD_OTA_MODEL    "VD-CTL/R v1.0.F 2026.4"', config)
         self.assertIn("NHOS_BOARD_ROWS         10", config)
         self.assertIn("NHOS_BOARD_COLS         12", config)
@@ -706,7 +706,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('releases/arduino-gcu-v21-lts-latest.json', readme)
         self.assertIn('releases/arduino-gcu-v21-lts-latest.json', releases)
         self.assertIn('releases/arduino-gcu-v21-lts-vX.Y.Z.json', releases)
-        self.assertIn('TIA-CTL/R v2.1 GCU LTS', releases)
+        self.assertIn('TIA-CTL v2.1 GCU LTS', releases)
         self.assertIn('FlashSize=4M,PartitionScheme=min_spiffs', script)
         self.assertIn('-DNHOS_BOARD_GCU_V21_LTS', script)
         self.assertIn('newhorizons-os-gcu-v21-lts-${VERSION}.bin', script)
@@ -750,7 +750,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
 
         self.assertIn("NHOS_BOARD_GCU_V22C_LTS", config)
-        self.assertIn('NHOS_BOARD_NAME         "TIA-CTL/R v2.2.C GCU LTS"', config)
+        self.assertIn('NHOS_BOARD_NAME         "TIA-CTL v2.2.C GCU LTS"', config)
         self.assertIn('NHOS_BOARD_OTA_MODEL    "VD-CTL/R v2.2.C GCU LTS"', config)
         self.assertIn("NHOS_BOARD_ROWS         11", config)
         self.assertIn("NHOS_BOARD_COLS         13", config)
@@ -784,7 +784,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('releases/arduino-gcu-v22c-lts-latest.json', readme)
         self.assertIn('releases/arduino-gcu-v22c-lts-latest.json', releases)
         self.assertIn('releases/arduino-gcu-v22c-lts-vX.Y.Z.json', releases)
-        self.assertIn('TIA-CTL/R v2.2.C GCU LTS', releases)
+        self.assertIn('TIA-CTL v2.2.C GCU LTS', releases)
         self.assertIn('FlashSize=4M,PartitionScheme=min_spiffs', script)
         self.assertIn('-DNHOS_BOARD_GCU_V22C_LTS', script)
         self.assertIn('newhorizons-os-gcu-v22c-lts-${VERSION}.bin', script)

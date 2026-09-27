@@ -8,10 +8,10 @@
 // pass the right define.
 //
 // NHOS_BOARD_NAME is what the device reports. NHOS_BOARD_OTA_MODEL is the
-// board's name from before the VD-CTL/R -> TIA-CTL/R rename, and it stays
+// board's name from before the VD-CTL/R -> TIA-CTL rename, and it stays
 // the `model` in every OTA manifest: firmware older than the rename accepts
 // a manifest only when `model` equals its own name exactly, so a manifest
-// saying TIA-CTL/R would strand it. OtaManager/EspNowOtaReceiver accept
+// saying TIA-CTL would strand it. OtaManager/EspNowOtaReceiver accept
 // either name.
 #if (defined(NHOS_BOARD_V10F) + defined(NHOS_BOARD_V15F) + \
      defined(NHOS_BOARD_GCU_V21_LTS) + defined(NHOS_BOARD_GCU_V22C_LTS) + \
@@ -21,7 +21,7 @@
 
 #if defined(NHOS_BOARD_V15F)
 
-#define NHOS_BOARD_NAME         "TIA-CTL/R v1.5.F 2026.7"
+#define NHOS_BOARD_NAME         "TIA-CTL v1.5.F 2026.7"
 #define NHOS_BOARD_OTA_MODEL    "VD-CTL/R v1.5.F 2026.7"
 #define NHOS_BOARD_ROWS         14
 #define NHOS_BOARD_COLS         14
@@ -45,7 +45,7 @@
 
 #elif defined(NHOS_BOARD_GCU_V21_LTS)
 
-#define NHOS_BOARD_NAME         "TIA-CTL/R v2.1 GCU LTS"
+#define NHOS_BOARD_NAME         "TIA-CTL v2.1 GCU LTS"
 #define NHOS_BOARD_OTA_MODEL    "VD-CTL/R v2.1 GCU LTS"
 #define NHOS_BOARD_ROWS         10
 #define NHOS_BOARD_COLS         12
@@ -63,7 +63,7 @@
 
 #elif defined(NHOS_BOARD_GCU_V22C_LTS)
 
-#define NHOS_BOARD_NAME         "TIA-CTL/R v2.2.C GCU LTS"
+#define NHOS_BOARD_NAME         "TIA-CTL v2.2.C GCU LTS"
 #define NHOS_BOARD_OTA_MODEL    "VD-CTL/R v2.2.C GCU LTS"
 #define NHOS_BOARD_ROWS         11
 #define NHOS_BOARD_COLS         13
@@ -81,7 +81,7 @@
 
 #elif defined(NHOS_BOARD_GCU_V23D_LTS)
 
-#define NHOS_BOARD_NAME         "TIA-CTL/R v2.3.D GCU LTS"
+#define NHOS_BOARD_NAME         "TIA-CTL v2.3.D GCU LTS"
 #define NHOS_BOARD_OTA_MODEL    "VD-CTL/R v2.3.D GCU LTS"
 #define NHOS_BOARD_ROWS         15
 #define NHOS_BOARD_COLS         15
@@ -99,7 +99,7 @@
 
 #elif defined(NHOS_BOARD_V10F)
 
-#define NHOS_BOARD_NAME         "TIA-CTL/R v1.0.F 2026.4"
+#define NHOS_BOARD_NAME         "TIA-CTL v1.0.F 2026.4"
 #define NHOS_BOARD_OTA_MODEL    "VD-CTL/R v1.0.F 2026.4"
 #define NHOS_BOARD_ROWS         10
 #define NHOS_BOARD_COLS         21

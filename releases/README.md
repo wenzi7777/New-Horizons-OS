@@ -16,14 +16,14 @@ Generated binaries are copied to `releases/artifacts/` so tagged raw GitHub URLs
 
 Publish two manifest tracks:
 
-- `releases/arduino-v10f-latest.json` and `releases/arduino-v10f-vX.Y.Z.json` for `TIA-CTL/R v1.0.F 2026.4`
-- `releases/arduino-v15f-latest.json` and `releases/arduino-v15f-vX.Y.Z.json` for `TIA-CTL/R v1.5.F 2026.7`
-- `releases/arduino-gcu-v23d-lts-latest.json` and `releases/arduino-gcu-v23d-lts-vX.Y.Z.json` for `TIA-CTL/R v2.3.D GCU LTS`
-- `releases/arduino-gcu-v22c-lts-latest.json` and `releases/arduino-gcu-v22c-lts-vX.Y.Z.json` for `TIA-CTL/R v2.2.C GCU LTS`
-- `releases/arduino-gcu-v21-lts-latest.json` and `releases/arduino-gcu-v21-lts-vX.Y.Z.json` for `TIA-CTL/R v2.1 GCU LTS`
+- `releases/arduino-v10f-latest.json` and `releases/arduino-v10f-vX.Y.Z.json` for `TIA-CTL v1.0.F 2026.4`
+- `releases/arduino-v15f-latest.json` and `releases/arduino-v15f-vX.Y.Z.json` for `TIA-CTL v1.5.F 2026.7`
+- `releases/arduino-gcu-v23d-lts-latest.json` and `releases/arduino-gcu-v23d-lts-vX.Y.Z.json` for `TIA-CTL v2.3.D GCU LTS`
+- `releases/arduino-gcu-v22c-lts-latest.json` and `releases/arduino-gcu-v22c-lts-vX.Y.Z.json` for `TIA-CTL v2.2.C GCU LTS`
+- `releases/arduino-gcu-v21-lts-latest.json` and `releases/arduino-gcu-v21-lts-vX.Y.Z.json` for `TIA-CTL v2.1 GCU LTS`
 
 Each manifest's `model` is the board's pre-rename name (`VD-CTL/R ...`, `NHOS_BOARD_OTA_MODEL`
-in `BoardConfig.h`), not the `TIA-CTL/R ...` the device now reports: firmware older than the
+in `BoardConfig.h`), not the `TIA-CTL ...` the device now reports: firmware older than the
 rename accepts a manifest only when `model` matches its own name exactly. Firmware since the
 rename accepts either name.
 
