@@ -44,6 +44,9 @@ void FindMeClient::service() {
   }
   const bool connected = wifi_->isConnected();
   if (connected && !wasWifiConnected_) {
+    // A reconnect is a fresh attachment for the stream even when the same
+    // Gateway answers: its address has to resolve again.
+    ++attachGeneration_;
     discoverNow();
   }
   wasWifiConnected_ = connected;
@@ -187,6 +190,7 @@ void FindMeClient::sendDiscover() {
     lastError_ = "findme_discover_send_failed";
   }
   lastDiscoverMs_ = millis();
+  acceptedThisRound_ = false;
   nextDiscoverMs_ = lastDiscoverMs_ + kDiscoverIntervalMs;
   state_ = "discovering";
   Serial.println(F("findme_discover_sent"));
@@ -266,8 +270,22 @@ void FindMeClient::readOffers() {
       lastError_ = "findme_transfer_offer_mismatch";
       continue;
     }
-    if (!hasGateway() || offer.priority >= priority_ || (millis() - lastDiscoverMs_) <= kOfferReadWindowMs) {
+    // One Gateway per round, and it stays. Before, every offer inside the
+    // read window was taken and so was any equal-priority one outside it, so
+    // with two Gateways on the LAN the device attached to the first and moved
+    // to the second 80ms later -- and the first frames to a new host can fail
+    // while its address resolves, which flashed ScanWarning on some boots.
+    // Now: the first offer of a round (it may replace a Gateway remembered
+    // from an earlier boot), the current Gateway refreshing itself, a
+    // strictly higher priority, or the Gateway a transfer asked for.
+    const bool inWindow = (millis() - lastDiscoverMs_) <= kOfferReadWindowMs;
+    const bool sameGateway = hasGateway() && offer.gatewayId == gatewayId_;
+    if (!hasGateway() || transferring || sameGateway || offer.priority > priority_ ||
+        (inWindow && !acceptedThisRound_)) {
       acceptOffer(offer, udp_.remoteIP());
+      if (inWindow) {
+        acceptedThisRound_ = true;
+      }
     }
   }
 }
@@ -300,6 +318,7 @@ void FindMeClient::acceptOffer(const Offer& offer, const IPAddress& host) {
     storage_->putString("findme_gw_name", gatewayName_);
   }
   if (!isSameGateway) {
+    ++attachGeneration_;
     Serial.print(F("findme_offer_accepted gateway="));
     Serial.print(gatewayId_);
     Serial.print(F(" host="));

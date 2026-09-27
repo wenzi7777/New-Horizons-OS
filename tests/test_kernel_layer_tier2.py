@@ -318,6 +318,39 @@ class AppOutputArbitrationTests(unittest.TestCase):
         self.assertIn("appOverlayShown()", view)
 
 
+class GatewayAttachTests(unittest.TestCase):
+    """v1.7.5: several Gateways on one LAN, and the first frames to a new one."""
+
+    def test_one_gateway_per_discovery_round(self):
+        # Every offer in the read window used to be taken, so a device moved
+        # from the first Gateway to answer to the second 80ms later.
+        findme = read("FindMeClient.cpp")
+        read_offers = findme[findme.index("void FindMeClient::readOffers") : findme.index("void FindMeClient::acceptOffer")]
+        self.assertNotIn("offer.priority >= priority_", read_offers)
+        self.assertIn("offer.priority > priority_", read_offers)
+        self.assertIn("(inWindow && !acceptedThisRound_)", read_offers)
+        self.assertIn("transferring", read_offers[read_offers.index("const bool inWindow"):])
+        discover = findme[findme.index("lastDiscoverMs_ = millis();") :][:120]
+        self.assertIn("acceptedThisRound_ = false;", discover)
+
+    def test_a_new_attachment_is_counted(self):
+        findme = read("FindMeClient.cpp")
+        accept = findme[findme.index("void FindMeClient::acceptOffer") : findme.index("bool FindMeClient::transferActive")]
+        self.assertLess(accept.index("if (!isSameGateway) {"), accept.index("++attachGeneration_;"))
+        service = findme[findme.index("void FindMeClient::service") : findme.index("void FindMeClient::service") + 400]
+        self.assertIn("++attachGeneration_;", service)
+
+    def test_udp_failures_right_after_attaching_are_not_a_scan_warning(self):
+        sketch = read("newhorizons_os.ino")
+        led = sketch[sketch.index("void updateLedState()") : sketch.index("void taskDisplay()")]
+        self.assertIn("findme.attachGeneration()", led)
+        settle = led[led.index("if (attachSettling) {") :][:120]
+        self.assertIn("lastObservedUdpFailures = health.udpSendFailures;", settle)
+        # Overruns are the scanner's own: no grace for them.
+        self.assertNotIn("lastObservedOverrunFrames", settle)
+        self.assertIn("kAttachSettleMs = 2000", sketch)
+
+
 class AppFrameworkTests(unittest.TestCase):
     def test_apps_are_opt_in(self):
         impl = read("AppManager.cpp")

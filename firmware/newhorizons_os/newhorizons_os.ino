@@ -140,6 +140,8 @@ uint32_t lastHeartbeatAttemptMs = 0;
 bool criticalError = false;
 uint32_t lastObservedOverrunFrames = 0;
 uint32_t lastObservedUdpFailures = 0;
+// How long UDP send failures after attaching to a Gateway are not a ScanWarning.
+constexpr uint32_t kAttachSettleMs = 2000;
 bool runtimeServicesSuspended = false;
 bool softOffOutputsSleeping = false;
 
@@ -603,6 +605,21 @@ void updateLedState() {
   }
   const bool transportAttached =
       espNowMode ? espNowPairing.hasHub() : findme.hasGateway();
+  // A fresh attachment gets a short grace period for UDP failures: the first
+  // frames to a new host can fail while its address resolves (4 frames at
+  // 60fps was seen), which is not the stream misbehaving. Overruns are the
+  // scanner's own and still count straight away.
+  static uint32_t lastAttachGeneration = 0;
+  static uint32_t attachSettleUntilMs = 0;
+  const uint32_t attachGeneration = espNowMode ? 0 : findme.attachGeneration();
+  if (attachGeneration != lastAttachGeneration) {
+    lastAttachGeneration = attachGeneration;
+    attachSettleUntilMs = nowMs + kAttachSettleMs;
+  }
+  const bool attachSettling = static_cast<int32_t>(attachSettleUntilMs - nowMs) > 0;
+  if (attachSettling) {
+    lastObservedUdpFailures = health.udpSendFailures;
+  }
   // Treat failures observed while finding a Gateway/Hub as startup history,
   // not an operator-facing scan warning. The base signal must remain the
   // blue/orange search breathe until a fresh attachment exists.

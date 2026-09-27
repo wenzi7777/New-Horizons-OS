@@ -18,6 +18,11 @@ class FindMeClient {
   void switchGateway(const String& preferredGatewayId, const String& claimId, uint32_t ttlMs);
 
   bool hasGateway() const;
+  // Bumped every time the stream moves to a different Gateway (never for the
+  // same one re-offering), so a caller can tell a fresh attachment -- whose
+  // first sends may fail while the new host's address resolves -- from a
+  // stream that has been up for a while.
+  uint32_t attachGeneration() const { return attachGeneration_; }
   const String& streamHost() const;
   uint16_t streamPort() const;
   String statusJson() const;
@@ -76,6 +81,9 @@ class FindMeClient {
   uint16_t seq_ = 1;
   uint32_t nextDiscoverMs_ = 0;
   uint32_t lastDiscoverMs_ = 0;
+  // Whether an offer was already taken in the current discovery round.
+  bool acceptedThisRound_ = false;
+  uint32_t attachGeneration_ = 0;
   uint32_t lastSuccessMs_ = 0;
   uint32_t lastHeartbeatMs_ = 0;
   uint32_t cooldownUntilMs_ = 0;
