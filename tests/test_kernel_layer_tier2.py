@@ -270,6 +270,17 @@ class AppOutputArbitrationTests(unittest.TestCase):
         self.assertIn("leds.setAppOverlay(held,", led)
         self.assertLess(led.index("leds.setAppOverlay"), led.index("leds.service(nowMs)"))
 
+    def test_polled_reads_do_not_flash_the_led(self):
+        # A ~660ms received+success flash per poll kept the LED flashing, and
+        # a flash outranks an app's colour, so the preview hid what it showed.
+        control = read("ControlServer.cpp")
+        rule = control[control.index("bool acknowledgesOnLed") : control.index("}  // namespace")]
+        self.assertIn('cmd != "app_view"', rule)
+        self.assertIn('cmd != "app_events"', rule)
+        # All three transports (TCP, UDP, ESP-NOW), both flashes each.
+        self.assertEqual(control.count("if (leds_ && acknowledgesOnLed(cmd)) {"), 6)
+        self.assertEqual(control.count("if (leds_) {\n    leds_->showEvent(LedSignal::CommandReceived);"), 0)
+
     def test_app_view_is_read_only_and_advertised(self):
         control = read("ControlServer.cpp")
         handler = control[control.index('if (cmd == "app_view")') : control.index('if (cmd == "app_enable"')]

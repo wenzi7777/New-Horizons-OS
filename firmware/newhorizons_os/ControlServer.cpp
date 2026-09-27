@@ -17,6 +17,16 @@ namespace {
 constexpr char kCompactStatusOmitted[] =
     "[\"battery_gauge\",\"config\",\"ota_rollback\",\"faults\",\"scheduler\",\"airtime\","
     "\"services\",\"power_governor\",\"apps\",\"magnetometer\"]";
+
+// Reads that something polls on a timer: the Desktop's live app preview
+// (app_view, up to twice a second) and the backend's recording capture
+// (app_events, every 0.5s). The received + success flashes take ~660ms, so
+// acknowledging these kept the status LED flashing for as long as the poll
+// ran -- and an event flash outranks an app's colour, so the very preview
+// meant to show that colour hid it. Every other command still flashes.
+bool acknowledgesOnLed(const String& cmd) {
+  return cmd != "app_view" && cmd != "app_events";
+}
 }  // namespace
 
 void ControlServer::begin(
@@ -79,7 +89,7 @@ void ControlServer::service() {
   Serial.print(logCmd);
   Serial.print(F(" request_id="));
   Serial.println(requestId);
-  if (leds_) {
+  if (leds_ && acknowledgesOnLed(cmd)) {
     leds_->showEvent(LedSignal::CommandReceived);
     leds_->service(millis());
   }
@@ -102,7 +112,7 @@ void ControlServer::service() {
   Serial.print(durationMs);
   Serial.print(F(" message="));
   Serial.println(message);
-  if (leds_) {
+  if (leds_ && acknowledgesOnLed(cmd)) {
     leds_->showEvent(responseOk ? LedSignal::CommandSuccess : LedSignal::CommandFailed);
     leds_->service(millis());
   }
@@ -150,7 +160,7 @@ void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
   Serial.print(logCmd);
   Serial.print(F(" request_id="));
   Serial.println(requestId);
-  if (leds_) {
+  if (leds_ && acknowledgesOnLed(cmd)) {
     leds_->showEvent(LedSignal::CommandReceived);
     leds_->service(millis());
   }
@@ -191,7 +201,7 @@ void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
   Serial.print(durationMs);
   Serial.print(F(" message="));
   Serial.println(message);
-  if (leds_) {
+  if (leds_ && acknowledgesOnLed(cmd)) {
     leds_->showEvent(responseOk ? LedSignal::CommandSuccess : LedSignal::CommandFailed);
     leds_->service(millis());
   }
@@ -218,7 +228,7 @@ String ControlServer::serviceEspNowCommand(const uint8_t* data, size_t len) {
   const String logCmd = cmd.isEmpty() ? String("missing") : cmd;
   Serial.print(F("control_command_received transport=espnow cmd="));
   Serial.println(logCmd);
-  if (leds_) {
+  if (leds_ && acknowledgesOnLed(cmd)) {
     leds_->showEvent(LedSignal::CommandReceived);
     leds_->service(millis());
   }
@@ -233,7 +243,7 @@ String ControlServer::serviceEspNowCommand(const uint8_t* data, size_t len) {
   Serial.print(responseOk ? F("true") : F("false"));
   Serial.print(F(" duration_ms="));
   Serial.println(durationMs);
-  if (leds_) {
+  if (leds_ && acknowledgesOnLed(cmd)) {
     leds_->showEvent(responseOk ? LedSignal::CommandSuccess : LedSignal::CommandFailed);
     leds_->service(millis());
   }
