@@ -34,9 +34,13 @@ void LedController::begin() {
 
 void LedController::service(uint32_t nowMs) {
   LedSignal active = baseSignal_;
+  // Only the base pattern may give way to an app; the boot hold and every
+  // event (command acks, OTA result, scan warnings) always show.
+  bool baseShown = true;
   if (bootStartedMs_ && nowMs - bootStartedMs_ < kBootSolidDurationMs &&
       baseSignal_ != LedSignal::Error && baseSignal_ != LedSignal::RamDanger) {
     active = LedSignal::Boot;
+    baseShown = false;
   }
   uint32_t patternMs = nowMs;
   if (eventSignal_ != LedSignal::Off) {
@@ -44,6 +48,7 @@ void LedController::service(uint32_t nowMs) {
     if (eventPattern.eventDurationMs && nowMs - eventStartedMs_ <= eventPattern.eventDurationMs) {
       active = eventSignal_;
       patternMs = nowMs - eventStartedMs_;
+      baseShown = false;
     } else {
       eventSignal_ = LedSignal::Off;
     }
@@ -51,9 +56,13 @@ void LedController::service(uint32_t nowMs) {
   if (eventSignal_ == LedSignal::Off && startNextEvent(nowMs)) {
     active = eventSignal_;
     patternMs = 0;
+    baseShown = false;
   }
 
-  const LedColor nextSystem = colorFor(active, patternMs);
+  appShown_ = appHeld_ && baseShown && appMayOverride(active);
+  shownSignal_ = active;
+  const LedColor nextSystem = appShown_ ? appColor_ : colorFor(active, patternMs);
+  shownColor_ = nextSystem;
   const LedColor nextBattery = batteryColorFor(nowMs);
   if (sameColor(nextSystem, currentSystem_) &&
       sameColor(nextBattery, currentBattery_)) {
@@ -94,6 +103,60 @@ void LedController::setBrightness(float brightness) {
 void LedController::setStatus(LedColor color) {
   currentSystem_ = color;
   writeStatusPixels(currentSystem_, currentBattery_);
+}
+
+void LedController::setAppOverlay(bool held, LedColor color) {
+  appHeld_ = held;
+  appColor_ = color;
+}
+
+// The base patterns that mean "healthy and online": Online itself, and on
+// one-pixel boards the charging variants that stand in for it while plugged
+// in (without them an app's colour would never show on a bench device).
+// Everything else is the system telling the operator something.
+bool LedController::appMayOverride(LedSignal signal) {
+  switch (signal) {
+    case LedSignal::Online:
+    case LedSignal::ChargingOrMissing:
+    case LedSignal::ChargeDone:
+      return true;
+    default:
+      return false;
+  }
+}
+
+const char* LedController::signalName(LedSignal signal) {
+  switch (signal) {
+    case LedSignal::Off: return "off";
+    case LedSignal::Boot: return "boot";
+    case LedSignal::WifiSetup: return "wifi_setup";
+    case LedSignal::WifiConnecting: return "wifi_connecting";
+    case LedSignal::EspNowConnecting: return "espnow_connecting";
+    case LedSignal::FindMePending: return "findme_pending";
+    case LedSignal::Online: return "online";
+    case LedSignal::Maintenance: return "maintenance";
+    case LedSignal::SafeMode: return "safe_mode";
+    case LedSignal::OtaActive: return "ota_active";
+    case LedSignal::OtaSuccess: return "ota_success";
+    case LedSignal::OtaError: return "ota_error";
+    case LedSignal::Error: return "error";
+    case LedSignal::ScanWarning: return "scan_warning";
+    case LedSignal::RamDanger: return "ram_danger";
+    case LedSignal::ChargingOrMissing: return "charging";
+    case LedSignal::ChargeDone: return "charge_done";
+    case LedSignal::SoftOffTransition: return "soft_off_transition";
+    case LedSignal::SoftOffCharging: return "soft_off_charging";
+    case LedSignal::SoftOffChargeDone: return "soft_off_charge_done";
+    case LedSignal::SoftOffChargeIdle: return "soft_off_charge_idle";
+    case LedSignal::PowerTransitionShutdown: return "power_shutdown";
+    case LedSignal::PowerTransitionWake: return "power_wake";
+    case LedSignal::CommandReceived: return "command_received";
+    case LedSignal::CommandSuccess: return "command_success";
+    case LedSignal::CommandFailed: return "command_failed";
+    case LedSignal::ActionButtonIdentify: return "identify";
+    case LedSignal::UplinkDegraded: return "uplink_degraded";
+  }
+  return "unknown";
 }
 
 void LedController::setBatteryStatus(bool sampleValid, uint16_t socCentiPercent,

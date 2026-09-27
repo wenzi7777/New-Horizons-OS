@@ -105,6 +105,7 @@ class ControlServer {
   String scanTimingStatusJson() const;
   String layoutStatusJson() const;
   String indicatorsStatusJson() const;
+  String appViewJson() const;
   String actionButtonStatusJson() const;
   String batteryStatusJson() const;
   String extractString(const String& request, const char* key) const;

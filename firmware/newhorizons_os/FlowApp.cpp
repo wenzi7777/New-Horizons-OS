@@ -677,6 +677,7 @@ void FlowApp::unload() {
     extPixelNode_[pixel] = -1;
   }
   extMeterNode_ = -1;
+  ledHeld_ = false;
   packageId_[0] = '\0';
   sourcePath_ = "";
   graphName_ = "";
@@ -1140,13 +1141,12 @@ void FlowApp::evaluate(const AppEvent& event) {
         const bool current = nodes_[node.input].boolResult;
         if (current != node.lastBool) {
           node.lastBool = current;
-          if (event.host != nullptr) {
-            if (current) {
-              event.host->setLed(manifest_.name, node.rgb[0], node.rgb[1], node.rgb[2]);
-            } else {
-              event.host->setLed(manifest_.name, 0, 0, 0);
-            }
-          }
+          // Held until the input falls, which releases the LED back to the
+          // system pattern; AppManager pulls it, as the display pulls rows.
+          ledHeld_ = current;
+          ledRgb_[0] = node.rgb[0];
+          ledRgb_[1] = node.rgb[1];
+          ledRgb_[2] = node.rgb[2];
         }
         break;
       }
@@ -1266,6 +1266,16 @@ bool FlowApp::displayLine(uint8_t row, AppDisplayLine& out) const {
   out.digits = node.c0;
   out.lo = node.lo;
   out.hi = node.hi;
+  return true;
+}
+
+bool FlowApp::statusLed(uint8_t rgb[3]) const {
+  if (nodeCount_ == 0 || !ledHeld_) {
+    return false;
+  }
+  rgb[0] = ledRgb_[0];
+  rgb[1] = ledRgb_[1];
+  rgb[2] = ledRgb_[2];
   return true;
 }
 

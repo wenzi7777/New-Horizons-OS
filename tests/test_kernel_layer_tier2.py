@@ -233,6 +233,56 @@ class ConfigSetHardwareRegressionTests(unittest.TestCase):
         self.assertLess(setter.index("encodeValue"), setter.index("processCommand(synthesized)"))
 
 
+class AppOutputArbitrationTests(unittest.TestCase):
+    """v1.7.0: the status LED is composed like the OLED and the strip."""
+
+    def test_the_led_op_no_longer_writes_the_pixel(self):
+        # Until v1.7.0 it went straight to LedController::setStatus and the LED
+        # task painted the system pattern back within 10ms.
+        flow = read("FlowApp.cpp")
+        sketch = read("newhorizons_os.ino")
+        self.assertNotIn("host->setLed", flow)
+        self.assertNotIn("applyAppLed", sketch)
+        self.assertNotIn("setLedSink", sketch)
+        self.assertNotIn("setLed(", read("App.h"))
+
+    def test_the_lowest_running_slot_holds_the_led(self):
+        impl = read("AppManager.cpp")
+        body = impl[impl.index("bool AppManager::statusLed") : impl.index("bool AppManager::displayLine")]
+        self.assertIn("slot.state != AppState::Running || slot.app->idle()", body)
+        self.assertIn("kAppCapDriveLed) == 0", body)
+        self.assertIn("if (ownerSlot < 0) {", body)
+
+    def test_apps_only_replace_a_healthy_online_pattern(self):
+        impl = read("LedController.cpp")
+        rule = impl[impl.index("bool LedController::appMayOverride") : impl.index("const char* LedController::signalName")]
+        allowed = {"Online", "ChargingOrMissing", "ChargeDone"}
+        import re
+        self.assertEqual(set(re.findall(r"case LedSignal::(\w+):", rule)), allowed)
+        service = impl[impl.index("void LedController::service") : impl.index("void LedController::setSignal")]
+        # Boot hold and every event (command acks, OTA result) always show.
+        self.assertEqual(service.count("baseShown = false;"), 3)
+        self.assertIn("appShown_ = appHeld_ && baseShown && appMayOverride(active);", service)
+
+    def test_the_overlay_is_restated_every_led_pass(self):
+        sketch = read("newhorizons_os.ino")
+        led = sketch[sketch.index("void updateLedState()") : sketch.index("void taskDisplay()")]
+        self.assertIn("leds.setAppOverlay(held,", led)
+        self.assertLess(led.index("leds.setAppOverlay"), led.index("leds.service(nowMs)"))
+
+    def test_app_view_is_read_only_and_advertised(self):
+        control = read("ControlServer.cpp")
+        handler = control[control.index('if (cmd == "app_view")') : control.index('if (cmd == "app_enable"')]
+        self.assertNotIn("maintenance", handler)
+        self.assertIn('\\"app_view\\":', control)
+        view = control[control.index("String ControlServer::appViewJson") : control.index("String ControlServer::indicatorsStatusJson")]
+        # Rows are formatted by the same functions the panel uses.
+        self.assertIn("formatOledTextLine(", view)
+        self.assertIn("oledBarGeometry(", view)
+        self.assertIn("displayContenders(", view)
+        self.assertIn("appOverlayShown()", view)
+
+
 class AppFrameworkTests(unittest.TestCase):
     def test_apps_are_opt_in(self):
         impl = read("AppManager.cpp")

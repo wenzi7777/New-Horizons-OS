@@ -99,6 +99,20 @@ class LedController {
                         uint8_t lowBatteryThresholdPercent = 10);
   void pulse(LedColor color, uint16_t delayMs);
 
+  // The colour the apps are asking for (AppManager::statusLed), re-stated on
+  // every LED pass. It replaces only a healthy, online base pattern -- see
+  // appMayOverride() -- so an app can never hide an error, an OTA, a lost
+  // link, maintenance mode or a command acknowledgement.
+  void setAppOverlay(bool held, LedColor color);
+  static bool appMayOverride(LedSignal signal);
+  // What the system pixel shows, as of the last service pass: the pattern's
+  // logical colour (before brightness), the signal behind it, and whether an
+  // app's colour replaced it.
+  LedColor shownColor() const { return shownColor_; }
+  LedSignal shownSignal() const { return shownSignal_; }
+  bool appOverlayShown() const { return appShown_; }
+  static const char* signalName(LedSignal signal);
+
  private:
   struct Pattern {
     PatternMode mode;
@@ -140,6 +154,11 @@ class LedController {
   uint16_t batterySocCentiPercent_ = 0;
   bool batteryCharging_ = false;
   uint8_t lowBatteryThresholdPercent_ = 10;
+  bool appHeld_ = false;
+  LedColor appColor_{0, 0, 0};
+  bool appShown_ = false;
+  LedColor shownColor_{0, 0, 0};
+  LedSignal shownSignal_ = LedSignal::Boot;
 };
 
 }  // namespace nhos

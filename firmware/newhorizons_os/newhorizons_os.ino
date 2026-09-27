@@ -365,13 +365,6 @@ bool streamingGateOk() {
   return espNowMode || wifi.isConnected();
 }
 
-// kAppCapDriveLed was declared in v1.0.0 but had nothing behind it, so an app
-// could ask for the LED and then discover there was no way to use it. This is
-// that way. AppManager re-checks the capability before calling through.
-void applyAppLed(uint8_t r, uint8_t g, uint8_t b) {
-  leds.setStatus(nhos::LedColor{r, g, b});
-}
-
 bool appDisplayLine(uint8_t row, nhos::AppDisplayLine& out) {
   return apps.displayLine(row, out);
 }
@@ -592,6 +585,13 @@ void updateLedState() {
   extIn.pressure01 = scanner.lastPeak01();
   extIn.calibrating = calibration.sessionActive();
   apps.extLedFrame(extIn.app);
+  {
+    // Re-stated every pass, so a slot that stops lets go on the next one.
+    uint8_t rgb[3] = {0, 0, 0};
+    int8_t owner = -1;
+    const bool held = apps.statusLed(rgb, owner);
+    leds.setAppOverlay(held, nhos::LedColor{rgb[0], rgb[1], rgb[2]});
+  }
   const bool transportAttached =
       espNowMode ? espNowPairing.hasHub() : findme.hasGateway();
   // Treat failures observed while finding a Gateway/Hub as startup history,
@@ -1096,7 +1096,6 @@ void setup() {
     }
   }
   apps.begin(&storage);
-  apps.setLedSink(&applyAppLed);
   appGovernor.begin(&apps);
   {
     const uint16_t cellCount =

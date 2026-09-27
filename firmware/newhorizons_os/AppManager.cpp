@@ -363,17 +363,43 @@ void AppManager::emitValue(const char* app, const char* event, float value) {
   recordEvent(app, event, String(value, 3), true, value);
 }
 
-void AppManager::setLed(const char* app, uint8_t r, uint8_t g, uint8_t b) {
-  const int8_t index = indexOfApp(app);
-  if (index < 0 || (slots_[index].app->manifest().capabilities & kAppCapDriveLed) == 0) {
-    return;
+// Pulled, not pushed. Until v1.7.0 the led op wrote the pixel directly and the
+// LED task painted the system pattern back over it within 10ms, so an app's
+// colour was all but invisible, and two apps raced with the later one winning.
+// Composing here gives the LED the same lowest-slot rule as the OLED and the
+// strip, and a slot that stops holds nothing because it is no longer running.
+bool AppManager::statusLed(uint8_t rgb[3], int8_t& ownerSlot, uint8_t* requesters) const {
+  ownerSlot = -1;
+  if (requesters != nullptr) {
+    *requesters = 0;
   }
-  if (ledSink_ != nullptr) {
-    ledSink_(r, g, b);
+  for (uint8_t i = 0; i < count_; ++i) {
+    const Slot& slot = slots_[i];
+    if (slot.state != AppState::Running || slot.app->idle() ||
+        (slot.app->manifest().capabilities & kAppCapDriveLed) == 0) {
+      continue;
+    }
+    uint8_t held[3];
+    if (!slot.app->statusLed(held)) {
+      continue;
+    }
+    if (requesters != nullptr) {
+      *requesters |= static_cast<uint8_t>(1U << i);
+    }
+    if (ownerSlot < 0) {
+      ownerSlot = static_cast<int8_t>(i);
+      rgb[0] = held[0];
+      rgb[1] = held[1];
+      rgb[2] = held[2];
+      if (requesters == nullptr) {
+        break;
+      }
+    }
   }
+  return ownerSlot >= 0;
 }
 
-bool AppManager::displayLine(uint8_t row, AppDisplayLine& out) const {
+bool AppManager::displayLine(uint8_t row, AppDisplayLine& out, int8_t* ownerSlot) const {
   for (uint8_t i = 0; i < count_; ++i) {
     const Slot& slot = slots_[i];
     if (slot.state != AppState::Running || slot.app->idle() ||
@@ -381,10 +407,29 @@ bool AppManager::displayLine(uint8_t row, AppDisplayLine& out) const {
       continue;
     }
     if (slot.app->displayLine(row, out)) {
+      if (ownerSlot != nullptr) {
+        *ownerSlot = static_cast<int8_t>(i);
+      }
       return true;
     }
   }
   return false;
+}
+
+uint8_t AppManager::displayContenders(uint8_t row) const {
+  uint8_t mask = 0;
+  for (uint8_t i = 0; i < count_; ++i) {
+    const Slot& slot = slots_[i];
+    if (slot.state != AppState::Running || slot.app->idle() ||
+        (slot.app->manifest().capabilities & kAppCapDisplay) == 0) {
+      continue;
+    }
+    AppDisplayLine line;
+    if (slot.app->displayLine(row, line)) {
+      mask |= static_cast<uint8_t>(1U << i);
+    }
+  }
+  return mask;
 }
 
 void AppManager::extLedFrame(AppExtLedFrame& out) const {

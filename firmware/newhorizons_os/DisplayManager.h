@@ -72,6 +72,11 @@ class DisplayManager {
   bool refreshDue(uint32_t nowMs) const;
   void service(uint32_t nowMs, const String& ip, const String& gatewayIp, const ScanHealth& health, uint32_t heapFree, uint32_t heapTotal);
   String statusJson() const;
+  const String& page() const { return config_.page; }
+  // Whether app rows are what the panel is showing right now.
+  bool showingAppPage() const {
+    return enabled_ && detected_ && !sleeping_ && config_.page == "app";
+  }
 
   // Where the "app" page gets its rows. A plain function rather than an
   // AppManager reference, so the display does not depend on the app runtime.

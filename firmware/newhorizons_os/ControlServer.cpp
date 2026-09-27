@@ -493,6 +493,12 @@ String ControlServer::processCommand(const String& request) {
     // {"command":"app_list","outputs":"flow1"} adds that slot's per-node values.
     return ok(cmd, "app_list", apps_->statusJson(extractString(request, "outputs")));
   }
+  if (cmd == "app_view") {
+    if (!apps_) {
+      return error(cmd, "app_manager_unavailable");
+    }
+    return ok(cmd, "app_view", appViewJson());
+  }
   if (cmd == "app_enable" || cmd == "app_disable") {
     if (!apps_) {
       return error(cmd, "app_manager_unavailable");
@@ -824,6 +830,8 @@ String ControlServer::processCommand(const String& request) {
     data += flow_ != nullptr ? "true" : "false";
     data += ",\"app_registry\":";
     data += appRegistry_ != nullptr ? "true" : "false";
+    data += ",\"app_view\":";
+    data += apps_ != nullptr ? "true" : "false";
     data += "}}";
     return ok(cmd, "capabilities", data);
   }
@@ -1906,6 +1914,142 @@ String ControlServer::layoutStatusJson() const {
   jsonRawField(data, "scan_health", scanner_->healthJson(), first);
   data += "}";
   return data;
+}
+
+namespace {
+
+void appendRgb(String& out, const uint8_t rgb[3]) {
+  out += "[";
+  out += String(rgb[0]);
+  out += ",";
+  out += String(rgb[1]);
+  out += ",";
+  out += String(rgb[2]);
+  out += "]";
+}
+
+// Slot names for the bits of `mask`, leaving out `except`.
+void appendSlotList(String& out, const AppManager& apps, uint8_t mask, int8_t except) {
+  out += "[";
+  bool first = true;
+  for (uint8_t i = 0; i < apps.slotCount(); ++i) {
+    if ((mask & (1U << i)) == 0 || static_cast<int8_t>(i) == except) {
+      continue;
+    }
+    if (!first) out += ",";
+    first = false;
+    out += "\"";
+    out += jsonEscape(apps.slotName(i));
+    out += "\"";
+  }
+  out += "]";
+}
+
+}  // namespace
+
+// What the apps' outputs look like right now, after every composition rule:
+// the OLED rows as the app page draws them (whichever page the panel is on,
+// and on boards with no panel at all), the status LED as the pixel shows it,
+// and the strip. Read-only and sized for an ESP-NOW reply (~1KB at most), so
+// the Desktop can poll it to mirror the device.
+String ControlServer::appViewJson() const {
+  String out = "{\"oled\":{\"hw\":";
+  out += NHOS_BOARD_HAS_OLED ? "true" : "false";
+  out += ",\"page\":\"";
+  out += display_ ? jsonEscape(display_->page()) : String("");
+  out += "\",\"on_screen\":";
+  out += display_ && display_->showingAppPage() ? "true" : "false";
+  out += ",\"rows\":[";
+  for (uint8_t row = 0; row < kOledRows; ++row) {
+    if (row) out += ",";
+    AppDisplayLine line;
+    int8_t owner = -1;
+    if (!apps_->displayLine(row, line, &owner)) {
+      out += "null";
+      continue;
+    }
+    out += "{\"slot\":\"";
+    out += jsonEscape(apps_->slotName(static_cast<uint8_t>(owner)));
+    out += "\",\"kind\":\"";
+    if (line.kind == AppDisplayKind::Bar) {
+      const OledBarGeometry bar = oledBarGeometry(static_cast<uint8_t>(strlen(line.label)),
+                                                  line.value, line.lo, line.hi);
+      out += "bar\",\"label\":\"";
+      out += jsonEscape(line.label);
+      out += "\",\"x0\":";
+      out += String(bar.x0);
+      out += ",\"width\":";
+      out += String(bar.width);
+      out += ",\"fill_px\":";
+      out += String(bar.fillPx);
+    } else {
+      char text[kOledCols + 1];
+      formatOledTextLine(line.label, line.value, line.digits, text);
+      out += "text\",\"label\":\"";
+      out += jsonEscape(line.label);
+      out += "\",\"text\":\"";
+      out += jsonEscape(text);
+      out += "\"";
+    }
+    const uint8_t contenders = apps_->displayContenders(row);
+    if ((contenders & ~(1U << owner)) != 0) {
+      out += ",\"contended\":";
+      appendSlotList(out, *apps_, contenders, owner);
+    }
+    out += "}";
+  }
+  out += "]},\"status_led\":{";
+  if (leds_) {
+    const LedColor shown = leds_->shownColor();
+    const uint8_t rgb[3] = {shown.r, shown.g, shown.b};
+    out += "\"rgb\":";
+    appendRgb(out, rgb);
+    out += ",\"signal\":\"";
+    out += LedController::signalName(leds_->shownSignal());
+    out += "\",";
+  }
+  uint8_t appRgb[3] = {0, 0, 0};
+  int8_t ledOwner = -1;
+  uint8_t requesters = 0;
+  const bool held = apps_->statusLed(appRgb, ledOwner, &requesters);
+  const bool shownApp = held && leds_ && leds_->appOverlayShown();
+  out += "\"owner\":\"";
+  out += shownApp ? jsonEscape(apps_->slotName(static_cast<uint8_t>(ledOwner))) : String("system");
+  out += "\"";
+  if (held) {
+    out += ",\"app_request\":{\"slot\":\"";
+    out += jsonEscape(apps_->slotName(static_cast<uint8_t>(ledOwner)));
+    out += "\",\"rgb\":";
+    appendRgb(out, appRgb);
+    out += ",\"suppressed\":";
+    out += shownApp ? "false" : "true";
+    if ((requesters & ~(1U << ledOwner)) != 0) {
+      out += ",\"contended\":";
+      appendSlotList(out, *apps_, requesters, ledOwner);
+    }
+    out += "}";
+  }
+  out += "},\"ext_led\":{\"count\":";
+  out += String(static_cast<unsigned>(kExternalLedCount));
+  out += ",\"owner\":\"";
+  out += externalLeds_ ? externalLeds_->activePreset() : "off";
+  out += "\"";
+#if NHOS_BOARD_HAS_EXT_LED
+  AppExtLedFrame frame;
+  apps_->extLedFrame(frame);
+  if (frame.active) {
+    uint8_t shown[kExternalLedCount][3];
+    renderAppExtLeds(frame, static_cast<uint8_t>(kExternalLedCount), shown);
+    out += ",\"pixels\":[";
+    for (uint16_t i = 0; i < kExternalLedCount; ++i) {
+      if (i) out += ",";
+      appendRgb(out, shown[i]);
+    }
+    out += "]";
+  }
+#endif
+  out += "}}";
+  return out;
 }
 
 String ControlServer::indicatorsStatusJson() const {

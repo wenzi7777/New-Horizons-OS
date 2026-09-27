@@ -84,7 +84,6 @@ class AppHost {
   virtual void emitEvent(const char* app, const char* event, const String& detail) = 0;
   // As above, but carrying a number -- the common case for a measurement.
   virtual void emitValue(const char* app, const char* event, float value) = 0;
-  virtual void setLed(const char* app, uint8_t r, uint8_t g, uint8_t b) = 0;
   virtual void logLine(const char* app, const String& line) = 0;
 };
 
@@ -155,6 +154,14 @@ class App {
   // `out`, leaving the meter and every pixel an earlier slot already set.
   // Pulled by the LED service, like displayLine.
   virtual void extLedFrame(AppExtLedFrame& out) const { (void)out; }
+  // The status LED colour this app is holding, if any. Pulled, like
+  // displayLine: false means the app has let go and the system pattern shows.
+  // Whether the colour reaches the pixel is AppManager's and LedController's
+  // call, not the app's.
+  virtual bool statusLed(uint8_t rgb[3]) const {
+    (void)rgb;
+    return false;
+  }
 };
 
 }  // namespace nhos

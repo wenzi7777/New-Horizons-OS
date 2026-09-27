@@ -189,6 +189,7 @@ class FlowApp : public App {
   String statusJson(bool withOutputs) const override;
   bool displayLine(uint8_t row, AppDisplayLine& out) const override;
   void extLedFrame(AppExtLedFrame& out) const override;
+  bool statusLed(uint8_t rgb[3]) const override;
 
   // Everything loading would check -- parse, references, windows, budget --
   // without touching any slot. The registry uses it to refuse a package at
@@ -258,6 +259,10 @@ class FlowApp : public App {
   // meter's node, on the last frame.
   int8_t extPixelNode_[kMaxAppExtLeds] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
   int8_t extMeterNode_ = -1;
+  // The status LED colour the last led-op edge asked for; cleared on a
+  // falling edge or when the graph is unloaded.
+  bool ledHeld_ = false;
+  uint8_t ledRgb_[3] = {0, 0, 0};
   String sourcePath_;
   String graphName_;
 };

@@ -46,6 +46,9 @@ class ExternalLedController {
   void wake();
   void service(uint32_t nowMs, const ScanHealth& health, const ExternalLedInputs& inputs);
   String statusJson() const;
+  // Which source drew the strip on the last service pass ("app" while an app
+  // holds it), as statusJson's active_preset reports.
+  const char* activePreset() const { return activePreset_; }
 
  private:
   void clear();

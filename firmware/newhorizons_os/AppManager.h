@@ -75,14 +75,17 @@ class AppManager : public AppHost {
   // AppHost
   void emitEvent(const char* app, const char* event, const String& detail) override;
   void emitValue(const char* app, const char* event, float value) override;
-  void setLed(const char* app, uint8_t r, uint8_t g, uint8_t b) override;
   void logLine(const char* app, const String& line) override;
 
   // The OLED row the display should draw, composed across slots: the
   // lowest-numbered running slot that drew `row` on its last frame wins, so
   // two apps can share the panel by using different rows. Capability-checked
   // here rather than in the app, like every other AppHost entry point.
-  bool displayLine(uint8_t row, AppDisplayLine& out) const;
+  // `ownerSlot`, when given, receives the winning slot's index.
+  bool displayLine(uint8_t row, AppDisplayLine& out, int8_t* ownerSlot = nullptr) const;
+  // Every running slot that drew `row`, winner included, one bit per slot.
+  // For app_view; the display itself only needs the winner.
+  uint8_t displayContenders(uint8_t row) const;
 
   // What the external LED strip shows, composed across slots the same way:
   // the lowest-numbered running slot's meter, and for each pixel the
@@ -90,8 +93,15 @@ class AppManager : public AppHost {
   // slot may drive the strip, whether or not it lit anything.
   void extLedFrame(AppExtLedFrame& out) const;
 
-  using LedSink = void (*)(uint8_t r, uint8_t g, uint8_t b);
-  void setLedSink(LedSink sink) { ledSink_ = sink; }
+  // The status LED colour the apps are asking for, composed the same way:
+  // the lowest-numbered running slot holding one wins. The system still
+  // decides whether it is shown (LedController::appMayOverride).
+  // `requesters` gets one bit per slot holding a colour.
+  bool statusLed(uint8_t rgb[3], int8_t& ownerSlot, uint8_t* requesters = nullptr) const;
+  const char* slotName(uint8_t index) const {
+    return index < count_ ? slots_[index].app->manifest().name : "";
+  }
+  uint8_t slotCount() const { return count_; }
 
   static const char* stateName(AppState state);
   // Per-node outputs are included only for the slot named by `outputsFor`
@@ -153,7 +163,6 @@ class AppManager : public AppHost {
   bool throttled_ = false;
   uint32_t lastTotalUs_ = 0;
   uint32_t maxTotalUs_ = 0;
-  LedSink ledSink_ = nullptr;
 };
 
 }  // namespace nhos
