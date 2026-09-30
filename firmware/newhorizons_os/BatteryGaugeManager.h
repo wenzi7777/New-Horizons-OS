@@ -22,12 +22,10 @@ class BatteryGaugeManager {
   void setPowerManager(PowerManager& power);
   void setManualProfile(const ManualBatteryProfile& profile);
   void service(uint32_t nowMs);
-  bool detectNow(uint32_t nowMs);
   GaugeResyncResult requestResync(uint32_t nowMs);
   bool copyLatestSample(BatteryGaugeSample& out) const;
   const BatteryProfile& profile() const { return profile_; }
   const ManualBatteryProfile& manualProfile() const { return manualProfile_; }
-  BatteryIdClass detectedBatteryId() const { return lastBatteryId_; }
   String statusJson() const;
  private:
   bool readGauge(BatteryGaugeSample& sample);
@@ -36,12 +34,10 @@ class BatteryGaugeManager {
   bool startQuickStart(uint32_t nowMs);
   void applySample(const BatteryGaugeSample& sample);
   void markReadFailed(const char* diagnostic);
-  BatteryIdClass readBatteryId() const;
   void updateProfile(const BatteryProfile& profile);
   BatteryGaugeSample sample_;
-  BatteryProfile profile_{BatteryProfileId::Unknown, BatteryProfileSource::Pending, false, true, 0, 100};
+  BatteryProfile profile_{false, true, 0, kUnconfiguredBatteryChargeLimitMa};
   ManualBatteryProfile manualProfile_{};
-  BatteryIdClass lastBatteryId_ = BatteryIdClass::Unknown;
   bool detected_ = false;
   String diagnostic_;
   uint32_t lastPollMs_ = 0;

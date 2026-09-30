@@ -13,18 +13,27 @@ void BootModeManager::begin() {
   evaluateOtaRollbackState();
   uint8_t bootFailures = prefs_.getUChar("boot_fail", 0);
   prefs_.putUChar("boot_fail", static_cast<uint8_t>(bootFailures + 1));
+  const bool setupCommanded = prefs_.getBool("setup_req", false);
+  if (setupCommanded) {
+    prefs_.remove("setup_req");
+  }
 #if NHOS_BOARD_HAS_BUTTON
   pinMode(kActionButtonPin, INPUT_PULLUP);
-  wifiSetupRequested_ = sampleWifiSetupButtonWindow();
-  if (wifiSetupRequested_) {
+  // Skip the 3 s button window when the setup was already asked for.
+  wifiSetupRequested_ = setupCommanded || sampleWifiSetupButtonWindow();
+  if (wifiSetupRequested_ && !setupCommanded) {
     Serial.println(F("boot_action_button_setup_requested"));
   }
 #else
-  wifiSetupRequested_ = sampleMultiCycleSetupTrigger();
-  if (wifiSetupRequested_) {
+  // Not counted as a power cycle towards the multi-cycle trigger.
+  wifiSetupRequested_ = setupCommanded || sampleMultiCycleSetupTrigger();
+  if (wifiSetupRequested_ && !setupCommanded) {
     Serial.println(F("boot_multi_cycle_setup_requested"));
   }
 #endif
+  if (setupCommanded) {
+    Serial.println(F("boot_command_setup_requested"));
+  }
   if (bootFailures + 1 >= kSafeModeBootFailures) {
     mode_ = RunMode::SafeMaintenance;
   } else if (prefs_.getBool("maint", false)) {
@@ -136,6 +145,10 @@ void BootModeManager::markWifiConnected() {
 
 void BootModeManager::requestReboot() {
   rebootRequested_ = true;
+}
+
+void BootModeManager::requestWifiSetupOnNextBoot() {
+  prefs_.putBool("setup_req", true);
 }
 
 bool BootModeManager::rebootRequested() const {

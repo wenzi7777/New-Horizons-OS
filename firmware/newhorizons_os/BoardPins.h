@@ -12,7 +12,6 @@ extern const uint8_t kColPins[];
 extern const uint8_t kI2cScl;
 extern const uint8_t kI2cSda;
 extern const uint8_t kStatusLedPin;
-extern const uint8_t kBatteryIdAdcPin;
 
 #if NHOS_BOARD_HAS_EXT_LED
 extern const uint8_t kExternalLedPin;

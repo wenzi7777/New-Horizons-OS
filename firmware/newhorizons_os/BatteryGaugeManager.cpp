@@ -4,7 +4,6 @@
 
 #include "BatteryChargeSafety.h"
 #include "BoardConfig.h"
-#include "BoardPins.h"
 #include "PowerManager.h"
 
 namespace nhos {
@@ -25,9 +24,8 @@ void BatteryGaugeManager::begin() {
   diagnostic_ = "not_polled";
   lastPollMs_ = 0;
   hasAppliedChargeLimit_ = false;
-  lastBatteryId_ = BatteryIdClass::Unknown;
   syncPolicy_.begin(millis());
-  updateProfile(resolveBatteryProfile(false, false, lastBatteryId_, manualProfile_));
+  updateProfile(resolveBatteryProfile(manualProfile_));
 }
 
 void BatteryGaugeManager::setPowerManager(PowerManager& power) {
@@ -38,7 +36,7 @@ void BatteryGaugeManager::setPowerManager(PowerManager& power) {
 void BatteryGaugeManager::setManualProfile(const ManualBatteryProfile& profile) {
   manualProfile_ = profile;
   manualProfile_.configured = manualBatteryProfileIsUsable(profile);
-  updateProfile(resolveBatteryProfile(detected_, sample_.valid, lastBatteryId_, manualProfile_));
+  updateProfile(resolveBatteryProfile(manualProfile_));
 }
 
 void BatteryGaugeManager::service(uint32_t nowMs) {
@@ -49,9 +47,7 @@ void BatteryGaugeManager::service(uint32_t nowMs) {
   lastPollMs_ = nowMs;
   sample_ = BatteryGaugeSample();
   detected_ = false;
-  lastBatteryId_ = BatteryIdClass::Unknown;
   diagnostic_ = "max17048_not_supported";
-  updateProfile(resolveBatteryProfile(false, false, lastBatteryId_, manualProfile_));
   return;
 #else
   const bool chargerDetected = power_ && power_->chargerDetected();
@@ -113,13 +109,6 @@ void BatteryGaugeManager::service(uint32_t nowMs) {
     startQuickStart(nowMs);
   }
 #endif
-}
-
-bool BatteryGaugeManager::detectNow(uint32_t nowMs) {
-  // Battery profile detection remains distinct from fuel-gauge resync.
-  lastPollMs_ = 0;
-  service(nowMs);
-  return sample_.valid;
 }
 
 GaugeResyncResult BatteryGaugeManager::requestResync(uint32_t nowMs) {
@@ -198,8 +187,6 @@ bool BatteryGaugeManager::startQuickStart(uint32_t nowMs) {
 void BatteryGaugeManager::applySample(const BatteryGaugeSample& sample) {
   sample_ = sample;
   detected_ = true;
-  lastBatteryId_ = readBatteryId();
-  updateProfile(resolveBatteryProfile(true, sample_.valid, lastBatteryId_, manualProfile_));
 }
 
 void BatteryGaugeManager::markReadFailed(const char* diagnostic) {
@@ -207,13 +194,7 @@ void BatteryGaugeManager::markReadFailed(const char* diagnostic) {
   sample_.status = 0;
   sample_.fault = 1;
   detected_ = false;
-  lastBatteryId_ = BatteryIdClass::Unknown;
   diagnostic_ = diagnostic;
-  updateProfile(resolveBatteryProfile(false, false, lastBatteryId_, manualProfile_));
-}
-
-BatteryIdClass BatteryGaugeManager::readBatteryId() const {
-  return classifyBatteryIdAdcRaw(analogRead(kBatteryIdAdcPin));
 }
 
 void BatteryGaugeManager::updateProfile(const BatteryProfile& profile) {
@@ -223,9 +204,11 @@ void BatteryGaugeManager::updateProfile(const BatteryProfile& profile) {
                      profile_.maxChargeCurrentMa)) {
     return;
   }
+  // The battery's maximum is a ceiling over the charge profile: a slower
+  // profile keeps its own lower current underneath it.
   uint16_t actualMa = 0;
-  if (power_->applyBatteryChargeLimit(profile_.maxChargeCurrentMa, actualMa)) {
-    appliedChargeLimitMa_ = actualMa;
+  if (power_->setChargeCeilingMa(profile_.maxChargeCurrentMa, actualMa)) {
+    appliedChargeLimitMa_ = profile_.maxChargeCurrentMa;
     hasAppliedChargeLimit_ = true;
     return;
   }
@@ -252,10 +235,10 @@ String BatteryGaugeManager::statusJson() const {
   out += gaugeSyncReasonName(syncPolicy_.lastReason());
   out += "\",\"gauge_sync_count\":";
   out += String(syncPolicy_.syncCount());
-  out += ",\"battery_id\":\"" + String(batteryIdClassName(lastBatteryId_));
-  out += "\",\"battery_profile\":\"" + String(batteryProfileIdName(profile_.id));
-  out += "\",\"profile_source\":\"" + String(batteryProfileSourceName(profile_.source));
-  out += "\",\"profile_resolved\":";
+  // Kept for older Desktops: the profile is always manual now.
+  out += ",\"battery_profile\":\"";
+  out += profile_.resolved ? "manual" : "none";
+  out += "\",\"profile_source\":\"manual\",\"profile_resolved\":";
   out += profile_.resolved ? "true" : "false";
   out += ",\"profile_required\":";
   out += profile_.required ? "true" : "false";

@@ -36,6 +36,10 @@ class BootModeManager {
   String otaRollbackStatusJson() const;
   void markWifiConnected();
   void requestReboot();
+  // Makes the next boot open the WiFi setup portal, exactly as holding the
+  // action button at power-on would -- for boards whose button is broken or
+  // missing. One-shot: the flag is consumed by that boot.
+  void requestWifiSetupOnNextBoot();
   bool rebootRequested() const;
   bool wifiSetupRequested() const;
 

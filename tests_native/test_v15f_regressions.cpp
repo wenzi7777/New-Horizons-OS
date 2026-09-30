@@ -54,6 +54,20 @@ void testBatterySafetyLimitIsReappliedOnProfileTransition() {
   assert(!shouldApplyBatteryChargeLimit(true, 200, 200));
   assert(shouldApplyBatteryChargeLimit(true, 200, 100));
   assert(!shouldApplyBatteryChargeLimit(true, 100, 100));
+
+  // The charge profile picks the speed, the battery maximum caps it.
+  assert(effectiveChargeCurrentMa(350, 200) == 200);
+  assert(effectiveChargeCurrentMa(100, 200) == 100);
+  assert(effectiveChargeCurrentMa(250, 250) == 250);
+  assert(effectiveChargeCurrentMa(350, 0) == 350);
+  uint8_t code = 0;
+  assert(bq25180IchgCodeForMa(100, code) && code == 0x25);
+  assert(bq25180IchgCodeForMa(250, code) && code == 0x34);
+  assert(bq25180IchgCodeForMa(300, code) && code == 0x39);
+  assert(bq25180IchgCodeForMa(350, code) && code == 0x3E);
+  assert(!bq25180IchgCodeForMa(90, code));
+  assert(!bq25180IchgCodeForMa(360, code));
+  assert(!bq25180IchgCodeForMa(105, code));
 }
 
 void testUncalibratedBmm350CannotPublishFakeMagneticField() {

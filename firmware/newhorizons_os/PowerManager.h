@@ -29,7 +29,9 @@ class PowerManager {
   uint8_t lastStat0() const;
   bool applyProfile(ChargeProfile profile);
   bool applyProfileByName(const String& profileName);
-  bool applyBatteryChargeLimit(uint16_t requestedMa, uint16_t& actualMa);
+  // Caps every charge profile at the battery's maximum charge current and
+  // re-applies the current profile. actualMa is the resulting charge current.
+  bool setChargeCeilingMa(uint16_t ceilingMa, uint16_t& actualMa);
   String profileName() const;
   String statusJson() const;
 
@@ -38,7 +40,6 @@ class PowerManager {
     const char* name;
     uint16_t chargeCurrentMa;
     uint16_t inputLimitMa;
-    uint8_t ichgRegisterValue;
     uint8_t inputLimitBits;
   };
 
@@ -58,6 +59,7 @@ class PowerManager {
   bool detected_ = false;
   bool configured_ = false;
   uint16_t chargeCurrentMa_ = 250;
+  uint16_t chargeCeilingMa_ = 0;  // 0 = no battery ceiling
   uint16_t inputLimitMa_ = 500;
   uint16_t vbatRegMv_ = 4200;
   uint8_t terminationPercent_ = 10;

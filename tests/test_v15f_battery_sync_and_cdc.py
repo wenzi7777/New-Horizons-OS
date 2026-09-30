@@ -28,7 +28,7 @@ class V15fBatterySyncAndCdcTests(unittest.TestCase):
         control = (FIRMWARE_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
 
         command_start = control.index('if (cmd == "resync_battery_gauge")')
-        command_end = control.index('if (cmd == "detect_battery_profile")', command_start)
+        command_end = control.index('if (cmd == "set_imu")', command_start)
         command = control[command_start:command_end]
         self.assertIn("batteryProfileCommandSupported(NHOS_BOARD_HAS_MAX17048)", command)
         self.assertIn("battery_gauge_resync_started", command)

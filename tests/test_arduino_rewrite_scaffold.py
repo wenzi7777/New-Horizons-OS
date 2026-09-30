@@ -684,8 +684,10 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('"ultra_slow"', power)
         self.assertIn('"extreme"', power)
         self.assertIn('"fast"', power)
-        self.assertIn("250, 500, 0x34, 0x05", power)
-        self.assertIn("300, 500, 0x39, 0x05", power)
+        # ICHG codes are derived by bq25180IchgCodeForMa() (tests_native).
+        self.assertIn("250, 500, 0x05", power)
+        self.assertIn("300, 500, 0x05", power)
+        self.assertIn("bq25180IchgCodeForMa(chargeMa, ichg)", power)
         self.assertNotIn("safe_default", power)
         self.assertNotIn("fast_800mah_only", power)
         self.assertIn("updateRegister(kBq25180ChargeCtrl0Register, 0x70, 0x20)", power)

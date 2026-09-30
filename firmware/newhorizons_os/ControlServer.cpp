@@ -1211,19 +1211,6 @@ String ControlServer::processCommand(const String& request) {
                   : "battery_gauge_resync_started",
               data);
   }
-  if (cmd == "detect_battery_profile") {
-    if (!batteryProfileCommandSupported(NHOS_BOARD_HAS_MAX17048) ||
-        !batteryGauge_) {
-      return error(cmd, "battery_profile_unavailable");
-    }
-    batteryGauge_->detectNow(millis());
-    String data = "{";
-    bool first = true;
-    jsonRawField(data, "battery", batteryStatusJson(), first);
-    jsonRawField(data, "battery_gauge", batteryGauge_->statusJson(), first);
-    data += "}";
-    return ok(cmd, "battery_profile_detected", data);
-  }
   if (cmd == "set_imu") {
     const bool enabled = extractBool(request, "enabled", true);
     if (deviceConfig_) {
@@ -1859,6 +1846,14 @@ String ControlServer::processCommand(const String& request) {
   if (cmd == "reboot") {
     boot_->requestReboot();
     return ok(cmd, "reboot_scheduled");
+  }
+  if (cmd == "reboot_wifi_setup") {
+    // For boards whose action button is broken: the reply goes out first,
+    // then the device restarts straight into the WiFi setup portal (also out
+    // of ESP-NOW mode, as the boot button does) and drops off the network.
+    boot_->requestWifiSetupOnNextBoot();
+    boot_->requestReboot();
+    return ok(cmd, "wifi_setup_reboot_scheduled");
   }
   return error(cmd, "unknown_command");
 }

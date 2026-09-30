@@ -2,6 +2,7 @@
 
 #include <Wire.h>
 
+#include "BatteryChargeSafety.h"
 #include "BoardConfig.h"
 #include "PowerStatusJson.h"
 
@@ -17,36 +18,36 @@ constexpr uint8_t kBq25180TmrIlimRegister = 0x08;
 constexpr uint8_t kBq25180Vbat4200Mv = 0x46;
 constexpr uint32_t kPowerStatusPollMs = 1000;
 
-// ICHG register encoding derived from known data points:
-// 0x34 -> 250mA, 0x39 -> 300mA (BQ25180 measured), linear interpolation 10mA/step
+// ICHG codes come from bq25180IchgCodeForMa(): 0x25 = 100 mA, +10 mA per
+// step (0x34 -> 250 mA and 0x39 -> 300 mA were measured on a BQ25180).
 constexpr PowerManager::ChargeProfileConfig kUltraSlowProfile = {
     ChargeProfile::UltraSlow,
     "ultra_slow",
-    100, 500, 0x25, 0x05,
+    100, 500, 0x05,
 };
 
 constexpr PowerManager::ChargeProfileConfig kSlowProfile = {
     ChargeProfile::Slow,
     "slow",
-    200, 500, 0x2F, 0x05,
+    200, 500, 0x05,
 };
 
 constexpr PowerManager::ChargeProfileConfig kBalancedProfile = {
     ChargeProfile::Balanced,
     "balanced",
-    250, 500, 0x34, 0x05,
+    250, 500, 0x05,
 };
 
 constexpr PowerManager::ChargeProfileConfig kFastProfile = {
     ChargeProfile::Fast,
     "fast",
-    300, 500, 0x39, 0x05,
+    300, 500, 0x05,
 };
 
 constexpr PowerManager::ChargeProfileConfig kExtremeProfile = {
     ChargeProfile::Extreme,
     "extreme",
-    350, 500, 0x3E, 0x05,
+    350, 500, 0x05,
 };
 
 void setPowerBusClock() {
@@ -140,12 +141,17 @@ bool PowerManager::applyProfile(ChargeProfile profile) {
     return failProfile("charge_profile_unsupported");
   }
   const ChargeProfileConfig& config = configForProfile(profile);
+  const uint16_t chargeMa = effectiveChargeCurrentMa(config.chargeCurrentMa, chargeCeilingMa_);
+  uint8_t ichg = 0;
+  if (!bq25180IchgCodeForMa(chargeMa, ichg)) {
+    return failProfile("bq25180_ichg_invalid");
+  }
   lastConfigError_ = "";
 
   if (!writeRegister(kBq25180VbatCtrlRegister, kBq25180Vbat4200Mv)) {
     return failProfile("bq25180_vbat_write_failed");
   }
-  if (!writeRegister(kBq25180IchgCtrlRegister, config.ichgRegisterValue)) {
+  if (!writeRegister(kBq25180IchgCtrlRegister, ichg)) {
     return failProfile("bq25180_ichg_write_failed");
   }
   if (!updateRegister(kBq25180ChargeCtrl0Register, 0x70, 0x20)) {
@@ -162,7 +168,7 @@ bool PowerManager::applyProfile(ChargeProfile profile) {
   if (!readRegister(kBq25180VbatCtrlRegister, value) || (value & 0x7F) != kBq25180Vbat4200Mv) {
     return failProfile("bq25180_vbat_verify_failed");
   }
-  if (!readRegister(kBq25180IchgCtrlRegister, value) || (value & 0x7F) != config.ichgRegisterValue) {
+  if (!readRegister(kBq25180IchgCtrlRegister, value) || (value & 0x7F) != ichg) {
     return failProfile("bq25180_ichg_verify_failed");
   }
   if (!readRegister(kBq25180ChargeCtrl0Register, value) || (value & 0x70) != 0x20) {
@@ -178,7 +184,7 @@ bool PowerManager::applyProfile(ChargeProfile profile) {
   profile_ = profile;
   configured_ = true;
   detected_ = true;
-  chargeCurrentMa_ = config.chargeCurrentMa;
+  chargeCurrentMa_ = chargeMa;
   inputLimitMa_ = config.inputLimitMa;
   vbatRegMv_ = 4200;
   terminationPercent_ = 10;
@@ -207,49 +213,18 @@ bool PowerManager::applyProfileByName(const String& profileName) {
   return failProfile("invalid_charge_profile");
 }
 
-bool PowerManager::applyBatteryChargeLimit(uint16_t requestedMa, uint16_t& actualMa) {
-  // BQ25180's documented ICHG range is linear here: 0x25 is 100 mA and each
-  // following code adds 10 mA.  Verify every register before reporting the
-  // exact requested limit as active.
-  if (!supportsChargeProfiles() || requestedMa < 100 || requestedMa > 350 ||
-      requestedMa % 10 != 0) {
-    actualMa = 0;
+bool PowerManager::setChargeCeilingMa(uint16_t ceilingMa, uint16_t& actualMa) {
+  actualMa = 0;
+  uint8_t unused = 0;
+  if (!supportsChargeProfiles() || !bq25180IchgCodeForMa(ceilingMa, unused)) {
     return failProfile("battery_charge_limit_invalid");
   }
-  const uint8_t ichg = static_cast<uint8_t>(0x25 + (requestedMa - 100) / 10);
-  lastConfigError_ = "";
-  if (!writeRegister(kBq25180VbatCtrlRegister, kBq25180Vbat4200Mv) ||
-      !writeRegister(kBq25180IchgCtrlRegister, ichg) ||
-      !updateRegister(kBq25180ChargeCtrl0Register, 0x70, 0x20) ||
-      !updateRegister(kBq25180IcCtrlRegister, 0x0C, 0x04) ||
-      !updateRegister(kBq25180TmrIlimRegister, 0x07, 0x05)) {
-    actualMa = 0;
-    return failProfile("battery_charge_limit_write_failed");
+  chargeCeilingMa_ = ceilingMa;
+  // Re-apply the selected profile so the new ceiling takes effect at once.
+  if (!applyProfile(profile_)) {
+    return false;
   }
-  uint8_t value = 0;
-  if (!readRegister(kBq25180VbatCtrlRegister, value) ||
-      (value & 0x7F) != kBq25180Vbat4200Mv ||
-      !readRegister(kBq25180IchgCtrlRegister, value) ||
-      (value & 0x7F) != ichg ||
-      !readRegister(kBq25180ChargeCtrl0Register, value) ||
-      (value & 0x70) != 0x20 ||
-      !readRegister(kBq25180IcCtrlRegister, value) ||
-      (value & 0x0C) != 0x04 ||
-      !readRegister(kBq25180TmrIlimRegister, value) ||
-      (value & 0x07) != 0x05) {
-    actualMa = 0;
-    return failProfile("battery_charge_limit_verify_failed");
-  }
-  chargeCurrentMa_ = requestedMa;
-  inputLimitMa_ = 500;
-  vbatRegMv_ = 4200;
-  terminationPercent_ = 10;
-  prechargePercent_ = 20;
-  safetyTimerHours_ = 6;
-  configured_ = true;
-  detected_ = true;
-  lastError_ = "";
-  actualMa = requestedMa;
+  actualMa = chargeCurrentMa_;
   return true;
 }
 
