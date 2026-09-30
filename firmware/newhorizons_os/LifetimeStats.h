@@ -11,7 +11,7 @@ class BootModeManager;
 class FaultRecorder;
 class TimeSync;
 
-// SMART-style lifetime counters: power-on time, reset history, OTA history,
+// Device health counters: power-on time, reset history, OTA history,
 // temperature and heap extremes. Served by the `health` command and
 // /proc/health -- deliberately not folded into `status`, whose compact
 // (ESP-NOW) form has little headroom left under the 7680 B response cap.

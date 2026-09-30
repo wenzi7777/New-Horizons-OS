@@ -12,7 +12,7 @@ def read(name: str) -> str:
 
 
 class LifetimeStatsTests(unittest.TestCase):
-    """SMART-style lifetime counters: the `health` command and /proc/health."""
+    """Device health counters: the `health` command and /proc/health."""
 
     def test_health_command_is_served_and_advertised(self):
         control = read("ControlServer.cpp")
