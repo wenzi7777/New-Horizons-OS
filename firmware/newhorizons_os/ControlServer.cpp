@@ -835,6 +835,8 @@ String ControlServer::processCommand(const String& request) {
     data += services_ != nullptr ? "true" : "false";
     data += ",\"faults\":";
     data += faults_ != nullptr ? "true" : "false";
+    data += ",\"health\":";
+    data += lifetime_ != nullptr ? "true" : "false";
     data += ",\"procfs\":";
     data += proc_ != nullptr ? "true" : "false";
     data += ",\"airtime_arbiter\":";
@@ -1771,6 +1773,12 @@ String ControlServer::processCommand(const String& request) {
     // with esp-coredump.
     data += ",\"scope\":\"proc\",\"path\":\"crash.elf\"}}";
     return ok(cmd, "crash_log", data);
+  }
+  if (cmd == "health") {
+    if (!lifetime_) {
+      return error(cmd, "lifetime_stats_unavailable");
+    }
+    return ok(cmd, "health", lifetime_->healthJson());
   }
   if (cmd == "crash_clear") {
     if (!faults_) {

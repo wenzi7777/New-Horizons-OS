@@ -30,6 +30,9 @@ class BootModeManager {
   // if this device has never been rolled back -- or has confirmed an update
   // since. Persisted across boots.
   const String& rolledBackFrom() const { return rolledBackFrom_; }
+  // True only on the boot that discovered the revert (rolledBackFrom() keeps
+  // reporting it on later boots too).
+  bool rolledBackThisBoot() const { return rolledBackThisBoot_; }
   String otaRollbackStatusJson() const;
   void markWifiConnected();
   void requestReboot();
@@ -51,6 +54,7 @@ class BootModeManager {
   bool wifiSetupRequested_ = false;
   bool otaPendingVerify_ = false;
   bool firmwareConfirmed_ = false;
+  bool rolledBackThisBoot_ = false;
   String rolledBackFrom_;
 };
 

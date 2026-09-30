@@ -95,3 +95,11 @@ CXX="${CXX:-c++}"
   -o "$BUILD_DIR/test_calibration_curve"
 
 "$BUILD_DIR/test_calibration_curve"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_lifetime_policy.cpp" \
+  "$FIRMWARE_DIR/LifetimePolicy.cpp" \
+  -o "$BUILD_DIR/test_lifetime_policy"
+
+"$BUILD_DIR/test_lifetime_policy"

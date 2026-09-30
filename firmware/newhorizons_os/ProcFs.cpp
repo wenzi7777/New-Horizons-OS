@@ -10,6 +10,7 @@
 #include "DeviceConfig.h"
 #include "FaultRecorder.h"
 #include "FindMeClient.h"
+#include "LifetimeStats.h"
 #include "MatrixScanner.h"
 #include "PowerGovernor.h"
 #include "PowerStateManager.h"
@@ -25,7 +26,7 @@ namespace {
 // Ordering is the listing order. crash.elf is the only binary entry.
 constexpr const char* kEntries[] = {
     "version", "uptime", "tasks", "services", "apps", "packages", "mem", "scan", "net", "power", "crash",
-    "kmsg", "crash.elf",
+    "health", "kmsg", "crash.elf",
 };
 constexpr size_t kEntryCount = sizeof(kEntries) / sizeof(kEntries[0]);
 
@@ -231,6 +232,13 @@ bool ProcFs::generate(const String& path, String& out) const {
     if (governor_ != nullptr) {
       out += String("governor=") + governor_->statusJson() + "\n";
     }
+    return true;
+  }
+  if (path == "health") {
+    if (lifetime_ == nullptr) {
+      return false;
+    }
+    out = lifetime_->procText();
     return true;
   }
   if (path == "crash") {

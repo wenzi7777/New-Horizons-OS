@@ -34,6 +34,8 @@ class FaultRecorder {
   bool lastBootCrashed() const { return lastBootCrashed_; }
   uint32_t bootCount() const { return bootId_; }
   uint8_t lastResetReason() const { return lastResetReason_; }
+  // boot_id of the newest crash still in the ring; 0 when there is none.
+  uint32_t lastCrashBootId() const;
   static const char* resetReasonName(uint8_t reason);
   // Reset reasons that mean "this run did not end on purpose".
   static bool isCrashReason(uint8_t reason);

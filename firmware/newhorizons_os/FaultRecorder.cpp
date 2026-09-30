@@ -93,6 +93,11 @@ const char* FaultRecorder::resetReasonName(uint8_t reason) {
     case ESP_RST_DEEPSLEEP: return "deepsleep";
     case ESP_RST_BROWNOUT: return "brownout";
     case ESP_RST_SDIO: return "sdio";
+    case ESP_RST_USB: return "usb";
+    case ESP_RST_JTAG: return "jtag";
+    case ESP_RST_EFUSE: return "efuse";
+    case ESP_RST_PWR_GLITCH: return "pwr_glitch";
+    case ESP_RST_CPU_LOCKUP: return "cpu_lockup";
     case ESP_RST_UNKNOWN:
     default: return "unknown";
   }
@@ -111,6 +116,16 @@ bool FaultRecorder::captureCoreDumpSummary(FaultRecord& record) const {
   record.pc = summary.exc_pc;
   copyField(record.task, sizeof(record.task), summary.exc_task);
   return true;
+}
+
+uint32_t FaultRecorder::lastCrashBootId() const {
+  uint32_t newest = 0;
+  for (uint8_t i = 0; i < kRingSize; ++i) {
+    if (ring_[i].valid && ring_[i].bootId > newest) {
+      newest = ring_[i].bootId;
+    }
+  }
+  return newest;
 }
 
 void FaultRecorder::loadRing() {

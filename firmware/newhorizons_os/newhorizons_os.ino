@@ -22,6 +22,7 @@
 #include "MagnetometerManager.h"
 #include "BatteryGaugeManager.h"
 #include "LedController.h"
+#include "LifetimeStats.h"
 #include "MatrixScanner.h"
 #include "OtaManager.h"
 #include "PacketBuilder.h"
@@ -62,6 +63,7 @@ nhos::Storage storage;
 nhos::DeviceConfig deviceConfig;
 nhos::BootModeManager bootMode;
 nhos::FaultRecorder faults;
+nhos::LifetimeStats lifetime;
 nhos::Scheduler scheduler;
 nhos::ProcFs procFs;
 nhos::ServiceManager services;
@@ -277,6 +279,9 @@ void servicePowerState() {
   const nhos::ActionButtonGesture gesture = powerState.service(
       millis(), power.chargerDetected(), power.chargeState());
 #if NHOS_BOARD_HAS_BUTTON
+  if (gesture != nhos::ActionButtonGesture::None) {
+    lifetime.noteButtonPress();
+  }
   // Apps see short presses on every board with a button, beside whatever the
   // press is configured to do. A long press never reaches them: it is the
   // soft-off gesture, and an app must not be able to make it mean anything
@@ -740,6 +745,18 @@ bool runtimeGate() {
 
 void taskServices() { services.service(millis()); }
 
+void taskLifetime() {
+  const bool awake = powerState.shouldRunServices();
+  // Only a drop while awake counts: soft-off suspends WiFi on purpose.
+  static bool wifiWasConnected = false;
+  const bool wifiConnected = awake && !espNowMode && wifi.isConnected();
+  if (wifiWasConnected && !wifiConnected && awake) {
+    lifetime.noteWifiDisconnect();
+  }
+  wifiWasConnected = wifiConnected;
+  lifetime.service(millis(), awake, awake && scanner.active());
+}
+
 void taskPowerGovernor() {
   powerGovernor.service(scanner.active(), powerState.shouldRunServices());
 }
@@ -870,6 +887,10 @@ void registerRuntimeTasks() {
   scheduler.registerTask("power_transition", &servicePowerTransition, false);
   scheduler.registerTask("display", &taskDisplay, false);
 
+  // 1Hz and alwaysRun: soft-off time counts as power-on time too. Before
+  // soft_off, whose light sleep would otherwise delay the tick that flushes
+  // on entering it.
+  scheduler.registerTask("lifetime", &taskLifetime, true, 1000000);
   scheduler.registerTask("soft_off", &taskSoftOff, true);
 }
 
@@ -909,6 +930,9 @@ void setup() {
   if (bootMode.rolledBackFrom().length() > 0) {
     logBoot(String("ota_rolled_back_from=") + bootMode.rolledBackFrom());
   }
+  lifetime.begin(faults, bootMode);
+  lifetime.setClock(&timeSync);
+  logBoot("boot_stage=lifetime_ready");
   powerState.begin();
   logBoot(String("boot_stage=power_state_ready ") + powerState.statusJson());
   Wire.begin(nhos::kI2cSda, nhos::kI2cScl, NHOS_BOARD_I2C_HZ);
@@ -1073,6 +1097,7 @@ void setup() {
                 powerState, imu, magnetometer, leds, deviceConfig, calibration,
                 displayManager, externalLeds);
   control.setFaultRecorder(&faults);
+  control.setLifetimeStats(&lifetime);
   control.setScheduler(&scheduler);
   procFs.attach(scheduler, faults, scanner, bootMode, powerState, wifi, findme, deviceConfig);
   control.setProcFs(&procFs);
@@ -1088,6 +1113,7 @@ void setup() {
   procFs.setAppManager(&apps);
   procFs.setAppRegistry(&appRegistry);
   procFs.setClock(&timeSync);
+  procFs.setLifetimeStats(&lifetime);
   if (espNowMode) {
     // Route check_update/apply_update through the Hub-relayed OTA path --
     // a Direct-mode device has no WiFi, so OtaManager's HTTP fetch can
@@ -1114,8 +1140,12 @@ void setup() {
   // invalid pin map means the device never really came up).
   if (bootMode.otaPendingVerify()) {
     if (bootMode.mode() != nhos::RunMode::SafeMaintenance && !criticalError) {
-      logBoot(bootMode.confirmFirmwareValid() ? "ota_image_confirmed"
-                                              : "ota_image_confirm_failed");
+      if (bootMode.confirmFirmwareValid()) {
+        lifetime.noteOtaConfirmed();
+        logBoot("ota_image_confirmed");
+      } else {
+        logBoot("ota_image_confirm_failed");
+      }
     } else {
       logBoot(String("ota_image_left_pending mode=") + bootMode.modeName() +
               " critical_error=" + (criticalError ? "true" : "false"));

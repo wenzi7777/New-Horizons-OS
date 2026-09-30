@@ -12,6 +12,7 @@ class BootModeManager;
 class DeviceConfig;
 class FaultRecorder;
 class FindMeClient;
+class LifetimeStats;
 class MatrixScanner;
 class PowerGovernor;
 class PowerStateManager;
@@ -41,6 +42,7 @@ class ProcFs {
   void setServiceManager(ServiceManager* services) { services_ = services; }
   void setStorage(Storage* storage) { storage_ = storage; }
   void setClock(TimeSync* clock) { clock_ = clock; }
+  void setLifetimeStats(LifetimeStats* stats) { lifetime_ = stats; }
   void setPowerGovernor(PowerGovernor* governor) { governor_ = governor; }
   void setAppManager(AppManager* apps) { apps_ = apps; }
   void setAppRegistry(AppRegistry* registry) { appRegistry_ = registry; }
@@ -69,6 +71,7 @@ class ProcFs {
   ServiceManager* services_ = nullptr;
   Storage* storage_ = nullptr;
   TimeSync* clock_ = nullptr;
+  LifetimeStats* lifetime_ = nullptr;
   PowerGovernor* governor_ = nullptr;
   AppManager* apps_ = nullptr;
   AppRegistry* appRegistry_ = nullptr;

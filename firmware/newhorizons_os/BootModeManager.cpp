@@ -122,6 +122,7 @@ void BootModeManager::evaluateOtaRollbackState() {
     } else {
       prefs_.putString("rb_from", pending);
       prefs_.remove("pend_ver");
+      rolledBackThisBoot_ = true;
     }
   }
   rolledBackFrom_ = prefs_.getString("rb_from", "");

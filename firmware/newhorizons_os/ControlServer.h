@@ -17,6 +17,7 @@
 #include "FindMeClient.h"
 #include "ImuManager.h"
 #include "LedController.h"
+#include "LifetimeStats.h"
 #include "MatrixScanner.h"
 #include "MagnetometerManager.h"
 #include "OtaManager.h"
@@ -77,6 +78,7 @@ class ControlServer {
   // begin()'s parameter list is already at its useful limit, and nothing in
   // ControlServer needs the recorder to exist.
   void setFaultRecorder(FaultRecorder* recorder) { faults_ = recorder; }
+  void setLifetimeStats(LifetimeStats* stats) { lifetime_ = stats; }
   void setScheduler(Scheduler* scheduler) { scheduler_ = scheduler; }
   void setProcFs(ProcFs* proc) { proc_ = proc; }
   void setArbiter(AirtimeArbiter* arbiter) { arbiter_ = arbiter; }
@@ -128,6 +130,7 @@ class ControlServer {
   OtaManager* ota_ = nullptr;
   EspNowOtaReceiver* espNowOta_ = nullptr;
   FaultRecorder* faults_ = nullptr;
+  LifetimeStats* lifetime_ = nullptr;
   Scheduler* scheduler_ = nullptr;
   ProcFs* proc_ = nullptr;
   AirtimeArbiter* arbiter_ = nullptr;
