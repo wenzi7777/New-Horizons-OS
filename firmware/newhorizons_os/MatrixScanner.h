@@ -79,8 +79,9 @@ class MatrixScanner {
   bool scanDue() const;
   size_t scanIntoPacketPayload(uint8_t* out, size_t capacity, MatrixFrame& frame);
   bool streamBufferEnabled() const;
-  bool captureCellAverage(uint16_t sensorIndex, uint32_t durationMs, float& outValue);
-  bool captureAllAverages(float* outValues, size_t count, uint32_t durationMs);
+  // Calibration captures: the median of ~0.5 s block means over durationMs.
+  bool captureCellBlockMedian(uint16_t sensorIndex, uint32_t durationMs, float& outValue);
+  bool captureAllBlockMedians(float* outValues, size_t count, uint32_t durationMs);
   bool shouldSendFrame(const MatrixFrame& frame) const;
   bool enqueuePacket(const uint8_t* data, size_t len, uint32_t seq, uint32_t timestampMs, uint8_t flags);
   bool sendQueuedPacket(StreamTransport& transport);

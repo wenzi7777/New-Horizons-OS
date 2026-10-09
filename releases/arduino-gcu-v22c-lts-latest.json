@@ -1,11 +1,11 @@
 {
-  "changelog_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v1.10.0/releases/notes/v1.10.0.md",
+  "changelog_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v1.11.0/releases/notes/v1.11.0.md",
   "firmware": {
-    "sha256": "3c8044f664f35fbd15b9ca7e3e4d93feba0a72ad192e8d7c1d63cecff59e1bce",
-    "size": 1560112,
-    "url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v1.10.0/releases/artifacts/newhorizons-os-gcu-v22c-lts-v1.10.0.bin"
+    "sha256": "9fcce8f118a547848fdd6735d8e8cfc18e81e0d80e2e66cfa71852262f9d7141",
+    "size": 1569152,
+    "url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v1.11.0/releases/artifacts/newhorizons-os-gcu-v22c-lts-v1.11.0.bin"
   },
-  "latest": "v1.10.0",
+  "latest": "v1.11.0",
   "model": "VD-CTL/R v2.2.C GCU LTS",
   "product": "NHOS Arduino",
   "protocol": "NHO/Arduino/1"

@@ -244,20 +244,20 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("bool apply(float rawMv, uint16_t sensorIndex, float& outValue) const;", calibration_header)
         self.assertIn('"draft_levels"', calibration_impl)
         self.assertIn('"draft_tare"', calibration_impl)
-        self.assertIn("legacy_missing_tare", calibration_impl)
+        self.assertIn('"draft_fit"', calibration_impl)
         self.assertIn("tare_", calibration_impl)
         self.assertIn("draftTare_", calibration_impl)
         self.assertIn('"metadata"', calibration_impl)
         self.assertIn('\\"tare_enabled\\"', calibration_impl)
         self.assertIn('\\"output_mode\\"', calibration_impl)
-        self.assertIn("levels_relative=", calibration_impl)
+        self.assertIn('meta += "format=";', calibration_impl)
         self.assertIn("void setCalibration", scanner_header)
-        self.assertIn("bool captureCellAverage", scanner_header)
-        self.assertIn("bool captureAllAverages", scanner_header)
+        self.assertIn("bool captureCellBlockMedian", scanner_header)
+        self.assertIn("bool captureAllBlockMedians", scanner_header)
         self.assertIn("calibration_->apply", scanner_impl)
         self.assertIn("scanner.setCalibration(&calibration)", sketch)
 
-    def test_calibration_apply_uses_cached_runtime_curves_instead_of_rebuilding_per_sample(self):
+    def test_calibration_apply_uses_cached_fits_instead_of_refitting_per_sample(self):
         calibration_header = (ARDUINO_ROOT / "Calibration.h").read_text(encoding="utf-8")
         calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
 
@@ -269,28 +269,20 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIsNotNone(apply_match)
         body = apply_match.group("body")
 
-        curve_impl = (ARDUINO_ROOT / "CalibrationCurve.cpp").read_text(encoding="utf-8")
-        evaluate_match = re.search(r"bool evaluateCurve\(.*?\n\}", curve_impl, re.S)
-        self.assertIsNotNone(evaluate_match)
-        evaluate_body = evaluate_match.group(0)
-
-        self.assertIn("std::vector<calibration_curve::Curve> runtimeCurves_", calibration_header)
+        self.assertIn("FitSet fits_;", calibration_header)
         self.assertIn("bool runtimeReady_ = false;", calibration_header)
-        self.assertIn("runtimeCurves_[sensorIndex]", body)
-        self.assertIn("calibration_curve::evaluateCurve", body)
-        self.assertIn("std::lower_bound", evaluate_body)
-        self.assertNotIn("std::sort", evaluate_body)
+        self.assertIn("fits_.models[sensorIndex]", body)
+        self.assertIn("calibration_curve::evaluateModel", body)
+        self.assertIn("calibration_curve::readoutX", body)
+        self.assertNotIn("fitModel(", body)
+        self.assertNotIn("fitAll(", body)
         self.assertNotIn("complete()", body)
-        self.assertNotIn("std::vector<SamplePoint>", body)
-        self.assertNotIn("points.reserve", body)
-        self.assertNotIn("std::sort(points.begin()", body)
 
     def test_saved_profile_mutators_refresh_calibration_runtime_cache(self):
         calibration_header = (ARDUINO_ROOT / "Calibration.h").read_text(encoding="utf-8")
         calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
 
         self.assertIn("void refreshSavedStateCache();", calibration_header)
-        self.assertIn("void rebuildRuntimeCurves();", calibration_header)
 
         for signature in (
             r"void Calibration::setLayout\(.*?\) \{(?P<body>.*?)\n\}",
@@ -298,20 +290,12 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             r"bool Calibration::clearProfile\(\) \{(?P<body>.*?)\n\}",
             r"bool Calibration::deleteLevel\(float level\) \{(?P<body>.*?)\n\}",
             r"bool Calibration::applyTareDirect\(const float\* values, size_t count\) \{(?P<body>.*?)\n\}",
-            r"bool Calibration::loadFromStoragePath\(const char\* metaPath, const char\* dirPath, const char\* tarePath\) \{(?P<body>.*?)\n\}",
+            r"bool Calibration::setFitSettings\(const FitSettings& settings\) \{(?P<body>.*?)\n\}",
+            r"bool Calibration::loadFromStorage\(\) \{(?P<body>.*?)\n\}",
         ):
             match = re.search(signature, calibration_impl, re.S)
-            self.assertIsNotNone(match)
+            self.assertIsNotNone(match, signature)
             self.assertIn("refreshSavedStateCache();", match.group("body"))
-
-        load_match = re.search(
-            r"bool Calibration::loadFromStorage\(\) \{(?P<body>.*?)\n\}",
-            calibration_impl,
-            re.S,
-        )
-        self.assertIsNotNone(load_match)
-        self.assertIn("loadFromStoragePath(kCalibrationMetaPath, kCalibrationDirPath, kCalibrationTarePath)", load_match.group("body"))
-        self.assertIn("loadFromStoragePath(kLegacyCalibrationMetaPath, kLegacyCalibrationDirPath, kLegacyCalibrationTarePath)", load_match.group("body"))
 
         refresh_match = re.search(
             r"void Calibration::refreshSavedStateCache\(\) \{(?P<body>.*?)\n\}",
@@ -321,9 +305,19 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIsNotNone(refresh_match)
         refresh_body = refresh_match.group("body")
         self.assertIn("savedTareComplete_", refresh_body)
-        self.assertIn("savedLevelsComplete_", refresh_body)
-        self.assertIn("rebuildRuntimeCurves();", refresh_body)
+        self.assertIn("fitAll(tare_, levels_, fits_);", refresh_body)
         self.assertIn("runtimeReady_", refresh_body)
+
+    def test_profiles_from_before_the_fitted_model_are_discarded(self):
+        calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
+        load = re.search(r"bool Calibration::loadFromStorage\(\) \{(?P<body>.*?)\n\}", calibration_impl, re.S)
+        self.assertIsNotNone(load)
+        body = load.group("body")
+        self.assertIn("format != kCalibrationFormat", body)
+        self.assertIn("wipeStoredProfile();", body)
+        # No migration code survives.
+        for gone in ("convertAbsoluteLevels", "levels_relative", "legacyMissingTare_", "toRelative"):
+            self.assertNotIn(gone, calibration_impl)
 
     def test_calibration_persistence_uses_short_spiffs_safe_paths(self):
         calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
@@ -333,8 +327,6 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('constexpr char kCalibrationMetaPath[] = "/cal/meta";', calibration_impl)
         self.assertIn('constexpr char kCalibrationTarePath[] = "/cal/tare";', calibration_impl)
         self.assertIn('constexpr char kLegacyCalibrationDirPath[] = "/calibration";', calibration_impl)
-        self.assertIn('constexpr char kLegacyCalibrationMetaPath[] = "/calibration/profile.meta";', calibration_impl)
-        self.assertIn('constexpr char kLegacyCalibrationTarePath[] = "/calibration/tare.csv";', calibration_impl)
         self.assertIn('SPIFFS.mkdir("/cal")', storage_impl)
 
         for level in (1, 10, 20):
@@ -342,15 +334,12 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             path = f"/cal/lp{key}"
             self.assertLessEqual(len(path + ".tmp"), 31)
 
-    def test_calibration_save_writes_new_profile_before_legacy_cleanup(self):
+    def test_calibration_save_writes_meta_last_then_prunes(self):
         calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
         calibration_header = (ARDUINO_ROOT / "Calibration.h").read_text(encoding="utf-8")
 
         self.assertIn("bool ensureCalibrationDir() const;", calibration_header)
-        self.assertIn("bool removeStoredLevels(const char* dirPath, bool includeTare) const;", calibration_header)
-        self.assertIn("void removeLegacyCalibrationProfile() const;", calibration_header)
         self.assertIn("void removeObsoleteStoredFiles() const;", calibration_header)
-        self.assertIn("bool loadFromStoragePath(const char* metaPath, const char* dirPath, const char* tarePath);", calibration_header)
 
         save_match = re.search(
             r"bool Calibration::saveToStorage\(\) \{(?P<body>.*?)\n\}",
@@ -363,9 +352,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("writeTareFile(tare_)", body)
         self.assertIn("writeLevelFile(item)", body)
         self.assertIn("writeTextFileAtomic(kCalibrationMetaPath, meta)", body)
-        self.assertIn("removeObsoleteStoredFiles();", body)
-        self.assertIn("removeLegacyCalibrationProfile();", body)
-        self.assertLess(body.index("writeTextFileAtomic(kCalibrationMetaPath, meta)"), body.index("removeLegacyCalibrationProfile();"))
+        self.assertLess(body.index("writeLevelFile(item)"), body.index("writeTextFileAtomic(kCalibrationMetaPath, meta)"))
+        self.assertLess(body.index("writeTextFileAtomic(kCalibrationMetaPath, meta)"), body.index("removeObsoleteStoredFiles();"))
 
     def test_optional_stream_filter_config_matches_gcu_shape_and_safe_defaults(self):
         config_header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
@@ -458,7 +446,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         )
 
         capture_cell_match = re.search(
-            r"bool MatrixScanner::captureCellAverage\(uint16_t sensorIndex, uint32_t durationMs, float& outValue\) \{(?P<body>.*?)\n\}",
+            r"bool MatrixScanner::captureCellBlockMedian\(uint16_t sensorIndex, uint32_t durationMs, float& outValue\) \{(?P<body>.*?)\n\}",
             scanner_impl,
             re.S,
         )
@@ -466,7 +454,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("applyFilter(", capture_cell_match.group("body"))
 
         capture_all_match = re.search(
-            r"bool MatrixScanner::captureAllAverages\(float\* outValues, size_t count, uint32_t durationMs\) \{(?P<body>.*?)\n\}",
+            r"bool MatrixScanner::captureAllBlockMedians\(float\* outValues, size_t count, uint32_t durationMs\) \{(?P<body>.*?)\n\}",
             scanner_impl,
             re.S,
         )

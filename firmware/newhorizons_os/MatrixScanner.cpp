@@ -1,9 +1,13 @@
 #include "MatrixScanner.h"
 
+#include <memory>
+#include <new>
+
 #include "Watchdog.h"
 
 #include "BoardPins.h"
 #include "Calibration.h"
+#include "CalibrationCurve.h"
 
 namespace nhos {
 
@@ -271,53 +275,76 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
   return payloadBytes;
 }
 
-bool MatrixScanner::captureCellAverage(uint16_t sensorIndex, uint32_t durationMs, float& outValue) {
+// Both captures report the median of ~0.5 s block means (see
+// calibration_curve::kCaptureBlockMs): a valve pulse or a twitch shifts one
+// block, not the result.
+bool MatrixScanner::captureCellBlockMedian(uint16_t sensorIndex, uint32_t durationMs, float& outValue) {
   if (!hasLayout() || sensorIndex >= rowCount_ * colCount_) {
     return false;
   }
-  const uint32_t startedMs = millis();
-  float total = 0;
-  uint32_t samples = 0;
-  do {
-    float value = 0;
-    if (!sampleRawCell(sensorIndex, value)) {
-      return false;
-    }
-    total += value;
-    ++samples;
-    // durationMs comes straight from the operator's calibration command and
-    // is not clamped, so this can legitimately run past the 5s task WDT.
-    watchdogFeed();
-  } while ((millis() - startedMs) < max<uint32_t>(1, durationMs));
-  outValue = samples ? total / static_cast<float>(samples) : 0;
-  return samples > 0;
+  const uint32_t blocks = calibration_curve::captureBlockCount(durationMs);
+  const uint32_t blockMs = max<uint32_t>(1, durationMs / blocks);
+  float blockMeans[calibration_curve::kMaxCaptureBlocks];
+  for (uint32_t b = 0; b < blocks; ++b) {
+    const uint32_t startedMs = millis();
+    float total = 0;
+    uint32_t samples = 0;
+    do {
+      float value = 0;
+      if (!sampleRawCell(sensorIndex, value)) {
+        return false;
+      }
+      total += value;
+      ++samples;
+      // durationMs comes straight from the operator's calibration command and
+      // is not clamped, so this can legitimately run past the 5s task WDT.
+      watchdogFeed();
+    } while ((millis() - startedMs) < blockMs);
+    blockMeans[b] = total / static_cast<float>(samples);
+  }
+  outValue = calibration_curve::medianInPlace(blockMeans, blocks);
+  return true;
 }
 
-bool MatrixScanner::captureAllAverages(float* outValues, size_t count, uint32_t durationMs) {
+bool MatrixScanner::captureAllBlockMedians(float* outValues, size_t count, uint32_t durationMs) {
   const size_t totalPoints = rowCount_ * colCount_;
   if (!hasLayout() || !outValues || totalPoints == 0 || count < totalPoints) {
     return false;
   }
-  for (size_t i = 0; i < totalPoints; ++i) {
-    captureTotalsScratch_[i] = 0;
-  }
-  const uint32_t startedMs = millis();
-  uint32_t samples = 0;
-  do {
-    if (!sampleRawFrame(captureSampleScratch_, totalPoints)) {
-      return false;
-    }
-    for (size_t i = 0; i < totalPoints; ++i) {
-      captureTotalsScratch_[i] += captureSampleScratch_[i];
-    }
-    ++samples;
-    watchdogFeed();  // same unbounded durationMs as captureCellAverage()
-  } while ((millis() - startedMs) < max<uint32_t>(1, durationMs));
-  if (samples == 0) {
+  const uint32_t blocks = calibration_curve::captureBlockCount(durationMs);
+  const uint32_t blockMs = max<uint32_t>(1, durationMs / blocks);
+  // blocks x sensors means: 18 KB for a 10 s capture on a 225-sensor board,
+  // only for the length of the capture.
+  std::unique_ptr<float[]> blockMeans(new (std::nothrow) float[blocks * totalPoints]);
+  if (!blockMeans) {
     return false;
   }
+  for (uint32_t b = 0; b < blocks; ++b) {
+    for (size_t i = 0; i < totalPoints; ++i) {
+      captureTotalsScratch_[i] = 0;
+    }
+    const uint32_t startedMs = millis();
+    uint32_t samples = 0;
+    do {
+      if (!sampleRawFrame(captureSampleScratch_, totalPoints)) {
+        return false;
+      }
+      for (size_t i = 0; i < totalPoints; ++i) {
+        captureTotalsScratch_[i] += captureSampleScratch_[i];
+      }
+      ++samples;
+      watchdogFeed();  // same unbounded durationMs as captureCellBlockMedian()
+    } while ((millis() - startedMs) < blockMs);
+    for (size_t i = 0; i < totalPoints; ++i) {
+      blockMeans[b * totalPoints + i] = captureTotalsScratch_[i] / static_cast<float>(samples);
+    }
+  }
+  float column[calibration_curve::kMaxCaptureBlocks];
   for (size_t i = 0; i < totalPoints; ++i) {
-    outValues[i] = captureTotalsScratch_[i] / static_cast<float>(samples);
+    for (uint32_t b = 0; b < blocks; ++b) {
+      column[b] = blockMeans[b * totalPoints + i];
+    }
+    outValues[i] = calibration_curve::medianInPlace(column, blocks);
   }
   return true;
 }

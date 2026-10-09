@@ -13,8 +13,8 @@ class TimeSync;
 
 // Device health counters: power-on time, reset history, OTA history,
 // temperature and heap extremes. Served by the `health` command and
-// /proc/health -- deliberately not folded into `status`, whose compact
-// (ESP-NOW) form has little headroom left under the 7680 B response cap.
+// /proc/health -- deliberately not folded into `status`, which is polled
+// often and already spans two ESP-NOW reply pages.
 //
 // Everything lives in RAM and is written back to NVS as one blob:
 //   - once at boot (the reset reason / firmware change just counted),

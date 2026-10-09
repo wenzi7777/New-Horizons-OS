@@ -15,19 +15,39 @@ namespace {
 constexpr char kCalibrationMetaPath[] = "/cal/meta";
 constexpr char kCalibrationDirPath[] = "/cal";
 constexpr char kCalibrationTarePath[] = "/cal/tare";
-constexpr char kLegacyCalibrationMetaPath[] = "/calibration/profile.meta";
+// Profiles from before the fitted model (interpolated curves, and the older
+// /calibration layout) are not migrated: a device on this firmware starts
+// uncalibrated and is calibrated again.
+constexpr int kCalibrationFormat = 2;
 constexpr char kLegacyCalibrationDirPath[] = "/calibration";
-constexpr char kLegacyCalibrationTarePath[] = "/calibration/tare.csv";
+// Failed sensors listed by index in status; the rest are only counted, so a
+// fresh 225-sensor board does not blow up every status reply.
+constexpr size_t kMaxListedFitFailures = 16;
+// GPIO11 and up are on ADC2 (ESP32-S3: ADC1 = GPIO1-10, ADC2 = GPIO11-20).
+constexpr uint8_t kFirstAdc2Gpio = 11;
 
-String trimFloat(float value) {
-  String out(value, 3);
-  while (out.endsWith("0")) {
-    out.remove(out.length() - 1);
-  }
-  if (out.endsWith(".")) {
-    out.remove(out.length() - 1);
+String trimFloat(float value, unsigned int decimals = 3) {
+  String out(value, decimals);
+  if (out.indexOf('.') >= 0) {
+    while (out.endsWith("0")) {
+      out.remove(out.length() - 1);
+    }
+    if (out.endsWith(".")) {
+      out.remove(out.length() - 1);
+    }
   }
   return out.isEmpty() ? String("0") : out;
+}
+
+// Readout and fit coefficients span many decades (c2 ~ 1e-4), so they are
+// written in scientific notation rather than trimFloat's fixed 3 decimals.
+String sciFloat(float value) {
+  if (std::isnan(value)) {
+    return "null";
+  }
+  char buffer[24];
+  snprintf(buffer, sizeof(buffer), "%.7g", static_cast<double>(value));
+  return buffer;
 }
 
 void parsePinCsv(const String& csv, uint8_t* out, size_t& count, size_t maxCount) {
@@ -58,11 +78,42 @@ String pinCsv(const uint8_t* pins, size_t count) {
   return out;
 }
 
+void parseFloatCsv(const String& content, int cursor, std::vector<float>& out) {
+  size_t index = 0;
+  while (cursor <= content.length() && index < out.size()) {
+    int sep = content.indexOf(',', cursor);
+    if (sep < 0) {
+      sep = content.length();
+    }
+    String token = content.substring(cursor, sep);
+    token.trim();
+    if (token.length()) {
+      out[index] = token.toFloat();
+    }
+    ++index;
+    cursor = sep + 1;
+  }
+}
+
+String floatCsv(const std::vector<float>& values) {
+  String content;
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (i) {
+      content += ",";
+    }
+    if (!std::isnan(values[i])) {
+      content += trimFloat(values[i]);
+    }
+  }
+  return content;
+}
+
 }  // namespace
 
 void Calibration::begin(Storage& storage) {
   storage_ = &storage;
   loadFromStorage();
+  logEvaluationCost();
 }
 
 void Calibration::setLayout(const uint8_t* analogPins, size_t analogCount, const uint8_t* selectPins, size_t selectCount) {
@@ -84,8 +135,8 @@ void Calibration::setLayout(const uint8_t* analogPins, size_t analogCount, const
 }
 
 String Calibration::statusJson(bool modeActive) const {
-  // Status keys intentionally include "draft_levels", "draft_tare", and
-  // "metadata" for the WebUI maintenance workbench.
+  // Status keys intentionally include "draft_levels", "draft_tare",
+  // "draft_fit" and "metadata" for the WebUI maintenance workbench.
   String out = "{";
   out += "\"enabled\":";
   out += enabled_ ? "true" : "false";
@@ -97,10 +148,6 @@ String Calibration::statusJson(bool modeActive) const {
   out += complete() ? "true" : "false";
   out += ",\"tare_complete\":";
   out += savedTareComplete_ ? "true" : "false";
-  out += ",\"levels_complete\":";
-  out += savedLevelsComplete_ ? "true" : "false";
-  out += ",\"legacy_missing_tare\":";
-  out += legacyMissingTare_ ? "true" : "false";
   out += ",\"tare_enabled\":";
   out += tareEnabled_ ? "true" : "false";
   out += ",\"output_mode\":\"";
@@ -113,6 +160,20 @@ String Calibration::statusJson(bool modeActive) const {
   out += levelsSummaryJson(levels_, "saved");
   out += ",\"draft_levels\":";
   out += levelsSummaryJson(draftLevels_, "draft");
+  out += ",\"fit\":";
+  out += fitSummaryJson(fits_);
+  out += ",\"draft_fit\":";
+  if (sessionActive_) {
+    // Fitted on demand: it is what Save would produce, so the workbench can
+    // show which sensors still need levels before committing.
+    FitSet draftFits;
+    fitAll(draftTare_, draftLevels_, draftFits);
+    out += fitSummaryJson(draftFits);
+  } else {
+    out += "null";
+  }
+  out += ",\"fit_settings\":";
+  out += fitSettingsJson();
   out += ",\"metadata\":";
   out += metadataJson();
   out += "}";
@@ -141,20 +202,17 @@ bool Calibration::sessionCommit(bool autoEnable, String& outError) {
     return false;
   }
 
-  const std::vector<float> nextTare = draftTare_;
-  const std::vector<LevelData> nextLevels = draftLevels_;
-  const bool nextTareComplete = tareComplete(nextTare);
-  const bool nextLevelsComplete = levelsComplete(nextLevels);
-  const bool nextComplete = nextTareComplete && nextLevelsComplete;
-
-  if (autoEnable && !nextComplete) {
-    outError = "calibration_incomplete";
-    return false;
+  if (autoEnable) {
+    FitSet draftFits;
+    fitAll(draftTare_, draftLevels_, draftFits);
+    if (!tareComplete(draftTare_) || draftFits.fitted < totalPointCount()) {
+      outError = "calibration_incomplete";
+      return false;
+    }
   }
 
-  tare_ = nextTare;
-  levels_ = nextLevels;
-  convertAbsoluteLevels(levels_, tare_);
+  tare_ = draftTare_;
+  levels_ = draftLevels_;
   draftTare_.clear();
   draftLevels_.clear();
   sessionActive_ = false;
@@ -191,7 +249,7 @@ bool Calibration::complete() const {
 
 bool Calibration::setEnabled(bool enabled, String& outError) {
   if (enabled && !complete()) {
-    outError = legacyMissingTare_ ? "calibration_missing_tare" : "calibration_incomplete";
+    outError = "calibration_incomplete";
     return false;
   }
   enabled_ = enabled;
@@ -229,13 +287,12 @@ bool Calibration::deleteLevel(float level) {
   }
   if (!sessionActive_) {
     refreshSavedStateCache();
+    if (!complete()) {
+      enabled_ = false;
+    }
     updatedAtMs_ = millis();
     if (!saveToStorage()) {
       return false;
-    }
-    if (!complete()) {
-      enabled_ = false;
-      saveToStorage();
     }
   }
   return true;
@@ -274,15 +331,15 @@ bool Calibration::dumpLevelJson(float level, String& out) const {
     const size_t total = totalPointCount();
     const size_t captured = capturedCount(*item);
     buffer += "{\"level\":";
-    buffer += floatLabel(item->level);
+    buffer += floatLabel(keyLevel(item->key));
+    buffer += ",\"reference\":";
+    buffer += floatLabel(item->reference);
     buffer += ",\"captured_points\":";
     buffer += String(static_cast<unsigned int>(captured));
     buffer += ",\"total_points\":";
     buffer += String(static_cast<unsigned int>(total));
     buffer += ",\"complete\":";
     buffer += captured >= total && total > 0 ? "true" : "false";
-    buffer += ",\"relative\":";
-    buffer += item->relative ? "true" : "false";
     buffer += ",\"cells\":[";
     for (size_t sensorIndex = 0; sensorIndex < total; ++sensorIndex) {
       if (sensorIndex) {
@@ -306,7 +363,7 @@ bool Calibration::dumpLevelJson(float level, String& out) const {
 
   out = "{";
   out += "\"level\":";
-  out += floatLabel(level);
+  out += floatLabel(keyLevel(levelKey(level)));
   out += ",\"total_points\":";
   out += String(static_cast<unsigned int>(totalPointCount()));
   out += ",\"saved\":";
@@ -317,6 +374,38 @@ bool Calibration::dumpLevelJson(float level, String& out) const {
   out += sessionActive_ ? "true" : "false";
   out += "}";
   return true;
+}
+
+String Calibration::dumpFitJson() const {
+  const size_t total = totalPointCount();
+  String out = "{\"model\":\"a+b*sqrt(x)+c*x\",\"total_points\":";
+  out += String(static_cast<unsigned int>(total));
+  out += ",\"settings\":";
+  out += fitSettingsJson();
+  out += ",\"cells\":[";
+  for (size_t sensorIndex = 0; sensorIndex < total; ++sensorIndex) {
+    if (sensorIndex) {
+      out += ",";
+    }
+    const calibration_curve::FitModel model =
+        sensorIndex < fits_.models.size() ? fits_.models[sensorIndex] : calibration_curve::FitModel();
+    const FitResult result = sensorIndex < fits_.results.size() ? fits_.results[sensorIndex] : FitResult::NoTare;
+    out += "{\"sensor_index\":";
+    out += String(static_cast<unsigned int>(sensorIndex));
+    out += ",\"adc\":";
+    out += String(static_cast<unsigned int>(adcIndexForSensor(sensorIndex) + 1));
+    out += ",\"result\":\"";
+    out += fitResultName(result);
+    out += "\",\"a\":";
+    out += sciFloat(model.a);
+    out += ",\"b\":";
+    out += sciFloat(model.b);
+    out += ",\"c\":";
+    out += sciFloat(model.c);
+    out += "}";
+  }
+  out += "]}";
+  return out;
 }
 
 bool Calibration::captureTare(const float* values, size_t count) {
@@ -331,7 +420,7 @@ bool Calibration::captureTare(const float* values, size_t count) {
   return true;
 }
 
-bool Calibration::captureCell(uint16_t sensorIndex, float level, float value) {
+bool Calibration::captureCell(uint16_t sensorIndex, float level, float reference, float value) {
   if (!sessionActive_ || sensorIndex >= totalPointCount() || !draftTareCaptured(sensorIndex)) {
     return false;
   }
@@ -339,18 +428,12 @@ bool Calibration::captureCell(uint16_t sensorIndex, float level, float value) {
   if (!item) {
     return false;
   }
-  if (item->values.size() < totalPointCount()) {
-    item->values.resize(totalPointCount(), NAN);
-  }
-  if (!item->relative) {
-    calibration_curve::toRelative(item->values, draftTare_);
-    item->relative = true;
-  }
+  item->reference = reference;
   item->values[sensorIndex] = value - draftTare_[sensorIndex];
   return true;
 }
 
-bool Calibration::captureAll(float level, const float* values, size_t count) {
+bool Calibration::captureAll(float level, float reference, const float* values, size_t count) {
   if (!sessionActive_ || !values) {
     return false;
   }
@@ -365,9 +448,31 @@ bool Calibration::captureAll(float level, const float* values, size_t count) {
   if (!item) {
     return false;
   }
-  item->values.assign(values, values + total);
-  calibration_curve::toRelative(item->values, draftTare_);
-  item->relative = true;
+  item->reference = reference;
+  for (size_t i = 0; i < total; ++i) {
+    item->values[i] = values[i] - draftTare_[i];
+  }
+  return true;
+}
+
+bool Calibration::setReference(float level, float reference) {
+  if (std::isnan(reference)) {
+    return false;
+  }
+  std::vector<LevelData>& target = sessionActive_ ? draftLevels_ : levels_;
+  LevelData* item = mutableLevel(target, level, false);
+  if (!item) {
+    return false;
+  }
+  item->reference = reference;
+  if (!sessionActive_) {
+    refreshSavedStateCache();
+    if (!complete()) {
+      enabled_ = false;
+    }
+    updatedAtMs_ = millis();
+    return saveToStorage();
+  }
   return true;
 }
 
@@ -388,9 +493,6 @@ bool Calibration::applyTareDirect(const float* values, size_t count) {
     return false;
   }
   tare_.assign(values, values + total);
-  // A pre-v1.5.1 profile that never had a tare becomes usable with this one,
-  // exactly as capturing a tare for it used to do.
-  convertAbsoluteLevels(levels_, tare_);
   tareEnabled_ = true;
   refreshSavedStateCache();
   if (!complete()) {
@@ -413,6 +515,24 @@ bool Calibration::tareEnabled() const {
   return tareEnabled_;
 }
 
+bool Calibration::setFitSettings(const FitSettings& settings) {
+  for (const calibration_curve::Readout& readout : settings.readout) {
+    if (std::isnan(readout.c1) || std::isnan(readout.c2) || readout.c1 <= 0.0f) {
+      return false;
+    }
+  }
+  if (std::isnan(settings.minLevel) || std::isnan(settings.clipMv[0]) || std::isnan(settings.clipMv[1])) {
+    return false;
+  }
+  fitSettings_ = settings;
+  refreshSavedStateCache();
+  if (!complete()) {
+    enabled_ = false;
+  }
+  updatedAtMs_ = millis();
+  return saveToStorage();
+}
+
 calibration_curve::OutputMode Calibration::outputMode() const {
   return calibration_curve::resolveOutputMode(enabled_, runtimeReady_, tareEnabled_, savedTareComplete_);
 }
@@ -427,11 +547,15 @@ bool Calibration::apply(float rawMv, uint16_t sensorIndex, float& outValue) cons
     return false;
   }
   switch (outputMode()) {
-    case calibration_curve::OutputMode::Calibrated:
-      if (sensorIndex >= runtimeCurves_.size()) {
+    case calibration_curve::OutputMode::Calibrated: {
+      if (sensorIndex >= fits_.models.size()) {
         return false;
       }
-      return calibration_curve::evaluateCurve(runtimeCurves_[sensorIndex], calibration_curve::applyTare(rawMv, tareValue), outValue);
+      const float x = calibration_curve::readoutX(calibration_curve::applyTare(rawMv, tareValue),
+                                                  fitSettings_.readout[adcIndexForSensor(sensorIndex)]);
+      outValue = calibration_curve::evaluateModel(fits_.models[sensorIndex], x);
+      return true;
+    }
     case calibration_curve::OutputMode::Tared:
       outValue = calibration_curve::applyTare(rawMv, tareValue);
       return true;
@@ -445,7 +569,6 @@ Calibration::LevelData* Calibration::mutableLevel(std::vector<LevelData>& levels
   const int32_t key = levelKey(level);
   for (LevelData& item : levels) {
     if (item.key == key) {
-      item.level = level;
       if (item.values.size() < totalPointCount()) {
         item.values.resize(totalPointCount(), NAN);
       }
@@ -457,7 +580,7 @@ Calibration::LevelData* Calibration::mutableLevel(std::vector<LevelData>& levels
   }
   LevelData item;
   item.key = key;
-  item.level = level;
+  item.reference = keyLevel(key);
   item.values.assign(totalPointCount(), NAN);
   levels.push_back(item);
   std::sort(levels.begin(), levels.end(), [](const LevelData& a, const LevelData& b) { return a.key < b.key; });
@@ -484,103 +607,116 @@ bool Calibration::tareComplete(const std::vector<float>& tare) const {
   return total > 0 && capturedCount(tare) >= total;
 }
 
-bool Calibration::levelsComplete(const std::vector<LevelData>& levels) const {
+void Calibration::fitAll(const std::vector<float>& tare, const std::vector<LevelData>& levels, FitSet& out) const {
   const size_t total = totalPointCount();
-  if (total == 0 || levels.empty()) {
-    return false;
-  }
-  for (const LevelData& level : levels) {
-    if (capturedCount(level) < total) {
-      return false;
+  out.models.assign(total, calibration_curve::FitModel());
+  out.results.assign(total, FitResult::NoTare);
+  out.fitted = 0;
+  std::vector<float> xs;
+  std::vector<float> pressures;
+  xs.reserve(levels.size());
+  pressures.reserve(levels.size());
+  for (size_t sensorIndex = 0; sensorIndex < total; ++sensorIndex) {
+    if (sensorIndex >= tare.size() || std::isnan(tare[sensorIndex])) {
+      continue;
     }
+    const size_t adc = adcIndexForSensor(sensorIndex);
+    xs.clear();
+    pressures.clear();
+    // The same point selection as make_figures.py: levels from the nominal
+    // minimum up, no clipped reading, and a positive response.
+    for (const LevelData& item : levels) {
+      if (keyLevel(item.key) < fitSettings_.minLevel || sensorIndex >= item.values.size()) {
+        continue;
+      }
+      const float relative = item.values[sensorIndex];
+      if (std::isnan(relative) || tare[sensorIndex] + relative >= fitSettings_.clipMv[adc]) {
+        continue;
+      }
+      const float x = calibration_curve::readoutX(relative, fitSettings_.readout[adc]);
+      if (std::isnan(x) || x <= 0.0f) {
+        continue;
+      }
+      xs.push_back(x);
+      pressures.push_back(item.reference);
+    }
+    if (xs.size() < calibration_curve::kMinFitPoints) {
+      out.results[sensorIndex] = FitResult::TooFewPoints;
+      continue;
+    }
+    if (!calibration_curve::fitModel(xs.data(), pressures.data(), xs.size(), out.models[sensorIndex])) {
+      out.results[sensorIndex] = FitResult::Singular;
+      continue;
+    }
+    out.results[sensorIndex] = FitResult::Fitted;
+    ++out.fitted;
   }
-  return true;
+}
+
+size_t Calibration::adcIndexForSensor(size_t sensorIndex) const {
+  if (analogCount_ == 0) {
+    return 0;
+  }
+  return analogPins_[sensorIndex % analogCount_] >= kFirstAdc2Gpio ? 1 : 0;
 }
 
 void Calibration::refreshSavedStateCache() {
   savedTareComplete_ = tareComplete(tare_);
-  savedLevelsComplete_ = levelsComplete(levels_);
-  legacyMissingTare_ = !levels_.empty() && !savedTareComplete_;
-  rebuildRuntimeCurves();
-  runtimeReady_ = !legacyMissingTare_ && savedTareComplete_ && savedLevelsComplete_ && runtimeCurves_.size() == totalPointCount();
+  fitAll(tare_, levels_, fits_);
+  runtimeReady_ = savedTareComplete_ && totalPointCount() > 0 && fits_.fitted == totalPointCount();
 }
 
-bool Calibration::convertAbsoluteLevels(std::vector<LevelData>& levels, const std::vector<float>& tare) {
-  if (tare.empty()) {
-    return false;
+void Calibration::logEvaluationCost() const {
+  // What apply() costs per sample, measured on this board: the readout
+  // inversion plus the model, with the paper's (non-identity) readout so the
+  // square root in the inversion is included.
+  calibration_curve::FitModel model;
+  model.a = -1.77f;
+  model.b = 1.44f;
+  model.c = -0.0141f;
+  calibration_curve::Readout readout;
+  readout.c1 = 2.6657f;
+  readout.c2 = -9.447e-05f;
+  constexpr int kRuns = 1000;
+  volatile float sink = 0;
+  const uint32_t startedUs = micros();
+  for (int i = 0; i < kRuns; ++i) {
+    sink = sink + calibration_curve::evaluateModel(model, calibration_curve::readoutX(10.0f + i, readout));
   }
-  bool changed = false;
-  for (LevelData& item : levels) {
-    if (!item.relative) {
-      calibration_curve::toRelative(item.values, tare);
-      item.relative = true;
-      changed = true;
-    }
-  }
-  return changed;
-}
-
-void Calibration::rebuildRuntimeCurves() {
-  runtimeCurves_.clear();
-  const size_t total = totalPointCount();
-  if (total == 0) {
-    return;
-  }
-
-  runtimeCurves_.resize(total);
-  std::vector<float> levelValues;
-  std::vector<float> relativeRaws;
-  levelValues.reserve(levels_.size());
-  relativeRaws.reserve(levels_.size());
-  for (size_t sensorIndex = 0; sensorIndex < total; ++sensorIndex) {
-    if (sensorIndex >= tare_.size() || std::isnan(tare_[sensorIndex])) {
-      continue;
-    }
-    levelValues.clear();
-    relativeRaws.clear();
-    for (const LevelData& item : levels_) {
-      if (!item.relative || sensorIndex >= item.values.size()) {
-        continue;
-      }
-      levelValues.push_back(item.level);
-      relativeRaws.push_back(item.values[sensorIndex]);
-    }
-    calibration_curve::buildCurve(levelValues.data(), relativeRaws.data(), levelValues.size(), runtimeCurves_[sensorIndex]);
-  }
+  const uint32_t elapsedUs = micros() - startedUs;
+  Serial.print(F("[calibration] eval_us_per_cell="));
+  Serial.println(static_cast<float>(elapsedUs) / kRuns, 3);
 }
 
 bool Calibration::loadFromStorage() {
   enabled_ = false;
   tareEnabled_ = false;
   sessionActive_ = false;
-  legacyMissingTare_ = false;
   savedTareComplete_ = false;
-  savedLevelsComplete_ = false;
   runtimeReady_ = false;
   tare_.clear();
   draftTare_.clear();
   levels_.clear();
   draftLevels_.clear();
-  runtimeCurves_.clear();
   createdAtMs_ = 0;
   updatedAtMs_ = 0;
 
-  if (SPIFFS.exists(kCalibrationMetaPath)) {
-    return loadFromStoragePath(kCalibrationMetaPath, kCalibrationDirPath, kCalibrationTarePath);
-  }
-  if (SPIFFS.exists(kLegacyCalibrationMetaPath)) {
-    return loadFromStoragePath(kLegacyCalibrationMetaPath, kLegacyCalibrationDirPath, kLegacyCalibrationTarePath);
-  }
-  return true;
-}
-
-bool Calibration::loadFromStoragePath(const char* metaPath, const char* dirPath, const char* tarePath) {
   String meta;
-  if (!storage_ || !storage_->readTextFile(metaPath, meta)) {
-    return false;
+  const bool hasMeta = SPIFFS.exists(kCalibrationMetaPath) && storage_ && storage_->readTextFile(kCalibrationMetaPath, meta);
+  int format = 0;
+  if (hasMeta) {
+    const int at = meta.indexOf("format=");
+    format = at >= 0 ? meta.substring(at + 7).toInt() : 0;
   }
-  // Absent in profiles saved before v1.5.1, whose levels are absolute mV.
-  bool levelsRelative = false;
+  if (format != kCalibrationFormat) {
+    if (hasMeta || SPIFFS.exists(kCalibrationTarePath) || SPIFFS.exists(String(kLegacyCalibrationDirPath) + "/profile.meta")) {
+      Serial.println(F("cal_profile_discarded reason=old_format"));
+    }
+    wipeStoredProfile();
+    refreshSavedStateCache();
+    return true;
+  }
+
   int cursor = 0;
   while (cursor <= meta.length()) {
     int end = meta.indexOf('\n', cursor);
@@ -589,95 +725,72 @@ bool Calibration::loadFromStoragePath(const char* metaPath, const char* dirPath,
     }
     String line = meta.substring(cursor, end);
     line.trim();
-    if (line.length()) {
-      const int sep = line.indexOf('=');
-      if (sep > 0) {
-        String key = line.substring(0, sep);
-        String value = line.substring(sep + 1);
-        key.trim();
-        value.trim();
-        if (key == "enabled") {
-          enabled_ = value == "1" || value == "true";
-        } else if (key == "tare_enabled") {
-          tareEnabled_ = value == "1" || value == "true";
-        } else if (key == "levels_relative") {
-          levelsRelative = value == "1" || value == "true";
-        } else if (key == "created_at_ms") {
-          createdAtMs_ = static_cast<uint32_t>(value.toInt());
-        } else if (key == "updated_at_ms") {
-          updatedAtMs_ = static_cast<uint32_t>(value.toInt());
-        } else if (key == "analog_pins" && analogCount_ == 0) {
-          parsePinCsv(value, analogPins_, analogCount_, kRows);
-        } else if (key == "select_pins" && selectCount_ == 0) {
-          parsePinCsv(value, selectPins_, selectCount_, kCols);
-        }
+    const int sep = line.indexOf('=');
+    if (sep > 0) {
+      String key = line.substring(0, sep);
+      String value = line.substring(sep + 1);
+      key.trim();
+      value.trim();
+      if (key == "enabled") {
+        enabled_ = value == "1";
+      } else if (key == "tare_enabled") {
+        tareEnabled_ = value == "1";
+      } else if (key == "created_at_ms") {
+        createdAtMs_ = static_cast<uint32_t>(value.toInt());
+      } else if (key == "updated_at_ms") {
+        updatedAtMs_ = static_cast<uint32_t>(value.toInt());
+      } else if (key == "analog_pins" && analogCount_ == 0) {
+        parsePinCsv(value, analogPins_, analogCount_, kRows);
+      } else if (key == "select_pins" && selectCount_ == 0) {
+        parsePinCsv(value, selectPins_, selectCount_, kCols);
+      } else if (key == "fit_min_level") {
+        fitSettings_.minLevel = value.toFloat();
+      } else if (key == "adc1_c1") {
+        fitSettings_.readout[0].c1 = value.toFloat();
+      } else if (key == "adc1_c2") {
+        fitSettings_.readout[0].c2 = value.toFloat();
+      } else if (key == "adc2_c1") {
+        fitSettings_.readout[1].c1 = value.toFloat();
+      } else if (key == "adc2_c2") {
+        fitSettings_.readout[1].c2 = value.toFloat();
+      } else if (key == "adc1_clip_mv") {
+        fitSettings_.clipMv[0] = value.toFloat();
+      } else if (key == "adc2_clip_mv") {
+        fitSettings_.clipMv[1] = value.toFloat();
       }
     }
     cursor = end + 1;
   }
 
-  const bool legacyLayout = String(dirPath) == kLegacyCalibrationDirPath;
-  File root = SPIFFS.open(dirPath);
+  File root = SPIFFS.open(kCalibrationDirPath);
   if (root && root.isDirectory()) {
     File file = root.openNextFile();
     while (file) {
       const String name = file.path();
       file.close();
-      if (!legacyLayout && name.startsWith(String(dirPath) + "/l")) {
-        String base = name.substring(name.lastIndexOf('/') + 2);
-        float level = 0;
-        if (base.startsWith("n")) {
-          level = -static_cast<float>(base.substring(1).toInt()) / 1000.0f;
-        } else {
-          if (base.startsWith("p")) {
-            base.remove(0, 1);
-          }
-          level = static_cast<float>(base.toInt()) / 1000.0f;
-        }
-        loadLevelFile(name, level);
-      } else if (legacyLayout && name.endsWith(".lvl")) {
-        String base = name.substring(name.lastIndexOf('/') + 1);
-        base.remove(base.length() - 4);
-        base.replace("level_", "");
-        float level = 0;
-        if (base.startsWith("n")) {
-          level = -static_cast<float>(base.substring(1).toInt()) / 1000.0f;
-        } else {
-          if (base.startsWith("p")) {
-            base.remove(0, 1);
-          }
-          level = static_cast<float>(base.toInt()) / 1000.0f;
-        }
-        loadLevelFile(name, level);
-      } else if (name == tarePath || (legacyLayout && name.endsWith("/tare.csv"))) {
+      if (name.startsWith(String(kCalibrationDirPath) + "/l")) {
+        const String base = name.substring(name.lastIndexOf('/') + 2);
+        const long magnitude = base.substring(1).toInt();
+        loadLevelFile(name, static_cast<int32_t>(base.startsWith("n") ? -magnitude : magnitude));
+      } else if (name == kCalibrationTarePath) {
         loadTareFile(name);
       }
       file = root.openNextFile();
     }
   }
 
-  if (legacyLayout) {
-    levelsRelative = false;
-  }
-  for (LevelData& item : levels_) {
-    item.relative = levelsRelative;
-  }
-  const bool migrated = convertAbsoluteLevels(levels_, tare_);
-
   refreshSavedStateCache();
   if (!complete()) {
     enabled_ = false;
-  }
-  if (migrated) {
-    Serial.println(F("cal_levels_migrated_to_relative"));
-    saveToStorage();
   }
   Serial.print(F("cal_loaded tare_points="));
   Serial.print(static_cast<unsigned int>(capturedCount(tare_)));
   Serial.print(F(" levels="));
   Serial.print(static_cast<unsigned int>(levels_.size()));
-  Serial.print(F(" complete="));
-  Serial.print(complete() ? F("true") : F("false"));
+  Serial.print(F(" fitted="));
+  Serial.print(static_cast<unsigned int>(fits_.fitted));
+  Serial.print(F("/"));
+  Serial.print(static_cast<unsigned int>(totalPointCount()));
   Serial.print(F(" enabled="));
   Serial.println(enabled_ ? F("true") : F("false"));
   return true;
@@ -699,8 +812,12 @@ bool Calibration::saveToStorage() {
     }
   }
   String meta;
-  meta += "enabled=";
+  meta += "format=";
+  meta += String(kCalibrationFormat);
+  meta += "\nenabled=";
   meta += enabled_ ? "1" : "0";
+  meta += "\ntare_enabled=";
+  meta += tareEnabled_ ? "1" : "0";
   meta += "\ncreated_at_ms=";
   meta += String(createdAtMs_);
   meta += "\nupdated_at_ms=";
@@ -709,25 +826,25 @@ bool Calibration::saveToStorage() {
   meta += pinCsv(analogPins_, analogCount_);
   meta += "\nselect_pins=";
   meta += pinCsv(selectPins_, selectCount_);
-  meta += "\nlegacy_missing_tare=";
-  meta += legacyMissingTare_ ? "1" : "0";
-  meta += "\ntare_enabled=";
-  meta += tareEnabled_ ? "1" : "0";
-  // Every saved level shares one representation: new captures are relative,
-  // and absolute ones are converted the moment a tare exists (load, commit,
-  // applyTareDirect). Only a tare-less legacy profile stays absolute.
-  bool levelsRelative = true;
-  for (const LevelData& item : levels_) {
-    levelsRelative = levelsRelative && item.relative;
-  }
-  meta += "\nlevels_relative=";
-  meta += levelsRelative ? "1" : "0";
+  meta += "\nfit_min_level=";
+  meta += sciFloat(fitSettings_.minLevel);
+  meta += "\nadc1_c1=";
+  meta += sciFloat(fitSettings_.readout[0].c1);
+  meta += "\nadc1_c2=";
+  meta += sciFloat(fitSettings_.readout[0].c2);
+  meta += "\nadc2_c1=";
+  meta += sciFloat(fitSettings_.readout[1].c1);
+  meta += "\nadc2_c2=";
+  meta += sciFloat(fitSettings_.readout[1].c2);
+  meta += "\nadc1_clip_mv=";
+  meta += sciFloat(fitSettings_.clipMv[0]);
+  meta += "\nadc2_clip_mv=";
+  meta += sciFloat(fitSettings_.clipMv[1]);
   meta += "\n";
   if (!storage_->writeTextFileAtomic(kCalibrationMetaPath, meta)) {
     return false;
   }
   removeObsoleteStoredFiles();
-  removeLegacyCalibrationProfile();
   return true;
 }
 
@@ -737,28 +854,25 @@ bool Calibration::ensureCalibrationDir() const {
   return root && root.isDirectory();
 }
 
-bool Calibration::removeStoredLevels(const char* dirPath, bool includeTare) const {
-  File root = SPIFFS.open(dirPath);
-  if (root && root.isDirectory()) {
+void Calibration::wipeStoredProfile() const {
+  // SPIFFS is flat: a "directory" is a path prefix, so every file under
+  // either prefix goes.
+  for (const char* dirPath : {kCalibrationDirPath, kLegacyCalibrationDirPath}) {
+    File root = SPIFFS.open(dirPath);
+    if (!root || !root.isDirectory()) {
+      continue;
+    }
+    std::vector<String> names;
     File file = root.openNextFile();
     while (file) {
-      const String name = file.path();
+      names.push_back(file.path());
       file.close();
-      const bool isLevel = name.endsWith(".lvl") || name.startsWith(String(dirPath) + "/l");
-      const bool isTare = name.endsWith("/tare.csv") || name == kCalibrationTarePath || name == kLegacyCalibrationTarePath;
-      if (isLevel || (includeTare && isTare)) {
-        SPIFFS.remove(name);
-      }
       file = root.openNextFile();
     }
+    for (const String& name : names) {
+      SPIFFS.remove(name);
+    }
   }
-  return true;
-}
-
-void Calibration::removeLegacyCalibrationProfile() const {
-  removeStoredLevels(kLegacyCalibrationDirPath, true);
-  SPIFFS.remove(kLegacyCalibrationMetaPath);
-  SPIFFS.remove(kLegacyCalibrationTarePath);
 }
 
 void Calibration::removeObsoleteStoredFiles() const {
@@ -788,31 +902,18 @@ bool Calibration::writeTareFile(const std::vector<float>& tare) const {
   if (!storage_) {
     return false;
   }
-  String content;
-  for (size_t i = 0; i < tare.size(); ++i) {
-    if (i) {
-      content += ",";
-    }
-    if (!std::isnan(tare[i])) {
-      content += trimFloat(tare[i]);
-    }
-  }
-  return storage_->writeTextFileAtomic(tarePath(), content);
+  return storage_->writeTextFileAtomic(tarePath(), floatCsv(tare));
 }
 
 bool Calibration::writeLevelFile(const LevelData& level) const {
   if (!storage_) {
     return false;
   }
-  String content;
-  for (size_t i = 0; i < level.values.size(); ++i) {
-    if (i) {
-      content += ",";
-    }
-    if (!std::isnan(level.values[i])) {
-      content += trimFloat(level.values[i]);
-    }
-  }
+  // First line: the reference pressure; second: tare-relative mV per sensor.
+  String content = "reference=";
+  content += sciFloat(level.reference);
+  content += "\n";
+  content += floatCsv(level.values);
   return storage_->writeTextFileAtomic(levelPath(level.key), content);
 }
 
@@ -822,48 +923,24 @@ bool Calibration::loadTareFile(const String& path) {
     return false;
   }
   tare_.assign(totalPointCount(), NAN);
-  size_t index = 0;
-  int cursor = 0;
-  while (cursor <= content.length() && index < tare_.size()) {
-    int sep = content.indexOf(',', cursor);
-    if (sep < 0) {
-      sep = content.length();
-    }
-    String token = content.substring(cursor, sep);
-    token.trim();
-    if (token.length()) {
-      tare_[index] = token.toFloat();
-    }
-    ++index;
-    cursor = sep + 1;
-  }
+  parseFloatCsv(content, 0, tare_);
   return true;
 }
 
-bool Calibration::loadLevelFile(const String& path, float level) {
+bool Calibration::loadLevelFile(const String& path, int32_t key) {
   String content;
   if (!storage_ || !storage_->readTextFile(path, content)) {
     return false;
   }
-  LevelData item;
-  item.key = levelKey(level);
-  item.level = level;
-  item.values.assign(totalPointCount(), NAN);
-  size_t index = 0;
-  int cursor = 0;
-  while (cursor <= content.length() && index < item.values.size()) {
-    int sep = content.indexOf(',', cursor);
-    if (sep < 0) {
-      sep = content.length();
-    }
-    String token = content.substring(cursor, sep);
-    token.trim();
-    if (token.length()) {
-      item.values[index] = token.toFloat();
-    }
-    ++index;
-    cursor = sep + 1;
+  const int newline = content.indexOf('\n');
+  if (!content.startsWith("reference=") || newline < 0) {
+    return false;
   }
+  LevelData item;
+  item.key = key;
+  item.reference = content.substring(10, newline).toFloat();
+  item.values.assign(totalPointCount(), NAN);
+  parseFloatCsv(content, newline + 1, item.values);
   levels_.push_back(item);
   std::sort(levels_.begin(), levels_.end(), [](const LevelData& a, const LevelData& b) { return a.key < b.key; });
   return true;
@@ -932,7 +1009,9 @@ String Calibration::levelsSummaryJson(const std::vector<LevelData>& levels, cons
     }
     const size_t captured = capturedCount(item);
     out += "{\"level\":";
-    out += floatLabel(item.level);
+    out += floatLabel(keyLevel(item.key));
+    out += ",\"reference\":";
+    out += floatLabel(item.reference);
     out += ",\"captured_points\":";
     out += String(static_cast<unsigned int>(captured));
     out += ",\"total_points\":";
@@ -949,12 +1028,73 @@ String Calibration::levelsSummaryJson(const std::vector<LevelData>& levels, cons
   return out;
 }
 
+String Calibration::fitSummaryJson(const FitSet& fits) const {
+  const size_t total = totalPointCount();
+  size_t counts[4] = {0, 0, 0, 0};
+  String failed = "[";
+  size_t listed = 0;
+  for (size_t i = 0; i < fits.results.size(); ++i) {
+    const FitResult result = fits.results[i];
+    ++counts[static_cast<size_t>(result)];
+    if (result == FitResult::Fitted || listed >= kMaxListedFitFailures) {
+      continue;
+    }
+    if (listed++) {
+      failed += ",";
+    }
+    failed += "{\"sensor_index\":";
+    failed += String(static_cast<unsigned int>(i));
+    failed += ",\"reason\":\"";
+    failed += fitResultName(result);
+    failed += "\"}";
+  }
+  failed += "]";
+  String out = "{\"cells_total\":";
+  out += String(static_cast<unsigned int>(total));
+  out += ",\"cells_fitted\":";
+  out += String(static_cast<unsigned int>(fits.fitted));
+  out += ",\"complete\":";
+  out += total > 0 && fits.fitted == total ? "true" : "false";
+  out += ",\"failures\":{\"no_tare\":";
+  out += String(static_cast<unsigned int>(counts[static_cast<size_t>(FitResult::NoTare)]));
+  out += ",\"too_few_points\":";
+  out += String(static_cast<unsigned int>(counts[static_cast<size_t>(FitResult::TooFewPoints)]));
+  out += ",\"singular\":";
+  out += String(static_cast<unsigned int>(counts[static_cast<size_t>(FitResult::Singular)]));
+  out += "},\"failed\":";
+  out += failed;
+  out += "}";
+  return out;
+}
+
+String Calibration::fitSettingsJson() const {
+  String out = "{\"min_points\":";
+  out += String(static_cast<unsigned int>(calibration_curve::kMinFitPoints));
+  out += ",\"min_level\":";
+  out += sciFloat(fitSettings_.minLevel);
+  out += ",\"readout\":[";
+  for (size_t adc = 0; adc < 2; ++adc) {
+    if (adc) {
+      out += ",";
+    }
+    out += "{\"adc\":";
+    out += String(static_cast<unsigned int>(adc + 1));
+    out += ",\"c1\":";
+    out += sciFloat(fitSettings_.readout[adc].c1);
+    out += ",\"c2\":";
+    out += sciFloat(fitSettings_.readout[adc].c2);
+    out += ",\"clip_mv\":";
+    out += sciFloat(fitSettings_.clipMv[adc]);
+    out += "}";
+  }
+  out += "]}";
+  return out;
+}
+
 String Calibration::metadataJson() const {
   float maxLevel = 0;
   for (const LevelData& level : levels_) {
-    if (level.level > maxLevel) {
-      maxLevel = level.level;
-    }
+    maxLevel = std::max(maxLevel, keyLevel(level.key));
   }
   String out = "{";
   out += "\"rows\":";
@@ -975,10 +1115,6 @@ String Calibration::metadataJson() const {
   out += floatLabel(maxLevel);
   out += ",\"tare_complete\":";
   out += savedTareComplete_ ? "true" : "false";
-  out += ",\"levels_complete\":";
-  out += savedLevelsComplete_ ? "true" : "false";
-  out += ",\"legacy_missing_tare\":";
-  out += legacyMissingTare_ ? "true" : "false";
   out += "}";
   return out;
 }
@@ -1035,8 +1171,26 @@ int32_t Calibration::levelKey(float level) {
   return static_cast<int32_t>(roundf(level * 1000.0f));
 }
 
+float Calibration::keyLevel(int32_t key) {
+  return static_cast<float>(key) / 1000.0f;
+}
+
 String Calibration::floatLabel(float value) {
   return trimFloat(value);
+}
+
+const char* Calibration::fitResultName(FitResult result) {
+  switch (result) {
+    case FitResult::Fitted:
+      return "fitted";
+    case FitResult::TooFewPoints:
+      return "too_few_points";
+    case FitResult::Singular:
+      return "singular";
+    case FitResult::NoTare:
+    default:
+      return "no_tare";
+  }
 }
 
 }  // namespace nhos

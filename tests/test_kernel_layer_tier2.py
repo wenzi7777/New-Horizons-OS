@@ -706,47 +706,79 @@ class IdleSlotTests(unittest.TestCase):
         self.assertIn('"idle"', impl[impl.index('String out = "NAME'):])
 
 
-class CompactStatusTests(unittest.TestCase):
-    """A Direct-mode status has to fit one ESP-NOW reply (7680 B).
+class FullStatusOnEveryTransportTests(unittest.TestCase):
+    """Direct mode sends the same full status as UDP.
 
-    The full status grew to ~13 KB with v1.1.0's app and scheduler sections,
-    so over ESP-NOW every status came back response_too_large and the Desktop
-    showed "unknown" for everything. Direct mode leaves out only sections no
-    status consumer reads.
+    v1.2.2 trimmed the Direct-mode status to fit one ESP-NOW reply (7680 B).
+    Replies bigger than a frame are now paged (EspNowResultPager), so the
+    trim and its "omitted" list are gone: every transport gets one shape.
     """
 
-    OMITTED = ["battery_gauge", "config", "ota_rollback", "faults", "scheduler",
-               "airtime", "services", "power_governor", "apps", "magnetometer"]
-    # Read from status by the Desktop frontend or backend; must never be dropped.
-    KEPT = ["device_uid", "device_name", "protocol", "mode", "firmware_version",
-            "hardware_model", "matrix_shape", "matrix_layout", "runtime", "wifi",
-            "battery", "power", "logging", "ota", "update_state", "clock", "filter",
-            "stream_raw_adc", "imu", "stream_buffer", "calibration", "indicators",
-            "action_button", "scan_health", "findme"]
+    SECTIONS = ["device_uid", "battery_gauge", "config", "ota_rollback", "faults",
+                "scheduler", "airtime", "services", "power_governor", "apps",
+                "magnetometer", "calibration", "findme"]
 
     def handler(self):
         impl = read("ControlServer.cpp")
         start = impl.index('if (cmd == "status" || cmd == "query")')
         return impl, impl[start:impl.index('return ok(cmd, "status", data);', start)]
 
-    def test_compact_only_in_direct_mode(self):
-        _, body = self.handler()
-        self.assertIn("const bool compact = espNowOta_ != nullptr;", body)
-
-    def test_omitted_sections_are_guarded_and_named(self):
+    def test_no_transport_specific_trim(self):
         impl, body = self.handler()
-        listing = impl[impl.index("kCompactStatusOmitted[] ="):]
-        listing = listing[:listing.index(";")]
-        for key in self.OMITTED:
-            self.assertIn(f'if (!compact) jsonRawField(data, "{key}"', body)
-            self.assertIn(f'\\"{key}\\"', listing)
-        self.assertIn('jsonRawField(data, "omitted", kCompactStatusOmitted, first);', body)
+        self.assertNotIn("compact", body)
+        self.assertNotIn("kCompactStatusOmitted", impl)
+        self.assertNotIn('"omitted"', body)
 
-    def test_fields_the_desktop_reads_are_always_sent(self):
+    def test_every_section_is_sent_unconditionally(self):
         _, body = self.handler()
-        for key in self.KEPT:
+        for key in self.SECTIONS:
             line = next(l for l in body.splitlines() if f'(data, "{key}"' in l)
-            self.assertNotIn("compact", line, key)
+            self.assertTrue(line.strip().startswith("json"), key)
+
+
+class EspNowPagedReplyTests(unittest.TestCase):
+    """A reply bigger than one ESP-NOW frame is paged, not refused."""
+
+    def pairing(self):
+        impl = read("EspNowPairing.cpp")
+        return impl[impl.index("void EspNowPairing::serviceCommand()"):]
+
+    def test_small_replies_go_out_as_one_frame(self):
+        body = self.pairing()
+        self.assertIn("if (response.length() <= kEspNowMaxFrameBytes) {", body)
+
+    def test_big_replies_are_cached_and_paged(self):
+        body = self.pairing()
+        self.assertIn("EspNowResultPager::paginate(", body)
+        self.assertIn("sendPage(0);", body)
+
+    def test_page_requests_are_answered_from_the_cache(self):
+        body = self.pairing()
+        intercept = body.index('== "result_page"')
+        self.assertLess(intercept, body.index("control_->serviceEspNowCommand("))
+        self.assertIn("rid != static_cast<long>(pagedResponseId_)", body)
+        self.assertIn("result_page_expired", body)
+
+    def test_any_other_command_releases_the_cache(self):
+        body = self.pairing()
+        self.assertLess(body.index("releasePagedResponse();\n\n  // Cleared after processCommand()"),
+                        body.index("control_->serviceEspNowCommand("))
+
+
+class RequestLengthClampTests(unittest.TestCase):
+    """Caller-chosen sizes are clamped before anything is allocated."""
+
+    def test_file_read_chunk_length_is_clamped(self):
+        impl = read("ControlServer.cpp")
+        body = impl[impl.index('if (cmd == "file_read_chunk")'):impl.index('if (cmd == "file_write_begin")')]
+        self.assertIn("kMaxFileReadChunkBytes", body)
+        self.assertIn("length < 1 ? 1", body)
+        self.assertIn("offset > 0 ? offset : 0", body)
+
+    def test_log_tail_rejects_non_positive_counts(self):
+        impl = read("ControlServer.cpp")
+        body = impl[impl.index('if (cmd == "log_tail")'):impl.index('if (cmd == "dmesg")')]
+        self.assertIn("maxLines > 0 ? static_cast<size_t>(maxLines) : 50", body)
 
 
 class ImuReadPathTests(unittest.TestCase):

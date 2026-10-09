@@ -13,10 +13,8 @@
 namespace nhos {
 
 namespace {
-// Sections a Direct-mode status leaves out; see the "status" handler.
-constexpr char kCompactStatusOmitted[] =
-    "[\"battery_gauge\",\"config\",\"ota_rollback\",\"faults\",\"scheduler\",\"airtime\","
-    "\"services\",\"power_governor\",\"apps\",\"magnetometer\"]";
+// Largest file_read_chunk length served; see that handler.
+constexpr int kMaxFileReadChunkBytes = 32768;
 
 // Whether a command gets the received + success/failed flashes (~660ms).
 // A caller marks what it sends on its own -- a poll, an automatic refresh --
@@ -220,10 +218,10 @@ String ControlServer::serviceEspNowCommand(const uint8_t* data, size_t len) {
   // processCommand() core. Unlike the UDP path, this takes the command
   // object directly (no outer {"type":"command","seq":...,"payload":{...}}
   // wrapper, no immediate ack-before-execute, no response chunking) --
-  // EspNowFrame's fragmentation already handles arbitrarily-sized
-  // payloads at the transport layer, and the ack/retry semantics for
-  // Hub-initiated commands belong to the Hub-side dispatcher (Phase 4),
-  // not this device-side handler.
+  // EspNowPairing fragments the reply and, when it is bigger than one
+  // frame, pages it (EspNowResultPager.h), and the ack/retry semantics for
+  // Hub-initiated commands belong to the Hub-side dispatcher, not this
+  // device-side handler.
   if (!started_ || data == nullptr || len == 0) {
     return error("", "invalid_request");
   }
@@ -376,13 +374,10 @@ String ControlServer::processCommand(const String& request) {
     jsonStringField(runtime, "mode", boot_->modeName(), runtimeFirst);
     runtime += "}";
 
-    // Over ESP-NOW a reply is capped at kEspNowMaxFragCount fragments
-    // (7680 B), and the full status is ~13 KB since v1.1.0 added the app and
-    // scheduler sections. Direct mode therefore leaves out the sections no
-    // status consumer reads -- the big three each have their own command
-    // (app_list, task_list, service_list) -- and names them in "omitted", so
-    // a reader can tell "not sent" from "empty". The UDP reply is unchanged.
-    const bool compact = espNowOta_ != nullptr;
+    // The same full status goes out on every transport. Over ESP-NOW it is
+    // bigger than one control frame (~13 KB against 7680 B), so it travels
+    // as a paged reply (EspNowResultPager.h), just as UDP splits it into
+    // result_chunk datagrams.
     String data = "{";
     data.reserve(1536);
     bool first = true;
@@ -397,9 +392,9 @@ String ControlServer::processCommand(const String& request) {
     jsonRawField(data, "runtime", runtime, first);
     jsonRawField(data, "wifi", wifi_->statusJson(), first);
     jsonRawField(data, "battery", batteryStatusJson(), first);
-    if (!compact) jsonRawField(data, "battery_gauge", batteryGauge_ ? batteryGauge_->statusJson() : "{}", first);
+    jsonRawField(data, "battery_gauge", batteryGauge_ ? batteryGauge_->statusJson() : "{}", first);
     jsonRawField(data, "power", powerState_ ? powerState_->statusJson() : "{}", first);
-    if (!compact) jsonRawField(data, "config", deviceConfig_ ? deviceConfig_->statusJson() : "{}", first);
+    jsonRawField(data, "config", deviceConfig_ ? deviceConfig_->statusJson() : "{}", first);
     jsonRawField(data, "logging", storage_ ? storage_->logStatusJson() : "{}", first);
     jsonRawField(data, "ota", deviceConfig_ ? deviceConfig_->otaJson() : "{}", first);
     // In Direct mode the HTTP OtaManager is never used (no WiFi), so its
@@ -409,27 +404,24 @@ String ControlServer::processCommand(const String& request) {
                  espNowOta_ != nullptr ? espNowOta_->statusJson()
                                         : (ota_ ? ota_->lastStatusJson() : String("{}")),
                  first);
-    if (!compact) jsonRawField(data, "ota_rollback", boot_ ? boot_->otaRollbackStatusJson() : "{}", first);
-    if (!compact) jsonRawField(data, "faults", faults_ ? faults_->statusJson() : "{}", first);
-    if (!compact) jsonRawField(data, "scheduler", scheduler_ ? scheduler_->statusJson() : "{}", first);
-    if (!compact) jsonRawField(data, "airtime", arbiter_ ? arbiter_->statusJson() : "{}", first);
-    if (!compact) jsonRawField(data, "services", services_ ? services_->statusJson() : "{}", first);
+    jsonRawField(data, "ota_rollback", boot_ ? boot_->otaRollbackStatusJson() : "{}", first);
+    jsonRawField(data, "faults", faults_ ? faults_->statusJson() : "{}", first);
+    jsonRawField(data, "scheduler", scheduler_ ? scheduler_->statusJson() : "{}", first);
+    jsonRawField(data, "airtime", arbiter_ ? arbiter_->statusJson() : "{}", first);
+    jsonRawField(data, "services", services_ ? services_->statusJson() : "{}", first);
     jsonRawField(data, "clock", clock_ ? clock_->statusJson() : "{}", first);
-    if (!compact) jsonRawField(data, "power_governor", governor_ ? governor_->statusJson() : "{}", first);
-    if (!compact) jsonRawField(data, "apps", apps_ ? apps_->statusJson() : "{}", first);
+    jsonRawField(data, "power_governor", governor_ ? governor_->statusJson() : "{}", first);
+    jsonRawField(data, "apps", apps_ ? apps_->statusJson() : "{}", first);
     jsonRawField(data, "filter", deviceConfig_ ? deviceConfig_->filterJson() : "{}", first);
     jsonBoolField(data, "stream_raw_adc", deviceConfig_ ? deviceConfig_->data().streamRawAdc : false, first);
     jsonRawField(data, "imu", imu_ ? imu_->statusJson() : "{}", first);
-    if (!compact) jsonRawField(data, "magnetometer", magnetometer_ ? magnetometer_->statusJson() : "{}", first);
+    jsonRawField(data, "magnetometer", magnetometer_ ? magnetometer_->statusJson() : "{}", first);
     jsonRawField(data, "stream_buffer", streamBuffer, first);
     jsonRawField(data, "calibration", calibration_ ? calibration_->statusJson(maintenanceMode()) : "{}", first);
     jsonRawField(data, "indicators", indicatorsStatusJson(), first);
     jsonRawField(data, "action_button", actionButtonStatusJson(), first);
     jsonRawField(data, "scan_health", scanner_->healthJson(), first);
     jsonRawField(data, "findme", findme_ ? findme_->statusJson() : "{}", first);
-    if (compact) {
-      jsonRawField(data, "omitted", kCompactStatusOmitted, first);
-    }
     data += "}";
     return ok(cmd, "status", data);
   }
@@ -1472,6 +1464,43 @@ String ControlServer::processCommand(const String& request) {
     }
     return ok(cmd, "calibration_level_dump", levelJson);
   }
+  if (cmd == "calibration_dump_fit") {
+    if (!calibration_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    return ok(cmd, "calibration_fit_dump", calibration_->dumpFitJson());
+  }
+  if (cmd == "calibration_set_fit") {
+    // Board-level fit inputs (see Calibration::FitSettings); any argument
+    // left out keeps its current value. Refits the saved profile.
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    if (!calibration_) {
+      return error(cmd, "calibration_unavailable");
+    }
+    Calibration::FitSettings settings = calibration_->fitSettings();
+    settings.minLevel = extractFloat(request, "min_level", settings.minLevel);
+    settings.readout[0].c1 = extractFloat(request, "adc1_c1", settings.readout[0].c1);
+    settings.readout[0].c2 = extractFloat(request, "adc1_c2", settings.readout[0].c2);
+    settings.readout[1].c1 = extractFloat(request, "adc2_c1", settings.readout[1].c1);
+    settings.readout[1].c2 = extractFloat(request, "adc2_c2", settings.readout[1].c2);
+    settings.clipMv[0] = extractFloat(request, "adc1_clip_mv", settings.clipMv[0]);
+    settings.clipMv[1] = extractFloat(request, "adc2_clip_mv", settings.clipMv[1]);
+    if (!calibration_->setFitSettings(settings)) {
+      return error(cmd, "calibration_fit_settings_invalid");
+    }
+    return ok(cmd, "calibration_fit_set", calibration_->statusJson(maintenanceMode()));
+  }
+  if (cmd == "calibration_set_reference") {
+    if (!maintenanceMode()) {
+      return error(cmd, "maintenance_required");
+    }
+    if (!calibration_ || !calibration_->setReference(extractFloat(request, "level", 0), extractFloat(request, "reference", NAN))) {
+      return error(cmd, "calibration_level_not_found");
+    }
+    return ok(cmd, "calibration_reference_set", calibration_->statusJson(maintenanceMode()));
+  }
   if (cmd == "calibration_delete_level") {
     if (!maintenanceMode()) {
       return error(cmd, "maintenance_required");
@@ -1491,7 +1520,7 @@ String ControlServer::processCommand(const String& request) {
     const ScanHealth health = scanner_->health();
     std::vector<float> values(health.pointCount, 0);
     const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 3000));
-    if (!scanner_->captureAllAverages(values.data(), values.size(), durationMs) || !calibration_->captureTare(values.data(), values.size())) {
+    if (!scanner_->captureAllBlockMedians(values.data(), values.size(), durationMs) || !calibration_->captureTare(values.data(), values.size())) {
       return error(cmd, "calibration_capture_failed");
     }
     String tareJson;
@@ -1514,7 +1543,7 @@ String ControlServer::processCommand(const String& request) {
     const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 1000));
     const bool pauseScan = !maintenanceMode() && scanner_->active();
     if (pauseScan) scanner_->stop();
-    const bool captured = scanner_->captureAllAverages(values.data(), values.size(), durationMs);
+    const bool captured = scanner_->captureAllBlockMedians(values.data(), values.size(), durationMs);
     if (pauseScan) scanner_->start();
     if (!captured || !calibration_->applyTareDirect(values.data(), values.size())) {
       return error(cmd, "calibration_tare_capture_failed");
@@ -1542,13 +1571,17 @@ String ControlServer::processCommand(const String& request) {
     }
     const uint16_t sensorIndex = static_cast<uint16_t>(extractInt(request, "sensor_index", -1));
     const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 3000));
+    // `level` names the level (nominal); `reference` is the pressure actually
+    // applied, which the fit uses -- the same unless the caller measured it.
     const float level = extractFloat(request, "level", 0);
+    const float reference = extractFloat(request, "reference", level);
     // Levels are stored relative to the draft baseline, so it comes first.
     if (calibration_->sessionActive() && !calibration_->draftTareCaptured(sensorIndex)) {
       return error(cmd, "calibration_tare_required");
     }
     float value = 0;
-    if (!scanner_->captureCellAverage(sensorIndex, durationMs, value) || !calibration_->captureCell(sensorIndex, level, value)) {
+    if (!scanner_->captureCellBlockMedian(sensorIndex, durationMs, value) ||
+        !calibration_->captureCell(sensorIndex, level, reference, value)) {
       return error(cmd, "calibration_capture_failed");
     }
     String levelJson;
@@ -1566,10 +1599,12 @@ String ControlServer::processCommand(const String& request) {
     std::vector<float> values(health.pointCount, 0);
     const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 3000));
     const float level = extractFloat(request, "level", 0);
+    const float reference = extractFloat(request, "reference", level);
     if (calibration_->sessionActive() && !calibration_->draftTareCaptured()) {
       return error(cmd, "calibration_tare_required");
     }
-    if (!scanner_->captureAllAverages(values.data(), values.size(), durationMs) || !calibration_->captureAll(level, values.data(), values.size())) {
+    if (!scanner_->captureAllBlockMedians(values.data(), values.size(), durationMs) ||
+        !calibration_->captureAll(level, reference, values.data(), values.size())) {
       return error(cmd, "calibration_capture_failed");
     }
     String levelJson;
@@ -1594,12 +1629,17 @@ String ControlServer::processCommand(const String& request) {
     if (scope.isEmpty()) {
       scope = "user";
     }
+    // The read buffer is allocated before anything checks the file size,
+    // so the length is clamped first: a negative one would wrap to a huge
+    // size_t. 32 KB is the most any caller asks for in one go.
+    const int length = extractInt(request, "length", 1024);
+    const int offset = extractInt(request, "offset", 0);
     return fileChunkJson(
         cmd,
         scope,
         extractString(request, "path"),
-        static_cast<size_t>(extractInt(request, "offset", 0)),
-        static_cast<size_t>(extractInt(request, "length", 1024)));
+        static_cast<size_t>(offset > 0 ? offset : 0),
+        static_cast<size_t>(length < 1 ? 1 : (length > kMaxFileReadChunkBytes ? kMaxFileReadChunkBytes : length)));
   }
   if (cmd == "file_write_begin") {
     if (!requireMaintenance(cmd)) {
@@ -1732,7 +1772,10 @@ String ControlServer::processCommand(const String& request) {
     return ok(cmd, "file_deleted", data);
   }
   if (cmd == "log_tail") {
-    return ok(cmd, "log_tail", storage_->tailLog(extractInt(request, "max_lines", 50)));
+    // A zero or negative count would wrap to a huge size_t and mean "the
+    // whole log".
+    const int maxLines = extractInt(request, "max_lines", 50);
+    return ok(cmd, "log_tail", storage_->tailLog(maxLines > 0 ? static_cast<size_t>(maxLines) : 50));
   }
   if (cmd == "dmesg") {
     // Serves the RAM ring, not the flash log: no SPIFFS reads, and it still

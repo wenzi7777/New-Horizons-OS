@@ -14,6 +14,13 @@ CXX="${CXX:-c++}"
   "$FIRMWARE_DIR/EspNowFrame.cpp" \
   -o "$BUILD_DIR/test_esp_now_frame"
 
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  "$SCRIPT_DIR/test_esp_now_result_pager.cpp" \
+  "$FIRMWARE_DIR/EspNowResultPager.cpp" \
+  -o "$BUILD_DIR/test_esp_now_result_pager"
+
+"$BUILD_DIR/test_esp_now_result_pager"
+
 "$BUILD_DIR/test_esp_now_frame"
 
 "$CXX" -std=c++17 -Wall -Wextra -Werror \

@@ -25,9 +25,12 @@
 
 #include <Arduino.h>
 
+#include <memory>
+
 #include "Config.h"
 #include "DeviceConfig.h"
 #include "EspNowFrame.h"
+#include "EspNowResultPager.h"
 #include "Storage.h"
 
 namespace nhos {
@@ -148,6 +151,13 @@ class EspNowPairing {
   void onPaired();
   void handleFragmentedPacket(const uint8_t* data, size_t len);
   void serviceCommand();
+  // Fragments one reply frame (<= kEspNowMaxFrameBytes) for the paced
+  // drain in serviceCommand().
+  void startResponse(const uint8_t* data, size_t len);
+  // Sends page `index` of the cached paged reply; see EspNowResultPager.h.
+  void sendPage(size_t index);
+  void handlePageRequest(const String& request);
+  void releasePagedResponse();
   bool parseHubMacFromConfig();
   void serviceDiscovery();
   void sendDiscoveryHello();
@@ -239,20 +249,19 @@ class EspNowPairing {
   // the stack canary (which is why it looked like a different, unrelated
   // crash at first). Static storage removes that stack cost entirely.
   //
-  // Sending is paced across service() calls (same reason
-  // EspNowStreamTransport.cpp paces its own fragment bursts): found on
-  // real hardware that firing all of a multi-fragment response's
-  // esp_now_send() calls back-to-back in one go gets most of them
-  // silently dropped (ESP_ERR_ESPNOW_NO_MEM) for anything bigger than a
-  // couple of fragments, e.g. the ~11-fragment "status" response -- the
-  // Hub never saw a single fragment from it. A single-fragment response
-  // (e.g. "reboot"'s tiny ack) happens to send within one service() call
-  // regardless, which is why this wasn't caught until "status" was tested.
+  // Sending is paced across service() calls: found on real hardware that
+  // firing all of a multi-fragment response's esp_now_send() calls
+  // back-to-back in one go gets most of them silently dropped
+  // (ESP_ERR_ESPNOW_NO_MEM) for anything bigger than a couple of
+  // fragments, e.g. the ~11-fragment "status" response -- the Hub never
+  // saw a single fragment from it. The stop-and-wait below is that pacing:
+  // the next fragment goes out only once the previous one's send callback
+  // has come back, so the driver never holds more than one of them. (It
+  // used to also wait out a fixed 15 ms window per frame on top, which a
+  // paged reply then paid on every page.)
   EspNowFragment responseFrags_[kEspNowMaxFragCount];
   uint8_t responseFragCount_ = 0;
   uint8_t responseFragsSent_ = 0;
-  uint32_t responseFragIntervalUs_ = 0;
-  uint32_t responseNextFragDueUs_ = 0;
 
   // Stop-and-wait retransmit state for the response drain above.
   //
@@ -271,6 +280,18 @@ class EspNowPairing {
   volatile bool responseSendCbFailed_ = false;
   uint8_t responseFragRetries_ = 0;
   uint32_t responseSendStartedUs_ = 0;
+
+  // A reply too big for one frame, kept until the Hub has pulled every
+  // page (see EspNowResultPager.h). Held through a pointer so releasing it
+  // really frees the heap: assigning an empty Arduino String keeps the old
+  // buffer. Dropped when the next command arrives or after
+  // kEspNowPagedResponseIdleMs without a page request.
+  std::unique_ptr<String> pagedResponse_;
+  uint32_t pageStarts_[kEspNowResultMaxPages] = {0};
+  size_t pageCount_ = 0;
+  uint16_t pagedResponseId_ = 0;
+  uint32_t pagedTouchedMs_ = 0;
+  uint32_t pagedStartedMs_ = 0;
 };
 
 }  // namespace nhos

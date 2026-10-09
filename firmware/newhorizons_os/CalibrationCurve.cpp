@@ -35,98 +35,139 @@ float applyTare(float raw, float tare) {
   return std::max(0.0f, raw - tare);
 }
 
-void buildCurve(const float* levels, const float* relativeRaws, size_t count, Curve& out) {
-  out.raws.clear();
-  out.levels.clear();
-  out.tangents.clear();
-
-  struct SamplePoint {
-    float raw;
-    float level;
-  };
-  std::vector<SamplePoint> points;
-  points.reserve(count + 1);
-  points.push_back({0.0f, 0.0f});
-  for (size_t i = 0; i < count; ++i) {
-    const float raw = relativeRaws[i];
-    if (std::isnan(raw) || raw <= 0.0001f) {
-      continue;
-    }
-    points.push_back({raw, levels[i]});
+float readoutX(float relativeMv, const Readout& readout) {
+  if (std::isnan(relativeMv)) {
+    return NAN;
   }
-
-  std::sort(points.begin(), points.end(), [](const SamplePoint& a, const SamplePoint& b) {
-    if (a.raw == b.raw) {
-      return a.level < b.level;
-    }
-    return a.raw < b.raw;
-  });
-
-  out.raws.reserve(points.size());
-  out.levels.reserve(points.size());
-  out.tangents.assign(points.size(), 0.0f);
-  for (const SamplePoint& point : points) {
-    out.raws.push_back(point.raw);
-    out.levels.push_back(point.level);
+  if (relativeMv <= 0.0f) {
+    return 0.0f;
   }
-  if (points.size() <= 1) {
-    return;
+  const float disc = std::max(0.0f, readout.c1 * readout.c1 + 4.0f * readout.c2 * relativeMv);
+  const float denominator = readout.c1 + std::sqrt(disc);
+  if (denominator <= 0.0f) {
+    return NAN;
   }
-
-  std::vector<float> slopes(points.size() - 1, 0.0f);
-  for (size_t i = 0; i < points.size() - 1; ++i) {
-    const float dx = points[i + 1].raw - points[i].raw;
-    slopes[i] = (dx < 0.0001f) ? 0.0f : (points[i + 1].level - points[i].level) / dx;
+  if (disc == 0.0f && readout.c2 < 0.0f) {
+    return -readout.c1 / (2.0f * readout.c2);  // the turning point, exactly
   }
-  out.tangents[0] = slopes[0];
-  out.tangents[points.size() - 1] = slopes[points.size() - 2];
-  for (size_t i = 1; i < points.size() - 1; ++i) {
-    if (slopes[i - 1] * slopes[i] <= 0.0f) {
-      out.tangents[i] = 0.0f;
-    } else {
-      out.tangents[i] = 2.0f / (1.0f / slopes[i - 1] + 1.0f / slopes[i]);
-    }
-  }
+  return 2.0f * relativeMv / denominator;
 }
 
-bool evaluateCurve(const Curve& curve, float relativeRaw, float& out) {
-  if (curve.raws.empty() || curve.levels.empty() || curve.tangents.empty()) {
+bool fitValid(const FitModel& model) {
+  return !std::isnan(model.a) && !std::isnan(model.b) && !std::isnan(model.c);
+}
+
+bool fitModel(const float* xs, const float* pressures, size_t count, FitModel& out) {
+  out = FitModel();
+  if (!xs || !pressures || count < kMinFitPoints) {
     return false;
   }
-  if (curve.raws.size() == 1 || relativeRaw <= curve.raws.front()) {
-    out = curve.levels.front();
-    return true;
+  // Normal equations for the basis (1, u, u^2), u = sqrt(x), in double: the
+  // sums reach ~1e7 for a 1000 uS sensor, far past float's 7 digits.
+  double m[3][4] = {{0}};
+  size_t distinct = 0;
+  double firstU = NAN;
+  double secondU = NAN;
+  for (size_t i = 0; i < count; ++i) {
+    const double x = xs[i];
+    const double p = pressures[i];
+    if (std::isnan(x) || std::isnan(p) || x <= 0.0) {
+      continue;
+    }
+    const double u = std::sqrt(x);
+    const double basis[3] = {1.0, u, u * u};
+    for (int r = 0; r < 3; ++r) {
+      for (int c = 0; c < 3; ++c) {
+        m[r][c] += basis[r] * basis[c];
+      }
+      m[r][3] += basis[r] * p;
+    }
+    if (distinct == 0) {
+      firstU = u;
+      distinct = 1;
+    } else if (distinct == 1 && u != firstU) {
+      secondU = u;
+      distinct = 2;
+    } else if (distinct == 2 && u != firstU && u != secondU) {
+      distinct = 3;
+    }
   }
-  if (relativeRaw >= curve.raws.back()) {
-    out = curve.levels.back();
-    return true;
+  if (distinct < kMinFitPoints) {
+    return false;
   }
-  const auto upper = std::lower_bound(curve.raws.begin() + 1, curve.raws.end(), relativeRaw);
-  const size_t i = static_cast<size_t>(upper - curve.raws.begin());
-  const float h = curve.raws[i] - curve.raws[i - 1];
-  if (h < 0.0001f) {
-    out = std::min(curve.levels[i - 1], curve.levels[i]);
-    return true;
+
+  double scale = 0.0;
+  for (int r = 0; r < 3; ++r) {
+    for (int c = 0; c < 3; ++c) {
+      scale = std::max(scale, std::fabs(m[r][c]));
+    }
   }
-  const float t = (relativeRaw - curve.raws[i - 1]) / h;
-  const float t2 = t * t;
-  const float t3 = t2 * t;
-  float value = (2.0f * t3 - 3.0f * t2 + 1.0f) * curve.levels[i - 1]
-              + (t3 - 2.0f * t2 + t) * h * curve.tangents[i - 1]
-              + (-2.0f * t3 + 3.0f * t2) * curve.levels[i]
-              + (t3 - t2) * h * curve.tangents[i];
-  out = value < 0.0f ? 0.0f : value;
+  // Gaussian elimination with partial pivoting.
+  for (int col = 0; col < 3; ++col) {
+    int pivot = col;
+    for (int r = col + 1; r < 3; ++r) {
+      if (std::fabs(m[r][col]) > std::fabs(m[pivot][col])) {
+        pivot = r;
+      }
+    }
+    if (std::fabs(m[pivot][col]) <= scale * 1e-14) {
+      return false;
+    }
+    if (pivot != col) {
+      for (int c = 0; c < 4; ++c) {
+        std::swap(m[col][c], m[pivot][c]);
+      }
+    }
+    for (int r = col + 1; r < 3; ++r) {
+      const double factor = m[r][col] / m[col][col];
+      for (int c = col; c < 4; ++c) {
+        m[r][c] -= factor * m[col][c];
+      }
+    }
+  }
+  double coefficient[3] = {0};
+  for (int r = 2; r >= 0; --r) {
+    double sum = m[r][3];
+    for (int c = r + 1; c < 3; ++c) {
+      sum -= m[r][c] * coefficient[c];
+    }
+    coefficient[r] = sum / m[r][r];
+  }
+  if (std::isnan(coefficient[0]) || std::isnan(coefficient[1]) || std::isnan(coefficient[2]) ||
+      std::isinf(coefficient[0]) || std::isinf(coefficient[1]) || std::isinf(coefficient[2])) {
+    return false;
+  }
+  out.a = static_cast<float>(coefficient[0]);
+  out.b = static_cast<float>(coefficient[1]);
+  out.c = static_cast<float>(coefficient[2]);
   return true;
 }
 
-void toRelative(std::vector<float>& levelValues, const std::vector<float>& tare) {
-  for (size_t i = 0; i < levelValues.size(); ++i) {
-    if (std::isnan(levelValues[i])) {
-      continue;
-    }
-    const float tareValue = i < tare.size() ? tare[i] : NAN;
-    levelValues[i] = std::isnan(tareValue) ? NAN : levelValues[i] - tareValue;
+float evaluateModel(const FitModel& model, float x) {
+  if (!fitValid(model) || std::isnan(x) || x <= 0.0f) {
+    return 0.0f;
   }
+  const float value = model.a + model.b * std::sqrt(x) + model.c * x;
+  return value > 0.0f ? value : 0.0f;
+}
+
+uint32_t captureBlockCount(uint32_t durationMs) {
+  const uint32_t blocks = (durationMs + kCaptureBlockMs - 1) / kCaptureBlockMs;
+  return std::min(kMaxCaptureBlocks, std::max<uint32_t>(1, blocks));
+}
+
+float medianInPlace(float* values, size_t count) {
+  if (!values || count == 0) {
+    return NAN;
+  }
+  const size_t mid = count / 2;
+  std::nth_element(values, values + mid, values + count);
+  const float upper = values[mid];
+  if (count % 2) {
+    return upper;
+  }
+  const float lower = *std::max_element(values, values + mid);
+  return (lower + upper) / 2.0f;
 }
 
 }  // namespace calibration_curve

@@ -4,10 +4,12 @@
 
 #include <cstring>
 #include <esp_now.h>
+#include <new>
 #include <esp_wifi.h>
 
 #include "ControlServer.h"
 #include "EspNowOtaReceiver.h"
+#include "JsonUtils.h"
 
 namespace nhos {
 
@@ -19,10 +21,22 @@ namespace {
 // EspNowPairing.h's otaReassembler_/hubRequestReassembler_ comment).
 constexpr size_t kEspNowFragTypeOffset = 2;
 
-// Mirrors EspNowStreamTransport.cpp's kSendWindowUs -- same reasoning
-// (spread a multi-fragment burst out so esp_now_send()'s internal queue
-// isn't overwhelmed, see EspNowPairing.h's responseFrags_ comment).
-constexpr uint32_t kEspNowResponseSendWindowUs = 15000;
+// A paged reply nobody asks for again within this long is dropped. The Hub
+// re-asks a lost page every 500 ms, so a live transfer never goes quiet
+// this long.
+constexpr uint32_t kEspNowPagedResponseIdleMs = 10000;
+
+// The Hub's page request is {"command":"result_page","rid":R,"chunk":I}.
+constexpr char kPageRequestToken[] = "\"result_page\"";
+
+bool bufferContains(const uint8_t* data, size_t len, const char* token) {
+  const size_t tokenLen = strlen(token);
+  if (tokenLen == 0 || len < tokenLen) return false;
+  for (size_t i = 0; i + tokenLen <= len; ++i) {
+    if (memcmp(data + i, token, tokenLen) == 0) return true;
+  }
+  return false;
+}
 
 // Stop-and-wait retransmit budget for response fragments (see
 // EspNowPairing.h's responseSendAwaitingCb_ comment). Real-hardware
@@ -418,23 +432,41 @@ void EspNowPairing::serviceCommand() {
                     static_cast<unsigned>(responseFragRetries_));
     }
 
-    if (static_cast<int32_t>(nowUs - responseNextFragDueUs_) >= 0) {
-      responseSendAwaitingCb_ = true;
-      responseSendStartedUs_ = nowUs;
-      if (arbiter_->send(AirtimeClass::CommandResponse, hubMac_,
-                         responseFrags_[responseFragsSent_].bytes,
-                        responseFrags_[responseFragsSent_].len) != ESP_OK) {
-        // Rejected outright (e.g. ESP_ERR_ESPNOW_NO_MEM) -- no callback
-        // will ever arrive for this one, so fail it immediately.
-        responseSendAwaitingCb_ = false;
-        responseSendCbFailed_ = true;
-      }
-      responseNextFragDueUs_ = nowUs + responseFragIntervalUs_;
+    responseSendAwaitingCb_ = true;
+    responseSendStartedUs_ = nowUs;
+    if (arbiter_->send(AirtimeClass::CommandResponse, hubMac_,
+                       responseFrags_[responseFragsSent_].bytes,
+                       responseFrags_[responseFragsSent_].len) != ESP_OK) {
+      // Rejected outright (e.g. ESP_ERR_ESPNOW_NO_MEM) -- no callback
+      // will ever arrive for this one, so fail it immediately.
+      responseSendAwaitingCb_ = false;
+      responseSendCbFailed_ = true;
     }
     return;  // don't start processing a new command while still draining this response
   }
 
+  if (pageCount_ > 0 && millis() - pagedTouchedMs_ >= kEspNowPagedResponseIdleMs) {
+    Serial.printf("[espnow_pairing] paged_response_expired rid=%u\n",
+                  static_cast<unsigned>(pagedResponseId_));
+    releasePagedResponse();
+  }
+
   if (!commandPending_ || control_ == nullptr) return;
+
+  // A page request never reaches ControlServer: it is answered from the
+  // cached reply, so the command that built it is not run again.
+  // The token scan keeps ordinary (possibly 7 KB) commands from being
+  // copied just to read their name.
+  if (bufferContains(pendingCommandBuffer_, pendingCommandLen_, kPageRequestToken)) {
+    const String request(reinterpret_cast<const char*>(pendingCommandBuffer_), pendingCommandLen_);
+    if (jsonExtractString(request, "command", "") == "result_page") {
+      commandPending_ = false;
+      handlePageRequest(request);
+      return;
+    }
+  }
+  // Any other command means the Hub is done with the previous paged reply.
+  releasePagedResponse();
 
   // Cleared after processCommand() returns, not before -- keeps
   // hasPendingCommandWork() true for the entire received-but-not-yet-
@@ -442,7 +474,7 @@ void EspNowPairing::serviceCommand() {
   // streamingGateOk() can hold off sensor streaming while it runs. Safe:
   // serviceEspNowCommand() copies out of pendingCommandBuffer_ at its own
   // top, and this is only ever called synchronously from loop().
-  const String response = control_->serviceEspNowCommand(pendingCommandBuffer_, pendingCommandLen_);
+  String response = control_->serviceEspNowCommand(pendingCommandBuffer_, pendingCommandLen_);
   commandPending_ = false;
   if (response.isEmpty()) {
     // Nothing to send back -- the Hub will sit on this command until its
@@ -453,43 +485,120 @@ void EspNowPairing::serviceCommand() {
     return;
   }
 
-  // Fragment the response back to the Hub; actual sending is paced out
-  // across subsequent service() calls above. frameId=0 is fine here since
-  // commands are processed synchronously and one-at-a-time -- there's
-  // never a second response in flight to disambiguate against.
-  responseFragCount_ = EspNowFragmenter::fragment(
-      reinterpret_cast<const uint8_t*>(response.c_str()), response.length(), 0,
-      kEspNowFragTypeControl, responseFrags_, kEspNowMaxFragCount);
+  if (response.length() <= kEspNowMaxFrameBytes) {
+    startResponse(reinterpret_cast<const uint8_t*>(response.c_str()), response.length());
+    return;
+  }
 
-  if (responseFragCount_ == 0) {
-    // The response doesn't fit the wire format (> kEspNowMaxFragCount *
-    // kEspNowFragMaxPayload). This used to fall straight through with
-    // responseFragCount_ = 0, sending *nothing at all* and silently: the
-    // device logged `control_command_finished ok=true` while the Hub never
-    // saw a fragment, so it looked exactly like an RF/transport failure and
-    // sent debugging down the wrong path for a long time. Substitute a
-    // compact error that always fits, so the caller gets a real, named
-    // failure instead of an unexplained command_delivery_timeout.
-    Serial.printf("[espnow_pairing] response_too_large bytes=%u max=%u\n",
-                  static_cast<unsigned>(response.length()),
-                  static_cast<unsigned>(kEspNowMaxFragCount * kEspNowFragMaxPayload));
+  // Too big for one frame: cache it and send page 0 as this command's
+  // reply; the Hub pulls the rest with result_page (EspNowResultPager.h).
+  const size_t bytes = response.length();
+  pagedResponse_.reset(new (std::nothrow) String(std::move(response)));
+  pageCount_ = pagedResponse_
+                   ? EspNowResultPager::paginate(pagedResponse_->c_str(), pagedResponse_->length(),
+                                                 kEspNowResultPageDataBudget, pageStarts_,
+                                                 kEspNowResultMaxPages)
+                   : 0;
+  if (pageCount_ == 0) {
+    // Only past kEspNowResultMaxPages (or out of heap): substitute a
+    // compact error that always fits, so the caller gets a named failure
+    // instead of an unexplained command_delivery_timeout.
+    releasePagedResponse();
+    Serial.printf("[espnow_pairing] response_too_large bytes=%u\n", static_cast<unsigned>(bytes));
     String fallback = "{\"ok\":false,\"error\":\"response_too_large\",";
     fallback += "\"message\":\"response_too_large\",\"data\":{\"response_bytes\":";
-    fallback += response.length();
-    fallback += ",\"max_bytes\":";
-    fallback += static_cast<unsigned>(kEspNowMaxFragCount * kEspNowFragMaxPayload);
+    fallback += static_cast<unsigned>(bytes);
+    fallback += ",\"max_pages\":";
+    fallback += static_cast<unsigned>(kEspNowResultMaxPages);
     fallback += "}}";
+    startResponse(reinterpret_cast<const uint8_t*>(fallback.c_str()), fallback.length());
+    return;
+  }
+  ++pagedResponseId_;
+  pagedStartedMs_ = millis();
+  Serial.printf("[espnow_pairing] paged_response rid=%u bytes=%u pages=%u\n",
+                static_cast<unsigned>(pagedResponseId_), static_cast<unsigned>(bytes),
+                static_cast<unsigned>(pageCount_));
+  sendPage(0);
+}
+
+void EspNowPairing::handlePageRequest(const String& request) {
+  long rid = -1;
+  long chunk = -1;
+  jsonExtractInt(request, "rid", rid);
+  jsonExtractInt(request, "chunk", chunk);
+  if (pageCount_ == 0 || rid != static_cast<long>(pagedResponseId_) || chunk < 0 ||
+      static_cast<size_t>(chunk) >= pageCount_) {
+    Serial.printf("[espnow_pairing] result_page_expired rid=%ld chunk=%ld cached_rid=%u pages=%u\n",
+                  rid, chunk, static_cast<unsigned>(pagedResponseId_),
+                  static_cast<unsigned>(pageCount_));
+    static const char kExpired[] =
+        "{\"ok\":false,\"cmd\":\"result_page\",\"error\":\"result_page_expired\","
+        "\"message\":\"result_page_expired\"}";
+    startResponse(reinterpret_cast<const uint8_t*>(kExpired), sizeof(kExpired) - 1);
+    return;
+  }
+  sendPage(static_cast<size_t>(chunk));
+}
+
+void EspNowPairing::sendPage(size_t index) {
+  const char* text = pagedResponse_->c_str();
+  const size_t start = pageStarts_[index];
+  const size_t end = index + 1 < pageCount_ ? pageStarts_[index + 1] : pagedResponse_->length();
+  const size_t len =
+      EspNowResultPager::pageLength(text, start, end, pagedResponseId_, index, pageCount_);
+  std::unique_ptr<char[]> page(new (std::nothrow) char[len]);
+  if (!page || EspNowResultPager::writePage(text, start, end, pagedResponseId_, index, pageCount_,
+                                            page.get(), len) != len) {
+    Serial.printf("[espnow_pairing] result_page_no_memory bytes=%u\n", static_cast<unsigned>(len));
+    static const char kNoMemory[] =
+        "{\"ok\":false,\"cmd\":\"result_page\",\"error\":\"result_page_no_memory\","
+        "\"message\":\"result_page_no_memory\"}";
+    startResponse(reinterpret_cast<const uint8_t*>(kNoMemory), sizeof(kNoMemory) - 1);
+    return;
+  }
+  startResponse(reinterpret_cast<const uint8_t*>(page.get()), len);
+  pagedTouchedMs_ = millis();
+  if (index + 1 == pageCount_) {
+    // Measured from page 0 leaving to the last page being queued: the
+    // number to watch when tuning the paged transfer on real hardware.
+    Serial.printf("[espnow_pairing] paged_response_last rid=%u pages=%u bytes=%u elapsed_ms=%u\n",
+                  static_cast<unsigned>(pagedResponseId_), static_cast<unsigned>(pageCount_),
+                  static_cast<unsigned>(pagedResponse_->length()),
+                  static_cast<unsigned>(millis() - pagedStartedMs_));
+  }
+}
+
+void EspNowPairing::releasePagedResponse() {
+  pagedResponse_.reset();
+  pageCount_ = 0;
+}
+
+void EspNowPairing::startResponse(const uint8_t* data, size_t len) {
+  // frameId=0 is fine here since commands are processed synchronously and
+  // one-at-a-time -- there's never a second response in flight to
+  // disambiguate against.
+  responseFragCount_ = EspNowFragmenter::fragment(data, len, 0, kEspNowFragTypeControl,
+                                                  responseFrags_, kEspNowMaxFragCount);
+  if (responseFragCount_ == 0) {
+    // Callers only pass frames up to kEspNowMaxFrameBytes, so this is a
+    // bug if it ever fires. It used to fall straight through, sending
+    // nothing at all and silently: the device logged
+    // `control_command_finished ok=true` while the Hub never saw a
+    // fragment, which looked exactly like an RF failure.
+    Serial.printf("[espnow_pairing] response_fragment_failed bytes=%u\n",
+                  static_cast<unsigned>(len));
+    static const char kFailed[] =
+        "{\"ok\":false,\"error\":\"response_too_large\",\"message\":\"response_too_large\"}";
     responseFragCount_ = EspNowFragmenter::fragment(
-        reinterpret_cast<const uint8_t*>(fallback.c_str()), fallback.length(), 0,
-        kEspNowFragTypeControl, responseFrags_, kEspNowMaxFragCount);
+        reinterpret_cast<const uint8_t*>(kFailed), sizeof(kFailed) - 1, 0, kEspNowFragTypeControl,
+        responseFrags_, kEspNowMaxFragCount);
   }
 
   responseFragsSent_ = 0;
   responseFragRetries_ = 0;
   responseSendAwaitingCb_ = false;
   responseSendCbFailed_ = false;
-  responseFragIntervalUs_ = responseFragCount_ > 0 ? kEspNowResponseSendWindowUs / responseFragCount_ : 0;
-  responseNextFragDueUs_ = nowUs;
 }
 
 void EspNowPairing::handleSendStatus(bool ok) {
