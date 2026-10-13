@@ -36,6 +36,9 @@ class LifetimeStats {
   void noteOtaConfirmed();
   void noteWifiDisconnect();
   void noteButtonPress();
+  void noteEspNowHubLoss();
+  void noteEspNowReplyFailure();
+  void noteEspNowSendFailures(uint32_t count);
 
   bool flush();
 

@@ -1,6 +1,8 @@
 #include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
+#include <string>
 #include <iostream>
 
 #include "LifetimePolicy.h"
@@ -137,7 +139,28 @@ void testHealthVerdict() {
 
 }  // namespace
 
+void testSchemaOneBlobReadsAsAPrefix() {
+  // LifetimeStats::begin() copies a shorter (older) blob over a default
+  // struct; the ESP-NOW counters appended in schema 2 must come out zero.
+  LifetimeCounters old;
+  old.wifiDisconnects = 7;
+  strncpy(old.firstFirmware, "v1.9.0", sizeof(old.firstFirmware) - 1);
+  const size_t schemaOneSize = offsetof(LifetimeCounters, espnowHubLosses);
+  LifetimeCounters loaded;
+  loaded.espnowHubLosses = 99;  // proves the copy does not reach it
+  loaded = LifetimeCounters();
+  std::memcpy(&loaded, &old, schemaOneSize);
+  assert(loaded.wifiDisconnects == 7);
+  assert(std::string(loaded.firstFirmware) == "v1.9.0");
+  assert(loaded.espnowHubLosses == 0);
+  assert(loaded.espnowReplyFailures == 0);
+  assert(loaded.espnowSendFailures == 0);
+  assert(kLifetimeSchema == 2);
+  assert(sizeof(LifetimeCounters) > schemaOneSize);
+}
+
 int main() {
+  testSchemaOneBlobReadsAsAPrefix();
   testAccumulateCarriesSubSecondRemainders();
   testAccumulateSaturates();
   testFreshBootSetsBaselineWithoutCountingAChange();

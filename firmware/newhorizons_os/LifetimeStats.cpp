@@ -108,6 +108,18 @@ void LifetimeStats::noteButtonPress() {
   ++counters_.buttonPresses;
 }
 
+void LifetimeStats::noteEspNowHubLoss() {
+  ++counters_.espnowHubLosses;
+}
+
+void LifetimeStats::noteEspNowReplyFailure() {
+  ++counters_.espnowReplyFailures;
+}
+
+void LifetimeStats::noteEspNowSendFailures(uint32_t count) {
+  counters_.espnowSendFailures += count;
+}
+
 bool LifetimeStats::flush() {
   if (!ready_) {
     return false;
@@ -212,6 +224,9 @@ String LifetimeStats::healthJson() const {
   json += ",\"connectivity\":{";
   first = true;
   jsonUnsignedField(json, "wifi_disconnects", counters_.wifiDisconnects, first);
+  jsonUnsignedField(json, "espnow_hub_losses", counters_.espnowHubLosses, first);
+  jsonUnsignedField(json, "espnow_reply_failures", counters_.espnowReplyFailures, first);
+  jsonUnsignedField(json, "espnow_send_failures", counters_.espnowSendFailures, first);
   json += "}";
 
 #if NHOS_BOARD_HAS_BUTTON
@@ -265,6 +280,9 @@ String LifetimeStats::procText() const {
   out += "chip_temp_min_c=" + tempJson(counters_.tempMinC10) + "\n";
   out += "min_free_heap=" + String(counters_.minFreeHeap) + "\n";
   out += "wifi_disconnects=" + String(counters_.wifiDisconnects) + "\n";
+  out += "espnow_hub_losses=" + String(counters_.espnowHubLosses) + "\n";
+  out += "espnow_reply_failures=" + String(counters_.espnowReplyFailures) + "\n";
+  out += "espnow_send_failures=" + String(counters_.espnowSendFailures) + "\n";
 #if NHOS_BOARD_HAS_BUTTON
   out += "button_presses=" + String(counters_.buttonPresses) + "\n";
 #endif

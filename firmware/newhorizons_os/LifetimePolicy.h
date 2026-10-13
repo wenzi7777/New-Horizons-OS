@@ -8,7 +8,7 @@ namespace nhos {
 // Pure bookkeeping behind LifetimeStats -- no Arduino, no NVS -- so the
 // arithmetic can be unit tested on the host (tests_native/).
 
-constexpr uint16_t kLifetimeSchema = 1;
+constexpr uint16_t kLifetimeSchema = 2;
 // One slot per esp_reset_reason_t value (ESP_RST_UNKNOWN .. ESP_RST_CPU_LOCKUP
 // in ESP-IDF 5.5). Anything newer lands in slot 0 ("unknown").
 constexpr uint8_t kLifetimeResetSlots = 16;
@@ -46,6 +46,10 @@ struct LifetimeCounters {
   uint16_t resetCounts[kLifetimeResetSlots] = {};
   char firstFirmware[24] = {0};
   char lastFirmware[24] = {0};
+  // --- schema 2: ESP-NOW (Direct mode) link quality ---
+  uint32_t espnowHubLosses = 0;      // paired, then >kEspNowHubLostMs without hearing the Hub
+  uint32_t espnowReplyFailures = 0;  // command replies abandoned after every retry
+  uint32_t espnowSendFailures = 0;   // sends the radio reported undelivered (stream included)
 };
 
 // Sub-second leftovers, RAM only: a flush every 10 minutes must not round

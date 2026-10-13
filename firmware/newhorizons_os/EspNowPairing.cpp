@@ -11,6 +11,7 @@
 #include "ControlServer.h"
 #include "EspNowOtaReceiver.h"
 #include "JsonUtils.h"
+#include "LifetimeStats.h"
 
 namespace nhos {
 
@@ -213,6 +214,7 @@ void EspNowPairing::onPaired() {
 
 void EspNowPairing::service() {
   serviceCommand();
+  serviceLinkStats();
   if (hubRequestFrameReady_) {
     hubRequestFrameReady_ = false;
     if (otaReceiver_ != nullptr) {
@@ -276,6 +278,7 @@ void EspNowPairing::handleEspNowRecv(const uint8_t mac[6], const uint8_t* data, 
   if (!hubMacValid_ || memcmp(mac, hubMac_, 6) != 0) {
     return;  // ignore anything not from our configured Hub
   }
+  lastHubContactMs_ = millis();
   if (len == 1 && data[0] == kEspNowPairedMagic) {
     onPaired();
     return;
@@ -430,6 +433,9 @@ void EspNowPairing::serviceCommand() {
         // Abandon the response: the Hub will report a delivery timeout,
         // which is at least an honest, bounded failure rather than a
         // drain that never finishes and blocks every later command.
+        if (lifetime_ != nullptr) {
+          lifetime_->noteEspNowReplyFailure();
+        }
         responseFragCount_ = 0;
         responseFragsSent_ = 0;
         responseFragRetries_ = 0;
@@ -609,7 +615,38 @@ void EspNowPairing::startResponse(const uint8_t* data, size_t len) {
   responseSendCbFailed_ = false;
 }
 
+void EspNowPairing::serviceLinkStats() {
+  if (lifetime_ == nullptr) {
+    return;
+  }
+  const uint32_t failures = pendingSendFailures_;
+  if (failures != 0) {
+    pendingSendFailures_ = pendingSendFailures_ - failures;
+    lifetime_->noteEspNowSendFailures(failures);
+  }
+  if (!paired_) {
+    return;
+  }
+  // A paired device hears its Hub several times a second (POLL) and at
+  // least every HELLO round; this long without anything means the Hub went
+  // away or out of range. Counted once per silence.
+  const uint32_t now = millis();
+  if (now - lastHubContactMs_ > kEspNowHubLostMs) {
+    if (!hubLostCounted_) {
+      hubLostCounted_ = true;
+      lifetime_->noteEspNowHubLoss();
+    }
+  } else {
+    hubLostCounted_ = false;
+  }
+}
+
 void EspNowPairing::handleSendStatus(bool ok) {
+  if (!ok) {
+    // Plain read-modify-write: compound ops on volatile are deprecated, and
+    // an occasional lost increment does not matter for a diagnostic count.
+    pendingSendFailures_ = pendingSendFailures_ + 1;
+  }
   if (!responseSendAwaitingCb_) return;  // not ours (ack / stream / OTA send)
   responseSendAwaitingCb_ = false;
   if (ok) {

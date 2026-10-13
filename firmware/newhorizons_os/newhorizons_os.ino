@@ -1081,6 +1081,7 @@ void setup() {
     espNowPairing.setArbiter(&airtime);
     espNowPairing.setOtaReceiver(&espNowOtaReceiver);
     espNowPairing.setTimeResponseHandler(&onEspNowTimeResponse, nullptr);
+    espNowPairing.setLifetimeStats(&lifetime);
     deviceClock.setEspNowMode(true);
     deviceClock.attachHub(&espNowPairing, &airtime);
     espNowOtaReceiver.setArbiter(&airtime);

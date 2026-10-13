@@ -40,6 +40,7 @@ class AirtimeArbiter;
 
 class ControlServer;
 class EspNowOtaReceiver;
+class LifetimeStats;
 
 // Scratch size for the device-initiated hub-request reassembler
 // (fetch_manifest/ota_relay_start replies) -- MUST match
@@ -82,6 +83,9 @@ constexpr uint8_t kEspNowScanChannels[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 constexpr uint8_t kEspNowMaxScanChannels = 14;  // lastKnownChannel + the 13 above
 constexpr uint32_t kEspNowChannelDwellMs = 400;
 constexpr uint32_t kEspNowHelloRetryMs = 1500;
+// Paired but nothing from the Hub for this long counts as a Hub loss in the
+// health statistics.
+constexpr uint32_t kEspNowHubLostMs = 10000;
 
 constexpr uint8_t kEspNowBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
@@ -144,6 +148,9 @@ class EspNowPairing {
   // left null, this device simply never attempts Direct-mode OTA.
   void setArbiter(AirtimeArbiter* arbiter) { arbiter_ = arbiter; }
   void setOtaReceiver(EspNowOtaReceiver* receiver) { otaReceiver_ = receiver; }
+  // Link-quality counters for the `health` command (Hub losses, abandoned
+  // replies, undelivered sends).
+  void setLifetimeStats(LifetimeStats* lifetime) { lifetime_ = lifetime; }
   // TIME_RESP from our Hub (EspNowTimeWire.h). Called on the WiFi task with
   // the arrival time already stamped, so it must only copy and return.
   using TimeResponseHandler = void (*)(const uint8_t* data, size_t len, int64_t t4MonoUs, void* ctx);
@@ -159,6 +166,7 @@ class EspNowPairing {
   void onPaired();
   void handleFragmentedPacket(const uint8_t* data, size_t len);
   void serviceCommand();
+  void serviceLinkStats();
   // Fragments one reply frame (<= kEspNowMaxFrameBytes) for the paced
   // drain in serviceCommand().
   void startResponse(const uint8_t* data, size_t len);
@@ -200,6 +208,14 @@ class EspNowPairing {
   uint32_t lastHelloMs_ = 0;
 
   volatile bool pollPending_ = false;
+  LifetimeStats* lifetime_ = nullptr;
+  // Last time anything arrived from our Hub (recv callback), and whether the
+  // current silence has already been counted as a Hub loss.
+  volatile uint32_t lastHubContactMs_ = 0;
+  bool hubLostCounted_ = false;
+  // Send-callback failures, counted on the WiFi task, folded into
+  // LifetimeStats from service().
+  volatile uint32_t pendingSendFailures_ = 0;
   TimeResponseHandler timeHandler_ = nullptr;
   void* timeHandlerCtx_ = nullptr;
 
