@@ -5,6 +5,7 @@
 #include <cstring>
 #include <esp_now.h>
 #include <new>
+#include <esp_timer.h>
 #include <esp_wifi.h>
 
 #include "ControlServer.h"
@@ -282,6 +283,13 @@ void EspNowPairing::handleEspNowRecv(const uint8_t mac[6], const uint8_t* data, 
   if (len == 1 && data[0] == kEspNowPollMagic) {
     if (paired_) {
       pollPending_ = true;
+    }
+    return;
+  }
+  if (len == kEspNowTimeRespLen && data[0] == kEspNowTimeRespMagic) {
+    const int64_t t4MonoUs = esp_timer_get_time();
+    if (paired_ && timeHandler_ != nullptr) {
+      timeHandler_(data, len, t4MonoUs, timeHandlerCtx_);
     }
     return;
   }

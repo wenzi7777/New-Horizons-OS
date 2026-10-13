@@ -94,6 +94,15 @@ struct TransportConfig {
   uint8_t lastKnownChannel = 0;
 };
 
+// Clock service tuning (see ClockService.h). syncIntervalS paces the time
+// exchange with the Gateway (WiFi) or Hub (ESP-NOW); ntpServer/ntpIntervalS
+// are the WiFi-mode fallback when no Gateway answers.
+struct ClockConfig {
+  String ntpServer = kDefaultNtpServer;
+  uint32_t ntpIntervalS = kDefaultNtpIntervalS;
+  uint16_t syncIntervalS = kDefaultSyncIntervalS;
+};
+
 struct DeviceConfigData {
   uint8_t schemaVersion = 1;
   MatrixLayoutConfig matrixLayout;
@@ -110,6 +119,7 @@ struct DeviceConfigData {
   ExternalLedConfig externalLed;
   OledConfig oled;
   TransportConfig transport;
+  ClockConfig clock;
 };
 
 class DeviceConfig {
@@ -135,6 +145,7 @@ class DeviceConfig {
   bool setOled(const String& mode, const String& page, uint8_t updateHz, uint8_t contrast, uint8_t rotation);
   bool setTransport(const String& mode, const String& hubMac);
   void setTransportLastKnownChannel(uint8_t channel);
+  bool setClockConfig(const String& ntpServer, uint32_t ntpIntervalS, uint32_t syncIntervalS);
 
   String statusJson() const;
   String filterJson() const;
@@ -142,6 +153,7 @@ class DeviceConfig {
   String otaJson() const;
   String streamBufferJson() const;
   String transportJson() const;
+  String clockJson() const;
   String actionButtonJson() const;
   String configJson() const;
 

@@ -28,6 +28,9 @@ static constexpr float kPressureActiveThreshold = 50.0f;
 struct MatrixFrame {
   uint32_t seq = 0;
   uint32_t timestampMs = 0;
+  // esp_timer_get_time() at scan start: what ClockService::epochMsAt()
+  // turns into the packet's wall-clock timestamp.
+  int64_t timestampUs = 0;
   uint16_t rows = 0;
   uint16_t cols = 0;
   uint16_t pointCount = 0;

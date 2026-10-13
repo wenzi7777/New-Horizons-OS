@@ -65,8 +65,10 @@
 
 #define NHOS_BOARD_NAME         "TIA-CTL v2.2.C GCU LTS"
 #define NHOS_BOARD_OTA_MODEL    "VD-CTL/R v2.2.C GCU LTS"
-#define NHOS_BOARD_ROWS         11
-#define NHOS_BOARD_COLS         13
+// IO11 and IO17 are wired to the connector but must not be used on this
+// revision (board overview: "DO NOT USE PIN 11,17"), hence 10 x 12.
+#define NHOS_BOARD_ROWS         10
+#define NHOS_BOARD_COLS         12
 #define NHOS_BOARD_I2C_HZ       1000000
 #define NHOS_BOARD_BQ25180_I2C_HZ 400000
 #define NHOS_BOARD_HAS_MAG      1

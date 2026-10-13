@@ -32,7 +32,7 @@
 #include "Scheduler.h"
 #include "ServiceManager.h"
 #include "Storage.h"
-#include "TimeSync.h"
+#include "ClockService.h"
 #include "WifiManager.h"
 
 namespace nhos {
@@ -83,7 +83,7 @@ class ControlServer {
   void setProcFs(ProcFs* proc) { proc_ = proc; }
   void setArbiter(AirtimeArbiter* arbiter) { arbiter_ = arbiter; }
   void setServiceManager(ServiceManager* services) { services_ = services; }
-  void setClock(TimeSync* clock) { clock_ = clock; }
+  void setClock(ClockService* clock) { clock_ = clock; }
   void setPowerGovernor(PowerGovernor* governor) { governor_ = governor; }
   void setAppManager(AppManager* apps, FlowApp* flow, AppRegistry* registry,
                      AppGovernor* governor) {
@@ -112,6 +112,8 @@ class ControlServer {
   String batteryStatusJson() const;
   String extractString(const String& request, const char* key) const;
   int extractInt(const String& request, const char* key, int fallback) const;
+  // {"clock":<ClockService::statusJson>,"clock_config":<DeviceConfig::clockJson>}
+  String clockStatusData() const;
   float extractFloat(const String& request, const char* key, float fallback) const;
   bool extractBool(const String& request, const char* key, bool fallback) const;
   size_t extractArray(const String& request, const char* key, uint8_t* out, size_t maxCount) const;
@@ -135,7 +137,7 @@ class ControlServer {
   ProcFs* proc_ = nullptr;
   AirtimeArbiter* arbiter_ = nullptr;
   ServiceManager* services_ = nullptr;
-  TimeSync* clock_ = nullptr;
+  ClockService* clock_ = nullptr;
   PowerGovernor* governor_ = nullptr;
   AppManager* apps_ = nullptr;
   FlowApp* flow_ = nullptr;

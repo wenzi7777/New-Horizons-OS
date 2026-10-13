@@ -2,12 +2,14 @@
 
 #include "EspNowOtaReceiver.h"
 
+#include <esp_timer.h>
 #include <vector>
 
 #include "Config.h"
 #include "BatteryStatusJsonMerge.h"
 #include "ActionButtonPolicy.h"
 #include "EspNowPairing.h"  // kEspNowPairingFailFlagKey, so this stays in sync with EspNowPairing.cpp's own check
+#include "EspNowTimeWire.h"
 #include "JsonUtils.h"
 
 namespace nhos {
@@ -131,11 +133,22 @@ void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
   if (pktSize <= 0) {
     return;
   }
+  // The Gateway's TIME_RESP arrives on this same socket. Stamped before the
+  // read so as little local time as possible counts as path delay; the
+  // device-side filter keeps the round trips where the loop polled promptly.
+  const int64_t rxMonoUs = esp_timer_get_time();
   const IPAddress senderIp = udp.remoteIP();
   const uint16_t senderPort = udp.remotePort();
   constexpr int kMaxSize = 512;
   static char buf[kMaxSize];
   const int len = udp.read(buf, kMaxSize - 1);
+  if (len == static_cast<int>(kEspNowTimeRespLen) &&
+      static_cast<uint8_t>(buf[0]) == kEspNowTimeRespMagic) {
+    if (clock_) {
+      clock_->onGatewayTimeResponse(reinterpret_cast<const uint8_t*>(buf), len, rxMonoUs);
+    }
+    return;
+  }
   if (len <= 0 || buf[0] != '{') {
     return;
   }
@@ -873,10 +886,58 @@ String ControlServer::processCommand(const String& request) {
       return error(cmd, "epoch_ms_required");
     }
     const uint64_t epochMs = strtoull(epochText.c_str(), nullptr, 10);
-    if (!clock_->setEpochMs(epochMs, TimeSource::Host)) {
+    // `force` marks an explicit user action ("use this computer's time");
+    // without it a better source already in charge (SNTP/Hub) wins.
+    const ClockSubmitResult result =
+        clock_->setEpochMs(epochMs, TimeSource::Host, extractBool(request, "force", false));
+    if (result == ClockSubmitResult::Rejected) {
       return error(cmd, "epoch_rejected");
     }
+    if (result == ClockSubmitResult::Ignored) {
+      return error(cmd, "better_source_active");
+    }
     return ok(cmd, "time_set", clock_->statusJson());
+  }
+  if (cmd == "clock_sync") {
+    if (!clock_) {
+      return error(cmd, "clock_unavailable");
+    }
+    // Only starts the exchange: the result lands in status.clock a moment
+    // later, so the command channel is never held for a network round trip.
+    if (!clock_->requestSync()) {
+      return error(cmd, "clock_source_unavailable");
+    }
+    return ok(cmd, "clock_sync_started", clockStatusData());
+  }
+  if (cmd == "clock_status") {
+    // A few hundred bytes, unlike `status`: cheap enough to poll after a
+    // clock_sync, even through a Hub.
+    if (!clock_) {
+      return error(cmd, "clock_unavailable");
+    }
+    return ok(cmd, "clock_status", clockStatusData());
+  }
+  if (cmd == "set_clock_config") {
+    if (!clock_ || !deviceConfig_) {
+      return error(cmd, "clock_unavailable");
+    }
+    const ClockConfig& current = deviceConfig_->data().clock;
+    String ntpServer = extractString(request, "ntp_server");
+    if (ntpServer.isEmpty()) {
+      ntpServer = current.ntpServer;
+    }
+    const int ntpIntervalS = extractInt(request, "ntp_interval_s", static_cast<int>(current.ntpIntervalS));
+    const int syncIntervalS = extractInt(request, "sync_interval_s", current.syncIntervalS);
+    if (ntpIntervalS <= 0 || syncIntervalS <= 0 ||
+        !deviceConfig_->setClockConfig(ntpServer, static_cast<uint32_t>(ntpIntervalS),
+                                       static_cast<uint32_t>(syncIntervalS))) {
+      return error(cmd, "clock_config_invalid");
+    }
+    if (!deviceConfig_->save(*storage_)) {
+      return error(cmd, "config_write_failed");
+    }
+    clock_->configure(*deviceConfig_);
+    return ok(cmd, "clock_config_updated", clockStatusData());
   }
   if (cmd == "service_list") {
     if (!services_) {
@@ -2167,6 +2228,15 @@ String ControlServer::batteryStatusJson() const {
 
 String ControlServer::extractString(const String& request, const char* key) const {
   return jsonExtractString(request, key, "");
+}
+
+String ControlServer::clockStatusData() const {
+  String data = "{\"clock\":";
+  data += clock_ != nullptr ? clock_->statusJson() : String("{}");
+  data += ",\"clock_config\":";
+  data += deviceConfig_ != nullptr ? deviceConfig_->clockJson() : String("{}");
+  data += "}";
+  return data;
 }
 
 int ControlServer::extractInt(const String& request, const char* key, int fallback) const {

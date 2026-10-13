@@ -7,7 +7,7 @@
 #include "Config.h"
 #include "FaultRecorder.h"
 #include "JsonUtils.h"
-#include "TimeSync.h"
+#include "ClockService.h"
 
 namespace nhos {
 namespace {

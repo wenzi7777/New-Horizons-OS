@@ -45,6 +45,13 @@ const ConfigEntry kEntries[] = {
      "performance,balanced,powersave", "CPU frequency policy while idle."},
     {"power.charge_profile", ConfigType::Enum, "set_charge_profile", "profile", 0, 0,
      "compatible,fast", "Battery charge current preset."},
+    {"clock.ntp_server", ConfigType::Text, "set_clock_config", "ntp_server", 0, 0, nullptr,
+     "NTP server used in WiFi mode."},
+    {"clock.ntp_interval_s", ConfigType::Int, "set_clock_config", "ntp_interval_s",
+     kMinNtpIntervalS, kMaxNtpIntervalS, nullptr, "Seconds between NTP re-syncs (WiFi mode)."},
+    {"clock.sync_interval_s", ConfigType::Int, "set_clock_config", "sync_interval_s",
+     kMinSyncIntervalS, kMaxSyncIntervalS, nullptr,
+     "Seconds between time exchanges with the Gateway (WiFi) or Hub (ESP-NOW)."},
 };
 
 constexpr size_t kEntryCount = sizeof(kEntries) / sizeof(kEntries[0]);
@@ -94,6 +101,9 @@ bool ConfigRegistry::readValue(const String& path, const DeviceConfig& config,
   if (path == "log.mode") { out = data.logging.mode; return true; }
   if (path == "ota.auto_apply_on_boot") { out = boolText(data.ota.autoApplyOnBoot); return true; }
   if (path == "ota.manifest_url") { out = data.ota.manifestUrl; return true; }
+  if (path == "clock.ntp_server") { out = data.clock.ntpServer; return true; }
+  if (path == "clock.ntp_interval_s") { out = String(data.clock.ntpIntervalS); return true; }
+  if (path == "clock.sync_interval_s") { out = String(data.clock.syncIntervalS); return true; }
   if (path == "power.profile") {
     // The only entry not backed by DeviceConfig: the governor owns it.
     out = governor != nullptr ? PowerGovernor::profileName(governor->profile()) : String("performance");

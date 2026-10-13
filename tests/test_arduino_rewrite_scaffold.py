@@ -272,7 +272,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("FitSet fits_;", calibration_header)
         self.assertIn("bool runtimeReady_ = false;", calibration_header)
         self.assertIn("fits_.models[sensorIndex]", body)
-        self.assertIn("calibration_curve::evaluateModel", body)
+        # Held at the top of the sensor's calibrated range, not extrapolated.
+        self.assertIn("calibration_curve::evaluateClamped", body)
+        self.assertIn("fits_.maxPressure", body)
         self.assertIn("calibration_curve::readoutX", body)
         self.assertNotIn("fitModel(", body)
         self.assertNotIn("fitAll(", body)
@@ -742,8 +744,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("NHOS_BOARD_GCU_V22C_LTS", config)
         self.assertIn('NHOS_BOARD_NAME         "TIA-CTL v2.2.C GCU LTS"', config)
         self.assertIn('NHOS_BOARD_OTA_MODEL    "VD-CTL/R v2.2.C GCU LTS"', config)
-        self.assertIn("NHOS_BOARD_ROWS         11", config)
-        self.assertIn("NHOS_BOARD_COLS         13", config)
+        self.assertIn("NHOS_BOARD_ROWS         10", config)
+        self.assertIn("NHOS_BOARD_COLS         12", config)
         self.assertIn("NHOS_BOARD_I2C_HZ       1000000", config)
         self.assertIn("NHOS_BOARD_HAS_MAG      1", config)
         self.assertIn("NHOS_BOARD_HAS_BQ25180  0", config)
@@ -758,12 +760,15 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         config_cpp = (ARDUINO_ROOT / "Config.cpp").read_text(encoding="utf-8")
 
         self.assertIn("#elif defined(NHOS_BOARD_GCU_V22C_LTS)", board_pins)
-        self.assertIn("{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}", board_pins)
-        self.assertIn("{17, 18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45}", board_pins)
+        v22c = board_pins[board_pins.index("#elif defined(NHOS_BOARD_GCU_V22C_LTS)") :]
+        v22c = v22c[: v22c.index("#elif", 1)]
+        # IO11 and IO17 must not be used on this revision.
+        self.assertIn("kRowAdcPins[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};", v22c)
+        self.assertIn("kColPins[] = {18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45};", v22c)
         self.assertIn("const uint8_t kI2cScl = 47;", board_pins)
         self.assertIn("const uint8_t kI2cSda = 48;", board_pins)
         self.assertIn("const uint8_t kStatusLedPin = 38;", board_pins)
-        self.assertIn("static_assert(kMaxSensors == 143", config_cpp)
+        self.assertIn("static_assert(kMaxSensors == 120", config_cpp)
 
     def test_v22c_lts_release_track_uses_4m_flash_and_distinct_manifest_names(self):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")

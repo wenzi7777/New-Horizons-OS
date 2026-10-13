@@ -1,5 +1,7 @@
 #include "MatrixScanner.h"
 
+#include <esp_timer.h>
+
 #include <memory>
 #include <new>
 
@@ -204,6 +206,7 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
 
   const uint32_t scanStartUs = micros();
   frame.seq = ++frameSeq_;
+  frame.timestampUs = esp_timer_get_time();
   frame.timestampMs = millis();
   frame.rows = static_cast<uint16_t>(rowCount_);
   frame.cols = static_cast<uint16_t>(colCount_);

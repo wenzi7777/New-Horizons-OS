@@ -19,7 +19,7 @@ class PowerStateManager;
 class Scheduler;
 class ServiceManager;
 class Storage;
-class TimeSync;
+class ClockService;
 class WifiManager;
 
 // A synthetic, read-only "proc" scope layered over the existing file
@@ -41,7 +41,7 @@ class ProcFs {
   void setArbiter(AirtimeArbiter* arbiter) { arbiter_ = arbiter; }
   void setServiceManager(ServiceManager* services) { services_ = services; }
   void setStorage(Storage* storage) { storage_ = storage; }
-  void setClock(TimeSync* clock) { clock_ = clock; }
+  void setClock(ClockService* clock) { clock_ = clock; }
   void setLifetimeStats(LifetimeStats* stats) { lifetime_ = stats; }
   void setPowerGovernor(PowerGovernor* governor) { governor_ = governor; }
   void setAppManager(AppManager* apps) { apps_ = apps; }
@@ -70,7 +70,7 @@ class ProcFs {
   AirtimeArbiter* arbiter_ = nullptr;
   ServiceManager* services_ = nullptr;
   Storage* storage_ = nullptr;
-  TimeSync* clock_ = nullptr;
+  ClockService* clock_ = nullptr;
   LifetimeStats* lifetime_ = nullptr;
   PowerGovernor* governor_ = nullptr;
   AppManager* apps_ = nullptr;

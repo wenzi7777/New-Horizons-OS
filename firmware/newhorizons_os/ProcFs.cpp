@@ -16,7 +16,7 @@
 #include "PowerStateManager.h"
 #include "Scheduler.h"
 #include "Storage.h"
-#include "TimeSync.h"
+#include "ClockService.h"
 #include "ServiceManager.h"
 #include "WifiManager.h"
 

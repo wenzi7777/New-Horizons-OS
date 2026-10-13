@@ -142,7 +142,52 @@ void testCaptureBlocksAndMedian() {
 
 }  // namespace
 
+void testPointClassificationMatchesTheFitSelection() {
+  const cc::Readout identity;
+  float x = -1.0f;
+  // Captured, above min level, below clip, above baseline: a fit point.
+  assert(cc::classifyPoint(10.0f, 1.0f, 1000.0f, 50.0f, 3150.0f, identity, &x) == cc::PointStatus::Used);
+  assert(near(x, 50.0, 1e-6));
+  assert(cc::classifyPoint(10.0f, 1.0f, 1000.0f, NAN, 3150.0f, identity, nullptr) == cc::PointStatus::NotCaptured);
+  assert(cc::classifyPoint(10.0f, 1.0f, NAN, 50.0f, 3150.0f, identity, nullptr) == cc::PointStatus::NotCaptured);
+  assert(cc::classifyPoint(0.5f, 1.0f, 1000.0f, 50.0f, 3150.0f, identity, nullptr) == cc::PointStatus::BelowMinLevel);
+  // Clipped: the ADC hit its ceiling, so the reading says nothing.
+  assert(cc::classifyPoint(120.0f, 1.0f, 3000.0f, 150.0f, 3150.0f, identity, nullptr) == cc::PointStatus::Saturated);
+  // Not above the sensor's own baseline: no response at this pressure.
+  assert(cc::classifyPoint(43.3f, 1.0f, 1000.0f, 0.0f, 3150.0f, identity, nullptr) == cc::PointStatus::NoResponse);
+  assert(cc::classifyPoint(43.3f, 1.0f, 1000.0f, -12.0f, 3150.0f, identity, nullptr) == cc::PointStatus::NoResponse);
+  assert(cc::pointStatusCode(cc::PointStatus::Used) == 'u');
+  assert(cc::pointStatusCode(cc::PointStatus::Saturated) == 's');
+  assert(cc::pointStatusCode(cc::PointStatus::NoResponse) == 'n');
+  assert(cc::pointStatusCode(cc::PointStatus::BelowMinLevel) == 'b');
+  assert(cc::pointStatusCode(cc::PointStatus::NotCaptured) == '-');
+}
+
+void testClampedOutputHoldsAtTheTopOfTheCalibratedRange() {
+  // A concave fit (c < 0) that would turn back down past its peak.
+  cc::FitModel model;
+  model.a = 0.0f;
+  model.b = 10.0f;
+  model.c = -0.5f;
+  const float maxX = 50.0f;
+  const float maxPressure = cc::evaluateModel(model, maxX);
+  // Inside the range: the model itself.
+  assert(near(cc::evaluateClamped(model, 16.0f, maxX, maxPressure), cc::evaluateModel(model, 16.0f), 1e-5));
+  // Past it: held, even where the raw polynomial would have fallen.
+  assert(cc::evaluateModel(model, 300.0f) < maxPressure);
+  assert(near(cc::evaluateClamped(model, 300.0f, maxX, maxPressure), maxPressure, 1e-5));
+  assert(near(cc::evaluateClamped(model, maxX, maxX, maxPressure), maxPressure, 1e-5));
+  // Never above the highest calibrated pressure.
+  assert(cc::evaluateClamped(model, 49.0f, maxX, 20.0f) <= 20.0f);
+  // Unfitted sensors (a partial profile) read 0.
+  assert(cc::evaluateClamped(cc::FitModel(), 30.0f, maxX, maxPressure) == 0.0f);
+  // No known limit: plain model.
+  assert(near(cc::evaluateClamped(model, 300.0f, NAN, NAN), cc::evaluateModel(model, 300.0f), 1e-5));
+}
+
 int main() {
+  testPointClassificationMatchesTheFitSelection();
+  testClampedOutputHoldsAtTheTopOfTheCalibratedRange();
   testFitMatchesNumpyPolyfitOnPaperData();
   testReadoutInvertsThePaperCurve();
   testEndToEndFromMillivoltsMatchesThePaper();

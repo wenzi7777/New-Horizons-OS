@@ -23,7 +23,7 @@ The previous MicroPython New Horizons OS tree was archived outside this reposito
   - Arduino FQBN: `esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs`
 - `TIA-CTL v2.2.C GCU LTS`
   - Flash: 4 MB
-  - Matrix: `11 x 13`
+  - Matrix: `10 x 12` (IO11 and IO17 reach the connector but must not be used)
   - Arduino FQBN: `esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs`
 - `TIA-CTL v2.1 GCU LTS`
   - Flash: 4 MB

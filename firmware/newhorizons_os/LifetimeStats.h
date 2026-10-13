@@ -9,7 +9,7 @@ namespace nhos {
 
 class BootModeManager;
 class FaultRecorder;
-class TimeSync;
+class ClockService;
 
 // Device health counters: power-on time, reset history, OTA history,
 // temperature and heap extremes. Served by the `health` command and
@@ -28,7 +28,7 @@ class LifetimeStats {
  public:
   // After FaultRecorder::begin() and BootModeManager::begin().
   void begin(const FaultRecorder& faults, const BootModeManager& boot);
-  void setClock(const TimeSync* clock) { clock_ = clock; }
+  void setClock(const ClockService* clock) { clock_ = clock; }
 
   // Scheduler task, alwaysRun so soft-off time is counted too.
   void service(uint32_t nowMs, bool awake, bool scanning);
@@ -54,7 +54,7 @@ class LifetimeStats {
   LifetimeRemainder remainder_;
   const FaultRecorder* faults_ = nullptr;
   const BootModeManager* boot_ = nullptr;
-  const TimeSync* clock_ = nullptr;
+  const ClockService* clock_ = nullptr;
   uint32_t lastTickMs_ = 0;
   uint32_t lastFlushMs_ = 0;
   uint32_t lastSampleMs_ = 0;

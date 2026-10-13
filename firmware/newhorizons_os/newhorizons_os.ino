@@ -38,7 +38,7 @@
 #include "ServiceManager.h"
 #include "StreamTransport.h"
 #include "Storage.h"
-#include "TimeSync.h"
+#include "ClockService.h"
 #include "UdpStreamTransport.h"
 #include "Watchdog.h"
 #include "WifiManager.h"
@@ -98,7 +98,7 @@ nhos::MagnetometerManager magnetometer;
 nhos::FindMeClient findme;
 nhos::ControlServer control;
 nhos::OtaManager ota;
-nhos::TimeSync timeSync;
+nhos::ClockService deviceClock;
 // Single WiFiUDP for the whole wifi_udp path lives inside udpTransport.
 // Do not add a second WiFiUDP bound to kUdpStreamPort: dual-bind steals
 // inbound command packets from serviceUdpCommand() while outbound stream
@@ -113,6 +113,11 @@ bool espNowMode = false;
 
 void onEspNowRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
   espNowPairing.handleEspNowRecv(info->src_addr, data, static_cast<size_t>(len));
+}
+
+// Called from inside onEspNowRecv(), so t4 is stamped on arrival.
+void onEspNowTimeResponse(const uint8_t* data, size_t len, int64_t t4MonoUs, void*) {
+  deviceClock.onHubTimeResponse(data, len, t4MonoUs);
 }
 
 // Diagnostic only (temporary): esp_now_send()'s own synchronous return
@@ -482,8 +487,9 @@ void scanAndStreamIfDue() {
   }
   lastFrameReady = true;
 
-  const bool epochValid = timeSync.hasSynced();
-  const uint64_t epochMs = epochValid ? timeSync.nowEpochMs() : 0;
+  // Stamped with when the frame was scanned, not when this packet is built.
+  const bool epochValid = deviceClock.hasSynced();
+  const uint64_t epochMs = epochValid ? deviceClock.epochMsAt(frame.timestampUs) : 0;
   size_t len = packetBuilder.buildMatrixPacketHeader(
       frame, epochMs, epochValid, packetBuffer, sizeof(packetBuffer),
       matrixPayloadLen, imuSampleValid ? imuSample : nullptr,
@@ -527,8 +533,8 @@ void sendHeartbeatIfDue() {
     return;
   }
   lastHeartbeatAttemptMs = now;
-  const bool epochValid = timeSync.hasSynced();
-  const uint64_t epochMs = epochValid ? timeSync.nowEpochMs() : 0;
+  const bool epochValid = deviceClock.hasSynced();
+  const uint64_t epochMs = epochValid ? deviceClock.nowEpochMs() : 0;
   size_t len = packetBuilder.buildHeartbeat(heartbeatSeq++, epochMs, epochValid, packetBuffer, sizeof(packetBuffer));
   if (!len) {
     findme.recordHeartbeat(now, "heartbeat_encode_failed");
@@ -580,10 +586,12 @@ void taskControlUdp() { control.serviceUdpCommand(udpTransport.udp()); }
 
 void taskTimeAndHeartbeat() {
   if (wifi.isConnected()) {
-    timeSync.begin();  // no-op after first successful call; covers WiFi connecting after boot
+    deviceClock.beginSntp();  // no-op after first successful call; covers WiFi connecting after boot
   }
   sendHeartbeatIfDue();
 }
+
+void taskClock() { deviceClock.service(millis()); }
 
 void updateLedState() {
   const uint32_t nowMs = millis();
@@ -820,6 +828,14 @@ bool scannerStart(void*) {
   return scanner.start();
 }
 
+bool clockHealthy(void*) { return deviceClock.healthy(); }
+
+bool clockStart(void*) {
+  // Automatic retry: must not undo a source's "server too old" back-off.
+  deviceClock.requestSync(false);
+  return true;
+}
+
 void registerServices() {
   // Foundational services: reported, never auto-restarted. Re-running their
   // begin() mid-flight would be more dangerous than the fault it is meant to
@@ -841,9 +857,8 @@ void registerServices() {
                            &batteryGaugeHealthy);
 #endif
   services.registerService("transport", true);
-  // No start hook: in Direct mode the clock can only be set from outside
-  // (set_time), and under WiFi ESP-IDF's SNTP client re-syncs on its own.
-  services.registerService("clock", true);
+  // A restart re-syncs from this mode's source (SNTP or the Hub).
+  services.registerService("clock", true, &clockStart, &clockHealthy);
   services.registerService("apps", true);
 }
 
@@ -875,6 +890,8 @@ void registerRuntimeTasks() {
     scheduler.registerTask("findme", &taskFindMe, false);
   }
   scheduler.registerTask("control", &taskControl, false);
+  // After control so a set_time/clock_sync is acted on in the same pass.
+  scheduler.registerTask("clock", &taskClock, false);
   if (!espNowMode) {
     scheduler.registerTask("control_udp", &taskControlUdp, false);
     scheduler.registerTask("time_heartbeat", &taskTimeAndHeartbeat, false);
@@ -931,7 +948,8 @@ void setup() {
     logBoot(String("ota_rolled_back_from=") + bootMode.rolledBackFrom());
   }
   lifetime.begin(faults, bootMode);
-  lifetime.setClock(&timeSync);
+  deviceClock.configure(deviceConfig);
+  lifetime.setClock(&deviceClock);
   logBoot("boot_stage=lifetime_ready");
   powerState.begin();
   logBoot(String("boot_stage=power_state_ready ") + powerState.statusJson());
@@ -1062,6 +1080,9 @@ void setup() {
     }
     espNowPairing.setArbiter(&airtime);
     espNowPairing.setOtaReceiver(&espNowOtaReceiver);
+    espNowPairing.setTimeResponseHandler(&onEspNowTimeResponse, nullptr);
+    deviceClock.setEspNowMode(true);
+    deviceClock.attachHub(&espNowPairing, &airtime);
     espNowOtaReceiver.setArbiter(&airtime);
     espNowTransport.setArbiter(&airtime);
     airtime.registerClaimant(nhos::AirtimeClass::OtaRelay, &otaRelayNeedsAirtime, nullptr);
@@ -1080,7 +1101,7 @@ void setup() {
     logBoot(String("boot_stage=wifi_ready connected=") + (wifiConnected ? "true" : "false") +
             " setup_active=" + (wifi.setupActive() ? "true" : "false"));
     if (wifiConnected) {
-      timeSync.begin();
+      deviceClock.beginSntp();
     }
     findme.begin(storage, wifi, uid);
     logBoot("findme_started");
@@ -1088,6 +1109,9 @@ void setup() {
     udpTransport.begin();
     udpTransport.attach(control, findme);
     activeTransport = &udpTransport;
+    // Time from the Gateway first (shared by every device behind it), NTP
+    // as the fallback -- see ClockCore::submit()'s priority note.
+    deviceClock.attachGateway(&udpTransport);
     logBoot(String("udp_stream_started port=") + String(nhos::kUdpStreamPort));
   }
   ota.begin(storage);
@@ -1106,13 +1130,13 @@ void setup() {
   control.setServiceManager(&services);
   procFs.setServiceManager(&services);
   procFs.setStorage(&storage);
-  control.setClock(&timeSync);
+  control.setClock(&deviceClock);
   control.setPowerGovernor(&powerGovernor);
   procFs.setPowerGovernor(&powerGovernor);
   control.setAppManager(&apps, &flowApp, &appRegistry, &appGovernor);
   procFs.setAppManager(&apps);
   procFs.setAppRegistry(&appRegistry);
-  procFs.setClock(&timeSync);
+  procFs.setClock(&deviceClock);
   procFs.setLifetimeStats(&lifetime);
   if (espNowMode) {
     // Route check_update/apply_update through the Hub-relayed OTA path --

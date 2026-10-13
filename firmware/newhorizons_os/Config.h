@@ -6,7 +6,7 @@
 #include "PacketWire.h"
 
 #ifndef NHOS_FIRMWARE_VERSION
-#define NHOS_FIRMWARE_VERSION "v1.11.0"
+#define NHOS_FIRMWARE_VERSION "v1.12.0"
 #endif
 
 namespace nhos {
@@ -41,7 +41,18 @@ static constexpr size_t kMaxPacketBytes =
 static_assert(kMaxPacketBytes <= kEspNowDataFrameBudget,
               "v5 packet must stay within the ESP-NOW data-frame budget");
 static constexpr uint32_t kHeartbeatIntervalMs = 5000;
-static constexpr uint32_t kTimeSyncValidEpochS = 1600000000;  // ~2020-09-13; time() below this means "not yet synced"
+// Clock service (ClockService.h). The NTP interval is far below ESP-IDF's
+// 3 h default: a ±20 ppm crystal drifts ~200 ms in 3 h but ~12 ms in 10 min.
+static constexpr char kDefaultNtpServer[] = "pool.ntp.org";
+static constexpr char kFallbackNtpServer[] = "time.google.com";
+static constexpr size_t kMaxNtpServerLen = 63;
+static constexpr uint32_t kDefaultNtpIntervalS = 600;
+static constexpr uint32_t kMinNtpIntervalS = 60;
+static constexpr uint32_t kMaxNtpIntervalS = 86400;
+// Time exchanges with the Gateway (WiFi mode) or Hub (ESP-NOW mode).
+static constexpr uint16_t kDefaultSyncIntervalS = 15;
+static constexpr uint16_t kMinSyncIntervalS = 5;
+static constexpr uint16_t kMaxSyncIntervalS = 3600;
 
 static constexpr uint16_t kDefaultTargetFps = 60;
 static constexpr uint16_t kMaxTargetFps = 120;

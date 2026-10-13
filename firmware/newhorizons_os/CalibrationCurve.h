@@ -70,6 +70,31 @@ bool fitModel(const float* xs, const float* pressures, size_t count, FitModel& o
 // polynomial carries on, as the paper's fit does.
 float evaluateModel(const FitModel& model, float x);
 
+// Why one captured reading is or is not a fit point -- the same selection as
+// make_figures.py, made explicit so the workbench can say per sensor and per
+// level what was left out. Codes are on the wire (calibration status
+// `points` string): never reuse one.
+enum class PointStatus : unsigned char {
+  Used = 0,           // 'u'
+  NotCaptured = 1,    // '-'  no reading at this level
+  BelowMinLevel = 2,  // 'b'  under FitSettings::minLevel (turn-on threshold)
+  Saturated = 3,      // 's'  at or above the ADC's clip voltage
+  NoResponse = 4,     // 'n'  not above the sensor's own baseline
+};
+char pointStatusCode(PointStatus status);
+
+// `relativeMv` is the capture relative to its tare. `outX` (optional) gets
+// the readout x when the point is Used.
+PointStatus classifyPoint(float level, float minLevel, float tareMv, float relativeMv, float clipMv,
+                          const Readout& readout, float* outX);
+
+// The model limited to the range the sensor was actually calibrated over:
+// never above `maxPressure` (its highest usable level), and held there for
+// any x at or past `maxX` -- a saturating sensor then reads as saturated
+// instead of following the concave polynomial back down. 0 for an unfitted
+// model. A NaN/zero `maxPressure` means "no limit known" (evaluateModel).
+float evaluateClamped(const FitModel& model, float x, float maxX, float maxPressure);
+
 // A capture is split into blocks of about kCaptureBlockMs; each block is
 // averaged and the capture reports the median of those block means. The
 // paper takes the median of every frame in its window, which needs far more

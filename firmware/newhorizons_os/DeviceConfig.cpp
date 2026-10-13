@@ -407,6 +407,23 @@ bool DeviceConfig::setTransport(const String& mode, const String& hubMac) {
   return true;
 }
 
+bool DeviceConfig::setClockConfig(const String& ntpServer, uint32_t ntpIntervalS,
+                                  uint32_t syncIntervalS) {
+  if (ntpServer.length() > kMaxNtpServerLen) {
+    return false;
+  }
+  if (ntpIntervalS < kMinNtpIntervalS || ntpIntervalS > kMaxNtpIntervalS) {
+    return false;
+  }
+  if (syncIntervalS < kMinSyncIntervalS || syncIntervalS > kMaxSyncIntervalS) {
+    return false;
+  }
+  data_.clock.ntpServer = ntpServer.isEmpty() ? String(kDefaultNtpServer) : ntpServer;
+  data_.clock.ntpIntervalS = ntpIntervalS;
+  data_.clock.syncIntervalS = static_cast<uint16_t>(syncIntervalS);
+  return true;
+}
+
 void DeviceConfig::setTransportLastKnownChannel(uint8_t channel) {
   data_.transport.lastKnownChannel = channel;
 }
@@ -512,6 +529,17 @@ String DeviceConfig::transportJson() const {
   return out;
 }
 
+String DeviceConfig::clockJson() const {
+  String out = "{\"ntp_server\":\"";
+  out += jsonEscape(data_.clock.ntpServer);
+  out += "\",\"ntp_interval_s\":";
+  out += String(static_cast<unsigned long>(data_.clock.ntpIntervalS));
+  out += ",\"sync_interval_s\":";
+  out += String(static_cast<unsigned int>(data_.clock.syncIntervalS));
+  out += "}";
+  return out;
+}
+
 String DeviceConfig::actionButtonJson() const {
   String out = "{\"short_press\":\"";
   out += jsonEscape(data_.actionButton.shortPress);
@@ -581,6 +609,9 @@ void DeviceConfig::setDefaults() {
   data_.transport.mode = "wifi_udp";
   data_.transport.hubMac = "";
   data_.transport.lastKnownChannel = 0;
+  data_.clock.ntpServer = kDefaultNtpServer;
+  data_.clock.ntpIntervalS = kDefaultNtpIntervalS;
+  data_.clock.syncIntervalS = kDefaultSyncIntervalS;
 }
 
 bool DeviceConfig::applyJson(const String& json) {
@@ -719,6 +750,16 @@ bool DeviceConfig::applyJson(const String& json) {
         extractInt(transport, "last_known_channel", data_.transport.lastKnownChannel));
   }
 
+  const String clock = objectForKey(json, "clock");
+  if (!clock.isEmpty()) {
+    // All-or-nothing, like set_clock_config: an out-of-range stored value
+    // keeps the defaults rather than half-applying.
+    setClockConfig(
+        extractString(clock, "ntp_server", data_.clock.ntpServer),
+        static_cast<uint32_t>(extractInt(clock, "ntp_interval_s", data_.clock.ntpIntervalS)),
+        static_cast<uint32_t>(extractInt(clock, "sync_interval_s", data_.clock.syncIntervalS)));
+  }
+
   return true;
 }
 
@@ -780,6 +821,8 @@ String DeviceConfig::toJson() const {
   out += actionButtonJson();
   out += ",\"transport\":";
   out += transportJson();
+  out += ",\"clock\":";
+  out += clockJson();
   out += "}";
   return out;
 }

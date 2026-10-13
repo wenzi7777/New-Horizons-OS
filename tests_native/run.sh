@@ -110,3 +110,20 @@ CXX="${CXX:-c++}"
   -o "$BUILD_DIR/test_lifetime_policy"
 
 "$BUILD_DIR/test_lifetime_policy"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_clock_core.cpp" \
+  "$FIRMWARE_DIR/ClockCore.cpp" \
+  -o "$BUILD_DIR/test_clock_core"
+
+"$BUILD_DIR/test_clock_core"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_espnow_time_wire.cpp" \
+  "$FIRMWARE_DIR/EspNowTimeWire.cpp" \
+  "$FIRMWARE_DIR/EspNowFrame.cpp" \
+  -o "$BUILD_DIR/test_espnow_time_wire"
+
+"$BUILD_DIR/test_espnow_time_wire"

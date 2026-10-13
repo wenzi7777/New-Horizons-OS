@@ -151,6 +151,52 @@ float evaluateModel(const FitModel& model, float x) {
   return value > 0.0f ? value : 0.0f;
 }
 
+char pointStatusCode(PointStatus status) {
+  switch (status) {
+    case PointStatus::Used: return 'u';
+    case PointStatus::BelowMinLevel: return 'b';
+    case PointStatus::Saturated: return 's';
+    case PointStatus::NoResponse: return 'n';
+    case PointStatus::NotCaptured:
+    default: return '-';
+  }
+}
+
+PointStatus classifyPoint(float level, float minLevel, float tareMv, float relativeMv, float clipMv,
+                          const Readout& readout, float* outX) {
+  if (std::isnan(relativeMv) || std::isnan(tareMv)) {
+    return PointStatus::NotCaptured;
+  }
+  if (level < minLevel) {
+    return PointStatus::BelowMinLevel;
+  }
+  if (tareMv + relativeMv >= clipMv) {
+    return PointStatus::Saturated;
+  }
+  const float x = readoutX(relativeMv, readout);
+  if (std::isnan(x) || x <= 0.0f) {
+    return PointStatus::NoResponse;
+  }
+  if (outX != nullptr) {
+    *outX = x;
+  }
+  return PointStatus::Used;
+}
+
+float evaluateClamped(const FitModel& model, float x, float maxX, float maxPressure) {
+  if (!fitValid(model)) {
+    return 0.0f;
+  }
+  if (std::isnan(maxPressure) || maxPressure <= 0.0f) {
+    return evaluateModel(model, x);
+  }
+  if (!std::isnan(maxX) && !std::isnan(x) && x >= maxX) {
+    return maxPressure;
+  }
+  const float value = evaluateModel(model, x);
+  return value < maxPressure ? value : maxPressure;
+}
+
 uint32_t captureBlockCount(uint32_t durationMs) {
   const uint32_t blocks = (durationMs + kCaptureBlockMs - 1) / kCaptureBlockMs;
   return std::min(kMaxCaptureBlocks, std::max<uint32_t>(1, blocks));

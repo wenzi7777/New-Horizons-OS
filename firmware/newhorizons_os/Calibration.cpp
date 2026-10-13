@@ -161,14 +161,14 @@ String Calibration::statusJson(bool modeActive) const {
   out += ",\"draft_levels\":";
   out += levelsSummaryJson(draftLevels_, "draft");
   out += ",\"fit\":";
-  out += fitSummaryJson(fits_);
+  out += fitSummaryJson(fits_, tare_, levels_, false);
   out += ",\"draft_fit\":";
   if (sessionActive_) {
     // Fitted on demand: it is what Save would produce, so the workbench can
     // show which sensors still need levels before committing.
     FitSet draftFits;
     fitAll(draftTare_, draftLevels_, draftFits);
-    out += fitSummaryJson(draftFits);
+    out += fitSummaryJson(draftFits, draftTare_, draftLevels_, true);
   } else {
     out += "null";
   }
@@ -205,7 +205,9 @@ bool Calibration::sessionCommit(bool autoEnable, String& outError) {
   if (autoEnable) {
     FitSet draftFits;
     fitAll(draftTare_, draftLevels_, draftFits);
-    if (!tareComplete(draftTare_) || draftFits.fitted < totalPointCount()) {
+    // Partial profiles are allowed (see refreshSavedStateCache()); only one
+    // with nothing fitted at all is refused.
+    if (!tareComplete(draftTare_) || draftFits.fitted == 0) {
       outError = "calibration_incomplete";
       return false;
     }
@@ -402,6 +404,11 @@ String Calibration::dumpFitJson() const {
     out += sciFloat(model.b);
     out += ",\"c\":";
     out += sciFloat(model.c);
+    // Top of the calibrated range: the output is held at max_pressure.
+    out += ",\"max_x\":";
+    out += sciFloat(sensorIndex < fits_.maxX.size() ? fits_.maxX[sensorIndex] : NAN);
+    out += ",\"max_pressure\":";
+    out += sciFloat(sensorIndex < fits_.maxPressure.size() ? fits_.maxPressure[sensorIndex] : NAN);
     out += "}";
   }
   out += "]}";
@@ -553,7 +560,11 @@ bool Calibration::apply(float rawMv, uint16_t sensorIndex, float& outValue) cons
       }
       const float x = calibration_curve::readoutX(calibration_curve::applyTare(rawMv, tareValue),
                                                   fitSettings_.readout[adcIndexForSensor(sensorIndex)]);
-      outValue = calibration_curve::evaluateModel(fits_.models[sensorIndex], x);
+      // Held at the top of this sensor's calibrated range rather than
+      // extrapolated; an unfitted sensor (partial profile) reads 0.
+      const float maxX = sensorIndex < fits_.maxX.size() ? fits_.maxX[sensorIndex] : NAN;
+      const float maxPressure = sensorIndex < fits_.maxPressure.size() ? fits_.maxPressure[sensorIndex] : NAN;
+      outValue = calibration_curve::evaluateClamped(fits_.models[sensorIndex], x, maxX, maxPressure);
       return true;
     }
     case calibration_curve::OutputMode::Tared:
@@ -611,6 +622,8 @@ void Calibration::fitAll(const std::vector<float>& tare, const std::vector<Level
   const size_t total = totalPointCount();
   out.models.assign(total, calibration_curve::FitModel());
   out.results.assign(total, FitResult::NoTare);
+  out.maxX.assign(total, NAN);
+  out.maxPressure.assign(total, NAN);
   out.fitted = 0;
   std::vector<float> xs;
   std::vector<float> pressures;
@@ -623,22 +636,24 @@ void Calibration::fitAll(const std::vector<float>& tare, const std::vector<Level
     const size_t adc = adcIndexForSensor(sensorIndex);
     xs.clear();
     pressures.clear();
+    float maxX = NAN;
+    float maxPressure = NAN;
     // The same point selection as make_figures.py: levels from the nominal
-    // minimum up, no clipped reading, and a positive response.
+    // minimum up, no clipped reading, and a positive response. Saturated
+    // levels are simply left out, so a sensor that clips at the top of the
+    // range is still fitted on the levels below it.
     for (const LevelData& item : levels) {
-      if (keyLevel(item.key) < fitSettings_.minLevel || sensorIndex >= item.values.size()) {
-        continue;
-      }
-      const float relative = item.values[sensorIndex];
-      if (std::isnan(relative) || tare[sensorIndex] + relative >= fitSettings_.clipMv[adc]) {
-        continue;
-      }
-      const float x = calibration_curve::readoutX(relative, fitSettings_.readout[adc]);
-      if (std::isnan(x) || x <= 0.0f) {
+      const float relative = sensorIndex < item.values.size() ? item.values[sensorIndex] : NAN;
+      float x = NAN;
+      if (calibration_curve::classifyPoint(keyLevel(item.key), fitSettings_.minLevel, tare[sensorIndex], relative,
+                                           fitSettings_.clipMv[adc], fitSettings_.readout[adc], &x) !=
+          calibration_curve::PointStatus::Used) {
         continue;
       }
       xs.push_back(x);
       pressures.push_back(item.reference);
+      if (std::isnan(maxX) || x > maxX) maxX = x;
+      if (std::isnan(maxPressure) || item.reference > maxPressure) maxPressure = item.reference;
     }
     if (xs.size() < calibration_curve::kMinFitPoints) {
       out.results[sensorIndex] = FitResult::TooFewPoints;
@@ -649,6 +664,8 @@ void Calibration::fitAll(const std::vector<float>& tare, const std::vector<Level
       continue;
     }
     out.results[sensorIndex] = FitResult::Fitted;
+    out.maxX[sensorIndex] = maxX;
+    out.maxPressure[sensorIndex] = maxPressure;
     ++out.fitted;
   }
 }
@@ -663,7 +680,10 @@ size_t Calibration::adcIndexForSensor(size_t sensorIndex) const {
 void Calibration::refreshSavedStateCache() {
   savedTareComplete_ = tareComplete(tare_);
   fitAll(tare_, levels_, fits_);
-  runtimeReady_ = savedTareComplete_ && totalPointCount() > 0 && fits_.fitted == totalPointCount();
+  // Usable once any sensor is fitted: a sensor that cannot be (a broken
+  // trace, a dead cell) reads 0 and is listed in the fit summary, instead of
+  // holding the whole profile hostage.
+  runtimeReady_ = savedTareComplete_ && totalPointCount() > 0 && fits_.fitted > 0;
 }
 
 void Calibration::logEvaluationCost() const {
@@ -1028,7 +1048,8 @@ String Calibration::levelsSummaryJson(const std::vector<LevelData>& levels, cons
   return out;
 }
 
-String Calibration::fitSummaryJson(const FitSet& fits) const {
+String Calibration::fitSummaryJson(const FitSet& fits, const std::vector<float>& tare,
+                                   const std::vector<LevelData>& levels, bool points) const {
   const size_t total = totalPointCount();
   size_t counts[4] = {0, 0, 0, 0};
   String failed = "[";
@@ -1055,6 +1076,8 @@ String Calibration::fitSummaryJson(const FitSet& fits) const {
   out += String(static_cast<unsigned int>(fits.fitted));
   out += ",\"complete\":";
   out += total > 0 && fits.fitted == total ? "true" : "false";
+  // Savable with some sensors unfitted (they read 0); see sessionCommit().
+  out += ",\"partial_save\":true";
   out += ",\"failures\":{\"no_tare\":";
   out += String(static_cast<unsigned int>(counts[static_cast<size_t>(FitResult::NoTare)]));
   out += ",\"too_few_points\":";
@@ -1063,6 +1086,30 @@ String Calibration::fitSummaryJson(const FitSet& fits) const {
   out += String(static_cast<unsigned int>(counts[static_cast<size_t>(FitResult::Singular)]));
   out += "},\"failed\":";
   out += failed;
+  if (points) {
+    // One character per level (in `point_levels` order) per sensor, sensor
+    // after sensor: see calibration_curve::pointStatusCode().
+    out += ",\"point_levels\":[";
+    for (size_t i = 0; i < levels.size(); ++i) {
+      if (i) out += ",";
+      out += floatLabel(keyLevel(levels[i].key));
+    }
+    out += "],\"points\":\"";
+    String codes;
+    codes.reserve(total * levels.size());
+    for (size_t sensorIndex = 0; sensorIndex < total; ++sensorIndex) {
+      const float sensorTare = sensorIndex < tare.size() ? tare[sensorIndex] : NAN;
+      const size_t adc = adcIndexForSensor(sensorIndex);
+      for (const LevelData& item : levels) {
+        const float relative = sensorIndex < item.values.size() ? item.values[sensorIndex] : NAN;
+        codes += calibration_curve::pointStatusCode(calibration_curve::classifyPoint(
+            keyLevel(item.key), fitSettings_.minLevel, sensorTare, relative, fitSettings_.clipMv[adc],
+            fitSettings_.readout[adc], nullptr));
+      }
+    }
+    out += codes;
+    out += "\"";
+  }
   out += "}";
   return out;
 }

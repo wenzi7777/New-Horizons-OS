@@ -31,6 +31,7 @@
 #include "DeviceConfig.h"
 #include "EspNowFrame.h"
 #include "EspNowResultPager.h"
+#include "EspNowTimeWire.h"
 #include "Storage.h"
 
 namespace nhos {
@@ -143,6 +144,13 @@ class EspNowPairing {
   // left null, this device simply never attempts Direct-mode OTA.
   void setArbiter(AirtimeArbiter* arbiter) { arbiter_ = arbiter; }
   void setOtaReceiver(EspNowOtaReceiver* receiver) { otaReceiver_ = receiver; }
+  // TIME_RESP from our Hub (EspNowTimeWire.h). Called on the WiFi task with
+  // the arrival time already stamped, so it must only copy and return.
+  using TimeResponseHandler = void (*)(const uint8_t* data, size_t len, int64_t t4MonoUs, void* ctx);
+  void setTimeResponseHandler(TimeResponseHandler handler, void* ctx) {
+    timeHandler_ = handler;
+    timeHandlerCtx_ = ctx;
+  }
 
  private:
   void buildScanChannelList();
@@ -192,6 +200,8 @@ class EspNowPairing {
   uint32_t lastHelloMs_ = 0;
 
   volatile bool pollPending_ = false;
+  TimeResponseHandler timeHandler_ = nullptr;
+  void* timeHandlerCtx_ = nullptr;
 
   uint8_t controlScratch_[kEspNowMaxFrameBytes];
   EspNowReassembler controlReassembler_;

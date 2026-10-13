@@ -119,25 +119,140 @@ class LoggingTests(unittest.TestCase):
 
 class ClockTests(unittest.TestCase):
     def test_a_garbage_push_cannot_destroy_a_good_clock(self):
-        impl = read("TimeSync.cpp")
+        impl = read("ClockCore.cpp")
 
-        setter = impl[impl.index("bool TimeSync::setEpochMs") : impl.index("String TimeSync::statusJson")]
-        self.assertIn("kTimeSyncValidEpochS", setter)
-        self.assertIn("return false", setter)
+        submit = impl[impl.index("ClockSubmitResult ClockCore::submit") :]
+        # Validity is checked before anything about the clock changes.
+        self.assertLess(submit.index("kClockMinValidEpochUs"), submit.index("baseOffsetUs_ ="))
+        self.assertIn("return ClockSubmitResult::Rejected", submit)
 
-    def test_drift_is_measured_before_the_clock_is_stepped(self):
-        impl = read("TimeSync.cpp")
+    def test_drift_is_measured_before_the_clock_is_adjusted(self):
+        impl = read("ClockCore.cpp")
 
-        setter = impl[impl.index("bool TimeSync::setEpochMs") : impl.index("String TimeSync::statusJson")]
-        self.assertLess(setter.index("lastAdjustMs_ ="), setter.index("settimeofday"))
+        submit = impl[impl.index("ClockSubmitResult ClockCore::submit") :]
+        self.assertLess(submit.index("const int64_t delta"), submit.index("baseOffsetUs_ ="))
+        self.assertIn("lastAdjustUs_ = synced_ ? delta : 0", submit)
 
-    def test_set_time_needs_no_new_espnow_message(self):
+    def test_packets_never_read_the_system_clock(self):
+        sketch = read("newhorizons_os.ino")
+
+        # Stamped from ClockService's slewed timeline at the scan instant;
+        # gettimeofday() would both step and lag by the build time.
+        self.assertIn("deviceClock.epochMsAt(frame.timestampUs)", sketch)
+        self.assertNotIn("gettimeofday", sketch)
+        self.assertNotIn("gettimeofday", read("ClockService.cpp"))
+
+    def test_sntp_feeds_the_clock_instead_of_stepping_it(self):
+        sources = read("ClockSources.cpp")
+
+        hook = sources[sources.index('extern "C" void sntp_sync_time') :]
+        hook = hook[: hook.index("\n}\n")]
+        self.assertNotIn("settimeofday", hook)
+        self.assertIn("sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED)", hook)
+
+    def test_set_time_still_works_on_every_transport(self):
         control = read("ControlServer.cpp")
 
-        # It is an ordinary control command, so it rides whichever transport
-        # already reaches the device.
         self.assertIn('if (cmd == "set_time")', control)
+        self.assertIn('if (cmd == "clock_sync")', control)
+
+    def test_espnow_time_uses_its_own_messages(self):
+        wire = read("EspNowTimeWire.h")
+        pairing = read("EspNowPairing.cpp")
+
+        # A dedicated, measured exchange -- not a relayed command (whose
+        # latency cannot be measured and which pauses the Hub's relay).
+        self.assertIn("kEspNowTimeReqMagic = 0xE8", wire)
+        self.assertIn("kEspNowTimeRespMagic = 0xE9", wire)
         self.assertNotIn("kEspNowFragTypeTime", read("EspNowFrame.h"))
+        # HELLO/PAIRED/POLL stay one byte: old devices match them on len == 1.
+        self.assertIn("len == 1 && data[0] == kEspNowPairedMagic", pairing)
+        self.assertIn("len == 1 && data[0] == kEspNowPollMagic", pairing)
+        # t4 is stamped the moment the reply arrives.
+        handler = pairing[pairing.index("data[0] == kEspNowTimeRespMagic") :]
+        self.assertLess(handler.index("esp_timer_get_time()"), handler.index("timeHandler_("))
+
+    def test_time_requests_go_through_the_arbiter(self):
+        sources = read("ClockSources.cpp")
+
+        self.assertIn("arbiter_->send(AirtimeClass::Pairing", sources)
+        self.assertIn("arbiter_->canClaim(AirtimeClass::Pairing)", sources)
+
+    def test_gateway_time_replies_are_taken_off_the_udp_socket(self):
+        control = read("ControlServer.cpp")
+        sketch = read("newhorizons_os.ino")
+
+        handler = control[control.index("void ControlServer::serviceUdpCommand") :]
+        handler = handler[: handler.index("buf[0] != '{'")]
+        # t4 is stamped before the read, and the reply never reaches the
+        # JSON command parser.
+        self.assertLess(handler.index("esp_timer_get_time()"), handler.index("udp.read("))
+        self.assertIn("kEspNowTimeRespMagic", handler)
+        self.assertIn("onGatewayTimeResponse", handler)
+        self.assertIn("deviceClock.attachGateway(&udpTransport)", sketch)
+
+    def test_gateway_outranks_ntp(self):
+        core = read("ClockCore.cpp")
+
+        priority = core[core.index("uint8_t ClockCore::priority") :]
+        priority = priority[: priority.index("\n}\n")]
+        self.assertLess(priority.index("TimeSource::Gateway: return 4"), priority.index("TimeSource::Sntp"))
+
+    def test_automatic_retries_keep_the_back_off(self):
+        sketch = read("newhorizons_os.ino")
+
+        start = sketch[sketch.index("bool clockStart(void*)") :]
+        self.assertIn("requestSync(false)", start[:300])
+
+    def test_clock_sync_returns_without_waiting(self):
+        control = read("ControlServer.cpp")
+
+        handler = control[control.index('if (cmd == "clock_sync")') : control.index('if (cmd == "set_clock_config")')]
+        self.assertIn("requestSync()", handler)
+        self.assertNotIn("delay(", handler)
+        self.assertNotIn("while", handler)
+
+    def test_clock_config_keys_map_to_set_clock_config(self):
+        registry = read("ConfigRegistry.cpp")
+        control = read("ControlServer.cpp")
+
+        handler = control[control.index('if (cmd == "set_clock_config")') :]
+        for key, argument in (
+            ("clock.ntp_server", "ntp_server"),
+            ("clock.ntp_interval_s", "ntp_interval_s"),
+            ("clock.sync_interval_s", "sync_interval_s"),
+        ):
+            self.assertIn(f'{{"{key}", ', registry)
+            self.assertIn(f'"set_clock_config", "{argument}"', registry)
+            self.assertIn(f'if (path == "{key}")', registry)
+            self.assertIn(f'"{argument}"', handler[:2000])
+
+
+class CalibrationFitReportingTests(unittest.TestCase):
+    def test_one_broken_sensor_no_longer_blocks_the_profile(self):
+        impl = read("Calibration.cpp")
+
+        refresh = impl[impl.index("void Calibration::refreshSavedStateCache") :]
+        self.assertIn("fits_.fitted > 0", refresh[:1200])
+        commit = impl[impl.index("bool Calibration::sessionCommit") :]
+        self.assertIn("draftFits.fitted == 0", commit[:1500])
+        self.assertIn('"calibration_incomplete"', commit[:1500])
+
+    def test_fit_and_status_share_one_point_selection(self):
+        impl = read("Calibration.cpp")
+
+        fit_all = impl[impl.index("void Calibration::fitAll") : impl.index("size_t Calibration::adcIndexForSensor")]
+        summary = impl[impl.index("String Calibration::fitSummaryJson") : impl.index("String Calibration::fitSettingsJson")]
+        self.assertIn("calibration_curve::classifyPoint", fit_all)
+        self.assertIn("calibration_curve::classifyPoint", summary)
+
+    def test_point_statuses_ride_the_draft_only(self):
+        impl = read("Calibration.cpp")
+
+        # Draft: what the workbench marks red from. Saved: counts only, to
+        # keep every status reply small.
+        self.assertIn("fitSummaryJson(draftFits, draftTare_, draftLevels_, true)", impl)
+        self.assertIn("fitSummaryJson(fits_, tare_, levels_, false)", impl)
 
 
 class PowerGovernorTests(unittest.TestCase):

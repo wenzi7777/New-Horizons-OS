@@ -91,6 +91,11 @@ class Calibration {
   struct FitSet {
     std::vector<calibration_curve::FitModel> models;
     std::vector<FitResult> results;
+    // Per sensor, the top of its calibrated range: the largest fit x and the
+    // highest reference pressure among its usable points. apply() holds the
+    // output there instead of extrapolating (evaluateClamped).
+    std::vector<float> maxX;
+    std::vector<float> maxPressure;
     size_t fitted = 0;
   };
 
@@ -113,7 +118,10 @@ class Calibration {
   String tareSummaryJson(const std::vector<float>& tare, const char* source) const;
   String tareLayerJson(const std::vector<float>* tare) const;
   String levelsSummaryJson(const std::vector<LevelData>& levels, const char* source) const;
-  String fitSummaryJson(const FitSet& fits) const;
+  // `points` adds the per-sensor, per-level PointStatus string (draft only:
+  // it is what the workbench marks levels and sensors red from).
+  String fitSummaryJson(const FitSet& fits, const std::vector<float>& tare,
+                        const std::vector<LevelData>& levels, bool points) const;
   String fitSettingsJson() const;
   String metadataJson() const;
   String arrayJson(const uint8_t* values, size_t count) const;
