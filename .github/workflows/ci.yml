@@ -47,7 +47,9 @@ jobs:
         run: |
           arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core install esp32:esp32@3.3.11 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-          arduino-cli lib install "Adafruit GFX Library@1.12.6" "Adafruit SSD1306@2.5.17" "Adafruit NeoPixel@1.15.5" "Adafruit BusIO@1.17.4"
+          # Exactly the user libraries a local build reports using
+          # (arduino-cli compile --json: builder_result.used_libraries).
+          arduino-cli lib install "Adafruit GFX Library@1.12.6" "Adafruit SSD1306@2.5.17" "Adafruit NeoPixel@1.15.5" "Adafruit BusIO@1.17.4" "Arduino_BMI270_BMM150@1.2.3"
       - name: Compile ${{ matrix.board }}
         # The board define goes through compiler.cpp.extra_flags, never
         # build.extra_flags (which holds the core's own defines).
