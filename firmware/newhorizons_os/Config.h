@@ -25,9 +25,7 @@ static constexpr uint16_t kMaxSensors = kRows * kCols;
 // block.  This keeps a seven-float IMU buffer from being mistaken for MAG.
 static constexpr uint8_t kImuSampleFloats = 7;
 
-static constexpr uint16_t kUdpStreamPort = 13250;
-static constexpr uint16_t kDiscoveryPort = 22346;
-static constexpr uint16_t kControlPort = 22345;
+// kUdpStreamPort / kDiscoveryPort / kControlPort: PacketWireConstants.h.
 
 static constexpr size_t kMaxPacketBytes =
     kPacketHeaderLen +

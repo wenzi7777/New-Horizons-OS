@@ -70,7 +70,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
     def test_config_declares_new_protocol_packet_version_and_ports(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
-        packet_wire = (ARDUINO_ROOT / "PacketWire.h").read_text(encoding="utf-8")
+        # Generated from spec/wire.json (firmware/scripts/gen_wire.py).
+        packet_wire = (ARDUINO_ROOT / "PacketWireConstants.h").read_text(encoding="utf-8")
 
         self.assertIn('#include "BoardConfig.h"', config)
         self.assertIn('kProtocolName[] = "NHO/Arduino/1"', config)
@@ -78,9 +79,10 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kPacketVersion = 5", packet_wire)
         self.assertIn("kPacketFlagExtensions = 0x20", packet_wire)
         self.assertIn("kPacketHeaderLen = 24", packet_wire)
-        self.assertIn("kUdpStreamPort = 13250", config)
-        self.assertIn("kDiscoveryPort = 22346", config)
-        self.assertIn("kControlPort = 22345", config)
+        self.assertIn('#include "PacketWireConstants.h"', (ARDUINO_ROOT / "PacketWire.h").read_text(encoding="utf-8"))
+        self.assertIn("kUdpStreamPort = 13250", packet_wire)
+        self.assertIn("kDiscoveryPort = 22346", packet_wire)
+        self.assertIn("kControlPort = 22345", packet_wire)
         self.assertIn("kHardwareModel[] = NHOS_BOARD_NAME", config)
         self.assertIn("kRows = NHOS_BOARD_ROWS", config)
         self.assertIn("kCols = NHOS_BOARD_COLS", config)
@@ -1540,7 +1542,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
     def test_packet_builder_and_imu_manager_support_magnetometer_extension(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
-        packet_wire = (ARDUINO_ROOT / "PacketWire.h").read_text(encoding="utf-8")
+        # Generated from spec/wire.json (firmware/scripts/gen_wire.py).
+        packet_wire = (ARDUINO_ROOT / "PacketWireConstants.h").read_text(encoding="utf-8")
         imu_header = (ARDUINO_ROOT / "ImuManager.h").read_text(encoding="utf-8")
         imu_impl = (ARDUINO_ROOT / "ImuManager.cpp").read_text(encoding="utf-8")
         packet_header = (ARDUINO_ROOT / "PacketBuilder.h").read_text(encoding="utf-8")

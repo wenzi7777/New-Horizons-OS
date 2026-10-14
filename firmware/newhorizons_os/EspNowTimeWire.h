@@ -38,21 +38,11 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "TimeWireConstants.h"
+
 namespace nhos {
 
-// Must not collide with HELLO 0xE1 / POLL 0xE2 / PAIRED 0xE3 / fragment
-// 0xE5 / OTA chunk ack 0xE6 / control ack 0xE7.
-static constexpr uint8_t kEspNowTimeReqMagic = 0xE8;
-static constexpr uint8_t kEspNowTimeRespMagic = 0xE9;
-static constexpr uint8_t kEspNowTimeWireVersion = 1;
-
-// magic(1) version(1) seq(1) flags(1) t1(8)
-static constexpr size_t kEspNowTimeReqLen = 12;
-// magic(1) version(1) seq(1) flags(1) t1(8) t2(8) t3(8) hubUncertaintyMs(2) reserved(2)
-static constexpr size_t kEspNowTimeRespLen = 32;
-
-// TIME_RESP flags: bit0 = Hub clock synced; high nibble = Hub TimeSource.
-static constexpr uint8_t kEspNowTimeFlagHubSynced = 0x01;
+// Magics, lengths and flags: TimeWireConstants.h, generated from spec/wire.json.
 
 struct EspNowTimeRequest {
   uint8_t seq = 0;

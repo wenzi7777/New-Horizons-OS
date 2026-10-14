@@ -211,8 +211,10 @@ class ClockTests(unittest.TestCase):
 
         # A dedicated, measured exchange -- not a relayed command (whose
         # latency cannot be measured and which pauses the Hub's relay).
-        self.assertIn("kEspNowTimeReqMagic = 0xE8", wire)
-        self.assertIn("kEspNowTimeRespMagic = 0xE9", wire)
+        self.assertIn('#include "TimeWireConstants.h"', wire)
+        constants = read("TimeWireConstants.h")
+        self.assertIn("kEspNowTimeReqMagic = 0xE8", constants)
+        self.assertIn("kEspNowTimeRespMagic = 0xE9", constants)
         self.assertNotIn("kEspNowFragTypeTime", read("EspNowFrame.h"))
         # HELLO/PAIRED/POLL stay one byte: old devices match them on len == 1.
         self.assertIn("len == 1 && data[0] == kEspNowPairedMagic", pairing)

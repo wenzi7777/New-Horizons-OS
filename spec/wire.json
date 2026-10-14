@@ -1,0 +1,41 @@
+{
+  "_comment": "NHO/Arduino/1 wire constants: the one place they are written. firmware/scripts/gen_wire.py generates the firmware's and Hub's PacketWireConstants.h / TimeWireConstants.h and the Desktop's and Gateway's wire.py from this file; CI runs it with --check. Integers may be written as hex strings.",
+  "protocol": "NHO/Arduino/1",
+  "ports": {
+    "stream": 13250,
+    "control": 22345,
+    "discovery": 22346
+  },
+  "packet": {
+    "magic": "0xA55A",
+    "version": 5,
+    "header_len": 24,
+    "hmac_len": 16,
+    "imu_floats": 7,
+    "mag_floats": 3,
+    "battery_bytes": 6,
+    "extension_tlv_header_len": 2,
+    "extension_budget": 128,
+    "espnow_data_frame_budget": 3840,
+    "flags": {
+      "imu": "0x01",
+      "battery": "0x02",
+      "mag": "0x04",
+      "raw_adc": "0x08",
+      "epoch_valid": "0x10",
+      "extensions": "0x20",
+      "hmac": "0x40",
+      "heartbeat": "0x80"
+    }
+  },
+  "time": {
+    "req_magic": "0xE8",
+    "resp_magic": "0xE9",
+    "version": 1,
+    "req_len": 12,
+    "resp_len": 32,
+    "flags": {
+      "synced": "0x01"
+    }
+  }
+}
