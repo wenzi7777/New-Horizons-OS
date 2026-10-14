@@ -13,7 +13,13 @@ namespace nhos {
 // hardcoded call list with a table that can be measured, named, and reported.
 //
 // Dispatch is in registration order, so a table registered in the order the
-// old loop() called things behaves identically to it.
+// old loop() called things behaves identically to it -- with one exception,
+// the urgent task (setUrgentTask): whenever any other task returns and the
+// urgent one says it is due, it runs right then rather than at its place in
+// the order. For the scan that bounds start lateness by the longest SINGLE
+// task instead of the sum of everything between the late task and the scan:
+// a 15 ms `status` followed by the 2.5 ms IMU read made scans 6.5 ms late,
+// where the status alone would have been ~2 ms.
 class Scheduler {
  public:
   // Returns false when the runtime is parked (soft-off) and only alwaysRun
@@ -22,6 +28,8 @@ class Scheduler {
   // equivalent `if` in the old loop() did.
   using RuntimeGate = bool (*)();
   using TaskFn = void (*)();
+  // Cheap check, called after every other task: is the urgent task due now.
+  using DueFn = bool (*)();
 
   struct TaskStats {
     uint32_t invocations = 0;
@@ -36,6 +44,10 @@ class Scheduler {
 
   bool registerTask(const char* name, TaskFn fn, bool alwaysRun, uint32_t periodUs = 0);
   bool setEnabled(const char* name, bool enabled);
+  // The task (already registered) that may jump the order. It still obeys
+  // enabled/gate/period like any task, and still runs at its own place too
+  // (where it finds nothing due and returns at once).
+  bool setUrgentTask(const char* name, DueFn due);
 
   // Runs one pass over the table. Call once per loop() iteration.
   void tick();
@@ -53,6 +65,7 @@ class Scheduler {
   // per-task figures below attribute it.
   uint16_t busyPermille() const { return busyPermille_; }
   uint8_t taskCount() const { return count_; }
+  uint32_t urgentRuns() const { return urgentRuns_; }
 
   String statusJson() const;
   // Column-aligned `ps`-style dump for /proc/tasks.
@@ -74,11 +87,16 @@ class Scheduler {
   };
 
   int8_t indexOf(const char* name) const;
+  // Runs task `index` if it is enabled, allowed by the gate and due.
+  bool dispatch(uint8_t index);
   void closeCpuWindowIfDue(uint32_t nowUs);
 
   Task tasks_[kMaxTasks];
   uint8_t count_ = 0;
   RuntimeGate gate_ = nullptr;
+  int8_t urgent_ = -1;
+  DueFn urgentDue_ = nullptr;
+  uint32_t urgentRuns_ = 0;  // times the urgent task jumped the order
   uint32_t ticks_ = 0;
   uint32_t maxTickUs_ = 0;
   uint16_t busyPermille_ = 0;

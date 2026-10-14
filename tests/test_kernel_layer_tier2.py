@@ -1,6 +1,10 @@
 import unittest
 from pathlib import Path
 
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from _control_source import command_names, control_source, flagged, handler_body  # noqa: E402
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIRMWARE_ROOT = REPO_ROOT / "firmware" / "newhorizons_os"
@@ -196,10 +200,10 @@ class ClockTests(unittest.TestCase):
         self.assertIn("sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED)", hook)
 
     def test_set_time_still_works_on_every_transport(self):
-        control = read("ControlServer.cpp")
+        control = control_source()
 
-        self.assertIn('if (cmd == "set_time")', control)
-        self.assertIn('if (cmd == "clock_sync")', control)
+        self.assertIn("set_time", command_names())
+        self.assertIn("clock_sync", command_names())
 
     def test_espnow_time_uses_its_own_messages(self):
         wire = read("EspNowTimeWire.h")
@@ -224,7 +228,7 @@ class ClockTests(unittest.TestCase):
         self.assertIn("arbiter_->canClaim(AirtimeClass::Pairing)", sources)
 
     def test_gateway_time_replies_are_taken_off_the_udp_socket(self):
-        control = read("ControlServer.cpp")
+        control = control_source()
         sketch = read("newhorizons_os.ino")
 
         handler = control[control.index("void ControlServer::serviceUdpCommand") :]
@@ -250,18 +254,18 @@ class ClockTests(unittest.TestCase):
         self.assertIn("requestSync(false)", start[:300])
 
     def test_clock_sync_returns_without_waiting(self):
-        control = read("ControlServer.cpp")
+        control = control_source()
 
-        handler = control[control.index('if (cmd == "clock_sync")') : control.index('if (cmd == "set_clock_config")')]
+        handler = handler_body("clock_sync")
         self.assertIn("requestSync()", handler)
         self.assertNotIn("delay(", handler)
         self.assertNotIn("while", handler)
 
     def test_clock_config_keys_map_to_set_clock_config(self):
         registry = read("ConfigRegistry.cpp")
-        control = read("ControlServer.cpp")
+        control = control_source()
 
-        handler = control[control.index('if (cmd == "set_clock_config")') :]
+        handler = handler_body("set_clock_config")
         for key, argument in (
             ("clock.ntp_server", "ntp_server"),
             ("clock.ntp_interval_s", "ntp_interval_s"),
@@ -319,9 +323,9 @@ class PowerGovernorTests(unittest.TestCase):
 
 class ConfigRegistryTests(unittest.TestCase):
     def test_writes_reuse_the_existing_validated_handlers(self):
-        control = read("ControlServer.cpp")
+        control = control_source()
 
-        setter = control[control.index('if (cmd == "config_set")') : control.index('if (cmd == "capabilities")')]
+        setter = handler_body("config_set")
         self.assertIn("entry->command", setter)
         self.assertIn("return processCommand(synthesized);", setter)
         # Recursion must be provably depth-1.
@@ -329,14 +333,14 @@ class ConfigRegistryTests(unittest.TestCase):
 
     def test_every_entry_names_a_real_command(self):
         registry = read("ConfigRegistry.cpp")
-        control = read("ControlServer.cpp")
+        control = control_source()
 
         import re
 
         commands = set(re.findall(r'ConfigType::\w+, "(\w+)"', registry))
         self.assertGreater(len(commands), 5)
         for command in commands:
-            self.assertIn('cmd == "{}"'.format(command), control, command)
+            self.assertIn(command, command_names(), command)
 
     def test_schema_hash_tracks_shape_not_values(self):
         registry = read("ConfigRegistry.cpp")
@@ -396,17 +400,17 @@ class ConfigSetHardwareRegressionTests(unittest.TestCase):
         scan.target_fps alone would therefore also snap settle_us and
         send_every_n_frames back to defaults.
         """
-        control = read("ControlServer.cpp")
+        control = control_source()
 
-        setter = control[control.index('if (cmd == "config_set")') : control.index('if (cmd == "capabilities")')]
+        setter = handler_body("config_set")
         self.assertIn("ConfigRegistry::entries()", setter)
         self.assertIn("strcmp(sibling.command, entry->command)", setter)
         self.assertIn("ConfigRegistry::readValue(String(sibling.path)", setter)
 
     def test_an_unparseable_value_is_rejected_not_defaulted(self):
-        control = read("ControlServer.cpp")
+        control = control_source()
 
-        setter = control[control.index('if (cmd == "config_set")') : control.index('if (cmd == "capabilities")')]
+        setter = handler_body("config_set")
         self.assertIn("ConfigRegistry::encodeValue(*entry, value, encoded, encodeError)", setter)
         self.assertIn("value_rejected:", setter)
         self.assertLess(setter.index("encodeValue"), setter.index("processCommand(synthesized)"))
@@ -452,12 +456,13 @@ class AppOutputArbitrationTests(unittest.TestCase):
     def test_polled_reads_do_not_flash_the_led(self):
         # A ~660ms received+success flash per poll kept the LED flashing, and
         # a flash outranks an app's colour, so the preview hid what it showed.
-        control = read("ControlServer.cpp")
+        control = control_source()
         rule = control[control.index("bool acknowledgesOnLed") : control.index("}  // namespace")]
-        self.assertIn("return !quiet", rule)
-        # Quiet regardless, for callers from before the flag.
-        self.assertIn('cmd != "app_view"', rule)
-        self.assertIn('cmd != "app_events"', rule)
+        self.assertIn("if (quiet) {\n    return false;", rule)
+        # Quiet regardless, for callers from before the flag: the table's
+        # kCmdQuietLed, set on exactly the two polled reads.
+        self.assertIn("(spec->flags & kCmdQuietLed) == 0", rule)
+        self.assertEqual(flagged("kCmdQuietLed"), {"app_view", "app_events"})
         # All three transports (TCP, UDP, ESP-NOW) read the flag from the
         # command itself, and gate both flashes on it.
         self.assertEqual(control.count('extractBool(request, "quiet", false)'), 2)
@@ -466,8 +471,8 @@ class AppOutputArbitrationTests(unittest.TestCase):
         self.assertEqual(control.count("if (leds_) {\n    leds_->showEvent(LedSignal::CommandReceived);"), 0)
 
     def test_app_view_is_read_only_and_advertised(self):
-        control = read("ControlServer.cpp")
-        handler = control[control.index('if (cmd == "app_view")') : control.index('if (cmd == "app_enable"')]
+        control = control_source()
+        handler = handler_body("app_view")
         self.assertNotIn("maintenance", handler)
         self.assertIn('\\"app_view\\":', control)
         view = control[control.index("String ControlServer::appViewJson") : control.index("String ControlServer::indicatorsStatusJson")]
@@ -879,9 +884,8 @@ class FullStatusOnEveryTransportTests(unittest.TestCase):
                 "magnetometer", "calibration", "findme"]
 
     def handler(self):
-        impl = read("ControlServer.cpp")
-        start = impl.index('if (cmd == "status" || cmd == "query")')
-        return impl, impl[start:impl.index('return ok(cmd, "status", data);', start)]
+        impl = control_source()
+        return impl, handler_body("status")
 
     def test_no_transport_specific_trim(self):
         impl, body = self.handler()
@@ -929,15 +933,15 @@ class RequestLengthClampTests(unittest.TestCase):
     """Caller-chosen sizes are clamped before anything is allocated."""
 
     def test_file_read_chunk_length_is_clamped(self):
-        impl = read("ControlServer.cpp")
-        body = impl[impl.index('if (cmd == "file_read_chunk")'):impl.index('if (cmd == "file_write_begin")')]
+        impl = control_source()
+        body = handler_body("file_read_chunk")
         self.assertIn("kMaxFileReadChunkBytes", body)
         self.assertIn("length < 1 ? 1", body)
         self.assertIn("offset > 0 ? offset : 0", body)
 
     def test_log_tail_rejects_non_positive_counts(self):
-        impl = read("ControlServer.cpp")
-        body = impl[impl.index('if (cmd == "log_tail")'):impl.index('if (cmd == "dmesg")')]
+        impl = control_source()
+        body = handler_body("log_tail")
         self.assertIn("maxLines > 0 ? static_cast<size_t>(maxLines) : 50", body)
 
 
@@ -1089,7 +1093,7 @@ class TwentyFourNodeTests(unittest.TestCase):
         flow = read("FlowApp.cpp")
         body = flow[flow.index("String FlowApp::statusJson(bool withOutputs)"):]
         self.assertLess(body.index("if (!withOutputs)"), body.index('\\"outputs\\":['))
-        control = read("ControlServer.cpp")
+        control = control_source()
         self.assertIn('apps_->statusJson(extractString(request, "outputs"))', control)
 
 
@@ -1169,8 +1173,8 @@ class FlowV16Tests(unittest.TestCase):
         self.assertIn("strcmp(id, packageId_) != 0 || strcmp(version, versionBuf_) != 0", restore)
 
     def test_sensor_sample_is_a_read_only_command(self):
-        control = read("ControlServer.cpp")
-        block = control[control.index('if (cmd == "sensor_sample")') : control.index('if (cmd == "memory_status")')]
+        control = control_source()
+        block = handler_body("sensor_sample")
         for key in ('"imu"', '"mag"', '"battery"', '"valid"'):
             self.assertIn(key.replace('"', '\\"'), block)
         self.assertNotIn("put", block)

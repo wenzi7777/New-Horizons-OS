@@ -1,6 +1,10 @@
 import unittest
 from pathlib import Path
 
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from _control_source import command_names, control_source, flagged, handler_body  # noqa: E402
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIRMWARE_ROOT = REPO_ROOT / "firmware" / "newhorizons_os"
@@ -14,9 +18,8 @@ class RebootWifiSetupTests(unittest.TestCase):
     """`reboot_wifi_setup`: the boot button's setup portal, without the button."""
 
     def test_command_sets_the_flag_then_reboots(self):
-        control = read("ControlServer.cpp")
-        start = control.index('if (cmd == "reboot_wifi_setup")')
-        body = control[start:control.index("\n  }\n", start)]
+        control = control_source()
+        body = handler_body("reboot_wifi_setup")
         self.assertLess(body.index("requestWifiSetupOnNextBoot()"), body.index("requestReboot()"))
         self.assertIn('return ok(cmd, "wifi_setup_reboot_scheduled");', body)
 

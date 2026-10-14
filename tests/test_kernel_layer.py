@@ -1,6 +1,10 @@
 import unittest
 from pathlib import Path
 
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from _control_source import command_names, control_source, flagged, handler_body  # noqa: E402
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIRMWARE_ROOT = REPO_ROOT / "firmware" / "newhorizons_os"
@@ -166,10 +170,10 @@ class FaultRecorderTests(unittest.TestCase):
         self.assertNotIn("ESP_RST_SW:", reasons)
 
     def test_control_server_exposes_crash_commands(self):
-        control = read("ControlServer.cpp")
+        control = control_source()
 
-        self.assertIn('if (cmd == "crash_log")', control)
-        self.assertIn('if (cmd == "crash_clear")', control)
+        self.assertIn("crash_log", command_names())
+        self.assertIn("crash_clear", command_names())
         self.assertIn('jsonRawField(data, "faults"', control)
 
 
@@ -209,6 +213,27 @@ class SchedulerTests(unittest.TestCase):
         tick = impl[impl.index("void Scheduler::tick()") : impl.index("void Scheduler::closeCpuWindowIfDue")]
         self.assertIn("!task.alwaysRun && gate_ != nullptr && !gate_()", tick)
 
+    def test_scan_jumps_the_order_once_due(self):
+        # A late task followed by the IMU read made scans 6.5 ms late; with the
+        # scan urgent, only the late task itself counts.
+        impl = read("Scheduler.cpp")
+        tick = impl[impl.index("void Scheduler::tick()") : impl.index("bool Scheduler::dispatch(")]
+        self.assertIn("i != static_cast<uint8_t>(urgent_) && urgentDue_()", tick)
+        self.assertIn("dispatch(static_cast<uint8_t>(urgent_))", tick)
+        # Out of order or not, it goes through the same enabled/gate/period checks.
+        dispatch = impl[impl.index("bool Scheduler::dispatch(") : impl.index("void Scheduler::closeCpuWindowIfDue")]
+        self.assertIn("!task.alwaysRun && gate_ != nullptr && !gate_()", dispatch)
+        self.assertIn('\\"urgent_runs\\":%lu', impl)
+
+        sketch = read("newhorizons_os.ino")
+        block = sketch[sketch.index("void registerRuntimeTasks()") : sketch.index("}  // namespace")]
+        self.assertIn('scheduler.setUrgentTask("scan_stream", &scanUrgent);', block)
+        # After every registerTask: setUrgentTask looks the name up.
+        self.assertGreater(block.index("setUrgentTask"), block.rindex("registerTask("))
+        urgent = sketch[sketch.index("bool scanUrgent() {"):]
+        urgent = urgent[:urgent.index("\n}\n")]
+        self.assertIn("scanner.scanDue() && streamingGateOk()", urgent)
+
     def test_scheduler_uses_no_freertos_primitives(self):
         impl = read("Scheduler.cpp") + read("Scheduler.h")
 
@@ -218,7 +243,7 @@ class SchedulerTests(unittest.TestCase):
 
 class ProcFsTests(unittest.TestCase):
     def test_proc_adds_no_new_command_surface(self):
-        control = read("ControlServer.cpp")
+        control = control_source()
 
         # It rides file_list / file_read_begin / file_read_chunk.
         self.assertIn("ProcFs::isProcScope(scope)", control)
@@ -226,7 +251,7 @@ class ProcFsTests(unittest.TestCase):
         self.assertIn("proc_->read(path, offset, length, bytes)", control)
 
     def test_proc_scope_rejects_writes_and_deletes(self):
-        control = read("ControlServer.cpp")
+        control = control_source()
 
         self.assertEqual(control.count('return error(cmd, "read_only_scope");'), 2)
 

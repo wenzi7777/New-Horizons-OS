@@ -389,6 +389,13 @@ bool streamingGateOk() {
   return espNowMode || wifi.isConnected();
 }
 
+// Scheduler's urgent check, run after every other task: the scan jumps the
+// task order as soon as it is due (Scheduler.h). scanDue() first, it is the
+// cheaper of the two.
+bool scanUrgent() {
+  return scanner.scanDue() && streamingGateOk();
+}
+
 bool appDisplayLine(uint8_t row, nhos::AppDisplayLine& out) {
   return apps.displayLine(row, out);
 }
@@ -912,6 +919,12 @@ void registerRuntimeTasks() {
   // on entering it.
   scheduler.registerTask("lifetime", &taskLifetime, true, 1000000);
   scheduler.registerTask("soft_off", &taskSoftOff, true);
+
+  // The scan runs as soon as it is due, not after whatever is registered
+  // between the task that overran and it (Scheduler.h). apps still sees each
+  // frame: it takes a handed-over frame at its own place, before the next
+  // scan can be due.
+  scheduler.setUrgentTask("scan_stream", &scanUrgent);
 }
 
 }  // namespace
@@ -1134,6 +1147,9 @@ void setup() {
   procFs.attach(scheduler, faults, scanner, bootMode, powerState, wifi, findme, deviceConfig);
   control.setProcFs(&procFs);
   control.setArbiter(&airtime);
+  // Heavy UDP commands wait for the gap after a scan only while scans will
+  // actually happen (HeavyCommandPacing, ReplyPacing.h).
+  control.setScanGate(&streamingGateOk);
   procFs.setArbiter(&airtime);
   control.setServiceManager(&services);
   procFs.setServiceManager(&services);

@@ -27,6 +27,16 @@ int8_t Scheduler::indexOf(const char* name) const {
   return -1;
 }
 
+bool Scheduler::setUrgentTask(const char* name, DueFn due) {
+  const int8_t index = indexOf(name);
+  if (index < 0 || due == nullptr) {
+    return false;
+  }
+  urgent_ = index;
+  urgentDue_ = due;
+  return true;
+}
+
 bool Scheduler::setEnabled(const char* name, bool enabled) {
   const int8_t index = indexOf(name);
   if (index < 0) {
@@ -39,31 +49,12 @@ bool Scheduler::setEnabled(const char* name, bool enabled) {
 void Scheduler::tick() {
   const uint32_t tickStartUs = micros();
   for (uint8_t i = 0; i < count_; ++i) {
-    Task& task = tasks_[i];
-    if (!task.enabled) {
+    if (!dispatch(i)) {
       continue;
     }
-    // Lazily, not once per tick: the gate depends on state that earlier
-    // tasks in this same pass may have just changed.
-    if (!task.alwaysRun && gate_ != nullptr && !gate_()) {
-      continue;
-    }
-    const uint32_t nowUs = micros();
-    if (task.periodUs != 0 && static_cast<int32_t>(nowUs - task.nextDueUs) < 0) {
-      continue;
-    }
-    task.fn();
-    const uint32_t elapsedUs = micros() - nowUs;
-    if (task.periodUs != 0) {
-      task.nextDueUs = nowUs + task.periodUs;
-    }
-    TaskStats& stats = task.stats;
-    ++stats.invocations;
-    stats.lastUs = elapsedUs;
-    stats.totalUs += elapsedUs;
-    stats.windowUs += elapsedUs;
-    if (elapsedUs > stats.maxUs) {
-      stats.maxUs = elapsedUs;
+    if (urgent_ >= 0 && i != static_cast<uint8_t>(urgent_) && urgentDue_() &&
+        dispatch(static_cast<uint8_t>(urgent_))) {
+      ++urgentRuns_;
     }
   }
 
@@ -74,6 +65,36 @@ void Scheduler::tick() {
   }
   windowBusyUs_ += tickUs;
   closeCpuWindowIfDue(tickStartUs);
+}
+
+bool Scheduler::dispatch(uint8_t index) {
+  Task& task = tasks_[index];
+  if (!task.enabled) {
+    return false;
+  }
+  // Lazily, not once per tick: the gate depends on state that earlier
+  // tasks in this same pass may have just changed.
+  if (!task.alwaysRun && gate_ != nullptr && !gate_()) {
+    return false;
+  }
+  const uint32_t nowUs = micros();
+  if (task.periodUs != 0 && static_cast<int32_t>(nowUs - task.nextDueUs) < 0) {
+    return false;
+  }
+  task.fn();
+  const uint32_t elapsedUs = micros() - nowUs;
+  if (task.periodUs != 0) {
+    task.nextDueUs = nowUs + task.periodUs;
+  }
+  TaskStats& stats = task.stats;
+  ++stats.invocations;
+  stats.lastUs = elapsedUs;
+  stats.totalUs += elapsedUs;
+  stats.windowUs += elapsedUs;
+  if (elapsedUs > stats.maxUs) {
+    stats.maxUs = elapsedUs;
+  }
+  return true;
 }
 
 void Scheduler::closeCpuWindowIfDue(uint32_t nowUs) {
@@ -96,37 +117,28 @@ void Scheduler::closeCpuWindowIfDue(uint32_t nowUs) {
 }
 
 String Scheduler::statusJson() const {
-  String json = "{\"ticks\":";
-  json += String(ticks_);
-  json += ",\"max_tick_us\":";
-  json += String(maxTickUs_);
-  json += ",\"busy_permille\":";
-  json += String(busyPermille_);
-  json += ",\"task_count\":";
-  json += String(count_);
-  json += ",\"tasks\":[";
+  // One snprintf per task into a buffer reserved up front: the String-per-
+  // field version cost ~2.3 ms of every `status`, almost all of it in heap
+  // churn. Task names are fixed identifiers, so they need no escaping.
+  String json;
+  json.reserve(160 + count_ * 150);
+  char buf[192];
+  snprintf(buf, sizeof(buf),
+           "{\"ticks\":%lu,\"max_tick_us\":%lu,\"busy_permille\":%u,\"task_count\":%u,\"urgent_runs\":%lu,\"tasks\":[",
+           static_cast<unsigned long>(ticks_), static_cast<unsigned long>(maxTickUs_),
+           static_cast<unsigned>(busyPermille_), static_cast<unsigned>(count_),
+           static_cast<unsigned long>(urgentRuns_));
+  json += buf;
   for (uint8_t i = 0; i < count_; ++i) {
     const Task& task = tasks_[i];
-    if (i != 0) {
-      json += ",";
-    }
-    json += "{\"name\":\"";
-    json += jsonEscape(String(task.name));
-    json += "\",\"enabled\":";
-    json += task.enabled ? "true" : "false";
-    json += ",\"always_run\":";
-    json += task.alwaysRun ? "true" : "false";
-    json += ",\"period_us\":";
-    json += String(task.periodUs);
-    json += ",\"invocations\":";
-    json += String(task.stats.invocations);
-    json += ",\"last_us\":";
-    json += String(task.stats.lastUs);
-    json += ",\"max_us\":";
-    json += String(task.stats.maxUs);
-    json += ",\"cpu_permille\":";
-    json += String(task.stats.cpuPermille);
-    json += "}";
+    snprintf(buf, sizeof(buf),
+             "%s{\"name\":\"%s\",\"enabled\":%s,\"always_run\":%s,\"period_us\":%lu,\"invocations\":%lu,"
+             "\"last_us\":%lu,\"max_us\":%lu,\"cpu_permille\":%u}",
+             i != 0 ? "," : "", task.name, task.enabled ? "true" : "false", task.alwaysRun ? "true" : "false",
+             static_cast<unsigned long>(task.periodUs), static_cast<unsigned long>(task.stats.invocations),
+             static_cast<unsigned long>(task.stats.lastUs), static_cast<unsigned long>(task.stats.maxUs),
+             static_cast<unsigned>(task.stats.cpuPermille));
+    json += buf;
   }
   json += "]}";
   return json;

@@ -2,6 +2,10 @@ import re
 import unittest
 from pathlib import Path
 
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from _control_source import command_names, control_source, flagged, handler_body  # noqa: E402
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIRMWARE_ROOT = REPO_ROOT / "firmware" / "newhorizons_os"
@@ -15,18 +19,17 @@ class LifetimeStatsTests(unittest.TestCase):
     """Device health counters: the `health` command and /proc/health."""
 
     def test_health_command_is_served_and_advertised(self):
-        control = read("ControlServer.cpp")
+        control = control_source()
 
-        self.assertIn('if (cmd == "health")', control)
+        self.assertIn("health", command_names())
         self.assertIn('return ok(cmd, "health", lifetime_->healthJson());', control)
         self.assertIn('data += ",\\"health\\":";', control)
 
     def test_health_stays_out_of_status(self):
         # The compact (ESP-NOW) status has ~1.9 KB of headroom left; lifetime
         # counters are fetched on their own instead.
-        control = read("ControlServer.cpp")
-        start = control.index('if (cmd == "status" || cmd == "query")')
-        body = control[start:control.index('return ok(cmd, "status", data);', start)]
+        control = control_source()
+        body = handler_body("status")
         self.assertNotIn("lifetime_", body)
         self.assertNotIn('"health"', body)
 
@@ -69,9 +72,9 @@ class LifetimeStatsTests(unittest.TestCase):
         self.assertIn('constexpr char kNamespace[] = "nhos_life";', impl)
 
     def test_counters_have_no_reset_command(self):
-        control = read("ControlServer.cpp")
-        self.assertNotIn('cmd == "health_clear"', control)
-        self.assertNotIn('cmd == "health_reset"', control)
+        control = control_source()
+        self.assertNotIn("health_clear", command_names())
+        self.assertNotIn("health_reset", command_names())
 
     def test_task_is_always_run_at_1hz_before_soft_off(self):
         sketch = read("newhorizons_os.ino")

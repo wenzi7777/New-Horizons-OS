@@ -7,6 +7,10 @@ import re
 import unittest
 from pathlib import Path
 
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from _control_source import command_names, control_source, flagged, handler_body  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ARDUINO_ROOT = REPO_ROOT / "firmware" / "newhorizons_os"
 
@@ -50,14 +54,13 @@ class UpdateChannelTests(unittest.TestCase):
         receiver = read("EspNowOtaReceiver.cpp")
         self.assertNotIn("deviceConfig_->data().ota.manifestUrl", receiver)
         self.assertIn("deviceConfig_->resolvedManifestUrl()", receiver)
-        server = read("ControlServer.cpp")
+        server = control_source()
         self.assertNotIn('extractString(request, "manifest_url"));', server)
         self.assertGreaterEqual(server.count("requestedManifestUrl(request)"), 4)
 
     def test_set_ota_config_accepts_channel(self):
-        server = read("ControlServer.cpp")
-        start = server.index('if (cmd == "set_ota_config")')
-        body = server[start:server.index('if (cmd == "check_update")', start)]
+        server = control_source()
+        body = handler_body("set_ota_config")
         self.assertIn('jsonExtractString(request, "channel", channel);', body)
         self.assertIn('"invalid_update_channel"', body)
         self.assertIn('\\"ota_channels\\":true', server)

@@ -3,6 +3,10 @@ import re
 import unittest
 from pathlib import Path
 
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from _control_source import command_names, control_source, flagged, handler_body  # noqa: E402
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ARDUINO_ROOT = REPO_ROOT / "firmware" / "newhorizons_os"
@@ -138,7 +142,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         header = (ARDUINO_ROOT / "FindMeClient.h").read_text(encoding="utf-8")
         findme = (ARDUINO_ROOT / "FindMeClient.cpp").read_text(encoding="utf-8")
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
 
         self.assertIn("class FindMeClient", header)
         self.assertIn("findme_discover", findme)
@@ -150,8 +154,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("findme.service", sketch)
         self.assertIn("findme.streamHost", sketch)
         self.assertNotIn('host = "255.255.255.255"', sketch)
-        self.assertIn('cmd == "findme_discover"', control)
-        self.assertIn('cmd == "findme_switch_gateway"', control)
+        self.assertIn("findme_discover", command_names())
+        self.assertIn("findme_switch_gateway", command_names())
         self.assertIn('jsonRawField(data, "findme"', control)
         self.assertIn("findme_->statusJson()", control)
 
@@ -192,22 +196,22 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("transfer_remaining_ms", findme)
 
     def test_arduino_file_management_uses_read_write_command_contract(self):
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
 
         for command in (
-            'cmd == "storage_status"',
-            'cmd == "file_read_begin"',
-            'cmd == "file_read_chunk"',
-            'cmd == "file_write_begin"',
-            'cmd == "file_write_chunk"',
-            'cmd == "file_write_finish"',
-            'cmd == "file_delete"',
+            "storage_status",
+            "file_read_begin",
+            "file_read_chunk",
+            "file_write_begin",
+            "file_write_chunk",
+            "file_write_finish",
+            "file_delete",
         ):
-            self.assertIn(command, control)
+            self.assertIn(command, command_names())
         self.assertIn("maintenance_required", control)
 
     def test_manual_calibration_workbench_command_set_exists(self):
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         calibration_header = (ARDUINO_ROOT / "Calibration.h").read_text(encoding="utf-8")
         calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
         scanner_header = (ARDUINO_ROOT / "MatrixScanner.h").read_text(encoding="utf-8")
@@ -215,23 +219,23 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
         for command in (
-            'cmd == "calibration_status"',
-            'cmd == "calibration_enable"',
-            'cmd == "calibration_disable"',
-            'cmd == "calibration_clear_profile"',
-            'cmd == "calibration_dump_tare"',
-            'cmd == "calibration_dump_level"',
-            'cmd == "calibration_delete_level"',
-            'cmd == "calibration_session_begin"',
-            'cmd == "calibration_session_abort"',
-            'cmd == "calibration_session_commit"',
-            'cmd == "calibration_capture_tare"',
-            'cmd == "calibration_capture_cell"',
-            'cmd == "calibration_capture_all"',
-            'cmd == "calibration_tare_capture"',
-            'cmd == "calibration_tare_clear"',
+            "calibration_status",
+            "calibration_enable",
+            "calibration_disable",
+            "calibration_clear_profile",
+            "calibration_dump_tare",
+            "calibration_dump_level",
+            "calibration_delete_level",
+            "calibration_session_begin",
+            "calibration_session_abort",
+            "calibration_session_commit",
+            "calibration_capture_tare",
+            "calibration_capture_cell",
+            "calibration_capture_all",
+            "calibration_tare_capture",
+            "calibration_tare_clear",
         ):
-            self.assertIn(command, control)
+            self.assertIn(command, command_names())
         self.assertIn('jsonRawField(data, "calibration"', control)
         self.assertIn("calibration_ ? calibration_->statusJson", control)
         self.assertIn("bool sessionBegin();", calibration_header)
@@ -390,15 +394,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         )
 
     def test_set_filter_command_accepts_full_filter_config_and_updates_runtime(self):
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
 
-        set_filter_match = re.search(
-            r'if \(cmd == "set_filter"\) \{(?P<body>.*?)\n  \}',
-            control,
-            re.S,
-        )
-        self.assertIsNotNone(set_filter_match)
-        body = set_filter_match.group("body")
+        body = handler_body("set_filter")
 
         self.assertIn('extractBool(request, "enabled", deviceConfig_->data().filter.enabled)', body)
         self.assertIn('extractInt(request, "median", deviceConfig_->data().filter.median)', body)
@@ -464,7 +462,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("applyFilter(", capture_all_match.group("body"))
 
     def test_diagnostics_commands_report_heap_totals_and_storage_usage(self):
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         storage_header = (ARDUINO_ROOT / "Storage.h").read_text(encoding="utf-8")
         storage = (ARDUINO_ROOT / "Storage.cpp").read_text(encoding="utf-8")
 
@@ -568,7 +566,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_serial_boot_log_has_operational_milestones(self):
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
         wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
 
         for marker in (
             "boot_stage=storage_ready",
@@ -588,7 +586,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_sk6812_status_patterns_include_bq25180_background_states(self):
         header = (ARDUINO_ROOT / "LedController.h").read_text(encoding="utf-8")
         led = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         self.assertTrue((ARDUINO_ROOT / "PowerManager.h").exists())
         self.assertTrue((ARDUINO_ROOT / "PowerManager.cpp").exists())
         power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
@@ -658,7 +656,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_bq25180_charge_profiles_include_safe_and_fast_modes(self):
         power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
         power = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
         self.assertIn("enum class ChargeProfile", power_header)
@@ -686,7 +684,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('\\"charge_current_ma\\"', power_status)
         self.assertIn('\\"input_limit_ma\\"', power_status)
         self.assertIn('\\"configured\\"', power_status)
-        self.assertIn('cmd == "set_charge_profile"', control)
+        self.assertIn("set_charge_profile", command_names())
         self.assertIn('storage_->putString("charge_profile"', control)
 
     def test_v21_lts_release_track_uses_4m_flash_and_distinct_manifest_names(self):
@@ -800,7 +798,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
         power_impl = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
         power_status = (ARDUINO_ROOT / "PowerStatusJson.cpp").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
 
         self.assertIn("bool supportsChargeProfiles() const;", power_header)
         self.assertIn("NHOS_BOARD_HAS_BQ25180", power_impl)
@@ -815,7 +813,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
         storage_header = (ARDUINO_ROOT / "Storage.h").read_text(encoding="utf-8")
         storage = (ARDUINO_ROOT / "Storage.cpp").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
         self.assertIn("struct DeviceConfigData", header)
@@ -874,9 +872,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn('const bool configured = storedSchemaVersion >= 2 && extractBool(matrix, "configured", false);', config)
 
     def test_set_matrix_layout_starts_deferred_scanner_without_reboot(self):
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
 
-        self.assertIn('cmd == "set_matrix_layout"', control)
+        self.assertIn("set_matrix_layout", command_names())
         self.assertIn("boot_->mode() == RunMode::Normal", control)
         self.assertIn("scanner_->hasLayout()", control)
         self.assertIn("!scanner_->active()", control)
@@ -886,7 +884,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_arduino_runtime_initializes_bmi270_and_streams_imu_payload(self):
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
         control_header = (ARDUINO_ROOT / "ControlServer.h").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         board_config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
         imu_header = (ARDUINO_ROOT / "ImuManager.h").read_text(encoding="utf-8")
         imu_impl = (ARDUINO_ROOT / "ImuManager.cpp").read_text(encoding="utf-8")
@@ -926,7 +924,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         device_config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
         storage_header = (ARDUINO_ROOT / "Storage.h").read_text(encoding="utf-8")
         storage = (ARDUINO_ROOT / "Storage.cpp").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
         self.assertIn("kDefaultLogMaxBytes = 12 * 1024", config)
@@ -942,7 +940,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("logMaxBytes_", storage)
         self.assertIn("effective_total_bytes", storage)
         self.assertIn("rotateLogIfNeeded", storage)
-        self.assertIn('cmd == "set_log"', control)
+        self.assertIn("set_log", command_names())
         self.assertIn("storage_->configureLog", control)
         self.assertIn('jsonRawField(data, "logging"', control)
         self.assertIn("storage.configureLog", sketch)
@@ -953,7 +951,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         ota_header = (ARDUINO_ROOT / "OtaManager.h").read_text(encoding="utf-8")
         ota = (ARDUINO_ROOT / "OtaManager.cpp").read_text(encoding="utf-8")
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
 
         self.assertIn("struct OtaConfig", device_header)
         self.assertIn("OtaConfig ota", device_header)
@@ -965,7 +963,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("auto_ota_no_update", ota)
         self.assertIn("serviceAutoOta", sketch)
         self.assertIn("deviceConfig.data().ota.autoApplyOnBoot", sketch)
-        self.assertIn('cmd == "set_ota_config"', control)
+        self.assertIn("set_ota_config", command_names())
         self.assertIn("LedSignal::OtaActive", sketch)
         self.assertIn("LedSignal::OtaSuccess", sketch)
         # Automatic update checks must not turn the connectivity LED red for
@@ -1038,7 +1036,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_ssd1306_128x32_driver_has_off_auto_enabled_modes(self):
         header = (ARDUINO_ROOT / "DisplayManager.h").read_text(encoding="utf-8")
         display = (ARDUINO_ROOT / "DisplayManager.cpp").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
         self.assertIn("#include <Adafruit_SSD1306.h>", header)
@@ -1087,7 +1085,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         status_impl = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
         external_header = (ARDUINO_ROOT / "ExternalLedController.h").read_text(encoding="utf-8")
         external = (ARDUINO_ROOT / "ExternalLedController.cpp").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
         self.assertIn("class LedController", status_header)
@@ -1126,7 +1124,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('storage.getString("charge_profile", "slow")', sketch)
 
     def test_control_server_float_parser_reads_numeric_brightness_without_falling_into_next_key(self):
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         start = control.index("float ControlServer::extractFloat")
         end = control.index("bool ControlServer::extractBool", start)
         body = control[start:end]
@@ -1291,7 +1289,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         script = (REPO_ROOT / "firmware" / "scripts" / "generate_arduino_manifest.py").read_text(encoding="utf-8")
         ota_header = (ARDUINO_ROOT / "OtaManager.h").read_text(encoding="utf-8")
         ota_impl = (ARDUINO_ROOT / "OtaManager.cpp").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
 
         self.assertIn("changelog_url", script)
         self.assertIn("String changelogUrl", ota_header)
@@ -1303,7 +1301,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         json_header = ARDUINO_ROOT / "JsonUtils.h"
         json_impl = ARDUINO_ROOT / "JsonUtils.cpp"
         control_header = (ARDUINO_ROOT / "ControlServer.h").read_text(encoding="utf-8")
-        control_impl = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control_impl = control_source()
         ota_impl = (ARDUINO_ROOT / "OtaManager.cpp").read_text(encoding="utf-8")
 
         self.assertTrue(json_header.exists())
@@ -1323,13 +1321,13 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         # static host/port (and the unreachable second set_transport branch
         # that once wrote it) are gone.
         self.assertNotIn("streamHost", control_header)
-        self.assertEqual(control_impl.count('if (cmd == "set_transport")'), 1)
+        self.assertEqual(command_names().count("set_transport"), 1)
         self.assertNotIn('"stream_host"', control_impl)
         transport = (ARDUINO_ROOT / "UdpStreamTransport.cpp").read_text(encoding="utf-8")
         self.assertNotIn("control_", transport)
 
     def test_control_and_ota_json_contract_text_is_parseable(self):
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         ota_impl = (ARDUINO_ROOT / "OtaManager.cpp").read_text(encoding="utf-8")
 
         self.assertIn('jsonRawField(data, "update_state"', control)
@@ -1355,7 +1353,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_stream_buffer_config_and_control_surface_exist(self):
         config_h = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
         config_cpp = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
-        control_cpp = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control_cpp = control_source()
 
         self.assertIn("struct StreamBufferConfig", config_h)
         self.assertIn("bool enabled = true;", config_h)
@@ -1370,7 +1368,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('extractBool(streamBuffer, "enabled"', config_cpp)
         self.assertIn('extractString(streamBuffer, "mode"', config_cpp)
         self.assertIn('\\"stream_buffer\\":{\\"enabled\\":', config_cpp)
-        self.assertIn('cmd == "set_stream_buffer"', control_cpp)
+        self.assertIn("set_stream_buffer", command_names())
         self.assertIn('return error(cmd, "stream_buffer_invalid")', control_cpp)
         self.assertIn('jsonRawField(data, "stream_buffer"', control_cpp)
 
@@ -1461,7 +1459,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         power_impl = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
         power_status = (ARDUINO_ROOT / "PowerStatusJson.cpp").read_text(encoding="utf-8")
         control_header = (ARDUINO_ROOT / "ControlServer.h").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
 
         self.assertIn("bool chargerDetected() const;", power_header)
@@ -1472,7 +1470,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('\\"last_stat0\\":', power_status)
         self.assertIn('\\"supported\\":', power_status)
         self.assertIn("class PowerStateManager", control_header)
-        self.assertIn('cmd == "power_set_state"', control)
+        self.assertIn("power_set_state", command_names())
         self.assertIn('jsonRawField(data, "power"', control)
         self.assertIn("powerState.statusJson()", sketch)
 
@@ -1563,10 +1561,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kPacketMagFloatCount", packet_codec)
 
     def test_manual_battery_profile_rejects_old_boards_before_nvs_write(self):
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
-        command_start = control.index('if (cmd == "set_battery_profile")')
-        command_end = control.index('if (cmd == "set_imu")', command_start)
-        command = control[command_start:command_end]
+        control = control_source()
+        command = handler_body("set_battery_profile")
         first_nvs_write = command.index('storage_->putUInt("bat_cap_mah"')
 
         self.assertIn(
@@ -1577,7 +1573,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
                         first_nvs_write)
 
     def test_root_battery_keeps_distinct_charger_and_battery_profile_fields(self):
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         charger = (ARDUINO_ROOT / "PowerStatusJson.cpp").read_text(encoding="utf-8")
         gauge = (ARDUINO_ROOT / "BatteryGaugeManager.cpp").read_text(encoding="utf-8")
 
@@ -1632,7 +1628,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_v15f_board_led_settings_are_persisted_and_reported(self):
         header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
         config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
-        control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
         leds = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
 
         self.assertIn("BoardLedConfig", header)

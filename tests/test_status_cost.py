@@ -7,6 +7,10 @@ flat filesystem once per category (~0.5 s). Both run on the main loop.
 import unittest
 from pathlib import Path
 
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from _control_source import command_names, control_source, flagged, handler_body  # noqa: E402
+
 ARDUINO_ROOT = Path(__file__).resolve().parents[1] / "firmware" / "newhorizons_os"
 
 
@@ -43,9 +47,8 @@ class StatusCostTests(unittest.TestCase):
 
 class BatteryStatusCommandTests(unittest.TestCase):
     def test_battery_status_returns_only_the_battery_cards_fields(self):
-        server = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
-        start = server.index('if (cmd == "battery_status")')
-        handler = server[start:server.index('if (cmd == "resync_battery_gauge")', start)]
+        server = control_source()
+        handler = handler_body("battery_status")
         for key in ('"battery"', '"battery_gauge"', '"power"'):
             self.assertIn(key, handler)
         self.assertEqual(handler.count("jsonRawField("), 3)

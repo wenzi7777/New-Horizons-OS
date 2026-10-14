@@ -49,4 +49,29 @@ struct ReplyPacing {
   }
 };
 
+// When a HEAVY command (kCmdHeavy: status, storage_status, commands) received over UDP
+// may run. Building a status reply takes ~14 ms of main-loop time; run at a
+// random moment it delays the next scan by up to that much. Its ack has
+// already gone out, so holding it for at most a couple of frames costs the
+// caller nothing but latency.
+//
+//   - no scan coming (scanner stopped, no layout, or the stream gate closed:
+//     maintenance, WiFi down, an ESP-NOW reply pending) -> run now; waiting
+//     for a scan that will not happen would only add the full deferral;
+//   - the next scan is at least kHeadroomUs away -> run now: right after a
+//     scan on a 5x5..5x7 matrix at 60 fps that is ~14 ms;
+//   - otherwise wait, but never more than kMaxDeferUs (high frame rates or
+//     large matrices may never leave that much room).
+struct HeavyCommandPacing {
+  static constexpr uint32_t kHeadroomUs = 13000;
+  static constexpr uint32_t kMaxDeferUs = 40000;
+
+  static bool mayRun(uint32_t nowUs, uint32_t deferredSinceUs, bool scanning, int32_t usUntilScan) {
+    if (!scanning || usUntilScan >= static_cast<int32_t>(kHeadroomUs)) {
+      return true;
+    }
+    return static_cast<uint32_t>(nowUs - deferredSinceUs) >= kMaxDeferUs;
+  }
+};
+
 }  // namespace nhos

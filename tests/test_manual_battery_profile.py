@@ -1,6 +1,10 @@
 import unittest
 from pathlib import Path
 
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from _control_source import command_names, control_source, flagged, handler_body  # noqa: E402
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIRMWARE_ROOT = REPO_ROOT / "firmware" / "newhorizons_os"
@@ -22,7 +26,7 @@ class ManualBatteryProfileTests(unittest.TestCase):
                 self.assertNotIn(banned, source, f"{banned} in {name}")
 
     def test_detect_command_is_gone(self):
-        self.assertNotIn('cmd == "detect_battery_profile"', read("ControlServer.cpp"))
+        self.assertNotIn("detect_battery_profile", command_names())
         self.assertNotIn("detectNow", read("BatteryGaugeManager.h"))
 
     def test_profile_resolves_from_the_manual_setting_only(self):

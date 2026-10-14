@@ -1,6 +1,10 @@
 import unittest
 from pathlib import Path
 
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from _control_source import command_names, control_source, flagged, handler_body  # noqa: E402
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIRMWARE_ROOT = REPO_ROOT / "firmware" / "newhorizons_os"
@@ -25,11 +29,9 @@ class V15fBatterySyncAndCdcTests(unittest.TestCase):
         self.assertIn('diagnostic_ = "max17048_resync_error"', impl)
 
     def test_control_server_exposes_idempotent_resync_command(self):
-        control = (FIRMWARE_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
+        control = control_source()
 
-        command_start = control.index('if (cmd == "resync_battery_gauge")')
-        command_end = control.index('if (cmd == "set_imu")', command_start)
-        command = control[command_start:command_end]
+        command = handler_body("resync_battery_gauge")
         self.assertIn("batteryProfileCommandSupported(NHOS_BOARD_HAS_MAX17048)", command)
         self.assertIn("battery_gauge_resync_started", command)
         self.assertIn("battery_gauge_resync_in_progress", command)

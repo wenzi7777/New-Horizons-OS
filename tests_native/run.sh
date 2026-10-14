@@ -172,3 +172,10 @@ echo "packet fixtures: up to date"
   -o "$BUILD_DIR/test_reply_pacing"
 
 "$BUILD_DIR/test_reply_pacing"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_heavy_pacing.cpp" \
+  -o "$BUILD_DIR/test_heavy_pacing"
+
+"$BUILD_DIR/test_heavy_pacing"

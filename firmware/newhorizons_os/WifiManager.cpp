@@ -146,7 +146,14 @@ String WifiManager::statusJson() const {
 }
 
 void WifiManager::macBytes(uint8_t out[6]) const {
-  esp_read_mac(out, ESP_MAC_WIFI_STA);
+  // An eFuse read, ~0.4 ms, and every status / result / findme asks for it.
+  // The MAC never changes, so read it once.
+  static uint8_t mac[6] = {0};
+  static bool cached = false;
+  if (!cached) {
+    cached = esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK;
+  }
+  memcpy(out, mac, sizeof(mac));
 }
 
 bool WifiManager::connectStored() {
