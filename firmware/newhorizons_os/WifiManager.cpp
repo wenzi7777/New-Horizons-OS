@@ -56,6 +56,7 @@ void WifiManager::service() {
     // stays pre-filled so the user can fix a wrong password or just
     // retry without losing anything).
     Serial.println(F("wifi_reconnect_timeout_falling_back_to_setup_portal"));
+    logWarn("wifi_reconnect_timeout_falling_back_to_setup_portal");
     startSetupAp();
     return;
   }
@@ -110,6 +111,7 @@ bool WifiManager::applyCredentials(const String& ssid, const String& password) {
   bool connected = connectStored();
   if (!connected) {
     Serial.println(F("wifi_sta_connect_failed restarting_setup_ap"));
+    logWarn("wifi_sta_connect_failed restarting_setup_ap");
     startSetupAp();
   } else {
     Serial.print(F("wifi_sta_connected ip="));
@@ -173,6 +175,12 @@ bool WifiManager::connectStored() {
     delay(50);
   }
   return false;
+}
+
+void WifiManager::logWarn(const char* line) {
+  if (storage_ != nullptr) {
+    storage_->logTagged("wifi", String(millis()) + " " + line, LogLevel::Warn);
+  }
 }
 
 void WifiManager::startSetupAp() {

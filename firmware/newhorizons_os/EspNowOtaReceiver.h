@@ -44,6 +44,7 @@
 
 #include "DeviceConfig.h"
 #include "OtaChunkCodec.h"
+#include "Storage.h"
 
 namespace nhos {
 
@@ -134,6 +135,10 @@ class EspNowOtaReceiver {
   // unpaused alongside it.
   bool isRelaying() const { return phase_ == Phase::kRelaying; }
   void setArbiter(AirtimeArbiter* arbiter) { arbiter_ = arbiter; }
+  // Optional. Failures that happen once the image is being written then
+  // also reach the flash log, which is kept at "error" by default -- the
+  // serial line alone is gone by the time anyone asks why an update failed.
+  void setStorage(Storage* storage) { storage_ = storage; }
 
  private:
   enum class Phase : uint8_t {
@@ -154,10 +159,12 @@ class EspNowOtaReceiver {
   void handleRelayStartReply(const String& payload);
   void finishRelay();
   void abortRelay(const char* reason);
+  void logFailure(const char* reason, LogLevel level);
   int compareVersion(const String& remote, const String& local) const;
 
   DeviceConfig* deviceConfig_ = nullptr;
   AirtimeArbiter* arbiter_ = nullptr;
+  Storage* storage_ = nullptr;
   uint8_t hubMac_[6] = {0};
   String manifestUrl_;
 

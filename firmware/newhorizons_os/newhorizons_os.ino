@@ -152,9 +152,12 @@ constexpr uint32_t kAttachSettleMs = 2000;
 bool runtimeServicesSuspended = false;
 bool softOffOutputsSleeping = false;
 
-void logBoot(const String& message) {
+// Info by default: at the default logging level ("error") only lines a
+// caller marks as a failure reach flash. Before the level existed here every
+// line was Info, so a device at the default kept no failure history at all.
+void logBoot(const String& message, nhos::LogLevel level = nhos::LogLevel::Info) {
   Serial.println(message);
-  storage.logLine(String(millis()) + " " + message);
+  storage.logLine(String(millis()) + " " + message, level);
 }
 
 void logPowerEvent(const String& message) {
@@ -170,7 +173,7 @@ void serviceAutoOta(bool wifiConnected) {
   // race the bootloader's revert-on-reset for the running slot. Deferring
   // to the next boot costs nothing -- by then the image is confirmed.
   if (bootMode.otaPendingVerify()) {
-    logBoot("auto_ota_deferred ota_pending_verify=true");
+    logBoot("auto_ota_deferred ota_pending_verify=true", nhos::LogLevel::Warn);
     return;
   }
   // This boot is healthy: it is a confirmed image that got as far as Wi-Fi
@@ -190,7 +193,7 @@ void serviceAutoOta(bool wifiConnected) {
     if (ota.lastPhase() == "current") {
       return;
     }
-    logBoot(String("auto_ota_apply_failed status=") + ota.lastStatusJson());
+    logBoot(String("auto_ota_apply_failed status=") + ota.lastStatusJson(), nhos::LogLevel::Error);
     // Keep OTA failure in serial/status, but do not overwrite the base
     // Gateway/Hub discovery indication with a red burst during every boot.
     // Explicit OTA commands still report their result through ControlServer.
@@ -925,12 +928,15 @@ void setup() {
   Serial.println("New Horizons OS Arduino boot");
 
   storage.begin();
-  logBoot("boot_stage=storage_ready");
   deviceConfig.load(storage);
   storage.configureLog(
       deviceConfig.data().logging.enabled,
       deviceConfig.data().logging.maxBytes,
       deviceConfig.data().logging.level);
+  // Only once the configured level applies: logged before it, this line
+  // reached flash on every boot even at the default "error", until
+  // /logs/device.log held nothing else.
+  logBoot("boot_stage=storage_ready");
   logBoot(String("boot_stage=config_ready ") + deviceConfig.statusJson());
   leds.begin();
   leds.setBrightness(deviceConfig.data().boardLed.brightness);
@@ -939,13 +945,13 @@ void setup() {
   faults.begin();
   logBoot(String("boot_stage=fault_recorder_ready ") + faults.statusJson());
   if (faults.lastBootCrashed()) {
-    logBoot(String("previous_boot_crashed ") + faults.historyJson());
+    logBoot(String("previous_boot_crashed ") + faults.historyJson(), nhos::LogLevel::Error);
   }
   bootMode.begin();
   logBoot(String("boot_stage=boot_mode_ready mode=") + bootMode.modeName() +
           " ota_rollback=" + bootMode.otaRollbackStatusJson());
   if (bootMode.rolledBackFrom().length() > 0) {
-    logBoot(String("ota_rolled_back_from=") + bootMode.rolledBackFrom());
+    logBoot(String("ota_rolled_back_from=") + bootMode.rolledBackFrom(), nhos::LogLevel::Error);
   }
   lifetime.begin(faults, bootMode);
   deviceClock.configure(deviceConfig);
@@ -1076,7 +1082,7 @@ void setup() {
     WiFi.disconnect();
     logBoot("boot_stage=wifi_skipped transport=espnow");
     if (!espNowPairing.begin(storage, deviceConfig, control, uid)) {
-      logBoot("espnow_pairing_begin_failed");
+      logBoot("espnow_pairing_begin_failed", nhos::LogLevel::Error);
     }
     espNowPairing.setArbiter(&airtime);
     espNowPairing.setOtaReceiver(&espNowOtaReceiver);
@@ -1085,6 +1091,7 @@ void setup() {
     deviceClock.setEspNowMode(true);
     deviceClock.attachHub(&espNowPairing, &airtime);
     espNowOtaReceiver.setArbiter(&airtime);
+    espNowOtaReceiver.setStorage(&storage);
     espNowTransport.setArbiter(&airtime);
     airtime.registerClaimant(nhos::AirtimeClass::OtaRelay, &otaRelayNeedsAirtime, nullptr);
     airtime.registerClaimant(nhos::AirtimeClass::CommandResponse, &commandResponseNeedsAirtime, nullptr);
@@ -1169,7 +1176,7 @@ void setup() {
         lifetime.noteOtaConfirmed();
         logBoot("ota_image_confirmed");
       } else {
-        logBoot("ota_image_confirm_failed");
+        logBoot("ota_image_confirm_failed", nhos::LogLevel::Error);
       }
     } else {
       logBoot(String("ota_image_left_pending mode=") + bootMode.modeName() +

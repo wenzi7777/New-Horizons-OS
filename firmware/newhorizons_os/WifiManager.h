@@ -36,6 +36,9 @@ class WifiManager {
   void handlePortalSave();
   void handlePortalRedirect();
   String portalPage(const String& message, bool success) const;
+  // Warn, not Error: a lost AP is routine for a wearable, but the default
+  // "error" flash log keeps neither unless a tag override asks for warn.
+  void logWarn(const char* line);
   String wifiNetworkOptionsHtml() const;
   String htmlEscape(const String& value) const;
 

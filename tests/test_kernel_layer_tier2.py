@@ -116,6 +116,51 @@ class LoggingTests(unittest.TestCase):
 
         self.assertIn('logTagged("sys", line, level)', impl)
 
+    def test_nothing_reaches_flash_before_the_configured_level_applies(self):
+        # storage_ready used to be logged before configureLog(), at Storage's
+        # own default of Info, so a device at "error" wrote that one line on
+        # every boot and nothing else.
+        sketch = read("newhorizons_os.ino")
+        setup = sketch[sketch.index("void setup() {") :]
+        self.assertLess(setup.index("storage.configureLog("), setup.index("logBoot("))
+        self.assertIn("LogLevel logLevel_ = LogLevel::Error;", read("Storage.h"))
+
+    def test_boot_failures_are_logged_at_error(self):
+        # Every logBoot() was Info, so the default "error" flash log could
+        # never hold a crash, a rollback or a failed OTA.
+        sketch = read("newhorizons_os.ino")
+        self.assertIn("void logBoot(const String& message, nhos::LogLevel level", sketch)
+        self.assertIn("storage.logLine(String(millis()) + \" \" + message, level);", sketch)
+        for marker in (
+            '"previous_boot_crashed "',
+            '"ota_rolled_back_from="',
+            '"auto_ota_apply_failed status="',
+            '"espnow_pairing_begin_failed"',
+            '"ota_image_confirm_failed"',
+        ):
+            call = sketch[sketch.index(marker) :]
+            call = call[: call.index(";")]
+            self.assertIn("nhos::LogLevel::Error", call, marker)
+
+    def test_espnow_ota_failures_reach_the_flash_log(self):
+        receiver = read("EspNowOtaReceiver.cpp")
+        for reason in ("update_begin_failed", "update_end_failed", "sha256_mismatch"):
+            self.assertIn('logFailure("{}", LogLevel::Error);'.format(reason), receiver)
+        abort = receiver[receiver.index("void EspNowOtaReceiver::abortRelay") :]
+        abort = abort[: abort.index("\n}\n")]
+        self.assertIn("logFailure(reason, LogLevel::Error);", abort)
+        self.assertIn("espNowOtaReceiver.setStorage(&storage);", read("newhorizons_os.ino"))
+
+    def test_file_list_paths_can_be_read_back(self):
+        # SPIFFS is flat: File::name() reports "x.nha" for /files/apps/x.nha,
+        # and a file_read_* for that bare name failed (the red LED on a
+        # Download of an app package).
+        impl = read("Storage.cpp")
+        listing = impl[impl.index("String Storage::listFiles") : impl.index("String Storage::storageStatusJson")]
+        self.assertIn("file.path()", listing)
+        self.assertIn('const String prefix = dirPath + "/";', listing)
+        self.assertNotIn("file.name()", listing)
+
 
 class ClockTests(unittest.TestCase):
     def test_a_garbage_push_cannot_destroy_a_good_clock(self):

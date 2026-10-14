@@ -33,11 +33,11 @@ class Storage {
   bool writeTextFileAtomic(const String& path, const String& content);
   size_t fileSize(const String& scope, const String& path);
   bool deleteFile(const String& scope, const String& path);
+  // Both report full scope-relative paths ("apps/x.nha"). SPIFFS is flat,
+  // so the directory is part of the filename and File::name() drops it --
+  // which makes a listing useless for anything that has to open the file
+  // again (a file_read_* for "x.nha" missed it).
   String listFiles(const String& scope);
-  // Full scope-relative paths ("apps/x.nha"), not the basenames
-  // listFiles() reports. SPIFFS is flat, so the directory is part of
-  // the filename and File::name() drops it -- which makes a listing
-  // useless for anything that has to open the file again.
   std::vector<String> listFilePaths(const String& scope);
   String storageStatusJson();
 
@@ -112,8 +112,10 @@ class Storage {
   String mountError_;
   bool logEnabled_ = true;
   size_t logMaxBytes_ = kDefaultLogMaxBytes;
-  LogLevel logLevel_ = LogLevel::Info;
-  String logLevelName_ = "info";
+  // DeviceConfig's default, so nothing logged before configureLog() runs
+  // reaches flash on a device that never asked for more than errors.
+  LogLevel logLevel_ = LogLevel::Error;
+  String logLevelName_ = "error";
 };
 
 }  // namespace nhos

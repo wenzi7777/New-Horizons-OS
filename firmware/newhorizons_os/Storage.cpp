@@ -177,14 +177,23 @@ String Storage::listFiles(const String& scope) {
   String out = "[";
   bool first = true;
   if (root && root.isDirectory()) {
+    // The same scope-relative path listFilePaths() gives, not File::name():
+    // SPIFFS is flat, so name() drops the "apps/" of "apps/x.nha", and a
+    // file_read_* / file_delete for the bare "x.nha" missed the file.
+    const String prefix = dirPath + "/";
     File file = root.openNextFile();
     while (file) {
+      const String full(file.path());
+      if (!full.startsWith(prefix) || full.length() <= prefix.length()) {
+        file = root.openNextFile();
+        continue;
+      }
       if (!first) {
         out += ",";
       }
       first = false;
       out += "{\"path\":\"";
-      out += String(file.name());
+      out += jsonEscape(full.substring(prefix.length()));
       out += "\",\"size\":";
       out += String(static_cast<unsigned int>(file.size()));
       out += "}";

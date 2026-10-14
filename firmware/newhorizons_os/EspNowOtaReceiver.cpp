@@ -172,6 +172,7 @@ void EspNowOtaReceiver::service() {
     if (requestAttempts_ >= kHubRequestMaxAttempts) {
       Serial.println(F("[espnow_ota] hub_request_timeout"));
       lastError_ = "hub_request_timeout";
+      logFailure("hub_request_timeout", LogLevel::Warn);
       phase_ = Phase::kFinished;
       return;
     }
@@ -302,6 +303,7 @@ void EspNowOtaReceiver::handleRelayStartReply(const String& payload) {
   if (!Update.begin(pendingSize_)) {
     Serial.println(F("[espnow_ota] update_begin_failed"));
     lastError_ = "update_begin_failed";
+    logFailure("update_begin_failed", LogLevel::Error);
     phase_ = Phase::kFinished;
     return;
   }
@@ -361,12 +363,14 @@ void EspNowOtaReceiver::finishRelay() {
     Update.abort();
     Serial.println(F("[espnow_ota] sha256_mismatch"));
     lastError_ = "sha256_mismatch";
+    logFailure("sha256_mismatch", LogLevel::Error);
     phase_ = Phase::kFinished;
     return;
   }
   if (!Update.end(true) || !Update.isFinished()) {
     Serial.println(F("[espnow_ota] update_end_failed"));
     lastError_ = "update_end_failed";
+    logFailure("update_end_failed", LogLevel::Error);
     phase_ = Phase::kFinished;
     return;
   }
@@ -383,7 +387,15 @@ void EspNowOtaReceiver::abortRelay(const char* reason) {
   Serial.print(F("[espnow_ota] relay_aborted reason="));
   Serial.println(reason);
   lastError_ = reason;
+  logFailure(reason, LogLevel::Error);
   phase_ = Phase::kFinished;
+}
+
+void EspNowOtaReceiver::logFailure(const char* reason, LogLevel level) {
+  if (storage_ == nullptr) return;
+  storage_->logTagged("ota", String(millis()) + " espnow_ota_failed reason=" + reason +
+                                 " version=" + pendingVersion_,
+                      level);
 }
 
 int EspNowOtaReceiver::compareVersion(const String& remote, const String& local) const {
