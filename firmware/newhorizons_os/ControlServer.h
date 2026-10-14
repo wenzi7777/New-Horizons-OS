@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 #include <WiFiServer.h>
-#include <WiFiUDP.h>
+#include <WiFiUdp.h>
 #include <vector>
 
 #include "BootModeManager.h"

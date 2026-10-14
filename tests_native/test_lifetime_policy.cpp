@@ -149,7 +149,9 @@ void testSchemaOneBlobReadsAsAPrefix() {
   LifetimeCounters loaded;
   loaded.espnowHubLosses = 99;  // proves the copy does not reach it
   loaded = LifetimeCounters();
-  std::memcpy(&loaded, &old, schemaOneSize);
+  // void*: the prefix copy is the point (it mirrors the firmware loading a
+  // shorter, older blob), which GCC would otherwise flag as class-memaccess.
+  std::memcpy(static_cast<void*>(&loaded), &old, schemaOneSize);
   assert(loaded.wifiDisconnects == 7);
   assert(std::string(loaded.firstFirmware) == "v1.9.0");
   assert(loaded.espnowHubLosses == 0);
