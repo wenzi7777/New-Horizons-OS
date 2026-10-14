@@ -88,6 +88,21 @@ class UpdateChannelTests(unittest.TestCase):
         self.assertIn("test_update_channel", run)
 
 
+
+
+class DirectModeCheckTests(unittest.TestCase):
+    def test_a_direct_mode_check_reports_the_offered_version_when_current(self):
+        # Over ESP-NOW a "you are on the latest" check used to report an
+        # empty version and URL, unlike OtaManager over WiFi.
+        impl = read("EspNowOtaReceiver.cpp")
+        reply = impl[impl.index("void EspNowOtaReceiver::handleManifestReply"):]
+        reply = reply[:reply.index("\n}\n")]
+        assigned = reply.index("pendingVersion_ = version;")
+        self.assertLess(assigned, reply.index('lastResult_ = "current";'))
+        self.assertLess(reply.index("pendingUrl_ = url;"), reply.index('lastResult_ = "current";'))
+        # Availability alone decides whether a relay starts.
+        self.assertIn("updateAvailable_ = false;", reply[assigned:])
+
+
 if __name__ == "__main__":
     unittest.main()
-

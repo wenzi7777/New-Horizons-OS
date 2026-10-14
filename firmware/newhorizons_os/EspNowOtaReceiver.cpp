@@ -253,6 +253,12 @@ void EspNowOtaReceiver::handleManifestReply(const String& payload) {
     return;
   }
   pendingChangelogUrl_ = jsonExtractString(manifest, "changelog_url", "");
+  // What the manifest offers, reported even when it is not newer -- as
+  // OtaManager does over WiFi. Leaving these empty made a Direct-mode check
+  // look like it found nothing ("current", version "-") rather than "you are
+  // on the latest". Only updateAvailable_ starts a relay.
+  pendingVersion_ = version;
+  pendingUrl_ = url;
   if (compareVersion(version, kFirmwareVersion) <= 0) {
     Serial.println(F("[espnow_ota] auto_ota_no_update"));
     updateAvailable_ = false;
@@ -260,8 +266,6 @@ void EspNowOtaReceiver::handleManifestReply(const String& payload) {
     phase_ = Phase::kFinished;
     return;
   }
-  pendingVersion_ = version;
-  pendingUrl_ = url;
   pendingSha256_ = sha256;
   pendingSize_ = static_cast<size_t>(sizeLong);
   updateAvailable_ = true;
