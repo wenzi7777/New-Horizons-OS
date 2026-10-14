@@ -7,63 +7,14 @@ namespace nhos {
 
 class Storage;
 
-// The operators a flow graph can use.
+// The operators a flow graph can use (FlowOp) and the fields a features sweep
+// produces (FeatureField) are generated from the App Library's opset.mjs into
+// AppContract.h, together with each op's name, input count, cost and kind.
 //
 // Named Flow rather than Rule because that is what it is: a synchronous
 // dataflow graph, evaluated start to finish once per event. It does no pattern
 // matching, holds no facts and draws no inferences, so calling it a rule
 // engine set an expectation nothing here meets.
-enum class FlowOp : uint8_t {
-  Invalid = 0,
-  // --- v1.0.0 ---
-  Total,        // sum of every cell
-  Peak,         // largest cell
-  RegionSum,    // sum over a rectangle
-  ActiveCells,  // count of cells at or above `value`
-  Threshold,    // bool: input >= value, with hysteresis
-  Debounce,     // bool: input held steady for `ms`
-  Emit,         // fires a named event on an edge of a bool
-  // --- v1.1.0: arithmetic ---
-  Const, Add, Sub, Mul, Div, Min, Max, Abs, Clamp,
-  // --- v1.1.0: time series ---
-  Mean, MaxHold, Delta, Integrate, Counter,
-  // --- v1.1.0: richer sweeps ---
-  Features, FeatureGet, ArgMax, RowCentroid, ColCentroid,
-  // --- v1.1.0: output ---
-  Led, EmitValue,
-  // --- v1.1.0: conditionals, for self-degradation ---
-  Select, Gate, BudgetLoad, GraceLeft,
-  // --- v1.4.0: interaction ---
-  Mod,       // a mod b (C fmodf), or 0 when b is 0 -- paging a counter
-  Button,    // bool: true for one frame per short press of the action button
-  OledText,  // shows a label and the input's value on an OLED row
-  OledBar,   // shows a label and the input as a bar over [lo, hi]
-  // --- v1.5.0: the external LED strip ---
-  ExtPixel,  // lights one external pixel in a colour while a bool is true
-  ExtMeter,  // shows the input as a meter along the strip over [lo, hi]
-  // --- v1.6.0: time, logic and counting (no windows, so no 128-frame cap) ---
-  Not,           // bool: the input's negation
-  Duration,      // ms the input has been continuously true, 0 while false
-  Interval,      // ms between the input's last two rising edges
-  PeakSince,     // largest a since b last rose
-  CounterReset,  // counts rises of a; a rise of b zeroes it first
-  Sqrt,          // sqrt, 0 for a negative input
-  Atan2,         // atan2(a, b) in degrees
-  // --- v1.6.0: sweeps over a region (r0..c1, optionally in percent) ---
-  RegionPeak, RegionActive, RegionRowCentroid, RegionColCentroid,
-  // --- v1.6.0: the other sensors ---
-  Imu,     // one ImuField of the delivered sample; holds without one
-  Mag,     // one MagField of the delivered sample; holds without one
-  Battery, // state of charge in percent, -1 without a reading
-  Linked,  // bool: the stream transport has somewhere to send
-  Uptime,  // seconds since boot
-};
-
-// Fields a single Features sweep produces, in wire order.
-enum class FeatureField : uint8_t {
-  TotalForce = 0, Peak, Peak01, PeakIndex, ActiveCells, CentroidRow, CentroidCol, InContact,
-  Count,
-};
 
 // One node of a flow graph. Nodes may only reference nodes declared before
 // them, so the array order IS a valid evaluation order and no cycle can be
@@ -122,21 +73,14 @@ class FlowApp : public App {
   // (heel strike, toe off, step count, LED) did not fit, at ~250us of a
   // 1500us budget. The App Library derives min_os v1.3.0 for graphs over 12.
   static constexpr uint8_t kMaxNodes = 24;
-  // Per-cell cost of a sweep operator, and flat cost of a scalar one.
+  // Each op's cost -- per cell for a sweep, flat otherwise -- is in
+  // AppContract.h's kFlowOps, generated from the App Library's opset.mjs, so
+  // the library's estimate and this one cannot drift apart.
   //
   // MEASURED on v1.5.F (ESP32-S3 @ 240MHz, 14x14): a flat sweep runs about
   // 86ns per cell, a features sweep about 235ns, and region_sum -- which does
   // two-dimensional index arithmetic per cell -- considerably more. The
-  // original 60/120/400 were guesses and under-estimated by 1.4x to 9x, which
-  // made the install-time estimate optimistic exactly where it was relied on.
-  // These values carry roughly 2x margin over the measurements.
-  //
-  // A compatibility contract with the App Library's sdk/lib/opset.mjs: if they
-  // drift, an app passes there and is refused here, and the author cannot see
-  // the other side. sdk/test/firmware-contract.test.mjs pins them together.
-  static constexpr uint32_t kCellOpNsPerCell = 300;
-  static constexpr uint32_t kFeaturesNsPerCell = 500;
-  static constexpr uint32_t kScalarOpNs = 600;
+  // table's 300/500 ns per cell and 600 ns flat carry roughly 2x margin.
   // 128 frames is ~2s at 60Hz -- long enough to average a gait cycle, and
   // the pool is per slot, so every float here is paid for four times over.
   static constexpr uint16_t kMaxWindow = 128;

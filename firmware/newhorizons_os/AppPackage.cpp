@@ -59,20 +59,9 @@ bool AppPackage::osVersionSatisfies(const char* minOs) {
 }
 
 uint16_t AppPackage::capabilityFromName(const String& name) {
-  if (name == "read_matrix") return kAppCapReadMatrix;
-  if (name == "read_imu") return kAppCapReadImu;
-  if (name == "emit_event") return kAppCapEmitEvent;
-  if (name == "drive_led") return kAppCapDriveLed;
-  if (name == "write_file") return kAppCapWriteFile;
-  if (name == "tick") return kAppCapTick;
-  if (name == "button") return kAppCapButton;
-  if (name == "power") return kAppCapPower;
-  if (name == "link") return kAppCapLink;
-  if (name == "budget") return kAppCapBudget;
-  if (name == "display") return kAppCapDisplay;
-  if (name == "drive_ext_led") return kAppCapExtLed;
-  if (name == "read_mag") return kAppCapReadMag;
-  if (name == "persist") return kAppCapPersist;
+  for (const AppCapabilityName& entry : kAppCapabilityNames) {
+    if (name == entry.name) return entry.bit;
+  }
   return 0;
 }
 

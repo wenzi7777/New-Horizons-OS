@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "AppContract.h"  // ImuField, MagField
+
 namespace nhos {
 
 // The arithmetic the v1.6.0 flow ops share with the App Library's
@@ -14,16 +16,6 @@ namespace nhos {
 static constexpr uint8_t kRegionRelRows = 1;
 static constexpr uint8_t kRegionRelCols = 2;
 static constexpr uint8_t kMaxRegionPercent = 100;
-
-// imu(field) / mag(field), in wire order. Mirrored as IMU_FIELDS / MAG_FIELDS.
-enum class ImuField : uint8_t {
-  Ax = 0, Ay, Az, Gx, Gy, Gz, AccMag, GyroMag, Pitch, Roll,
-  Count,
-};
-enum class MagField : uint8_t {
-  Mx = 0, My, Mz, Strength, Heading,
-  Count,
-};
 
 struct FlowSpan {
   uint16_t lo;

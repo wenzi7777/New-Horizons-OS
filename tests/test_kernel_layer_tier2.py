@@ -994,14 +994,14 @@ class ImuReadPathTests(unittest.TestCase):
 
 class CostModelTests(unittest.TestCase):
     def test_the_constants_are_the_measured_ones(self):
-        header = read("FlowApp.h")
         # The originals were guesses and under-estimated the real cost by 1.4x
         # to 9x, which made the install-time estimate optimistic exactly where
-        # an author relies on it.
-        self.assertIn("kCellOpNsPerCell = 300", header)
-        self.assertIn("kFeaturesNsPerCell = 500", header)
-        self.assertIn("kScalarOpNs = 600", header)
-        self.assertIn("MEASURED", header)
+        # an author relies on it. Per op since v1.15.0, in the generated table.
+        contract = read("AppContract.h")
+        self.assertIn('{"total", 0, true, 300, 600,', contract)
+        self.assertIn('{"features", 0, true, 500, 600,', contract)
+        self.assertIn('{"add", 2, false, 300, 600,', contract)
+        self.assertIn("MEASURED", read("FlowApp.h"))
 
 
 class AppRegistryTests(unittest.TestCase):

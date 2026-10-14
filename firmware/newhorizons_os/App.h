@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "AppContract.h"
 #include "AppDisplay.h"
 #include "AppExtLed.h"
 #include "MatrixScanner.h"
@@ -16,31 +17,22 @@ namespace nhos {
 // Permission and subscription are the same bit on purpose: an app that may not
 // read the matrix has no business being woken when a frame arrives, and having
 // two lists that could disagree is a bug waiting to happen.
-enum AppCapability : uint16_t {
-  kAppCapNone = 0,
-  kAppCapReadMatrix = 1 << 0,
-  kAppCapReadImu = 1 << 1,
-  kAppCapEmitEvent = 1 << 2,
-  kAppCapDriveLed = 1 << 3,
-  kAppCapWriteFile = 1 << 4,
-  kAppCapTick = 1 << 5,      // periodic wakeup, independent of scanning
-  kAppCapButton = 1 << 6,    // action button edges
-  kAppCapPower = 1 << 7,     // charge/battery state changes
-  kAppCapLink = 1 << 8,      // gateway/hub connectivity changes
-  // Budget pressure is delivered to every app that asks for it, so an app can
-  // shed work before it is stopped. Ignoring it is a valid choice.
-  kAppCapBudget = 1 << 9,
-  // Rows on the OLED. Shown only while the operator has the OLED on its "app"
-  // page: an installed app never takes the screen over by itself.
-  kAppCapDisplay = 1 << 10,
-  // The external LED strip. Unlike the OLED, a running app that may drive it
-  // takes it over from the configured preset, and hands it back when it stops.
-  kAppCapExtLed = 1 << 11,
-  // Magnetometer samples: a separate sensor (and permission) from the IMU.
-  kAppCapReadMag = 1 << 12,
-  // Keep marked values across reboots, in NVS. Written outside dispatch.
-  kAppCapPersist = 1 << 13,
-};
+// The bits themselves are generated from the App Library's opset.mjs, in
+// AppContract.h:
+//   tick         periodic wakeup, independent of scanning
+//   button       action button edges
+//   power        charge/battery state changes
+//   link         gateway/hub connectivity changes
+//   budget       budget pressure, delivered to every app that asks for it, so
+//                an app can shed work before it is stopped (ignoring it is fine)
+//   display      rows on the OLED, shown only while the operator has the OLED
+//                on its "app" page: an app never takes the screen over itself
+//   drive_ext_led  the external LED strip; unlike the OLED, a running app that
+//                may drive it takes it over from the configured preset, and
+//                hands it back when it stops
+//   read_mag     magnetometer samples, a separate permission from the IMU
+//   persist      keep marked values across reboots, in NVS (written outside
+//                dispatch)
 
 struct AppManifest {
   const char* name = nullptr;

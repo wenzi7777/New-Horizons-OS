@@ -18,6 +18,20 @@ jobs:
       - name: Host-native tests (also checks spec/fixtures/packets.json is current)
         run: bash tests_native/run.sh
 
+  contract:
+    # AppContract.h is generated from the App Library's opset.mjs; fail when
+    # the committed copy is not what the library would generate today.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check out the App Library beside this repo
+        run: git clone --depth 1 https://github.com/wenzi7777/NHOS-App-Library.git ../NHOS-App-Library
+      - name: AppContract.h is current
+        run: node ../NHOS-App-Library/sdk/bin/nhos.mjs gen-contract --check --firmware .
+
   build:
     # Every board must keep compiling: a build that only works for the board
     # someone happened to test is how the wrong -DNHOS_BOARD_* once shipped.

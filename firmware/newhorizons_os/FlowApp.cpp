@@ -45,40 +45,21 @@ void splitObjects(const String& arrayBody, std::vector<String>& out) {
   }
 }
 
-uint8_t featureFieldFromName(const String& name) {
-  if (name == "total_force") return static_cast<uint8_t>(FeatureField::TotalForce);
-  if (name == "peak") return static_cast<uint8_t>(FeatureField::Peak);
-  if (name == "peak01") return static_cast<uint8_t>(FeatureField::Peak01);
-  if (name == "peak_index") return static_cast<uint8_t>(FeatureField::PeakIndex);
-  if (name == "active_cells") return static_cast<uint8_t>(FeatureField::ActiveCells);
-  if (name == "centroid_row") return static_cast<uint8_t>(FeatureField::CentroidRow);
-  if (name == "centroid_col") return static_cast<uint8_t>(FeatureField::CentroidCol);
-  if (name == "in_contact") return static_cast<uint8_t>(FeatureField::InContact);
-  return 0xFF;
-}
-
-// Mirrored by IMU_FIELDS / MAG_FIELDS in the App Library's opset.mjs.
-uint8_t imuFieldFromName(const String& name) {
-  static const char* const kNames[] = {"ax", "ay", "az", "gx", "gy", "gz",
-                                       "acc_mag", "gyro_mag", "pitch", "roll"};
-  for (uint8_t i = 0; i < static_cast<uint8_t>(ImuField::Count); ++i) {
-    if (name == kNames[i]) return i;
+// Index of `name` in one of AppContract.h's name tables, or 0xFF.
+template <size_t N>
+uint8_t indexOfName(const char* const (&names)[N], const String& name) {
+  for (size_t i = 0; i < N; ++i) {
+    if (name == names[i]) return static_cast<uint8_t>(i);
   }
   return 0xFF;
 }
 
-uint8_t magFieldFromName(const String& name) {
-  static const char* const kNames[] = {"mx", "my", "mz", "strength", "heading"};
-  for (uint8_t i = 0; i < static_cast<uint8_t>(MagField::Count); ++i) {
-    if (name == kNames[i]) return i;
-  }
-  return 0xFF;
+const FlowOpInfo& opInfo(FlowOp op) {
+  const uint8_t index = static_cast<uint8_t>(op);
+  return kFlowOps[index < kFlowOpCount ? index : 0];
 }
 
-bool isRegionOp(FlowOp op) {
-  return op == FlowOp::RegionSum || op == FlowOp::RegionPeak || op == FlowOp::RegionActive ||
-         op == FlowOp::RegionRowCentroid || op == FlowOp::RegionColCentroid;
-}
+bool isRegionOp(FlowOp op) { return opInfo(op).region; }
 
 // Persisted counters live in one NVS blob per package, keyed by the id's first
 // 12 characters (NVS keys stop at 15). The blob repeats the whole id and the
@@ -149,131 +130,15 @@ void FlowApp::applyPackageManifest(const char* version, const char* summary,
 }
 
 FlowOp FlowApp::opFromName(const String& name) {
-  if (name == "total") return FlowOp::Total;
-  if (name == "peak") return FlowOp::Peak;
-  if (name == "region_sum") return FlowOp::RegionSum;
-  if (name == "active_cells") return FlowOp::ActiveCells;
-  if (name == "threshold") return FlowOp::Threshold;
-  if (name == "debounce") return FlowOp::Debounce;
-  if (name == "emit") return FlowOp::Emit;
-  if (name == "const") return FlowOp::Const;
-  if (name == "add") return FlowOp::Add;
-  if (name == "sub") return FlowOp::Sub;
-  if (name == "mul") return FlowOp::Mul;
-  if (name == "div") return FlowOp::Div;
-  if (name == "min") return FlowOp::Min;
-  if (name == "max") return FlowOp::Max;
-  if (name == "abs") return FlowOp::Abs;
-  if (name == "clamp") return FlowOp::Clamp;
-  if (name == "mean") return FlowOp::Mean;
-  if (name == "max_hold") return FlowOp::MaxHold;
-  if (name == "delta") return FlowOp::Delta;
-  if (name == "integrate") return FlowOp::Integrate;
-  if (name == "counter") return FlowOp::Counter;
-  if (name == "features") return FlowOp::Features;
-  if (name == "feature_get") return FlowOp::FeatureGet;
-  if (name == "arg_max") return FlowOp::ArgMax;
-  if (name == "row_centroid") return FlowOp::RowCentroid;
-  if (name == "col_centroid") return FlowOp::ColCentroid;
-  if (name == "led") return FlowOp::Led;
-  if (name == "emit_value") return FlowOp::EmitValue;
-  if (name == "select") return FlowOp::Select;
-  if (name == "gate") return FlowOp::Gate;
-  if (name == "budget_load") return FlowOp::BudgetLoad;
-  if (name == "grace_left") return FlowOp::GraceLeft;
-  if (name == "mod") return FlowOp::Mod;
-  if (name == "button") return FlowOp::Button;
-  if (name == "oled_text") return FlowOp::OledText;
-  if (name == "oled_bar") return FlowOp::OledBar;
-  if (name == "ext_pixel") return FlowOp::ExtPixel;
-  if (name == "ext_meter") return FlowOp::ExtMeter;
-  if (name == "not") return FlowOp::Not;
-  if (name == "duration") return FlowOp::Duration;
-  if (name == "interval") return FlowOp::Interval;
-  if (name == "peak_since") return FlowOp::PeakSince;
-  if (name == "counter_reset") return FlowOp::CounterReset;
-  if (name == "sqrt") return FlowOp::Sqrt;
-  if (name == "atan2") return FlowOp::Atan2;
-  if (name == "region_peak") return FlowOp::RegionPeak;
-  if (name == "region_active") return FlowOp::RegionActive;
-  if (name == "region_row_centroid") return FlowOp::RegionRowCentroid;
-  if (name == "region_col_centroid") return FlowOp::RegionColCentroid;
-  if (name == "imu") return FlowOp::Imu;
-  if (name == "mag") return FlowOp::Mag;
-  if (name == "battery") return FlowOp::Battery;
-  if (name == "linked") return FlowOp::Linked;
-  if (name == "uptime") return FlowOp::Uptime;
+  for (uint8_t i = 1; i < kFlowOpCount; ++i) {
+    if (name == kFlowOps[i].name) return static_cast<FlowOp>(i);
+  }
   return FlowOp::Invalid;
 }
 
-const char* FlowApp::opName(FlowOp op) {
-  switch (op) {
-    case FlowOp::Total: return "total";
-    case FlowOp::Peak: return "peak";
-    case FlowOp::RegionSum: return "region_sum";
-    case FlowOp::ActiveCells: return "active_cells";
-    case FlowOp::Threshold: return "threshold";
-    case FlowOp::Debounce: return "debounce";
-    case FlowOp::Emit: return "emit";
-    case FlowOp::Const: return "const";
-    case FlowOp::Add: return "add";
-    case FlowOp::Sub: return "sub";
-    case FlowOp::Mul: return "mul";
-    case FlowOp::Div: return "div";
-    case FlowOp::Min: return "min";
-    case FlowOp::Max: return "max";
-    case FlowOp::Abs: return "abs";
-    case FlowOp::Clamp: return "clamp";
-    case FlowOp::Mean: return "mean";
-    case FlowOp::MaxHold: return "max_hold";
-    case FlowOp::Delta: return "delta";
-    case FlowOp::Integrate: return "integrate";
-    case FlowOp::Counter: return "counter";
-    case FlowOp::Features: return "features";
-    case FlowOp::FeatureGet: return "feature_get";
-    case FlowOp::ArgMax: return "arg_max";
-    case FlowOp::RowCentroid: return "row_centroid";
-    case FlowOp::ColCentroid: return "col_centroid";
-    case FlowOp::Led: return "led";
-    case FlowOp::EmitValue: return "emit_value";
-    case FlowOp::Select: return "select";
-    case FlowOp::Gate: return "gate";
-    case FlowOp::BudgetLoad: return "budget_load";
-    case FlowOp::GraceLeft: return "grace_left";
-    case FlowOp::Mod: return "mod";
-    case FlowOp::Button: return "button";
-    case FlowOp::OledText: return "oled_text";
-    case FlowOp::OledBar: return "oled_bar";
-    case FlowOp::ExtPixel: return "ext_pixel";
-    case FlowOp::ExtMeter: return "ext_meter";
-    case FlowOp::Not: return "not";
-    case FlowOp::Duration: return "duration";
-    case FlowOp::Interval: return "interval";
-    case FlowOp::PeakSince: return "peak_since";
-    case FlowOp::CounterReset: return "counter_reset";
-    case FlowOp::Sqrt: return "sqrt";
-    case FlowOp::Atan2: return "atan2";
-    case FlowOp::RegionPeak: return "region_peak";
-    case FlowOp::RegionActive: return "region_active";
-    case FlowOp::RegionRowCentroid: return "region_row_centroid";
-    case FlowOp::RegionColCentroid: return "region_col_centroid";
-    case FlowOp::Imu: return "imu";
-    case FlowOp::Mag: return "mag";
-    case FlowOp::Battery: return "battery";
-    case FlowOp::Linked: return "linked";
-    case FlowOp::Uptime: return "uptime";
-    case FlowOp::Invalid:
-    default: return "invalid";
-  }
-}
+const char* FlowApp::opName(FlowOp op) { return opInfo(op).name; }
 
-bool FlowApp::isSweepOp(FlowOp op) {
-  return op == FlowOp::Total || op == FlowOp::Peak || op == FlowOp::RegionSum ||
-         op == FlowOp::ActiveCells || op == FlowOp::Features || op == FlowOp::ArgMax ||
-         op == FlowOp::RowCentroid || op == FlowOp::ColCentroid ||
-         op == FlowOp::RegionPeak || op == FlowOp::RegionActive ||
-         op == FlowOp::RegionRowCentroid || op == FlowOp::RegionColCentroid;
-}
+bool FlowApp::isSweepOp(FlowOp op) { return opInfo(op).sweep; }
 
 namespace {
 
@@ -295,13 +160,8 @@ uint32_t FlowApp::estimateNodesUs(const FlowNode* nodes, uint8_t count, uint16_t
   for (uint8_t i = 0; i < count; ++i) {
     // Gate is charged as if it never skips: costing the average would
     // understate the bound on exactly the frames that matter.
-    if (nodes[i].op == FlowOp::Features) {
-      totalNs += static_cast<uint64_t>(cellCount) * kFeaturesNsPerCell;
-    } else if (isSweepOp(nodes[i].op)) {
-      totalNs += static_cast<uint64_t>(cellCount) * kCellOpNsPerCell;
-    } else {
-      totalNs += kScalarOpNs;
-    }
+    const FlowOpInfo& info = opInfo(nodes[i].op);
+    totalNs += info.sweep ? static_cast<uint64_t>(cellCount) * info.nsPerCell : info.nsFlat;
   }
   return static_cast<uint32_t>((totalNs + 999) / 1000);
 }
@@ -404,20 +264,20 @@ bool FlowApp::parseNodes(const String& json, FlowNode* scratch, uint8_t& count,
     if (rgb.length() > 0) {
       // A symbolic colour keeps the package readable; the palette is tiny on
       // purpose, since an app driving arbitrary colour is not a use case yet.
-      if (rgb == "red") { node.rgb[0] = 255; }
-      else if (rgb == "green") { node.rgb[1] = 255; }
-      else if (rgb == "blue") { node.rgb[2] = 255; }
-      else if (rgb == "white") { node.rgb[0] = node.rgb[1] = node.rgb[2] = 255; }
-      else if (rgb == "off") { }
-      else {
+      const FlowColour* colour = nullptr;
+      for (const FlowColour& candidate : kFlowColours) {
+        if (rgb == candidate.name) colour = &candidate;
+      }
+      if (colour == nullptr) {
         error = String("unknown_colour:") + rgb;
         return false;
       }
+      memcpy(node.rgb, colour->rgb, sizeof(node.rgb));
     }
 
     if (node.op == FlowOp::FeatureGet) {
       const String fieldName = jsonExtractString(object, "field", "");
-      node.field = featureFieldFromName(fieldName);
+      node.field = indexOfName(kFeatureFieldNames, fieldName);
       if (node.field == 0xFF) {
         error = String("unknown_feature_field:") + fieldName;
         return false;
@@ -430,7 +290,8 @@ bool FlowApp::parseNodes(const String& json, FlowNode* scratch, uint8_t& count,
 
     if (node.op == FlowOp::Imu || node.op == FlowOp::Mag) {
       const String fieldName = jsonExtractString(object, "field", "");
-      node.field = node.op == FlowOp::Imu ? imuFieldFromName(fieldName) : magFieldFromName(fieldName);
+      node.field = node.op == FlowOp::Imu ? indexOfName(kImuFieldNames, fieldName)
+                                         : indexOfName(kMagFieldNames, fieldName);
       if (node.field == 0xFF) {
         error = String(node.op == FlowOp::Imu ? "unknown_imu_field:" : "unknown_mag_field:") + fieldName;
         return false;
@@ -520,7 +381,7 @@ bool FlowApp::parseNodes(const String& json, FlowNode* scratch, uint8_t& count,
 
     // Ring buffers are reserved here, at load time, from a fixed pool. There
     // is no runtime allocation anywhere in this engine.
-    if (node.op == FlowOp::Mean || node.op == FlowOp::MaxHold || node.op == FlowOp::Integrate) {
+    if (opInfo(node.op).windowed) {
       if (!jsonExtractInt(object, "window", integer) || integer <= 0 || integer > kMaxWindow) {
         error = "invalid_window";
         return false;
@@ -536,25 +397,7 @@ bool FlowApp::parseNodes(const String& json, FlowNode* scratch, uint8_t& count,
     }
 
     // Operators that consume a value must actually have one.
-    uint8_t needed = 0;
-    switch (node.op) {
-      case FlowOp::Threshold: case FlowOp::Debounce: case FlowOp::Emit:
-      case FlowOp::Abs: case FlowOp::Clamp: case FlowOp::Mean: case FlowOp::MaxHold:
-      case FlowOp::Delta: case FlowOp::Integrate: case FlowOp::Counter:
-      case FlowOp::FeatureGet: case FlowOp::Led: case FlowOp::OledText: case FlowOp::OledBar:
-      case FlowOp::ExtPixel: case FlowOp::ExtMeter:
-      case FlowOp::Not: case FlowOp::Duration: case FlowOp::Interval: case FlowOp::Sqrt:
-        needed = 1; break;
-      case FlowOp::Add: case FlowOp::Sub: case FlowOp::Mul: case FlowOp::Div:
-      case FlowOp::Min: case FlowOp::Max: case FlowOp::EmitValue: case FlowOp::Gate:
-      case FlowOp::Mod:
-      case FlowOp::PeakSince: case FlowOp::CounterReset: case FlowOp::Atan2:
-        needed = 2; break;
-      case FlowOp::Select:
-        needed = 3; break;
-      default:
-        needed = 0; break;
-    }
+    const uint8_t needed = opInfo(node.op).inputs;
     if ((needed >= 1 && node.input < 0) || (needed >= 2 && node.input2 < 0) ||
         (needed >= 3 && node.input3 < 0)) {
       error = String("missing_input:") + opName(node.op);
