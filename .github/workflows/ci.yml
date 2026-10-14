@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Source-level tests
+        run: python -m unittest discover -s tests -q
+      - name: Host-native tests (also checks spec/fixtures/packets.json is current)
+        run: bash tests_native/run.sh
+
+  build:
+    # Every board must keep compiling: a build that only works for the board
+    # someone happened to test is how the wrong -DNHOS_BOARD_* once shipped.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - board: V10F
+            fqbn: esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB
+          - board: V15F
+            fqbn: esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc,CDCOnBoot=cdc
+          - board: GCU_V21_LTS
+            fqbn: esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs
+          - board: GCU_V22C_LTS
+            fqbn: esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs
+          - board: GCU_V23D_LTS
+            fqbn: esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino15-esp32-3.3.11-${{ runner.os }}
+      - name: Install core and libraries
+        run: |
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.11 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli lib install "Adafruit GFX Library@1.12.6" "Adafruit SSD1306@2.5.17" "Adafruit NeoPixel@1.15.5" "Adafruit BusIO@1.17.4"
+      - name: Compile ${{ matrix.board }}
+        # The board define goes through compiler.cpp.extra_flags, never
+        # build.extra_flags (which holds the core's own defines).
+        run: |
+          arduino-cli compile --fqbn "${{ matrix.fqbn }}" \
+            --build-path "${{ runner.temp }}/build" \
+            --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_${{ matrix.board }}" \
+            firmware/newhorizons_os

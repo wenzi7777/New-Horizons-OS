@@ -4,6 +4,7 @@
 
 #include "Config.h"
 #include "Storage.h"
+#include "UpdateChannel.h"
 
 namespace nhos {
 
@@ -78,7 +79,11 @@ struct LogConfig {
 
 struct OtaConfig {
   bool autoApplyOnBoot = true;
-  String manifestUrl = kDefaultUpdateManifestUrl;
+  // "stable" or "beta" (UpdateChannel.h). Every board starts on stable.
+  String channel = kUpdateChannelStable;
+  // An operator's custom manifest, which overrides the channel. Empty means
+  // "follow the channel" -- the normal case; see resolvedManifestUrl().
+  String manifestUrl;
 };
 
 // New Horizons Direct: which transport StreamTransport should use.
@@ -137,7 +142,14 @@ class DeviceConfig {
   bool setImuEnabled(bool enabled);
   bool setStreamRawAdc(bool enabled);
   bool setLogging(bool enabled, const String& level, const String& mode, size_t maxBytes);
-  bool setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl);
+  // `channel` must be a valid update channel. A `manifestUrl` equal to the
+  // board's stable manifest is stored as empty (follow the channel): that is
+  // what every device had saved before channels existed, and keeping it
+  // literally would pin those devices to stable even after a switch to beta.
+  bool setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl, const String& channel);
+  // The manifest the device actually checks: the custom URL when one is
+  // set, otherwise the board's manifest for its channel.
+  String resolvedManifestUrl() const;
   bool setBoardLedBrightness(float brightness);
   bool setBatteryLedLowBatteryThreshold(uint8_t lowBatteryThresholdPercent);
   bool setActionButtonActions(const String& shortPress, const String& longPress);

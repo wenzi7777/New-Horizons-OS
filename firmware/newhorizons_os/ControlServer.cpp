@@ -3,6 +3,7 @@
 #include "EspNowOtaReceiver.h"
 
 #include <esp_timer.h>
+#include <utility>
 #include <vector>
 
 #include "Config.h"
@@ -11,6 +12,9 @@
 #include "EspNowPairing.h"  // kEspNowPairingFailFlagKey, so this stays in sync with EspNowPairing.cpp's own check
 #include "EspNowTimeWire.h"
 #include "JsonUtils.h"
+#include "ReplyPacing.h"
+#include "UpdateChannel.h"
+#include "VersionCompare.h"
 
 namespace nhos {
 
@@ -64,8 +68,6 @@ void ControlServer::begin(
   calibration_ = &calibration;
   display_ = &display;
   externalLeds_ = &externalLeds;
-  streamHost_ = storage.getString("stream_host", "");
-  streamPort_ = static_cast<uint16_t>(storage.getUInt("stream_port", kUdpStreamPort));
   server_.begin();
   server_.setNoDelay(true);
   started_ = true;
@@ -129,6 +131,10 @@ void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
   if (!started_) {
     return;
   }
+  // Pace out any queued large result first. Incoming packets are still read
+  // every tick below: the Gateway's TIME_RESP shares this socket, and a
+  // command arriving meanwhile is processed (its result queued) at once.
+  serviceUdpReplies(udp);
   const int pktSize = udp.parsePacket();
   if (pktSize <= 0) {
     return;
@@ -271,11 +277,15 @@ String ControlServer::serviceEspNowCommand(const uint8_t* data, size_t len) {
 // datagram and get lost to IP fragmentation over WiFi/Docker bridges. Split
 // any oversized response into application-level chunks that each fit inside one
 // datagram; the gateway reassembles them by request_id before forwarding.
+namespace {
+// Threshold and chunk size leave headroom for JSON-string escaping and the
+// envelope so every datagram stays under the ~1472-byte UDP payload limit.
+constexpr size_t kUdpInlineLimit = 1200;
+constexpr size_t kUdpChunkRaw = 700;
+}  // namespace
+
 void ControlServer::sendUdpResult(WiFiUDP& udp, const String& host, uint16_t port, const String& uid, const String& requestId, const String& response) {
-  // Threshold and chunk size leave headroom for JSON-string escaping and the
-  // envelope so every datagram stays under the ~1472-byte UDP payload limit.
-  constexpr size_t kInlineLimit = 1200;
-  if (response.length() <= kInlineLimit) {
+  if (response.length() <= kUdpInlineLimit) {
     String result;
     result.reserve(response.length() + 120);
     bool rf = true;
@@ -291,44 +301,78 @@ void ControlServer::sendUdpResult(WiFiUDP& udp, const String& host, uint16_t por
     return;
   }
 
-  constexpr size_t kChunkRaw = 700;
-  const size_t total = (response.length() + kChunkRaw - 1) / kChunkRaw;
-  for (size_t i = 0; i < total; i++) {
-    const size_t start = i * kChunkRaw;
-    size_t end = start + kChunkRaw;
-    if (end > static_cast<size_t>(response.length())) {
-      end = static_cast<size_t>(response.length());
+  PendingUdpReply reply;
+  reply.host = host;
+  reply.port = port;
+  reply.uid = uid;
+  reply.requestId = requestId;
+  reply.response = response;
+  reply.totalChunks = (response.length() + kUdpChunkRaw - 1) / kUdpChunkRaw;
+  if (udpReplyCount_ < kMaxPendingUdpReplies) {
+    if (udpReplyCount_ == 0) {
+      udpChunkReadyUs_ = micros();
     }
-    const String fragment = response.substring(start, end);
-    String chunk;
-    chunk.reserve(fragment.length() * 2 + 140);
-    bool cf = true;
-    chunk += '{';
-    jsonStringField(chunk, "type", "result_chunk", cf);
-    jsonStringField(chunk, "device_uid", uid, cf);
-    jsonStringField(chunk, "request_id", requestId, cf);
-    jsonUnsignedField(chunk, "chunk", static_cast<unsigned long>(i), cf);
-    jsonUnsignedField(chunk, "chunks", static_cast<unsigned long>(total), cf);
-    jsonStringField(chunk, "data", fragment, cf);
-    chunk += '}';
-    udp.beginPacket(host.c_str(), port);
-    udp.print(chunk);
-    udp.endPacket();
+    udpReplies_[udpReplyCount_++] = std::move(reply);  // no second 18 KB copy
+    return;
+  }
+  // Queue full: the old blocking send, so nothing is ever dropped.
+  Serial.println(F("udp_reply_queue_full sending_blocking"));
+  for (size_t i = 0; i < reply.totalChunks; i++) {
+    sendUdpChunk(udp, reply, i);
     // Small gap so the ESP32 WiFi stack does not drop back-to-back datagrams.
     delay(3);
   }
 }
 
+void ControlServer::serviceUdpReplies(WiFiUDP& udp) {
+  if (udpReplyCount_ == 0) {
+    return;
+  }
+  const uint32_t nowUs = micros();
+  const bool scanning = scanner_ != nullptr && scanner_->active() && scanner_->hasLayout();
+  const int32_t usUntilScan =
+      scanning ? static_cast<int32_t>(scanner_->nextScanDueUs() - nowUs) : 0;
+  if (!ReplyPacing::maySend(nowUs, udpChunkReadyUs_, scanning, usUntilScan)) {
+    return;
+  }
+  PendingUdpReply& reply = udpReplies_[0];
+  sendUdpChunk(udp, reply, reply.nextChunk++);
+  udpChunkReadyUs_ = micros() + ReplyPacing::kChunkGapUs;
+  if (reply.nextChunk < reply.totalChunks) {
+    return;
+  }
+  for (uint8_t i = 1; i < udpReplyCount_; ++i) {
+    udpReplies_[i - 1] = std::move(udpReplies_[i]);
+  }
+  --udpReplyCount_;
+  udpReplies_[udpReplyCount_] = PendingUdpReply{};  // release the strings
+}
+
+void ControlServer::sendUdpChunk(WiFiUDP& udp, const PendingUdpReply& reply, size_t index) {
+  const size_t start = index * kUdpChunkRaw;
+  size_t end = start + kUdpChunkRaw;
+  if (end > static_cast<size_t>(reply.response.length())) {
+    end = static_cast<size_t>(reply.response.length());
+  }
+  const String fragment = reply.response.substring(start, end);
+  String chunk;
+  chunk.reserve(fragment.length() * 2 + 140);
+  bool cf = true;
+  chunk += '{';
+  jsonStringField(chunk, "type", "result_chunk", cf);
+  jsonStringField(chunk, "device_uid", reply.uid, cf);
+  jsonStringField(chunk, "request_id", reply.requestId, cf);
+  jsonUnsignedField(chunk, "chunk", static_cast<unsigned long>(index), cf);
+  jsonUnsignedField(chunk, "chunks", static_cast<unsigned long>(reply.totalChunks), cf);
+  jsonStringField(chunk, "data", fragment, cf);
+  chunk += '}';
+  udp.beginPacket(reply.host.c_str(), reply.port);
+  udp.print(chunk);
+  udp.endPacket();
+}
+
 bool ControlServer::maintenanceMode() const {
   return boot_ && boot_->mode() != RunMode::Normal;
-}
-
-const String& ControlServer::streamHost() const {
-  return streamHost_;
-}
-
-uint16_t ControlServer::streamPort() const {
-  return streamPort_;
 }
 
 void ControlServer::servicePendingApplyUpdate() {
@@ -399,6 +443,7 @@ String ControlServer::processCommand(const String& request) {
     jsonStringField(data, "protocol", kProtocolName, first);
     jsonStringField(data, "mode", boot_->modeName(), first);
     jsonStringField(data, "firmware_version", kFirmwareVersion, first);
+    jsonBoolField(data, "firmware_prerelease", isPrereleaseVersion(kFirmwareVersion), first);
     jsonStringField(data, "hardware_model", kHardwareModel, first);
     jsonRawField(data, "matrix_shape", scanner_->matrixShapeJson(), first);
     jsonRawField(data, "matrix_layout", scanner_->matrixLayoutJson(), first);
@@ -834,6 +879,7 @@ String ControlServer::processCommand(const String& request) {
     data += NHOS_BOARD_HAS_OLED ? "true" : "false";
     data += ",\"gpio_wake\":";
     data += NHOS_BOARD_SUPPORTS_GPIO_WAKE ? "true" : "false";
+    data += ",\"ota_channels\":true";
     data += "},\"subsystems\":{\"scheduler\":";
     data += scheduler_ != nullptr ? "true" : "false";
     data += ",\"services\":";
@@ -1090,13 +1136,6 @@ String ControlServer::processCommand(const String& request) {
     }
     return ok(cmd, "wifi_updated", wifi_->statusJson());
   }
-  if (cmd == "set_transport") {
-    streamHost_ = extractString(request, "host");
-    streamPort_ = static_cast<uint16_t>(extractInt(request, "udp_port", kUdpStreamPort));
-    storage_->putString("stream_host", streamHost_);
-    storage_->putUInt("stream_port", streamPort_);
-    return ok(cmd, "transport_updated");
-  }
   if (cmd == "findme_discover") {
     if (findme_) {
       findme_->discoverNow();
@@ -1232,9 +1271,12 @@ String ControlServer::processCommand(const String& request) {
         static_cast<uint16_t>(maxChargeCurrentMa), true};
     // These dedicated NVS keys deliberately bypass DeviceConfig: a battery
     // identity is hardware safety data, not a transport/UI preference.
-    storage_->putUInt("battery_profile_capacity_mah", profile.capacityMah);
-    storage_->putUInt("battery_profile_max_charge_current_ma",
-                      profile.maxChargeCurrentMa);
+    // Keys within NVS's 15-character limit: the original
+    // battery_profile_capacity_mah / _max_charge_current_ma were too long, so
+    // the write always failed and the profile was gone after every reboot.
+    // Nothing was ever stored under the old names, so there is no migration.
+    storage_->putUInt("bat_cap_mah", profile.capacityMah);
+    storage_->putUInt("bat_max_chg_ma", profile.maxChargeCurrentMa);
     batteryGauge_->setManualProfile(profile);
     String data = "{";
     bool first = true;
@@ -1242,6 +1284,18 @@ String ControlServer::processCommand(const String& request) {
     jsonRawField(data, "battery_gauge", batteryGauge_->statusJson(), first);
     data += "}";
     return ok(cmd, "battery_profile_updated", data);
+  }
+  if (cmd == "battery_status") {
+    // The battery card's own slice of `status`: what the Desktop polls while
+    // a gauge resync runs. A full status costs ~14 ms of main-loop time to
+    // build (it is ~18 KB); this is the ~1 KB the card actually reads.
+    String data = "{";
+    bool first = true;
+    jsonRawField(data, "battery", batteryStatusJson(), first);
+    jsonRawField(data, "battery_gauge", batteryGauge_ ? batteryGauge_->statusJson() : "{}", first);
+    jsonRawField(data, "power", powerState_ ? powerState_->statusJson() : "{}", first);
+    data += "}";
+    return ok(cmd, "battery_status", data);
   }
   if (cmd == "resync_battery_gauge") {
     if (!batteryProfileCommandSupported(NHOS_BOARD_HAS_MAX17048) ||
@@ -1883,11 +1937,16 @@ String ControlServer::processCommand(const String& request) {
       return error(cmd, "config_unavailable");
     }
     const bool autoApplyOnBoot = extractBool(request, "auto_apply_on_boot", deviceConfig_->data().ota.autoApplyOnBoot);
-    String manifestUrl = extractString(request, "manifest_url");
-    if (manifestUrl.isEmpty()) {
-      manifestUrl = deviceConfig_->data().ota.manifestUrl;
+    // Absent keeps the current value. A present-but-empty manifest_url
+    // clears the custom URL so the device follows its channel again.
+    String manifestUrl = deviceConfig_->data().ota.manifestUrl;
+    jsonExtractString(request, "manifest_url", manifestUrl);
+    String channel = deviceConfig_->data().ota.channel;
+    jsonExtractString(request, "channel", channel);
+    if (!isValidUpdateChannel(channel.c_str())) {
+      return error(cmd, "invalid_update_channel");
     }
-    if (!deviceConfig_->setOtaConfig(autoApplyOnBoot, manifestUrl)) {
+    if (!deviceConfig_->setOtaConfig(autoApplyOnBoot, manifestUrl, channel)) {
       return error(cmd, "ota_config_invalid");
     }
     if (!deviceConfig_->save(*storage_)) {
@@ -1907,7 +1966,7 @@ String ControlServer::processCommand(const String& request) {
       // Direct mode: the manifest lives behind a Hub round trip, so this
       // can only start the check -- the result lands in update_state a
       // moment later (poll `status`, which the Desktop app already does).
-      const bool started = espNowOta_->requestCheck(extractString(request, "manifest_url"));
+      const bool started = espNowOta_->requestCheck(requestedManifestUrl(request));
       String data = "{";
       bool f = true;
       jsonRawField(data, "update_state", espNowOta_->statusJson(), f);
@@ -1915,7 +1974,7 @@ String ControlServer::processCommand(const String& request) {
       return started ? ok(cmd, "update_check_started", data)
                      : error(cmd, "espnow_ota_busy_or_unpaired");
     }
-    UpdateInfo info = ota_->checkUpdate(extractString(request, "manifest_url"));
+    UpdateInfo info = ota_->checkUpdate(requestedManifestUrl(request));
     String data = "{";
     data.reserve(512);
     bool first = true;
@@ -1932,7 +1991,7 @@ String ControlServer::processCommand(const String& request) {
   }
   if (cmd == "apply_update") {
     if (espNowOta_ != nullptr) {
-      const bool started = espNowOta_->requestApply(extractString(request, "manifest_url"));
+      const bool started = espNowOta_->requestApply(requestedManifestUrl(request));
       String data = "{";
       bool f = true;
       jsonRawField(data, "update_state", espNowOta_->statusJson(), f);
@@ -1940,7 +1999,7 @@ String ControlServer::processCommand(const String& request) {
       return started ? ok(cmd, "update_started", data)
                      : error(cmd, "espnow_ota_busy_or_unpaired");
     }
-    otaPendingManifestUrl_ = extractString(request, "manifest_url");
+    otaPendingManifestUrl_ = requestedManifestUrl(request);
     otaPending_ = true;
     return ok(
         cmd,
@@ -2224,6 +2283,14 @@ String ControlServer::batteryStatusJson() const {
   const std::string merged = mergeBatteryStatusJson(
       std::string(charger.c_str()), std::string(gauge.c_str()));
   return String(merged.c_str());
+}
+
+String ControlServer::requestedManifestUrl(const String& request) const {
+  const String explicitUrl = extractString(request, "manifest_url");
+  if (!explicitUrl.isEmpty() || deviceConfig_ == nullptr) {
+    return explicitUrl;
+  }
+  return deviceConfig_->resolvedManifestUrl();
 }
 
 String ControlServer::extractString(const String& request, const char* key) const {

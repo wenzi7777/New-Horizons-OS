@@ -108,9 +108,48 @@ Adjust the serial port after checking:
 arduino-cli board list
 ```
 
+## Update channels (stable / beta)
+
+Every board follows one of two update channels, set per device
+(`set_ota_config` `channel`, config key `ota.channel`, or the Desktop's
+update settings). **New and reset devices are on `stable`.**
+
+| Channel | Manifest | Gets |
+|---|---|---|
+| `stable` | `releases/<track>-latest.json` | public releases only |
+| `beta` | `releases/<track>-beta.json` | prereleases first, plus every stable release |
+
+- Beta versions carry a semver prerelease suffix: `v1.14.0-beta.1`. The tag
+  and `releases/notes/<version>.md` use the same string.
+- A prerelease sorts below its release (`v1.14.0-beta.2 < v1.14.0`), see
+  `firmware/newhorizons_os/VersionCompare.h` and the shared vectors in
+  `spec/fixtures/versions.json` (the Desktop, Gateway and Hub test against
+  the same file).
+- Leaving beta never downgrades: the device keeps its beta until a stable
+  release is newer, then moves onto it by itself.
+- `<track>-latest.json` is the only manifest firmware older than v1.14.0
+  reads, so it must never carry a prerelease. `generate_arduino_manifest.py`
+  refuses to write one there.
+- `ota.manifest_url` is now an optional custom override; empty follows the
+  channel. A stored URL equal to the board's old default is migrated to
+  "follow the channel" on boot.
+
+Release by channel (`CHANNEL` defaults to `stable`):
+
+```bash
+# Beta: writes <track>-<version>.json and <track>-beta.json only
+CHANNEL=beta VERSION=v1.14.1-beta.1 bash firmware/scripts/build_arduino_release_v15f.sh
+
+# Stable: writes <track>-<version>.json and <track>-latest.json, and also
+# <track>-beta.json unless a newer beta is already there
+VERSION=v1.14.1 bash firmware/scripts/build_arduino_release_v15f.sh
+```
+
 ## OTA Manifest
 
-Generate the Arduino OTA manifest from a built firmware binary:
+The release scripts call the generator with `--track`/`--channel`, which
+writes every manifest the channel needs (see above). It can also write a
+single file. Generate the Arduino OTA manifest from a built firmware binary:
 
 ```bash
 # TIA-CTL v1.0.F 2026.4
@@ -172,7 +211,7 @@ The manifest shape is JSON:
 ```bash
 python3 -m unittest discover -s tests -q
 arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V10F" firmware/newhorizons_os
-arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "build.extra_flags=-DNHOS_BOARD_GCU_V23D_LTS" firmware/newhorizons_os
+arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_GCU_V23D_LTS" firmware/newhorizons_os
 arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "build.extra_flags=-DNHOS_BOARD_GCU_V22C_LTS" firmware/newhorizons_os
 arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "build.extra_flags=-DNHOS_BOARD_GCU_V21_LTS" firmware/newhorizons_os
 ```

@@ -6,7 +6,7 @@
 #include "PacketWire.h"
 
 #ifndef NHOS_FIRMWARE_VERSION
-#define NHOS_FIRMWARE_VERSION "v1.13.1"
+#define NHOS_FIRMWARE_VERSION "v1.14.0"
 #endif
 
 namespace nhos {
@@ -83,8 +83,11 @@ static constexpr char kDefaultApSsidPrefix[] = "NHOS";
 static constexpr char kDefaultApPassword[] = "";
 static constexpr char kSetupPortalDomain[] = "nhos.os";
 static constexpr uint16_t kSetupPortalPort = 80;
-static constexpr char kDefaultUpdateManifestUrl[] =
-    NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL;
+static constexpr char kUpdateManifestBase[] = NHOS_BOARD_OTA_MANIFEST_BASE;
+// The stable manifest, which every device followed before update channels
+// existed. A stored manifest_url equal to it is migrated to "follow the
+// channel" (DeviceConfig::setOtaConfig).
+static constexpr char kDefaultUpdateManifestUrl[] = NHOS_BOARD_OTA_MANIFEST_BASE "-latest.json";
 
 enum class RunMode : uint8_t {
   Normal = 0,

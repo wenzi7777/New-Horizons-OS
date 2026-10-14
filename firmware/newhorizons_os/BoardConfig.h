@@ -1,7 +1,7 @@
 #pragma once
 
 // The board is chosen at compile time and nothing else: hardware model,
-// matrix size, LEDs and the default OTA manifest all come from here, so a
+// matrix size, LEDs and the OTA manifest base all come from here, so a
 // build must name exactly one board. There is deliberately no default --
 // a build that silently fell back to v1.0.F once got flashed onto a v2.1
 // GCU LTS board. Use the per-board firmware/scripts/*.sh (or .ps1), which
@@ -13,6 +13,9 @@
 // a manifest only when `model` equals its own name exactly, so a manifest
 // saying TIA-CTL would strand it. OtaManager/EspNowOtaReceiver accept
 // either name.
+//
+// NHOS_BOARD_OTA_MANIFEST_BASE has no file suffix: the update channel adds
+// "-latest.json" (stable) or "-beta.json" (beta), see UpdateChannel.h.
 #if (defined(NHOS_BOARD_V10F) + defined(NHOS_BOARD_V15F) + \
      defined(NHOS_BOARD_GCU_V21_LTS) + defined(NHOS_BOARD_GCU_V22C_LTS) + \
      defined(NHOS_BOARD_GCU_V23D_LTS)) > 1
@@ -40,8 +43,8 @@
 #define NHOS_BOARD_HAS_MAX17048 1
 #define NHOS_BOARD_HAS_BMM350   1
 #define NHOS_BOARD_EXTERNAL_LED_COUNT 9
-#define NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL \
-  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v15f-latest.json"
+#define NHOS_BOARD_OTA_MANIFEST_BASE \
+  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v15f"
 
 #elif defined(NHOS_BOARD_GCU_V21_LTS)
 
@@ -58,8 +61,8 @@
 #define NHOS_BOARD_HAS_EXT_LED  0
 #define NHOS_BOARD_HAS_OLED     0
 #define NHOS_BOARD_SUPPORTS_GPIO_WAKE 0
-#define NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL \
-  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v21-lts-latest.json"
+#define NHOS_BOARD_OTA_MANIFEST_BASE \
+  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v21-lts"
 
 #elif defined(NHOS_BOARD_GCU_V22C_LTS)
 
@@ -78,8 +81,8 @@
 #define NHOS_BOARD_HAS_EXT_LED  0
 #define NHOS_BOARD_HAS_OLED     0
 #define NHOS_BOARD_SUPPORTS_GPIO_WAKE 0
-#define NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL \
-  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v22c-lts-latest.json"
+#define NHOS_BOARD_OTA_MANIFEST_BASE \
+  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v22c-lts"
 
 #elif defined(NHOS_BOARD_GCU_V23D_LTS)
 
@@ -96,8 +99,8 @@
 #define NHOS_BOARD_HAS_EXT_LED  0
 #define NHOS_BOARD_HAS_OLED     0
 #define NHOS_BOARD_SUPPORTS_GPIO_WAKE 0
-#define NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL \
-  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v23d-lts-latest.json"
+#define NHOS_BOARD_OTA_MANIFEST_BASE \
+  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v23d-lts"
 
 #elif defined(NHOS_BOARD_V10F)
 
@@ -115,8 +118,8 @@
 #define NHOS_BOARD_HAS_OLED     1
 #define NHOS_BOARD_SUPPORTS_GPIO_WAKE 1
 #define NHOS_BOARD_EXTERNAL_LED_COUNT 3
-#define NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL \
-  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v10f-latest.json"
+#define NHOS_BOARD_OTA_MANIFEST_BASE \
+  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v10f"
 
 #else
 

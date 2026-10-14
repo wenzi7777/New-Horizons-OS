@@ -114,10 +114,17 @@ bool AppRegistry::install(const String& path, const String& expectedSha256, bool
   String json;
   String sha;
   uint32_t size = 0;
+  // The digest is required, not optional: without it a truncated or
+  // tampered upload installs as long as it still parses. The Desktop always
+  // sends the catalog's (or its own build's) digest.
+  if (expectedSha256.length() != 64) {
+    error = "sha256_required";
+    return false;
+  }
   if (!readPackage(path, json, sha, size, error)) {
     return false;
   }
-  if (expectedSha256.length() > 0 && !expectedSha256.equalsIgnoreCase(sha)) {
+  if (!expectedSha256.equalsIgnoreCase(sha)) {
     error = "checksum_mismatch";
     return false;
   }

@@ -122,8 +122,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("NHOS_BOARD_HAS_BQ25180  0", config)
         self.assertIn("NHOS_BOARD_HAS_BQ25180  1", config)
         self.assertIn("NHOS_BOARD_BQ25180_I2C_HZ 400000", config)
-        self.assertIn("NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL", config)
-        self.assertIn("arduino-gcu-v21-lts-latest.json", config)
+        self.assertIn("NHOS_BOARD_OTA_MANIFEST_BASE", config)
+        self.assertIn('releases/arduino-gcu-v21-lts"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
         config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
@@ -478,8 +478,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('\\"mounted\\"', storage)
         self.assertIn('\\"formatted_on_boot\\"', storage)
         self.assertIn('\\"mount_error\\"', storage)
-        self.assertIn('prefs_.getBool("spiffs_initialized", false)', storage)
-        self.assertIn('prefs_.putBool("spiffs_initialized", true)', storage)
+        self.assertIn('prefs_.getBool("spiffs_init", false)', storage)
+        self.assertIn('prefs_.putBool("spiffs_init", true)', storage)
 
     def test_wifi_setup_ssid_matches_legacy_full_device_suffix(self):
         wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
@@ -753,7 +753,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("NHOS_BOARD_HAS_EXT_LED  0", config)
         self.assertIn("NHOS_BOARD_HAS_OLED     0", config)
         self.assertIn("NHOS_BOARD_SUPPORTS_GPIO_WAKE 0", config)
-        self.assertIn("arduino-gcu-v22c-lts-latest.json", config)
+        self.assertIn('releases/arduino-gcu-v22c-lts"', config)
 
     def test_v22c_lts_board_pins_follow_reference_implementation(self):
         board_pins = (ARDUINO_ROOT / "BoardPins.cpp").read_text(encoding="utf-8")
@@ -1181,7 +1181,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         for filename, board_flag in cases.items():
             script = (SCRIPT_ROOT / filename).read_text(encoding="utf-8")
             self.assertIn("FlashSize=4M,PartitionScheme=min_spiffs", script)
-            self.assertIn(f'--build-property "build.extra_flags={board_flag}"', script)
+            self.assertIn(f'--build-property "compiler.cpp.extra_flags={board_flag}"', script)
             self.assertNotIn("FlashSize=8M", script)
 
     def test_flash_scripts_compile_before_upload_since_upload_alone_does_not_build(self):
@@ -1209,6 +1209,16 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
                 script,
                 r"arduino-cli upload[^\n]*--build-property",
             )
+
+    def test_no_script_overrides_the_cores_build_extra_flags(self):
+        # build.extra_flags carries the core's own defines (-DESP32=ESP32,
+        # ARDUINO_USB_MODE / CDC_ON_BOOT, CORE_DEBUG_LEVEL, the running-core
+        # pins). The GCU scripts used to replace it with just the board define,
+        # silently dropping all of those -- every board now passes its define
+        # through the compiler-only extension point instead.
+        for script_path in sorted(SCRIPT_ROOT.glob("*.sh")) + sorted(SCRIPT_ROOT.glob("*.ps1")):
+            script = script_path.read_text(encoding="utf-8")
+            self.assertNotIn("build.extra_flags", script, script_path.name)
 
     def test_v15f_scripts_preserve_esp32_core_build_defines(self):
         # ESP32 core seeds build.extra_flags with -DESP32=ESP32. Overriding that
@@ -1238,7 +1248,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertRegex(script, r'VERSION="\$\{VERSION:-v\d+\.\d+\.\d+\}"')
         self.assertNotIn('VERSION="${VERSION:-v0.5.0-arduino}"', script)
         self.assertIn('target="${RELEASE_DIR}/newhorizons-os-gcu-v23d-lts-${VERSION}.bin"', gcu_script)
-        self.assertIn('--build-property "build.extra_flags=-DNHOS_BOARD_GCU_V23D_LTS"', gcu_script)
+        self.assertIn('--build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_GCU_V23D_LTS', gcu_script)
         self.assertIn('FlashSize=4M,PartitionScheme=min_spiffs', gcu_script)
         self.assertNotIn('FlashSize=8M', gcu_script)
 
@@ -1309,7 +1319,14 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("jsonExtractString(", ota_impl)
         self.assertNotIn('String pattern = "\\"" + String(key) + "\\"";', control_impl)
         self.assertNotIn('String pattern = "\\"" + String(key) + "\\"";', ota_impl)
-        self.assertIn("const String& streamHost() const;", control_header)
+        # The stream destination is FindMeClient's alone: ControlServer's
+        # static host/port (and the unreachable second set_transport branch
+        # that once wrote it) are gone.
+        self.assertNotIn("streamHost", control_header)
+        self.assertEqual(control_impl.count('if (cmd == "set_transport")'), 1)
+        self.assertNotIn('"stream_host"', control_impl)
+        transport = (ARDUINO_ROOT / "UdpStreamTransport.cpp").read_text(encoding="utf-8")
+        self.assertNotIn("control_", transport)
 
     def test_control_and_ota_json_contract_text_is_parseable(self):
         control = (ARDUINO_ROOT / "ControlServer.cpp").read_text(encoding="utf-8")
@@ -1389,7 +1406,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("uint8_t selectPins[kCols] = {0};", header)
         self.assertIn("defaultMatrixLayout", config)
         self.assertIn("matrix_layout_invalid_fallback_default", config)
-        self.assertIn("data_.ota.manifestUrl = kDefaultUpdateManifestUrl;", config)
+        # Defaults follow the stable channel rather than storing a URL.
+        self.assertIn("data_.ota.channel = kUpdateChannelStable;", config)
+        self.assertIn('data_.ota.manifestUrl = "";', config)
 
     def test_power_state_manager_scaffold_exists_and_tracks_soft_off_states(self):
         header = (ARDUINO_ROOT / "PowerStateManager.h").read_text(encoding="utf-8")
@@ -1548,7 +1567,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         command_start = control.index('if (cmd == "set_battery_profile")')
         command_end = control.index('if (cmd == "set_imu")', command_start)
         command = control[command_start:command_end]
-        first_nvs_write = command.index('storage_->putUInt("battery_profile_capacity_mah"')
+        first_nvs_write = command.index('storage_->putUInt("bat_cap_mah"')
 
         self.assertIn(
             "batteryProfileCommandSupported(NHOS_BOARD_HAS_MAX17048)", command

@@ -188,7 +188,7 @@ void serviceAutoOta(bool wifiConnected) {
   logBoot("auto_ota_enabled");
   leds.setSignal(nhos::LedSignal::OtaActive);
   leds.service(millis());
-  const bool applied = ota.autoApplyIfNewer(deviceConfig.data().ota.manifestUrl);
+  const bool applied = ota.autoApplyIfNewer(deviceConfig.resolvedManifestUrl());
   if (!applied) {
     if (ota.lastPhase() == "current") {
       return;
@@ -974,9 +974,9 @@ void setup() {
 #endif
   batteryGauge.begin();
   const uint32_t storedBatteryCapacityMah =
-      storage.getUInt("battery_profile_capacity_mah", 0);
+      storage.getUInt("bat_cap_mah", 0);
   const uint32_t storedBatteryMaxCurrentMa =
-      storage.getUInt("battery_profile_max_charge_current_ma", 0);
+      storage.getUInt("bat_max_chg_ma", 0);
   if (storedBatteryCapacityMah <= 65535 && storedBatteryMaxCurrentMa <= 65535) {
     const nhos::ManualBatteryProfile storedManualProfile{
         static_cast<uint16_t>(storedBatteryCapacityMah),
@@ -1115,7 +1115,7 @@ void setup() {
     logBoot("findme_started");
     // One bind only — see comment on udpTransport above.
     udpTransport.begin();
-    udpTransport.attach(control, findme);
+    udpTransport.attach(findme);
     activeTransport = &udpTransport;
     // Time from the Gateway first (shared by every device behind it), NTP
     // as the fallback -- see ClockCore::submit()'s priority note.

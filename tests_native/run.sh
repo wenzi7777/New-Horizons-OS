@@ -127,3 +127,48 @@ CXX="${CXX:-c++}"
   -o "$BUILD_DIR/test_espnow_time_wire"
 
 "$BUILD_DIR/test_espnow_time_wire"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_version_compare.cpp" \
+  "$FIRMWARE_DIR/VersionCompare.cpp" \
+  -o "$BUILD_DIR/test_version_compare"
+
+"$BUILD_DIR/test_version_compare" "$SCRIPT_DIR/../spec/fixtures/versions.json"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_update_channel.cpp" \
+  -o "$BUILD_DIR/test_update_channel"
+
+"$BUILD_DIR/test_update_channel"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_scan_lateness.cpp" \
+  -o "$BUILD_DIR/test_scan_lateness"
+
+"$BUILD_DIR/test_scan_lateness"
+
+# Wire-format fixtures the Desktop and Gateway parse in their own tests: the
+# committed file must be exactly what the firmware encoder produces today.
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/gen_packet_fixtures.cpp" \
+  "$FIRMWARE_DIR/PacketV5Codec.cpp" \
+  -o "$BUILD_DIR/gen_packet_fixtures"
+
+"$BUILD_DIR/gen_packet_fixtures" > "$BUILD_DIR/packets.json"
+if ! cmp -s "$BUILD_DIR/packets.json" "$SCRIPT_DIR/../spec/fixtures/packets.json"; then
+  echo "spec/fixtures/packets.json is out of date with PacketV5Codec.cpp; regenerate with:" >&2
+  echo "  tests_native/.build/gen_packet_fixtures > spec/fixtures/packets.json" >&2
+  exit 1
+fi
+echo "packet fixtures: up to date"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror \
+  -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_reply_pacing.cpp" \
+  -o "$BUILD_DIR/test_reply_pacing"
+
+"$BUILD_DIR/test_reply_pacing"

@@ -324,10 +324,21 @@ bool DeviceConfig::setLogging(bool enabled, const String& level, const String& m
   return true;
 }
 
-bool DeviceConfig::setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl) {
+bool DeviceConfig::setOtaConfig(bool autoApplyOnBoot, const String& manifestUrl, const String& channel) {
+  if (!isValidUpdateChannel(channel.c_str())) {
+    return false;
+  }
   data_.ota.autoApplyOnBoot = autoApplyOnBoot;
-  data_.ota.manifestUrl = manifestUrl.isEmpty() ? String(kDefaultUpdateManifestUrl) : manifestUrl;
+  data_.ota.channel = channel;
+  data_.ota.manifestUrl = manifestUrl == kDefaultUpdateManifestUrl ? String() : manifestUrl;
   return true;
+}
+
+String DeviceConfig::resolvedManifestUrl() const {
+  if (!data_.ota.manifestUrl.isEmpty()) {
+    return data_.ota.manifestUrl;
+  }
+  return String(kUpdateManifestBase) + updateChannelManifestSuffix(data_.ota.channel.c_str());
 }
 
 bool DeviceConfig::setBoardLedBrightness(float brightness) {
@@ -501,8 +512,12 @@ String DeviceConfig::loggingJson() const {
 String DeviceConfig::otaJson() const {
   String out = "{\"auto_apply_on_boot\":";
   out += data_.ota.autoApplyOnBoot ? "true" : "false";
-  out += ",\"manifest_url\":\"";
+  out += ",\"channel\":\"";
+  out += jsonEscape(data_.ota.channel);
+  out += "\",\"manifest_url\":\"";
   out += jsonEscape(data_.ota.manifestUrl);
+  out += "\",\"resolved_manifest_url\":\"";
+  out += jsonEscape(resolvedManifestUrl());
   out += "\"}";
   return out;
 }
@@ -592,7 +607,8 @@ void DeviceConfig::setDefaults() {
   data_.logging.level = "error";
   data_.logging.mode = "standard";
   data_.ota.autoApplyOnBoot = true;
-  data_.ota.manifestUrl = kDefaultUpdateManifestUrl;
+  data_.ota.channel = kUpdateChannelStable;
+  data_.ota.manifestUrl = "";
   data_.boardLed.brightness = 0.30f;
   data_.batteryLed.lowBatteryThresholdPercent = 10;
   data_.actionButton.shortPress = "none";
@@ -691,9 +707,18 @@ bool DeviceConfig::applyJson(const String& json) {
 
   const String ota = objectForKey(json, "ota");
   if (!ota.isEmpty()) {
+    // A config saved before update channels has no "channel" (stable) and
+    // the board's stable manifest as manifest_url, which setOtaConfig turns
+    // back into "follow the channel". An unknown channel keeps the current
+    // one rather than failing the whole load.
+    String channel = extractString(ota, "channel", data_.ota.channel);
+    if (!isValidUpdateChannel(channel.c_str())) {
+      channel = data_.ota.channel;
+    }
     setOtaConfig(
         extractBool(ota, "auto_apply_on_boot", data_.ota.autoApplyOnBoot),
-        extractString(ota, "manifest_url", data_.ota.manifestUrl));
+        extractString(ota, "manifest_url", data_.ota.manifestUrl),
+        channel);
   }
 
   const String indicators = objectForKey(json, "indicators");

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <FS.h>
 #include <Preferences.h>
 #include <vector>
 
@@ -69,7 +70,25 @@ class Storage {
 
  private:
   String scopedPath(const String& scope, const String& path) const;
-  size_t directorySize(const char* path) const;
+  // Byte counts per storage category, from ONE walk of the filesystem.
+  // SPIFFS is flat: every directory listing scans all of it, so measuring the
+  // six categories with one directorySize() each took ~0.5 s on a v1.5.F --
+  // all of it on the main loop, stalling the scanner.
+  struct CategoryBytes {
+    size_t user = 0;
+    size_t logs = 0;
+    size_t calibration = 0;
+    size_t offline = 0;
+    size_t config = 0;
+  };
+  void accumulateCategories(fs::File& dir, CategoryBytes& out) const;
+  // Size of the current flash log, cached: `status` reports it on every call,
+  // and a SPIFFS open just to read it cost ~10 ms of main-loop time. Kept
+  // exact on our own appends/rotations/clears; any other write through
+  // writeFile/deleteFile just marks it unknown and the next read reopens.
+  size_t currentLogBytes() const;
+  void noteLogWritten(size_t bytes) const { logBytes_ = bytes; logBytesKnown_ = true; }
+  void forgetLogBytes() const { logBytesKnown_ = false; }
   bool ensureDirs();
   void rotateLogIfNeeded(size_t incomingBytes = 0);
 
@@ -107,6 +126,8 @@ class Storage {
   uint8_t tagLevelCount_ = 0;
 
   Preferences prefs_;
+  mutable size_t logBytes_ = 0;
+  mutable bool logBytesKnown_ = false;
   bool mounted_ = false;
   bool formattedOnBoot_ = false;
   String mountError_;

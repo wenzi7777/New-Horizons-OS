@@ -10,4 +10,4 @@ Invoke-NhosFlash -Port $Port `
   -BoardName 'TIA-CTL v2.2.C GCU LTS' `
   -Fqbn 'esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs' `
   -BuildDirName 'build_gcu_v22c_lts' `
-  -BuildProperty 'build.extra_flags=-DNHOS_BOARD_GCU_V22C_LTS'
+  -BuildProperty 'compiler.cpp.extra_flags=-DNHOS_BOARD_GCU_V22C_LTS'

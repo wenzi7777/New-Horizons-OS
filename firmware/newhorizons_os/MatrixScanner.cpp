@@ -205,6 +205,12 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
   }
 
   const uint32_t scanStartUs = micros();
+  // A due time of 0 means "scan now" (just started or retimed): there is
+  // nothing to be late against.
+  if (nextScanDueUs_ != 0) {
+    const int32_t lateUs = static_cast<int32_t>(scanStartUs - nextScanDueUs_);
+    startLateness_.record(lateUs > 0 ? static_cast<uint32_t>(lateUs) : 0, scanStartUs);
+  }
   frame.seq = ++frameSeq_;
   frame.timestampUs = esp_timer_get_time();
   frame.timestampMs = millis();
@@ -496,13 +502,14 @@ ScanHealth MatrixScanner::health() const {
   item.settleUs = settleUs_;
   item.sendEveryNFrames = sendEveryNFrames_;
   item.pointCount = rowCount_ * colCount_;
+  item.startLateness = startLateness_;
   return item;
 }
 
 String MatrixScanner::healthJson() const {
   ScanHealth h = health();
   String out = "{";
-  out.reserve(320);
+  out.reserve(480);
   out += "\"scan_active\":";
   out += h.active ? "true" : "false";
   out += ",\"requested_target_fps\":";
@@ -547,7 +554,28 @@ String MatrixScanner::healthJson() const {
   out += h.queueDroppedFrames;
   out += ",\"queue_max_occupied_frames\":";
   out += h.queueMaxOccupiedFrames;
-  out += "}";
+  const ScanLateness& late = h.startLateness;
+  out += ",\"start_lateness\":{\"samples\":";
+  out += late.samples;
+  out += ",\"late\":";
+  out += late.lateStarts();
+  out += ",\"gaps\":";
+  out += late.gaps;
+  out += ",\"max_us\":";
+  out += late.maxUs;
+  out += ",\"recent_max_us\":";
+  out += late.recentMaxUs;
+  out += ",\"hist\":[";
+  for (uint8_t i = 0; i < ScanLateness::kBucketCount; ++i) {
+    if (i > 0) out += ",";
+    out += late.hist[i];
+  }
+  out += "],\"bounds_us\":[";
+  for (uint8_t i = 0; i < ScanLateness::kBucketCount - 1; ++i) {
+    if (i > 0) out += ",";
+    out += ScanLateness::kBucketBoundsUs[i];
+  }
+  out += "]}}";
   return out;
 }
 

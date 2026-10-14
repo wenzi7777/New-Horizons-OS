@@ -6,6 +6,7 @@
 
 #include "Config.h"
 #include "JsonUtils.h"
+#include "VersionCompare.h"
 
 namespace nhos {
 namespace {
@@ -17,24 +18,6 @@ bool shadowsPackageKey(const String& manifest) {
   String unused;
   return jsonExtractArray(manifest, "nodes", unused) ||
          jsonExtractObject(manifest, "manifest", unused);
-}
-
-void splitVersion(const char* text, long out[3]) {
-  out[0] = out[1] = out[2] = 0;
-  if (text == nullptr) {
-    return;
-  }
-  String value(text);
-  value.trim();
-  if (value.startsWith("v") || value.startsWith("V")) {
-    value = value.substring(1);
-  }
-  for (uint8_t part = 0; part < 3 && value.length() > 0; ++part) {
-    const int dot = value.indexOf('.');
-    const String piece = dot >= 0 ? value.substring(0, dot) : value;
-    out[part] = piece.toInt();
-    value = dot >= 0 ? value.substring(dot + 1) : "";
-  }
 }
 
 void copyField(char* dest, size_t size, const String& value) {
@@ -70,16 +53,9 @@ bool AppPackage::validId(const String& id) {
 String AppPackage::packagePath(const String& id) { return String("apps/") + id + ".nha"; }
 
 bool AppPackage::osVersionSatisfies(const char* minOs) {
-  long required[3];
-  long current[3];
-  splitVersion(minOs, required);
-  splitVersion(kFirmwareVersion, current);
-  for (uint8_t i = 0; i < 3; ++i) {
-    if (current[i] != required[i]) {
-      return current[i] > required[i];
-    }
-  }
-  return true;
+  // Cores only: a beta of v1.14.0 is the candidate for v1.14.0 and already
+  // has its operators, so an app needing v1.14.0 must install on it.
+  return compareVersionCores(kFirmwareVersion, minOs) >= 0;
 }
 
 uint16_t AppPackage::capabilityFromName(const String& name) {

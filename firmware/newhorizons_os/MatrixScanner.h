@@ -4,6 +4,7 @@
 
 #include "Config.h"
 #include "DeviceConfig.h"
+#include "ScanLateness.h"
 #include "StreamTransport.h"
 
 namespace nhos {
@@ -64,6 +65,8 @@ struct ScanHealth {
   uint16_t settleUs = kDefaultSettleUs;
   uint16_t sendEveryNFrames = kDefaultSendEveryNFrames;
   uint16_t pointCount = kMaxSensors;
+  // How late scans start against their due time (ScanLateness.h).
+  ScanLateness startLateness;
 };
 
 class MatrixScanner {
@@ -148,6 +151,7 @@ class MatrixScanner {
   uint32_t lastScanDurationUs_ = 0;
   uint32_t maxScanDurationUs_ = 0;
   uint32_t overrunFrames_ = 0;
+  ScanLateness startLateness_;
   uint32_t udpSentFrames_ = 0;
   uint32_t udpSendFailures_ = 0;
   uint32_t lastUdpSendUs_ = 0;

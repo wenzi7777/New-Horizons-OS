@@ -93,12 +93,14 @@ class ControlServer {
     appGovernor_ = governor;
   }
   bool maintenanceMode() const;
-  const String& streamHost() const;
-  uint16_t streamPort() const;
 
  private:
   void servicePendingApplyUpdate();
+  // Sends a command result: inline when it fits one datagram, otherwise
+  // queued as result_chunk datagrams that serviceUdpReplies() paces out one
+  // per tick between scans (ReplyPacing.h).
   void sendUdpResult(WiFiUDP& udp, const String& host, uint16_t port, const String& uid, const String& requestId, const String& response);
+  void serviceUdpReplies(WiFiUDP& udp);
   String processCommand(const String& request);
   String ok(const String& command, const String& message, const String& data = "{}") const;
   String error(const String& command, const String& message) const;
@@ -110,6 +112,9 @@ class ControlServer {
   String appViewJson() const;
   String actionButtonStatusJson() const;
   String batteryStatusJson() const;
+  // check_update/apply_update: the request's manifest_url when it names
+  // one, otherwise the device's own (custom URL or its channel's manifest).
+  String requestedManifestUrl(const String& request) const;
   String extractString(const String& request, const char* key) const;
   int extractInt(const String& request, const char* key, int fallback) const;
   // {"clock":<ClockService::statusJson>,"clock_config":<DeviceConfig::clockJson>}
@@ -155,8 +160,23 @@ class ControlServer {
   DisplayManager* display_ = nullptr;
   ExternalLedController* externalLeds_ = nullptr;
   bool started_ = false;
-  String streamHost_;
-  uint16_t streamPort_ = kUdpStreamPort;
+  // Large UDP results waiting to go out, oldest first. Two slots: a user
+  // command and a background poll can overlap; a third falls back to the
+  // old blocking send rather than holding more heap.
+  struct PendingUdpReply {
+    String host;
+    uint16_t port = 0;
+    String uid;
+    String requestId;
+    String response;
+    size_t nextChunk = 0;
+    size_t totalChunks = 0;
+  };
+  static constexpr uint8_t kMaxPendingUdpReplies = 2;
+  PendingUdpReply udpReplies_[kMaxPendingUdpReplies];
+  uint8_t udpReplyCount_ = 0;
+  uint32_t udpChunkReadyUs_ = 0;
+  void sendUdpChunk(WiFiUDP& udp, const PendingUdpReply& reply, size_t index);
   String writeScope_;
   String writePath_;
   size_t writeExpectedSize_ = 0;

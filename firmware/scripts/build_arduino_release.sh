@@ -9,6 +9,8 @@ RELEASE_DIR="${ROOT}/releases/artifacts"
 MANIFEST_DIR="${MANIFEST_DIR:-$(dirname "${RELEASE_DIR}")}"
 FQBN="${FQBN:-esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB}"
 VERSION="${VERSION:-v1.0.0}"
+# stable (default) or beta; beta versions carry a suffix, e.g. v1.14.0-beta.1.
+CHANNEL="${CHANNEL:-stable}"
 BASE_URL="${BASE_URL:-https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/${VERSION}/releases/artifacts}"
 CHANGELOG_URL="${CHANGELOG_URL:-https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/${VERSION}/releases/notes/${VERSION}.md}"
 
@@ -34,15 +36,20 @@ cp "${main_bin}" "${target}"
 # can still be sitting in a device's NVS; it is regenerated here so those
 # devices keep getting updates instead of being pinned to whatever it last
 # happened to contain. New configs should use arduino-v10f-latest.json.
-for manifest in "${MANIFEST_DIR}/arduino-v10f-latest.json" "${MANIFEST_DIR}/arduino-v10f-${VERSION}.json" "${MANIFEST_DIR}/arduino-latest.json"; do
-  # The manifest keeps the board's pre-rename VD-CTL/R name (NHOS_BOARD_OTA_MODEL):
-  # firmware older than the TIA-CTL rename only accepts an exact match.
-  python3 "${ROOT}/firmware/scripts/generate_arduino_manifest.py" \
-    --firmware "${target}" \
-    --output "${manifest}" \
-    --model "VD-CTL/R v1.0.F 2026.4" \
-    --version "${VERSION}" \
-    --base-url "${BASE_URL}" \
-    --changelog-url "${CHANGELOG_URL}"
-done
+# Which manifests this lands in depends on CHANNEL (stable/beta), see
+# publish_track() in generate_arduino_manifest.py: stable writes
+# arduino-v10f-latest.json (and -beta.json unless a newer beta is there),
+# beta writes only arduino-v10f-beta.json. The manifest keeps the board's
+# pre-rename VD-CTL/R name (NHOS_BOARD_OTA_MODEL): firmware older than the
+# TIA-CTL rename only accepts an exact match.
+python3 "${ROOT}/firmware/scripts/generate_arduino_manifest.py" \
+  --firmware "${target}" \
+  --track arduino-v10f \
+  --manifest-dir "${MANIFEST_DIR}" \
+  --channel "${CHANNEL}" \
+  --stable-alias arduino-latest.json \
+  --model "VD-CTL/R v1.0.F 2026.4" \
+  --version "${VERSION}" \
+  --base-url "${BASE_URL}" \
+  --changelog-url "${CHANGELOG_URL}"
 echo "${target}"

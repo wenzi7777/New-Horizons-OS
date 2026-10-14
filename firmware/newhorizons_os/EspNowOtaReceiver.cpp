@@ -9,18 +9,20 @@
 #include "Config.h"
 #include "EspNowFrame.h"
 #include "JsonUtils.h"
+#include "VersionCompare.h"
 
 namespace nhos {
 
 void EspNowOtaReceiver::begin(DeviceConfig& deviceConfig, const uint8_t hubMac[6]) {
   deviceConfig_ = &deviceConfig;
   memcpy(hubMac_, hubMac, 6);
-  manifestUrl_ = deviceConfig_->data().ota.manifestUrl;
+  manifestUrl_ = deviceConfig_->resolvedManifestUrl();
 }
 
 void EspNowOtaReceiver::startBootCheck() {
   if (bootCheckStarted_ || deviceConfig_ == nullptr) return;
   bootCheckStarted_ = true;
+  manifestUrl_ = deviceConfig_->resolvedManifestUrl();
   if (!deviceConfig_->data().ota.autoApplyOnBoot) {
     Serial.println(F("[espnow_ota] auto_ota_disabled"));
     phase_ = Phase::kFinished;
@@ -42,9 +44,8 @@ bool EspNowOtaReceiver::startOnDemand(const String& manifestUrl, bool apply) {
       phase_ == Phase::kRelaying) {
     return false;
   }
-  if (!manifestUrl.isEmpty()) {
-    manifestUrl_ = manifestUrl;
-  }
+  // Re-resolved every time: the channel may have changed since begin().
+  manifestUrl_ = manifestUrl.isEmpty() ? deviceConfig_->resolvedManifestUrl() : manifestUrl;
   applyRequested_ = apply;
   operation_ = apply ? "apply_update" : "check_update";
   updateAvailable_ = false;
@@ -399,15 +400,8 @@ void EspNowOtaReceiver::logFailure(const char* reason, LogLevel level) {
 }
 
 int EspNowOtaReceiver::compareVersion(const String& remote, const String& local) const {
-  int r[3] = {0, 0, 0};
-  int l[3] = {0, 0, 0};
-  sscanf(remote.c_str(), "v%d.%d.%d", &r[0], &r[1], &r[2]);
-  sscanf(local.c_str(), "v%d.%d.%d", &l[0], &l[1], &l[2]);
-  for (uint8_t i = 0; i < 3; ++i) {
-    if (r[i] > l[i]) return 1;
-    if (r[i] < l[i]) return -1;
-  }
-  return 0;
+  // Prerelease-aware (VersionCompare.h): a beta must not read as its release.
+  return compareVersions(remote.c_str(), local.c_str());
 }
 
 }  // namespace nhos

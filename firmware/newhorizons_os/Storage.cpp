@@ -27,7 +27,11 @@ bool Storage::begin() {
   prefs_.begin("nhos", false);
   mounted_ = SPIFFS.begin(false);
   if (!mounted_) {
-    const bool firstBootFormatAllowed = !prefs_.getBool("spiffs_initialized", false);
+    // "spiffs_init", not the original "spiffs_initialized": NVS keys cap at
+    // 15 characters, so that write always failed (KEY_TOO_LONG), the flag was
+    // never set, and every mount failure was treated as a first boot --
+    // formatting away calibration and apps instead of reporting mount_failed.
+    const bool firstBootFormatAllowed = !prefs_.getBool("spiffs_init", false);
     if (!firstBootFormatAllowed || !SPIFFS.begin(true)) {
       mountError_ = firstBootFormatAllowed ? "mount_format_failed" : "mount_failed";
       return false;
@@ -35,7 +39,7 @@ bool Storage::begin() {
     mounted_ = true;
     formattedOnBoot_ = true;
   }
-  prefs_.putBool("spiffs_initialized", true);
+  prefs_.putBool("spiffs_init", true);
   return ensureDirs();
 }
 
@@ -75,6 +79,7 @@ bool Storage::writeFile(const String& scope, const String& path, const uint8_t* 
   if (full.isEmpty()) {
     return false;
   }
+  forgetLogBytes();  // the logs scope is writable
   File file = SPIFFS.open(full, append ? FILE_APPEND : FILE_WRITE);
   if (!file) {
     return false;
@@ -145,6 +150,7 @@ size_t Storage::fileSize(const String& scope, const String& path) {
 }
 
 bool Storage::deleteFile(const String& scope, const String& path) {
+  forgetLogBytes();
   const String full = scopedPath(scope, path);
   return !full.isEmpty() && SPIFFS.remove(full);
 }
@@ -208,11 +214,16 @@ String Storage::storageStatusJson() {
   // Diagnostic JSON field: "categories".
   const size_t total = SPIFFS.totalBytes();
   const size_t used = SPIFFS.usedBytes();
-  const size_t userBytes = directorySize("/files");
-  const size_t logBytes = directorySize("/logs");
-  const size_t calibrationBytes = directorySize("/cal") + directorySize("/calibration");
-  const size_t offlineBytes = directorySize("/offline");
-  const size_t configBytes = directorySize("/config");
+  CategoryBytes bytes;
+  File root = SPIFFS.open("/");
+  if (root && root.isDirectory()) {
+    accumulateCategories(root, bytes);
+  }
+  const size_t userBytes = bytes.user;
+  const size_t logBytes = bytes.logs;
+  const size_t calibrationBytes = bytes.calibration;
+  const size_t offlineBytes = bytes.offline;
+  const size_t configBytes = bytes.config;
   const size_t known = userBytes + logBytes + calibrationBytes + offlineBytes + configBytes;
   const size_t otherBytes = used > known ? used - known : 0;
 
@@ -259,8 +270,15 @@ void Storage::configureLog(bool enabled, size_t maxBytes, const String& level) {
   rotateLogIfNeeded(0);
 }
 
+size_t Storage::currentLogBytes() const {
+  if (!logBytesKnown_) {
+    File file = SPIFFS.open(kLogPath, FILE_READ);
+    noteLogWritten(file ? file.size() : 0);
+  }
+  return logBytes_;
+}
+
 String Storage::logStatusJson() const {
-  File file = SPIFFS.open(kLogPath, FILE_READ);
   String out = "{\"enabled\":";
   out += logEnabled_ ? "true" : "false";
   out += ",\"level\":\"";
@@ -272,7 +290,7 @@ String Storage::logStatusJson() const {
   out += ",\"effective_total_bytes\":";
   out += String(static_cast<unsigned int>(logMaxBytes_ * 2));
   out += ",\"bytes\":";
-  out += String(static_cast<unsigned int>(file ? file.size() : 0));
+  out += String(static_cast<unsigned int>(currentLogBytes()));
   out += ",\"path\":\"";
   out += kLogPath;
   out += "\",\"tag_levels\":";
@@ -306,9 +324,11 @@ void Storage::logTagged(const char* tag, const String& line, LogLevel level) {
   rotateLogIfNeeded(line.length() + 1);
   File current = SPIFFS.open(kLogPath, FILE_APPEND);
   if (!current) {
+    forgetLogBytes();
     return;
   }
   current.println(line);
+  noteLogWritten(current.size());
   current.close();
   rotateLogIfNeeded(0);
 }
@@ -479,6 +499,7 @@ String Storage::tailLog(size_t maxLines) {
 void Storage::clearLog() {
   SPIFFS.remove(kLogPath);
   SPIFFS.remove("/logs/device.log.1");
+  noteLogWritten(0);
 }
 
 LogLevel Storage::parseLogLevel(const String& level) {
@@ -517,23 +538,28 @@ String Storage::scopedPath(const String& scope, const String& path) const {
   return full;
 }
 
-size_t Storage::directorySize(const char* path) const {
-  File root = SPIFFS.open(path);
-  if (!root || !root.isDirectory()) {
-    File file = SPIFFS.open(path, FILE_READ);
-    return file ? file.size() : 0;
-  }
-  size_t total = 0;
-  File file = root.openNextFile();
+void Storage::accumulateCategories(File& dir, CategoryBytes& out) const {
+  File file = dir.openNextFile();
   while (file) {
     if (file.isDirectory()) {
-      total += directorySize(file.path());
+      accumulateCategories(file, out);
     } else {
-      total += file.size();
+      const String path = file.path();
+      const size_t size = file.size();
+      if (path.startsWith("/files/")) {
+        out.user += size;
+      } else if (path.startsWith("/logs/")) {
+        out.logs += size;
+      } else if (path.startsWith("/cal/") || path.startsWith("/calibration/")) {
+        out.calibration += size;
+      } else if (path.startsWith("/offline/")) {
+        out.offline += size;
+      } else if (path.startsWith("/config/")) {
+        out.config += size;
+      }
     }
-    file = root.openNextFile();
+    file = dir.openNextFile();
   }
-  return total;
 }
 
 bool Storage::ensureDirs() {
@@ -553,11 +579,13 @@ void Storage::rotateLogIfNeeded(size_t incomingBytes) {
   }
   const size_t currentSize = check.size();
   check.close();
+  noteLogWritten(currentSize);
   if (currentSize + incomingBytes <= logMaxBytes_) {
     return;
   }
   SPIFFS.remove("/logs/device.log.1");
   SPIFFS.rename(kLogPath, "/logs/device.log.1");
+  noteLogWritten(0);
 }
 
 }  // namespace nhos

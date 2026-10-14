@@ -1,10 +1,14 @@
 #pragma once
 
-// Mechanical extraction of the existing WiFi/UDP streaming send path
-// (previously inline in newhorizons_os.ino's scanAndStreamIfDue() /
-// sendHeartbeatIfDue()) behind the StreamTransport interface. Behavior is
-// unchanged: prefer FindMeClient's discovered gateway host/port, falling
-// back to ControlServer's manually-configured direct-ingest host/port.
+// The WiFi/UDP streaming send path behind the StreamTransport interface.
+// Frames go to the Gateway FindMeClient discovered, and nowhere else.
+//
+// There used to be a fallback to a manually configured host/port kept by
+// ControlServer (NVS stream_host / stream_port). Nothing could set it any
+// more -- its set_transport branch sat behind the newer set_transport that
+// switches WiFi/ESP-NOW, so it never ran -- yet a value left in NVS from
+// before kept being used whenever no Gateway answered. Removed in v1.14.0;
+// the stale keys are simply no longer read.
 
 #include <Arduino.h>
 #include <WiFiUdp.h>
@@ -14,7 +18,6 @@
 
 namespace nhos {
 
-class ControlServer;
 class FindMeClient;
 
 class UdpStreamTransport : public StreamTransport {
@@ -25,7 +28,7 @@ class UdpStreamTransport : public StreamTransport {
   // RX from serviceUdpCommand while TX still looks healthy.
   void begin();
 
-  void attach(ControlServer& control, FindMeClient& findme);
+  void attach(FindMeClient& findme);
 
   bool ready() const override;
   bool sendFrame(const uint8_t* data, size_t len) override;
@@ -37,7 +40,6 @@ class UdpStreamTransport : public StreamTransport {
 
  private:
   WiFiUDP udp_;
-  ControlServer* control_ = nullptr;
   FindMeClient* findme_ = nullptr;
 };
 

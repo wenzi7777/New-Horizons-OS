@@ -1,0 +1,109 @@
+{
+  "description": "NHO/Arduino/1 v5 stream packets from the firmware encoder (tests_native/gen_packet_fixtures.cpp). Regenerate, never hand-edit.",
+  "packet_version": 5,
+  "header_len": 24,
+  "packets": [
+    {
+      "name": "matrix_only",
+      "hex": "5aa505103cdc7545ccd0010000007b68e5cf8b0100001000000000000000003f0000a03f00007a44",
+      "expect": {
+        "flags": 16,
+        "device_uid": "3CDC7545CCD0",
+        "sequence": 1,
+        "epoch_valid": true,
+        "epoch_ms": 1700000000123,
+        "point_count": 4,
+        "matrix": [0, 0.5, 1.25, 1000],
+        "raw": null,
+        "imu": null,
+        "mag": null,
+        "battery": null
+      }
+    },
+    {
+      "name": "epoch_not_valid",
+      "hex": "5aa505003cdc7545ccd002000000000000000000000008000000204000007040",
+      "expect": {
+        "flags": 0,
+        "device_uid": "3CDC7545CCD0",
+        "sequence": 2,
+        "epoch_valid": false,
+        "epoch_ms": 0,
+        "point_count": 2,
+        "matrix": [2.5, 3.75],
+        "raw": null,
+        "imu": null,
+        "mag": null,
+        "battery": null
+      }
+    },
+    {
+      "name": "imu",
+      "hex": "5aa505113cdc7545ccd003000000c869e5cf8b01000028000000803f00000040000040400000003f000080be00001c410000003e000080bd0000c03f00001242",
+      "expect": {
+        "flags": 17,
+        "device_uid": "3CDC7545CCD0",
+        "sequence": 3,
+        "epoch_valid": true,
+        "epoch_ms": 1700000000456,
+        "point_count": 3,
+        "matrix": [1, 2, 3],
+        "raw": null,
+        "imu": [0.5, -0.25, 9.75, 0.125, -0.0625, 1.5, 36.5],
+        "mag": null,
+        "battery": null
+      }
+    },
+    {
+      "name": "imu_mag_battery",
+      "hex": "5aa505173cdc7545ccd004000000156be5cf8b0100003600000028410000a24100000000000000000000803f0000000000000000000000000000c8410000e04000000041000018c101024f10b61c",
+      "expect": {
+        "flags": 23,
+        "device_uid": "3CDC7545CCD0",
+        "sequence": 4,
+        "epoch_valid": true,
+        "epoch_ms": 1700000000789,
+        "point_count": 2,
+        "matrix": [10.5, 20.25],
+        "raw": null,
+        "imu": [0, 0, 1, 0, 0, 0, 25],
+        "mag": [7, 8, -9.5],
+        "battery": {"status": 1, "fault": 2, "vbat_mv": 4175, "soc_centi_percent": 7350}
+      }
+    },
+    {
+      "name": "raw_adc",
+      "hex": "5aa505183cdc7545ccd005000000e86be5cf8b01000018000000003f0000c03f00002040000000440000804400f0ff44",
+      "expect": {
+        "flags": 24,
+        "device_uid": "3CDC7545CCD0",
+        "sequence": 5,
+        "epoch_valid": true,
+        "epoch_ms": 1700000001000,
+        "point_count": 3,
+        "matrix": [0.5, 1.5, 2.5],
+        "raw": [512, 1024, 2047.5],
+        "imu": null,
+        "mag": null,
+        "battery": null
+      }
+    },
+    {
+      "name": "everything",
+      "hex": "5aa5051f3cdc7545ccd0ffffffff0f8fe5cf8b0100005e000000803f0000004000004040000080400000a0400000c0400000c84200004843000096430000c8430000fa43000016440000803e0000003f0000403f0000803f0000a03f0000c03f0000f0410000c0bf00001040000020420000740e1027",
+      "expect": {
+        "flags": 31,
+        "device_uid": "3CDC7545CCD0",
+        "sequence": 4294967295,
+        "epoch_valid": true,
+        "epoch_ms": 1700000009999,
+        "point_count": 6,
+        "matrix": [1, 2, 3, 4, 5, 6],
+        "raw": [100, 200, 300, 400, 500, 600],
+        "imu": [0.25, 0.5, 0.75, 1, 1.25, 1.5, 30],
+        "mag": [-1.5, 2.25, 40],
+        "battery": {"status": 0, "fault": 0, "vbat_mv": 3700, "soc_centi_percent": 10000}
+      }
+    }
+  ]
+}

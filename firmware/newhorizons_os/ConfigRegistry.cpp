@@ -4,6 +4,7 @@
 #include "JsonUtils.h"
 #include "PowerGovernor.h"
 #include "Storage.h"
+#include "UpdateChannel.h"
 
 namespace nhos {
 namespace {
@@ -39,8 +40,10 @@ const ConfigEntry kEntries[] = {
      "Log file size budget."},
     {"ota.auto_apply_on_boot", ConfigType::Bool, "set_ota_config", "auto_apply_on_boot", 0, 0,
      nullptr, "Check for and apply a newer firmware during boot."},
+    {"ota.channel", ConfigType::Enum, "set_ota_config", "channel", 0, 0, kUpdateChannelNames,
+     "Update channel: stable (public releases) or beta (experimental)."},
     {"ota.manifest_url", ConfigType::Text, "set_ota_config", "manifest_url", 0, 0, nullptr,
-     "Release manifest this device updates from."},
+     "Custom release manifest; empty follows the update channel."},
     {"power.profile", ConfigType::Enum, "set_power_profile", "profile", 0, 0,
      "performance,balanced,powersave", "CPU frequency policy while idle."},
     {"power.charge_profile", ConfigType::Enum, "set_charge_profile", "profile", 0, 0,
@@ -100,6 +103,7 @@ bool ConfigRegistry::readValue(const String& path, const DeviceConfig& config,
   if (path == "log.level") { out = data.logging.level; return true; }
   if (path == "log.mode") { out = data.logging.mode; return true; }
   if (path == "ota.auto_apply_on_boot") { out = boolText(data.ota.autoApplyOnBoot); return true; }
+  if (path == "ota.channel") { out = data.ota.channel; return true; }
   if (path == "ota.manifest_url") { out = data.ota.manifestUrl; return true; }
   if (path == "clock.ntp_server") { out = data.clock.ntpServer; return true; }
   if (path == "clock.ntp_interval_s") { out = String(data.clock.ntpIntervalS); return true; }

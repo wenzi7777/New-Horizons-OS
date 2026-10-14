@@ -10,6 +10,8 @@
 
 #include "Config.h"
 #include "JsonUtils.h"
+#include "OtaTls.h"
+#include "VersionCompare.h"
 
 namespace nhos {
 namespace {
@@ -125,7 +127,7 @@ String OtaManager::lastError() const {
 
 bool OtaManager::fetchManifest(const String& url, String& payload) {
   WiFiClientSecure client;
-  client.setInsecure();
+  trustPublicCertificateAuthorities(client);
   // 6s connect + 8s read, in single blocking calls -- see WatchdogPause.
   WatchdogPause watchdogPause;
   HTTPClient http;
@@ -172,7 +174,7 @@ bool OtaManager::parseManifest(const String& payload, UpdateInfo& out) {
 
 bool OtaManager::downloadAndApply(const UpdateInfo& info) {
   WiFiClientSecure client;
-  client.setInsecure();
+  trustPublicCertificateAuthorities(client);
   HTTPClient http;
   http.setTimeout(12000);
   http.setConnectTimeout(12000);
@@ -321,19 +323,8 @@ size_t OtaManager::extractSize(const String& source, const char* key) const {
 }
 
 int OtaManager::compareVersion(const String& remote, const String& local) const {
-  int r[3] = {0, 0, 0};
-  int l[3] = {0, 0, 0};
-  sscanf(remote.c_str(), "v%d.%d.%d", &r[0], &r[1], &r[2]);
-  sscanf(local.c_str(), "v%d.%d.%d", &l[0], &l[1], &l[2]);
-  for (uint8_t i = 0; i < 3; ++i) {
-    if (r[i] > l[i]) {
-      return 1;
-    }
-    if (r[i] < l[i]) {
-      return -1;
-    }
-  }
-  return 0;
+  // Prerelease-aware (VersionCompare.h): a beta must not read as its release.
+  return compareVersions(remote.c_str(), local.c_str());
 }
 
 }  // namespace nhos

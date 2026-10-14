@@ -51,8 +51,8 @@ class AppPackage {
   static bool validId(const String& id);
   static String packagePath(const String& id);  // "apps/<id>.nha", user scope
 
-  // Lexicographic-by-component compare of `minOs` against kFirmwareVersion.
-  // A leading 'v' is tolerated on either side.
+  // Numeric compare of `minOs` against kFirmwareVersion, ignoring any
+  // prerelease suffix (VersionCompare.h). A leading 'v' is tolerated.
   static bool osVersionSatisfies(const char* minOs);
 
   static String sha256Hex(const uint8_t* data, size_t length);

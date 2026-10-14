@@ -124,8 +124,105 @@ class ArduinoManifestGeneratorTests(unittest.TestCase):
         for script_name, manifest_name in tracks.items():
             script = (REPO_ROOT / "firmware" / "scripts" / script_name).read_text(encoding="utf-8")
             self.assertIn("generate_arduino_manifest.py", script, script_name)
-            self.assertIn(f"{manifest_name}-latest.json", script, script_name)
-            self.assertIn(f"{manifest_name}-${{VERSION}}.json", script, script_name)
+            self.assertIn(f"--track {manifest_name} ", script, script_name)
+            self.assertIn('--channel "${CHANNEL}"', script, script_name)
+            self.assertIn('CHANNEL="${CHANNEL:-stable}"', script, script_name)
+
+    def test_v10f_keeps_the_legacy_alias_on_stable(self):
+        script = (REPO_ROOT / "firmware" / "scripts" / "build_arduino_release.sh").read_text(encoding="utf-8")
+        self.assertIn("--stable-alias arduino-latest.json", script)
+
+
+class ManifestChannelTests(unittest.TestCase):
+    """publish_track(): which manifests a release lands in, per channel."""
+
+    def setUp(self):
+        self.module = load_manifest_module()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.firmware = self.dir / "fw.bin"
+        self.firmware.write_bytes(b"fw")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def publish(self, version, channel, **extra):
+        return self.module.publish_track(
+            manifest_dir=self.dir,
+            track="arduino-v15f",
+            firmware_path=self.firmware,
+            model="VD-CTL/R v1.5.F 2026.7",
+            version=version,
+            base_url="https://example.com",
+            channel=channel,
+            **extra,
+        )
+
+    def latest(self, name):
+        path = self.dir / f"arduino-v15f-{name}.json"
+        return json.loads(path.read_text(encoding="utf-8"))["latest"] if path.exists() else None
+
+    def test_stable_release_feeds_both_channels(self):
+        self.publish("v1.14.0", "stable")
+        self.assertEqual(self.latest("latest"), "v1.14.0")
+        self.assertEqual(self.latest("beta"), "v1.14.0")
+        self.assertEqual(self.latest("v1.14.0"), "v1.14.0")
+
+    def test_beta_release_never_touches_latest(self):
+        self.publish("v1.14.0", "stable")
+        self.publish("v1.15.0-beta.1", "beta")
+        self.assertEqual(self.latest("latest"), "v1.14.0")
+        self.assertEqual(self.latest("beta"), "v1.15.0-beta.1")
+        self.assertEqual(self.latest("v1.15.0-beta.1"), "v1.15.0-beta.1")
+
+    def test_stable_does_not_pull_beta_back_below_a_newer_prerelease(self):
+        self.publish("v1.14.0", "stable")
+        self.publish("v1.15.0-beta.1", "beta")
+        self.publish("v1.14.1", "stable")  # a hotfix while 1.15 is in beta
+        self.assertEqual(self.latest("latest"), "v1.14.1")
+        self.assertEqual(self.latest("beta"), "v1.15.0-beta.1")
+
+    def test_stable_overtaking_the_beta_takes_over_the_beta_channel(self):
+        self.publish("v1.14.0", "stable")
+        self.publish("v1.15.0-beta.2", "beta")
+        self.publish("v1.15.0", "stable")
+        self.assertEqual(self.latest("beta"), "v1.15.0")
+
+    def test_prerelease_is_refused_on_stable(self):
+        with self.assertRaises(ValueError):
+            self.publish("v1.15.0-beta.1", "stable")
+        self.assertIsNone(self.latest("latest"))
+
+    def test_beta_needs_a_prerelease_newer_than_stable(self):
+        with self.assertRaises(ValueError):
+            self.publish("v1.15.0", "beta")
+        self.publish("v1.14.0", "stable")
+        with self.assertRaises(ValueError):
+            self.publish("v1.14.0-beta.3", "beta")
+
+    def test_stable_aliases_follow_latest_only(self):
+        self.publish("v1.14.0", "stable", stable_aliases=("arduino-latest.json",))
+        self.publish("v1.15.0-beta.1", "beta", stable_aliases=("arduino-latest.json",))
+        alias = json.loads((self.dir / "arduino-latest.json").read_text(encoding="utf-8"))
+        self.assertEqual(alias["latest"], "v1.14.0")
+
+    def test_single_output_mode_refuses_prerelease_into_latest(self):
+        output = self.dir / "arduino-v15f-latest.json"
+        result = subprocess.run(
+            ["python3", str(SCRIPT_PATH), "--firmware", str(self.firmware), "--output", str(output),
+             "--version", "v1.15.0-beta.1", "--base-url", "https://example.com"],
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(output.exists())
+
+    def test_compare_versions_matches_the_shared_fixture(self):
+        fixture = json.loads((REPO_ROOT / "spec" / "fixtures" / "versions.json").read_text(encoding="utf-8"))
+        for case in fixture["compare"]:
+            result = self.module.compare_versions(case["a"], case["b"])
+            self.assertEqual((result > 0) - (result < 0), case["order"], case)
+        for case in fixture["prerelease"]:
+            self.assertEqual(self.module.is_prerelease(case["version"]), case["prerelease"], case)
 
 
 if __name__ == "__main__":
