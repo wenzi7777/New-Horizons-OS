@@ -60,6 +60,8 @@ function Invoke-NhosFlash {
 
   $root = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, '..', '..'))
   $sketch = [System.IO.Path]::Combine($root, 'firmware', 'newhorizons_os')
+  # Shared with the Hub; every build needs it.
+  $coreLib = [System.IO.Path]::Combine($root, 'firmware', 'libraries', 'nhos_core')
   $buildPath = [System.IO.Path]::Combine($root, 'firmware', $BuildDirName, 'compile')
   New-Item -ItemType Directory -Force -Path $buildPath | Out-Null
 
@@ -68,6 +70,7 @@ function Invoke-NhosFlash {
   if ($DownloadModeHint) { Write-Host $DownloadModeHint -ForegroundColor Yellow }
 
   & arduino-cli compile `
+    --library $coreLib `
     --fqbn $Fqbn `
     --build-path $buildPath `
     --build-property $BuildProperty `

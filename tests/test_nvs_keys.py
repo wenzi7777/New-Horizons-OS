@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCES = [ROOT / "firmware" / "newhorizons_os"]
+SOURCES = [ROOT / "firmware" / "newhorizons_os", ROOT / "firmware" / "libraries" / "nhos_core" / "src"]
 HUB = ROOT.parent / "New-Horizons-Hub" / "newhorizons_hub"
 if HUB.exists():
     SOURCES.append(HUB)

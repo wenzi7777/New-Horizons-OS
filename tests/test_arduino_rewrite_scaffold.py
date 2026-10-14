@@ -6,6 +6,9 @@ from pathlib import Path
 import sys as _sys
 _sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
 from _control_source import command_names, control_source, flagged, handler_body  # noqa: E402
+import sys as _fsys
+_fsys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from _firmware import CORE_ROOT, firmware_file, firmware_sources, read_firmware  # noqa: E402
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -64,14 +67,14 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             "Storage.cpp",
         }
 
-        missing = sorted(name for name in expected if not (ARDUINO_ROOT / name).exists())
+        missing = sorted(name for name in expected if not firmware_file(name).exists())
 
         self.assertEqual(missing, [])
 
     def test_config_declares_new_protocol_packet_version_and_ports(self):
-        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+        config = read_firmware("Config.h")
         # Generated from spec/wire.json (firmware/scripts/gen_wire.py).
-        packet_wire = (ARDUINO_ROOT / "PacketWireConstants.h").read_text(encoding="utf-8")
+        packet_wire = read_firmware("PacketWireConstants.h")
 
         self.assertIn('#include "BoardConfig.h"', config)
         self.assertIn('kProtocolName[] = "NHO/Arduino/1"', config)
@@ -79,7 +82,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kPacketVersion = 5", packet_wire)
         self.assertIn("kPacketFlagExtensions = 0x20", packet_wire)
         self.assertIn("kPacketHeaderLen = 24", packet_wire)
-        self.assertIn('#include "PacketWireConstants.h"', (ARDUINO_ROOT / "PacketWire.h").read_text(encoding="utf-8"))
+        self.assertIn('#include "PacketWireConstants.h"', read_firmware("PacketWire.h"))
         self.assertIn("kUdpStreamPort = 13250", packet_wire)
         self.assertIn("kDiscoveryPort = 22346", packet_wire)
         self.assertIn("kControlPort = 22345", packet_wire)
@@ -94,18 +97,18 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_ota_accepts_the_pre_rename_board_name(self):
         """Manifests keep the VD-CTL/R name so older firmware can still OTA;
         every model check must take it alongside the TIA-CTL name."""
-        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+        config = read_firmware("Config.h")
         self.assertIn("kOtaManifestModel[] = NHOS_BOARD_OTA_MODEL", config)
         for name in ("OtaManager.cpp", "EspNowOtaReceiver.cpp"):
             source = (ARDUINO_ROOT / name).read_text(encoding="utf-8")
             self.assertIn("model != kHardwareModel && model != kOtaManifestModel", source, name)
-        board_config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
+        board_config = read_firmware("BoardConfig.h")
         self.assertEqual(board_config.count("#define NHOS_BOARD_NAME "), board_config.count("#define NHOS_BOARD_OTA_MODEL "))
         for script in SCRIPT_ROOT.glob("build_arduino_release*.sh"):
             self.assertIn('--model "VD-CTL/R ', script.read_text(encoding="utf-8"), script.name)
 
     def test_board_config_declares_three_board_capabilities(self):
-        config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
+        config = read_firmware("BoardConfig.h")
 
         self.assertIn("NHOS_BOARD_GCU_V21_LTS", config)
         self.assertIn("NHOS_BOARD_GCU_V23D_LTS", config)
@@ -132,7 +135,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('releases/arduino-gcu-v21-lts"', config)
 
     def test_wifi_setup_ap_uses_legacy_open_ssid(self):
-        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+        config = read_firmware("Config.h")
 
         self.assertIn('kDefaultApSsidPrefix[] = "NHOS"', config)
         self.assertNotIn('kDefaultApSsidPrefix[] = "NewHorizonsOS-Arduino"', config)
@@ -141,9 +144,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("kSetupPortalPort = 80", config)
 
     def test_findme_is_primary_gateway_attachment_flow(self):
-        header = (ARDUINO_ROOT / "FindMeClient.h").read_text(encoding="utf-8")
-        findme = (ARDUINO_ROOT / "FindMeClient.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        header = read_firmware("FindMeClient.h")
+        findme = read_firmware("FindMeClient.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
         control = control_source()
 
         self.assertIn("class FindMeClient", header)
@@ -165,9 +168,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         # v0.12.0 left a global WiFiUDP streamUdp.begin(13250) beside
         # udpTransport.begin() (also 13250). Dual-bind steals inbound
         # commands from serviceUdpCommand while outbound stream still works.
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
-        transport_h = (ARDUINO_ROOT / "UdpStreamTransport.h").read_text(encoding="utf-8")
-        transport_cpp = (ARDUINO_ROOT / "UdpStreamTransport.cpp").read_text(encoding="utf-8")
+        sketch = read_firmware("newhorizons_os.ino")
+        transport_h = read_firmware("UdpStreamTransport.h")
+        transport_cpp = read_firmware("UdpStreamTransport.cpp")
 
         self.assertNotIn("WiFiUDP streamUdp", sketch)
         self.assertNotIn("streamUdp.begin", sketch)
@@ -181,8 +184,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertEqual(transport_cpp.count("udp_.begin(kUdpStreamPort)"), 1)
 
     def test_findme_gateway_transfer_expires_and_requires_matching_offer(self):
-        header = (ARDUINO_ROOT / "FindMeClient.h").read_text(encoding="utf-8")
-        findme = (ARDUINO_ROOT / "FindMeClient.cpp").read_text(encoding="utf-8")
+        header = read_firmware("FindMeClient.h")
+        findme = read_firmware("FindMeClient.cpp")
 
         self.assertIn("transferDeadlineMs_", header)
         self.assertIn("transferActive() const", header)
@@ -214,11 +217,11 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
     def test_manual_calibration_workbench_command_set_exists(self):
         control = control_source()
-        calibration_header = (ARDUINO_ROOT / "Calibration.h").read_text(encoding="utf-8")
-        calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
-        scanner_header = (ARDUINO_ROOT / "MatrixScanner.h").read_text(encoding="utf-8")
-        scanner_impl = (ARDUINO_ROOT / "MatrixScanner.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        calibration_header = read_firmware("Calibration.h")
+        calibration_impl = read_firmware("Calibration.cpp")
+        scanner_header = read_firmware("MatrixScanner.h")
+        scanner_impl = read_firmware("MatrixScanner.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
 
         for command in (
             "calibration_status",
@@ -264,8 +267,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("scanner.setCalibration(&calibration)", sketch)
 
     def test_calibration_apply_uses_cached_fits_instead_of_refitting_per_sample(self):
-        calibration_header = (ARDUINO_ROOT / "Calibration.h").read_text(encoding="utf-8")
-        calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
+        calibration_header = read_firmware("Calibration.h")
+        calibration_impl = read_firmware("Calibration.cpp")
 
         apply_match = re.search(
             r"bool Calibration::apply\(float rawMv, uint16_t sensorIndex, float& outValue\) const \{(?P<body>.*?)\n\}",
@@ -287,8 +290,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("complete()", body)
 
     def test_saved_profile_mutators_refresh_calibration_runtime_cache(self):
-        calibration_header = (ARDUINO_ROOT / "Calibration.h").read_text(encoding="utf-8")
-        calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
+        calibration_header = read_firmware("Calibration.h")
+        calibration_impl = read_firmware("Calibration.cpp")
 
         self.assertIn("void refreshSavedStateCache();", calibration_header)
 
@@ -317,7 +320,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("runtimeReady_", refresh_body)
 
     def test_profiles_from_before_the_fitted_model_are_discarded(self):
-        calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
+        calibration_impl = read_firmware("Calibration.cpp")
         load = re.search(r"bool Calibration::loadFromStorage\(\) \{(?P<body>.*?)\n\}", calibration_impl, re.S)
         self.assertIsNotNone(load)
         body = load.group("body")
@@ -328,8 +331,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             self.assertNotIn(gone, calibration_impl)
 
     def test_calibration_persistence_uses_short_spiffs_safe_paths(self):
-        calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
-        storage_impl = (ARDUINO_ROOT / "Storage.cpp").read_text(encoding="utf-8")
+        calibration_impl = read_firmware("Calibration.cpp")
+        storage_impl = read_firmware("Storage.cpp")
 
         self.assertIn('constexpr char kCalibrationDirPath[] = "/cal";', calibration_impl)
         self.assertIn('constexpr char kCalibrationMetaPath[] = "/cal/meta";', calibration_impl)
@@ -343,8 +346,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             self.assertLessEqual(len(path + ".tmp"), 31)
 
     def test_calibration_save_writes_meta_last_then_prunes(self):
-        calibration_impl = (ARDUINO_ROOT / "Calibration.cpp").read_text(encoding="utf-8")
-        calibration_header = (ARDUINO_ROOT / "Calibration.h").read_text(encoding="utf-8")
+        calibration_impl = read_firmware("Calibration.cpp")
+        calibration_header = read_firmware("Calibration.h")
 
         self.assertIn("bool ensureCalibrationDir() const;", calibration_header)
         self.assertIn("void removeObsoleteStoredFiles() const;", calibration_header)
@@ -364,9 +367,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertLess(body.index("writeTextFileAtomic(kCalibrationMetaPath, meta)"), body.index("removeObsoleteStoredFiles();"))
 
     def test_optional_stream_filter_config_matches_gcu_shape_and_safe_defaults(self):
-        config_header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
-        config_impl = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        config_header = read_firmware("DeviceConfig.h")
+        config_impl = read_firmware("DeviceConfig.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("constexpr uint8_t kFilterDefaultMedian = 3;", config_header)
         self.assertIn("constexpr float kFilterDefaultAlpha = 0.25f;", config_header)
@@ -409,8 +412,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('return ok(cmd, "filter_updated", data);', body)
 
     def test_matrix_scanner_filters_live_stream_frames_before_calibration_only(self):
-        scanner_header = (ARDUINO_ROOT / "MatrixScanner.h").read_text(encoding="utf-8")
-        scanner_impl = (ARDUINO_ROOT / "MatrixScanner.cpp").read_text(encoding="utf-8")
+        scanner_header = read_firmware("MatrixScanner.h")
+        scanner_impl = read_firmware("MatrixScanner.cpp")
 
         self.assertIn("bool setFilterConfig(const FilterConfig& config);", scanner_header)
         self.assertIn("struct SensorFilterState", scanner_header)
@@ -465,8 +468,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
     def test_diagnostics_commands_report_heap_totals_and_storage_usage(self):
         control = control_source()
-        storage_header = (ARDUINO_ROOT / "Storage.h").read_text(encoding="utf-8")
-        storage = (ARDUINO_ROOT / "Storage.cpp").read_text(encoding="utf-8")
+        storage_header = read_firmware("Storage.h")
+        storage = read_firmware("Storage.cpp")
 
         self.assertIn("ESP.getHeapSize()", control)
         self.assertIn('"heap_total"', control)
@@ -482,7 +485,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('prefs_.putBool("spiffs_init", true)', storage)
 
     def test_wifi_setup_ssid_matches_legacy_full_device_suffix(self):
-        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
+        wifi = read_firmware("WifiManager.cpp")
 
         self.assertRegex(
             wifi,
@@ -495,8 +498,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("WiFi.softAP(ssid, kDefaultApPassword);", wifi)
 
     def test_wifi_setup_starts_captive_portal_dns_and_http(self):
-        header = (ARDUINO_ROOT / "WifiManager.h").read_text(encoding="utf-8")
-        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
+        header = read_firmware("WifiManager.h")
+        wifi = read_firmware("WifiManager.cpp")
 
         self.assertIn("#include <DNSServer.h>", header)
         self.assertIn("#include <WebServer.h>", header)
@@ -509,9 +512,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("handlePortalSave", wifi)
 
     def test_wifi_setup_enters_portal_without_credentials_or_boot_button_request(self):
-        header = (ARDUINO_ROOT / "WifiManager.h").read_text(encoding="utf-8")
-        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        header = read_firmware("WifiManager.h")
+        wifi = read_firmware("WifiManager.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn(
             "bool begin(Storage& storage, DeviceConfig& deviceConfig, bool forceSetupPortal = false);",
@@ -529,7 +532,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         )
 
     def test_force_setup_portal_does_not_prestart_sta_or_disconnect_missing_ap(self):
-        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
+        wifi = read_firmware("WifiManager.cpp")
 
         self.assertLess(wifi.index("if (forceSetupPortal)"), wifi.index("WiFi.mode(WIFI_STA)"))
         self.assertIn("#include <esp_mac.h>", wifi)
@@ -541,9 +544,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         )
 
     def test_action_button_boot_window_requests_wifi_setup(self):
-        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
-        header = (ARDUINO_ROOT / "BootModeManager.h").read_text(encoding="utf-8")
-        boot = (ARDUINO_ROOT / "BootModeManager.cpp").read_text(encoding="utf-8")
+        config = read_firmware("Config.h")
+        header = read_firmware("BootModeManager.h")
+        boot = read_firmware("BootModeManager.cpp")
 
         self.assertIn("kBootWifiSetupWindowMs = 3000", config)
         self.assertIn("bool wifiSetupRequested() const;", header)
@@ -555,8 +558,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("actionButtonHeld() ||", boot)
 
     def test_wifi_setup_portal_lists_scanned_networks(self):
-        header = (ARDUINO_ROOT / "WifiManager.h").read_text(encoding="utf-8")
-        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
+        header = read_firmware("WifiManager.h")
+        wifi = read_firmware("WifiManager.cpp")
 
         self.assertIn("String wifiNetworkOptionsHtml() const;", header)
         self.assertIn("WiFi.scanNetworks", wifi)
@@ -566,8 +569,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("WiFi.encryptionType(i)", wifi)
 
     def test_serial_boot_log_has_operational_milestones(self):
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
-        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
+        sketch = read_firmware("newhorizons_os.ino")
+        wifi = read_firmware("WifiManager.cpp")
         control = control_source()
 
         for marker in (
@@ -586,14 +589,14 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("control_server_started port=", control)
 
     def test_sk6812_status_patterns_include_bq25180_background_states(self):
-        header = (ARDUINO_ROOT / "LedController.h").read_text(encoding="utf-8")
-        led = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
+        header = read_firmware("LedController.h")
+        led = read_firmware("LedController.cpp")
         control = control_source()
         self.assertTrue((ARDUINO_ROOT / "PowerManager.h").exists())
         self.assertTrue((ARDUINO_ROOT / "PowerManager.cpp").exists())
-        power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
-        power = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        power_header = read_firmware("PowerManager.h")
+        power = read_firmware("PowerManager.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("enum class LedSignal", header)
         self.assertIn("enum class PatternMode", header)
@@ -621,7 +624,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("power_->statusJson()", control)
 
     def test_sk6812_runtime_status_uses_solid_base_states_and_event_overlays(self):
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("leds.showEvent(nhos::LedSignal::ScanWarning)", sketch)
         self.assertNotIn("scanWarningUntilMs", sketch)
@@ -632,7 +635,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("LedSignal::SoftOffChargeDone", sketch)
 
     def test_v15f_reserves_the_system_pixel_for_connectivity_not_charging(self):
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertRegex(
             sketch,
@@ -656,10 +659,10 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         )
 
     def test_bq25180_charge_profiles_include_safe_and_fast_modes(self):
-        power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
-        power = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
+        power_header = read_firmware("PowerManager.h")
+        power = read_firmware("PowerManager.cpp")
         control = control_source()
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("enum class ChargeProfile", power_header)
         self.assertIn("Balanced", power_header)
@@ -682,7 +685,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("fast_800mah_only", power)
         self.assertIn("updateRegister(kBq25180ChargeCtrl0Register, 0x70, 0x20)", power)
         self.assertIn("updateRegister(kBq25180IcCtrlRegister, 0x0C, 0x04)", power)
-        power_status = (ARDUINO_ROOT / "PowerStatusJson.cpp").read_text(encoding="utf-8")
+        power_status = read_firmware("PowerStatusJson.cpp")
         self.assertIn('\\"charge_current_ma\\"', power_status)
         self.assertIn('\\"input_limit_ma\\"', power_status)
         self.assertIn('\\"configured\\"', power_status)
@@ -706,7 +709,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
     def test_board_selection_has_no_silent_default(self):
         # A build without a board define used to fall through to v1.0.F and
         # got flashed onto a v2.1 GCU LTS board; it must fail to compile.
-        config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
+        config = read_firmware("BoardConfig.h")
         branches = re.findall(r"^#(?:if|elif) defined\((NHOS_BOARD_\w+)\)", config, re.MULTILINE)
 
         self.assertEqual(
@@ -739,7 +742,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
                     self.assertEqual(len(re.findall(r"-DNHOS_BOARD_\w+", script)), 1)
 
     def test_v22c_lts_board_config_declares_correct_capabilities(self):
-        config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
+        config = read_firmware("BoardConfig.h")
 
         self.assertIn("NHOS_BOARD_GCU_V22C_LTS", config)
         self.assertIn('NHOS_BOARD_NAME         "TIA-CTL v2.2.C GCU LTS"', config)
@@ -756,8 +759,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('releases/arduino-gcu-v22c-lts"', config)
 
     def test_v22c_lts_board_pins_follow_reference_implementation(self):
-        board_pins = (ARDUINO_ROOT / "BoardPins.cpp").read_text(encoding="utf-8")
-        config_cpp = (ARDUINO_ROOT / "Config.cpp").read_text(encoding="utf-8")
+        board_pins = read_firmware("BoardPins.cpp")
+        config_cpp = read_firmware("Config.cpp")
 
         self.assertIn("#elif defined(NHOS_BOARD_GCU_V22C_LTS)", board_pins)
         v22c = board_pins[board_pins.index("#elif defined(NHOS_BOARD_GCU_V22C_LTS)") :]
@@ -785,8 +788,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('newhorizons-os-gcu-v22c-lts-${VERSION}.bin', script)
 
     def test_v21_lts_board_pins_and_packet_shape_follow_legacy_v21_whitelist(self):
-        board_pins = (ARDUINO_ROOT / "BoardPins.cpp").read_text(encoding="utf-8")
-        config = (ARDUINO_ROOT / "Config.cpp").read_text(encoding="utf-8")
+        board_pins = read_firmware("BoardPins.cpp")
+        config = read_firmware("Config.cpp")
 
         self.assertIn("#elif defined(NHOS_BOARD_GCU_V21_LTS)", board_pins)
         self.assertIn("{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}", board_pins)
@@ -797,9 +800,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("static_assert(kMaxSensors == 120", config)
 
     def test_v21_lts_power_path_reports_non_bq25180_fallback(self):
-        power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
-        power_impl = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
-        power_status = (ARDUINO_ROOT / "PowerStatusJson.cpp").read_text(encoding="utf-8")
+        power_header = read_firmware("PowerManager.h")
+        power_impl = read_firmware("PowerManager.cpp")
+        power_status = read_firmware("PowerStatusJson.cpp")
         control = control_source()
 
         self.assertIn("bool supportsChargeProfiles() const;", power_header)
@@ -811,12 +814,12 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn('return error(cmd, "charge_profile_failed");', control)
 
     def test_device_config_persists_webui_runtime_settings_to_spiffs(self):
-        header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
-        config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
-        storage_header = (ARDUINO_ROOT / "Storage.h").read_text(encoding="utf-8")
-        storage = (ARDUINO_ROOT / "Storage.cpp").read_text(encoding="utf-8")
+        header = read_firmware("DeviceConfig.h")
+        config = read_firmware("DeviceConfig.cpp")
+        storage_header = read_firmware("Storage.h")
+        storage = read_firmware("Storage.cpp")
         control = control_source()
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("struct DeviceConfigData", header)
         self.assertIn('kDeviceConfigPath[] = "/config/device.json"', config)
@@ -844,10 +847,10 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("manual_preset", config + control)
 
     def test_missing_device_config_falls_back_to_board_default_matrix_layout(self):
-        config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
-        scanner_header = (ARDUINO_ROOT / "MatrixScanner.h").read_text(encoding="utf-8")
-        scanner = (ARDUINO_ROOT / "MatrixScanner.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        config = read_firmware("DeviceConfig.cpp")
+        scanner_header = read_firmware("MatrixScanner.h")
+        scanner = read_firmware("MatrixScanner.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
 
         defaults_body = re.search(r"void DeviceConfig::setDefaults\(\) \{(?P<body>.*?)\n\}", config, re.S)
         self.assertIsNotNone(defaults_body)
@@ -868,7 +871,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("scanner.matrixShapeJson()", sketch)
 
     def test_legacy_schema_matrix_layout_is_migrated_when_arrays_exist(self):
-        config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
+        config = read_firmware("DeviceConfig.cpp")
 
         self.assertIn('const bool configured = extractBool(matrix, "configured", false) || (storedSchemaVersion < 2 && analogCount && selectCount);', config)
         self.assertNotIn('const bool configured = storedSchemaVersion >= 2 && extractBool(matrix, "configured", false);', config)
@@ -884,15 +887,15 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("scan_task_started_by_layout_update", control)
 
     def test_arduino_runtime_initializes_bmi270_and_streams_imu_payload(self):
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
-        control_header = (ARDUINO_ROOT / "ControlServer.h").read_text(encoding="utf-8")
+        sketch = read_firmware("newhorizons_os.ino")
+        control_header = read_firmware("ControlServer.h")
         control = control_source()
-        board_config = (ARDUINO_ROOT / "BoardConfig.h").read_text(encoding="utf-8")
-        imu_header = (ARDUINO_ROOT / "ImuManager.h").read_text(encoding="utf-8")
-        imu_impl = (ARDUINO_ROOT / "ImuManager.cpp").read_text(encoding="utf-8")
-        magnetometer_impl = (ARDUINO_ROOT / "MagnetometerManager.cpp").read_text(encoding="utf-8")
-        packet_header = (ARDUINO_ROOT / "PacketBuilder.h").read_text(encoding="utf-8")
-        packet_impl = (ARDUINO_ROOT / "PacketBuilder.cpp").read_text(encoding="utf-8")
+        board_config = read_firmware("BoardConfig.h")
+        imu_header = read_firmware("ImuManager.h")
+        imu_impl = read_firmware("ImuManager.cpp")
+        magnetometer_impl = read_firmware("MagnetometerManager.cpp")
+        packet_header = read_firmware("PacketBuilder.h")
+        packet_impl = read_firmware("PacketBuilder.cpp")
 
         self.assertIn('#include "Arduino_BMI270_BMM150.h"', imu_header)
         self.assertIn("NHOS_BOARD_MAG_MODEL", board_config + imu_impl)
@@ -921,13 +924,13 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("imu_->setServiceIntervalUs(scanner_->scanIntervalUs())", control)
 
     def test_log_configuration_defaults_to_rolling_12k_and_has_extended_24k_mode(self):
-        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
-        device_header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
-        device_config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
-        storage_header = (ARDUINO_ROOT / "Storage.h").read_text(encoding="utf-8")
-        storage = (ARDUINO_ROOT / "Storage.cpp").read_text(encoding="utf-8")
+        config = read_firmware("Config.h")
+        device_header = read_firmware("DeviceConfig.h")
+        device_config = read_firmware("DeviceConfig.cpp")
+        storage_header = read_firmware("Storage.h")
+        storage = read_firmware("Storage.cpp")
         control = control_source()
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("kDefaultLogMaxBytes = 12 * 1024", config)
         self.assertIn("kExtendedLogMaxBytes = 24 * 1024", config)
@@ -948,11 +951,11 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("storage.configureLog", sketch)
 
     def test_boot_auto_ota_is_configurable_and_runs_after_wifi_ready(self):
-        device_header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
-        device_config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
-        ota_header = (ARDUINO_ROOT / "OtaManager.h").read_text(encoding="utf-8")
-        ota = (ARDUINO_ROOT / "OtaManager.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        device_header = read_firmware("DeviceConfig.h")
+        device_config = read_firmware("DeviceConfig.cpp")
+        ota_header = read_firmware("OtaManager.h")
+        ota = read_firmware("OtaManager.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
         control = control_source()
 
         self.assertIn("struct OtaConfig", device_header)
@@ -978,7 +981,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("servicePendingApplyUpdate", control)
 
     def test_release_builds_inject_their_version_into_the_firmware(self):
-        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+        config = read_firmware("Config.h")
         release_scripts = (
             "build_arduino_release.sh",
             "build_arduino_release_v15f.sh",
@@ -996,7 +999,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             self.assertIn("${VERSION}", script, script_name)
 
     def test_main_loop_prioritizes_scan_before_other_runtime_services_and_uses_yield(self):
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        sketch = read_firmware("newhorizons_os.ino")
 
         # The ordering guarantee moved from a hardcoded call list in loop()
         # into the scheduler's task table; loop() is now the tick plus the
@@ -1036,10 +1039,10 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("PartitionScheme=custom", flash_script)
 
     def test_ssd1306_128x32_driver_has_off_auto_enabled_modes(self):
-        header = (ARDUINO_ROOT / "DisplayManager.h").read_text(encoding="utf-8")
-        display = (ARDUINO_ROOT / "DisplayManager.cpp").read_text(encoding="utf-8")
+        header = read_firmware("DisplayManager.h")
+        display = read_firmware("DisplayManager.cpp")
         control = control_source()
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("#include <Adafruit_SSD1306.h>", header)
         self.assertIn("kOledWidth = 128", display)
@@ -1061,9 +1064,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("display_->statusJson()", control)
 
     def test_oled_pages_render_operational_labels_and_gateway_metrics(self):
-        header = (ARDUINO_ROOT / "DisplayManager.h").read_text(encoding="utf-8")
-        display = (ARDUINO_ROOT / "DisplayManager.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        header = read_firmware("DisplayManager.h")
+        display = read_firmware("DisplayManager.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("gatewayIp", header)
         self.assertIn("heapTotal", header)
@@ -1083,12 +1086,12 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("ESP.getHeapSize()", sketch)
 
     def test_external_ws2812b_controller_is_separate_from_internal_status_led_rmt(self):
-        status_header = (ARDUINO_ROOT / "LedController.h").read_text(encoding="utf-8")
-        status_impl = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
-        external_header = (ARDUINO_ROOT / "ExternalLedController.h").read_text(encoding="utf-8")
-        external = (ARDUINO_ROOT / "ExternalLedController.cpp").read_text(encoding="utf-8")
+        status_header = read_firmware("LedController.h")
+        status_impl = read_firmware("LedController.cpp")
+        external_header = read_firmware("ExternalLedController.h")
+        external = read_firmware("ExternalLedController.cpp")
         control = control_source()
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("class LedController", status_header)
         self.assertIn("kStatusLedPin", status_impl)
@@ -1136,8 +1139,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("return jsonExtractFloat(request, key, value) ? value : fallback;", body)
 
     def test_board_pin_map_matches_new_horizons_hardware(self):
-        header = (ARDUINO_ROOT / "BoardPins.h").read_text(encoding="utf-8")
-        pins = (ARDUINO_ROOT / "BoardPins.cpp").read_text(encoding="utf-8")
+        header = read_firmware("BoardPins.h")
+        pins = read_firmware("BoardPins.cpp")
 
         self.assertIn('#include "BoardConfig.h"', header)
         self.assertIn("#if NHOS_BOARD_HAS_EXT_LED", header)
@@ -1289,8 +1292,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
     def test_ota_manifest_and_status_include_changelog_url(self):
         script = (REPO_ROOT / "firmware" / "scripts" / "generate_arduino_manifest.py").read_text(encoding="utf-8")
-        ota_header = (ARDUINO_ROOT / "OtaManager.h").read_text(encoding="utf-8")
-        ota_impl = (ARDUINO_ROOT / "OtaManager.cpp").read_text(encoding="utf-8")
+        ota_header = read_firmware("OtaManager.h")
+        ota_impl = read_firmware("OtaManager.cpp")
         control = control_source()
 
         self.assertIn("changelog_url", script)
@@ -1300,11 +1303,11 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('jsonStringField(data, "changelog_url"', control)
 
     def test_control_and_ota_use_shared_json_helpers(self):
-        json_header = ARDUINO_ROOT / "JsonUtils.h"
-        json_impl = ARDUINO_ROOT / "JsonUtils.cpp"
-        control_header = (ARDUINO_ROOT / "ControlServer.h").read_text(encoding="utf-8")
+        json_header = firmware_file("JsonUtils.h")
+        json_impl = firmware_file("JsonUtils.cpp")
+        control_header = read_firmware("ControlServer.h")
         control_impl = control_source()
-        ota_impl = (ARDUINO_ROOT / "OtaManager.cpp").read_text(encoding="utf-8")
+        ota_impl = read_firmware("OtaManager.cpp")
 
         self.assertTrue(json_header.exists())
         self.assertTrue(json_impl.exists())
@@ -1325,12 +1328,12 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("streamHost", control_header)
         self.assertEqual(command_names().count("set_transport"), 1)
         self.assertNotIn('"stream_host"', control_impl)
-        transport = (ARDUINO_ROOT / "UdpStreamTransport.cpp").read_text(encoding="utf-8")
+        transport = read_firmware("UdpStreamTransport.cpp")
         self.assertNotIn("control_", transport)
 
     def test_control_and_ota_json_contract_text_is_parseable(self):
         control = control_source()
-        ota_impl = (ARDUINO_ROOT / "OtaManager.cpp").read_text(encoding="utf-8")
+        ota_impl = read_firmware("OtaManager.cpp")
 
         self.assertIn('jsonRawField(data, "update_state"', control)
         self.assertIn('jsonStringField(out, "manifest_url"', ota_impl)
@@ -1342,8 +1345,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("python3 -m pytest tests -q", readme)
 
     def test_matrix_scanner_reuses_fixed_average_buffers(self):
-        header = (ARDUINO_ROOT / "MatrixScanner.h").read_text(encoding="utf-8")
-        impl = (ARDUINO_ROOT / "MatrixScanner.cpp").read_text(encoding="utf-8")
+        header = read_firmware("MatrixScanner.h")
+        impl = read_firmware("MatrixScanner.cpp")
 
         self.assertIn("float captureTotalsScratch_[kMaxSensors] = {0};", header)
         self.assertIn("float captureSampleScratch_[kMaxSensors] = {0};", header)
@@ -1353,8 +1356,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("sampleRawFrame(captureSampleScratch_, totalPoints)", impl)
 
     def test_stream_buffer_config_and_control_surface_exist(self):
-        config_h = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
-        config_cpp = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
+        config_h = read_firmware("DeviceConfig.h")
+        config_cpp = read_firmware("DeviceConfig.cpp")
         control_cpp = control_source()
 
         self.assertIn("struct StreamBufferConfig", config_h)
@@ -1375,9 +1378,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('jsonRawField(data, "stream_buffer"', control_cpp)
 
     def test_stream_buffer_queue_runtime_and_health_metrics_exist(self):
-        header = (ARDUINO_ROOT / "MatrixScanner.h").read_text(encoding="utf-8")
-        impl = (ARDUINO_ROOT / "MatrixScanner.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        header = read_firmware("MatrixScanner.h")
+        impl = read_firmware("MatrixScanner.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("queueEnabled", header)
         self.assertIn("queueDepthFrames", header)
@@ -1399,8 +1402,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("scanner.sendQueuedPacket(", sketch)
 
     def test_device_config_defaults_board_aware_layout_and_ota_manifest(self):
-        header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
-        config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
+        header = read_firmware("DeviceConfig.h")
+        config = read_firmware("DeviceConfig.cpp")
 
         self.assertIn("uint8_t analogPins[kRows] = {0};", header)
         self.assertIn("uint8_t selectPins[kCols] = {0};", header)
@@ -1411,9 +1414,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn('data_.ota.manifestUrl = "";', config)
 
     def test_power_state_manager_scaffold_exists_and_tracks_soft_off_states(self):
-        header = (ARDUINO_ROOT / "PowerStateManager.h").read_text(encoding="utf-8")
-        impl = (ARDUINO_ROOT / "PowerStateManager.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        header = read_firmware("PowerStateManager.h")
+        impl = read_firmware("PowerStateManager.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("enum class PowerState", header)
         self.assertIn("SoftOffBattery", header)
@@ -1429,12 +1432,12 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("powerState.service", sketch)
 
     def test_soft_off_path_is_board_aware_for_gpio_wake_and_subsystem_suspend(self):
-        header = (ARDUINO_ROOT / "WifiManager.h").read_text(encoding="utf-8")
-        wifi = (ARDUINO_ROOT / "WifiManager.cpp").read_text(encoding="utf-8")
-        display = (ARDUINO_ROOT / "DisplayManager.cpp").read_text(encoding="utf-8")
-        external = (ARDUINO_ROOT / "ExternalLedController.cpp").read_text(encoding="utf-8")
-        power_state = (ARDUINO_ROOT / "PowerStateManager.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        header = read_firmware("WifiManager.h")
+        wifi = read_firmware("WifiManager.cpp")
+        display = read_firmware("DisplayManager.cpp")
+        external = read_firmware("ExternalLedController.cpp")
+        power_state = read_firmware("PowerStateManager.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("void suspend();", header)
         self.assertIn("void resume();", header)
@@ -1457,12 +1460,12 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("externalLeds.sleep()", sketch)
 
     def test_power_status_and_control_surface_include_soft_off_state(self):
-        power_header = (ARDUINO_ROOT / "PowerManager.h").read_text(encoding="utf-8")
-        power_impl = (ARDUINO_ROOT / "PowerManager.cpp").read_text(encoding="utf-8")
-        power_status = (ARDUINO_ROOT / "PowerStatusJson.cpp").read_text(encoding="utf-8")
-        control_header = (ARDUINO_ROOT / "ControlServer.h").read_text(encoding="utf-8")
+        power_header = read_firmware("PowerManager.h")
+        power_impl = read_firmware("PowerManager.cpp")
+        power_status = read_firmware("PowerStatusJson.cpp")
+        control_header = read_firmware("ControlServer.h")
         control = control_source()
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("bool chargerDetected() const;", power_header)
         self.assertIn("bool softOffRecommended() const;", power_header)
@@ -1477,12 +1480,12 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("powerState.statusJson()", sketch)
 
     def test_power_transition_animation_hooks_exist_for_display_and_external_leds(self):
-        display_header = (ARDUINO_ROOT / "DisplayManager.h").read_text(encoding="utf-8")
-        display_impl = (ARDUINO_ROOT / "DisplayManager.cpp").read_text(encoding="utf-8")
-        external_header = (ARDUINO_ROOT / "ExternalLedController.h").read_text(encoding="utf-8")
-        external_impl = (ARDUINO_ROOT / "ExternalLedController.cpp").read_text(encoding="utf-8")
-        led_header = (ARDUINO_ROOT / "LedController.h").read_text(encoding="utf-8")
-        led_impl = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
+        display_header = read_firmware("DisplayManager.h")
+        display_impl = read_firmware("DisplayManager.cpp")
+        external_header = read_firmware("ExternalLedController.h")
+        external_impl = read_firmware("ExternalLedController.cpp")
+        led_header = read_firmware("LedController.h")
+        led_impl = read_firmware("LedController.cpp")
 
         self.assertIn("enum class PowerAnimation", display_header)
         self.assertIn("void startPowerAnimation(", display_header)
@@ -1503,9 +1506,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("case LedSignal::PowerTransitionWake:", led_impl)
 
     def test_power_transition_flow_uses_immediate_sleep_and_wake(self):
-        power_header = (ARDUINO_ROOT / "PowerStateManager.h").read_text(encoding="utf-8")
-        power_impl = (ARDUINO_ROOT / "PowerStateManager.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        power_header = read_firmware("PowerStateManager.h")
+        power_impl = read_firmware("PowerStateManager.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("enum class PowerTransitionPhase", power_header)
         self.assertIn("PowerTransitionPhase transitionPhase() const;", power_header)
@@ -1528,9 +1531,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("powerState.beginWakeAnimation()", sketch)
 
     def test_boot_mode_manager_supports_buttonless_multi_cycle_wifi_setup(self):
-        header = (ARDUINO_ROOT / "BootModeManager.h").read_text(encoding="utf-8")
-        impl = (ARDUINO_ROOT / "BootModeManager.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        header = read_firmware("BootModeManager.h")
+        impl = read_firmware("BootModeManager.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
 
         self.assertIn("void markWifiConnected();", header)
         self.assertIn("sampleMultiCycleSetupTrigger", header + impl)
@@ -1541,15 +1544,15 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("bootMode.markWifiConnected()", sketch)
 
     def test_packet_builder_and_imu_manager_support_magnetometer_extension(self):
-        config = (ARDUINO_ROOT / "Config.h").read_text(encoding="utf-8")
+        config = read_firmware("Config.h")
         # Generated from spec/wire.json (firmware/scripts/gen_wire.py).
-        packet_wire = (ARDUINO_ROOT / "PacketWireConstants.h").read_text(encoding="utf-8")
-        imu_header = (ARDUINO_ROOT / "ImuManager.h").read_text(encoding="utf-8")
-        imu_impl = (ARDUINO_ROOT / "ImuManager.cpp").read_text(encoding="utf-8")
-        packet_header = (ARDUINO_ROOT / "PacketBuilder.h").read_text(encoding="utf-8")
-        packet_impl = (ARDUINO_ROOT / "PacketBuilder.cpp").read_text(encoding="utf-8")
-        magnetometer_impl = (ARDUINO_ROOT / "MagnetometerManager.cpp").read_text(encoding="utf-8")
-        packet_codec = (ARDUINO_ROOT / "PacketV5Codec.cpp").read_text(encoding="utf-8")
+        packet_wire = read_firmware("PacketWireConstants.h")
+        imu_header = read_firmware("ImuManager.h")
+        imu_impl = read_firmware("ImuManager.cpp")
+        packet_header = read_firmware("PacketBuilder.h")
+        packet_impl = read_firmware("PacketBuilder.cpp")
+        magnetometer_impl = read_firmware("MagnetometerManager.cpp")
+        packet_codec = read_firmware("PacketV5Codec.cpp")
 
         self.assertIn('#include "PacketWire.h"', config)
         self.assertIn("kPacketFlagMag = 0x04", packet_wire)
@@ -1577,8 +1580,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
     def test_root_battery_keeps_distinct_charger_and_battery_profile_fields(self):
         control = control_source()
-        charger = (ARDUINO_ROOT / "PowerStatusJson.cpp").read_text(encoding="utf-8")
-        gauge = (ARDUINO_ROOT / "BatteryGaugeManager.cpp").read_text(encoding="utf-8")
+        charger = read_firmware("PowerStatusJson.cpp")
+        gauge = read_firmware("BatteryGaugeManager.cpp")
 
         self.assertIn('jsonRawField(data, "battery", batteryStatusJson(), first)', control)
         self.assertIn('\\"profile\\":\\"', charger)
@@ -1587,9 +1590,9 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn('\\"profile\\":\\"', gauge)
 
     def test_v15f_leds_keep_gateway_search_and_command_feedback_distinct(self):
-        header = (ARDUINO_ROOT / "LedController.h").read_text(encoding="utf-8")
-        impl = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        header = read_firmware("LedController.h")
+        impl = read_firmware("LedController.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
 
         # Direct gateway discovery is blue; Hub/ESP-NOW discovery remains orange.
         self.assertIn("PatternMode::Solid, LedPalette::Boot", impl)
@@ -1609,8 +1612,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         )
 
     def test_v15f_boot_requires_a_fresh_gateway_offer_before_streaming_or_warning(self):
-        findme = (ARDUINO_ROOT / "FindMeClient.cpp").read_text(encoding="utf-8")
-        sketch = (ARDUINO_ROOT / "newhorizons_os.ino").read_text(encoding="utf-8")
+        findme = read_firmware("FindMeClient.cpp")
+        sketch = read_firmware("newhorizons_os.ino")
         begin_start = findme.index("void FindMeClient::begin")
         begin_end = findme.index("void FindMeClient::service", begin_start)
         begin = findme[begin_start:begin_end]
@@ -1629,10 +1632,10 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("} else if (health.overrunFrames", led_update)
 
     def test_v15f_board_led_settings_are_persisted_and_reported(self):
-        header = (ARDUINO_ROOT / "DeviceConfig.h").read_text(encoding="utf-8")
-        config = (ARDUINO_ROOT / "DeviceConfig.cpp").read_text(encoding="utf-8")
+        header = read_firmware("DeviceConfig.h")
+        config = read_firmware("DeviceConfig.cpp")
         control = control_source()
-        leds = (ARDUINO_ROOT / "LedController.cpp").read_text(encoding="utf-8")
+        leds = read_firmware("LedController.cpp")
 
         self.assertIn("BoardLedConfig", header)
         self.assertIn("brightness = 0.30f", header)

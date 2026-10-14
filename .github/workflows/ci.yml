@@ -66,9 +66,11 @@ jobs:
           arduino-cli lib install "Adafruit GFX Library@1.12.6" "Adafruit SSD1306@2.5.17" "Adafruit NeoPixel@1.15.5" "Adafruit BusIO@1.17.4" "Arduino_BMI270_BMM150@1.2.3"
       - name: Compile ${{ matrix.board }}
         # The board define goes through compiler.cpp.extra_flags, never
-        # build.extra_flags (which holds the core's own defines).
+        # build.extra_flags (which holds the core's own defines). nhos_core is
+        # the code shared with the Hub; no build works without it.
         run: |
           arduino-cli compile --fqbn "${{ matrix.fqbn }}" \
+            --library firmware/libraries/nhos_core \
             --build-path "${{ runner.temp }}/build" \
             --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_${{ matrix.board }}" \
             firmware/newhorizons_os

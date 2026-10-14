@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SKETCH="${ROOT}/firmware/newhorizons_os"
+# Shared with the Hub (README there); every build needs it.
+CORE_LIB="${ROOT}/firmware/libraries/nhos_core"
 OUT_DIR="${OUT_DIR:-${ROOT}/firmware/build_v15f}"
 BUILD_PATH="${BUILD_PATH:-${OUT_DIR}/compile}"
 RELEASE_DIR="${RELEASE_DIR:-${ROOT}/releases/artifacts}"
@@ -17,6 +19,7 @@ CHANGELOG_URL="${CHANGELOG_URL:-https://raw.githubusercontent.com/wenzi7777/New-
 mkdir -p "${OUT_DIR}" "${BUILD_PATH}" "${RELEASE_DIR}" "${MANIFEST_DIR}"
 
 arduino-cli compile \
+  --library "${CORE_LIB}" \
   --fqbn "${FQBN}" \
   --build-path "${BUILD_PATH}" \
   --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V15F -DNHOS_FIRMWARE_VERSION=\"${VERSION}\"" \

@@ -4,6 +4,9 @@ from pathlib import Path
 import sys as _sys
 _sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
 from _control_source import command_names, control_source, flagged, handler_body  # noqa: E402
+import sys as _fsys
+_fsys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from _firmware import CORE_ROOT, firmware_file, firmware_sources, read_firmware  # noqa: E402
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -11,13 +14,13 @@ FIRMWARE_ROOT = REPO_ROOT / "firmware" / "newhorizons_os"
 
 
 def read(name: str) -> str:
-    return (FIRMWARE_ROOT / name).read_text(encoding="utf-8")
+    return read_firmware(name)
 
 
 class AirtimeArbiterTests(unittest.TestCase):
     def test_arbiter_is_the_only_caller_of_esp_now_send(self):
         offenders = []
-        for path in FIRMWARE_ROOT.glob("*.cpp"):
+        for path in firmware_sources(".cpp"):
             if path.name == "AirtimeArbiter.cpp":
                 continue
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):

@@ -12,12 +12,15 @@ fi
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SKETCH="${ROOT}/firmware/newhorizons_os"
+# Shared with the Hub (README there); every build needs it.
+CORE_LIB="${ROOT}/firmware/libraries/nhos_core"
 BUILD_PATH="${ROOT}/firmware/build_v15f/compile"
 FQBN="${FQBN:-esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc,CDCOnBoot=cdc}"
 
 mkdir -p "${BUILD_PATH}"
 
 arduino-cli compile \
+  --library "${CORE_LIB}" \
   --fqbn "${FQBN}" \
   --build-path "${BUILD_PATH}" \
   --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V15F" \

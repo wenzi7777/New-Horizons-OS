@@ -9,7 +9,7 @@
 #include <cstring>
 #include <vector>
 
-#include "../firmware/newhorizons_os/EspNowFrame.h"
+#include "../firmware/libraries/nhos_core/src/EspNowFrame.h"
 
 namespace {
 

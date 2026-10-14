@@ -48,8 +48,13 @@ The old MicroPython runtime layout (`device/root`, `device/os`, `device/recovery
 
 ```bash
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/NewHorizonsOS-OTA
-arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V10F" firmware/newhorizons_os
+arduino-cli compile --library firmware/libraries/nhos_core --fqbn esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V10F" firmware/newhorizons_os
 ```
+
+`--library firmware/libraries/nhos_core` is required: that library holds the
+code shared with the New Horizons Hub (board definitions, wire constants,
+ESP-NOW framing, clock core, version order; see its README). The build,
+flash and release scripts pass it.
 
 Every build must name its board (`-DNHOS_BOARD_V10F`, `-DNHOS_BOARD_V15F`,
 `-DNHOS_BOARD_GCU_V21_LTS`, `-DNHOS_BOARD_GCU_V22C_LTS` or
@@ -210,10 +215,10 @@ The manifest shape is JSON:
 
 ```bash
 python3 -m unittest discover -s tests -q
-arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V10F" firmware/newhorizons_os
-arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_GCU_V23D_LTS" firmware/newhorizons_os
-arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "build.extra_flags=-DNHOS_BOARD_GCU_V22C_LTS" firmware/newhorizons_os
-arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "build.extra_flags=-DNHOS_BOARD_GCU_V21_LTS" firmware/newhorizons_os
+arduino-cli compile --library firmware/libraries/nhos_core --fqbn esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_V10F" firmware/newhorizons_os
+arduino-cli compile --library firmware/libraries/nhos_core --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_GCU_V23D_LTS" firmware/newhorizons_os
+arduino-cli compile --library firmware/libraries/nhos_core --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_GCU_V22C_LTS" firmware/newhorizons_os
+arduino-cli compile --library firmware/libraries/nhos_core --fqbn esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs --build-property "compiler.cpp.extra_flags=-DNHOS_BOARD_GCU_V21_LTS" firmware/newhorizons_os
 ```
 
 Hardware smoke tests still need to be run on the physical board: flash, serial boot, Wi-Fi provisioning, UDP discovery, 10x21 60 Hz stream, maintenance mode, and OTA rollback.

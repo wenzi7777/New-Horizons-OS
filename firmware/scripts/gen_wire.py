@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Generate the NHO/Arduino/1 wire constants from spec/wire.json.
 
-    firmware/scripts/gen_wire.py [--check] [--hub DIR] [--desktop DIR] [--gateway DIR]
+    firmware/scripts/gen_wire.py [--check] [--desktop DIR] [--gateway DIR]
 
 Writes (or with --check, compares):
-  this repo  firmware/newhorizons_os/PacketWireConstants.h, TimeWireConstants.h
-  Hub        newhorizons_hub/PacketWireConstants.h, TimeWireConstants.h
+  this repo  firmware/libraries/nhos_core/src/PacketWireConstants.h, TimeWireConstants.h
+             (the library the firmware and the Hub both build with)
   Desktop    backend/newhorizons_backend/wire.py
   Gateway    newhorizons_gateway/wire.py
 
@@ -166,12 +166,8 @@ def outputs(spec: dict) -> list[tuple[str, str | None, str, list[tuple[str, str]
     py = python_module(spec)
     return [
         ("firmware", str(REPO), "NewHorizonsOS-OTA", [
-            ("firmware/newhorizons_os/PacketWireConstants.h", packet),
-            ("firmware/newhorizons_os/TimeWireConstants.h", time),
-        ]),
-        ("hub", None, "New-Horizons-Hub", [
-            ("newhorizons_hub/PacketWireConstants.h", packet),
-            ("newhorizons_hub/TimeWireConstants.h", time),
+            ("firmware/libraries/nhos_core/src/PacketWireConstants.h", packet),
+            ("firmware/libraries/nhos_core/src/TimeWireConstants.h", time),
         ]),
         ("desktop", None, "New-Horizons-Desktop", [("backend/newhorizons_backend/wire.py", py)]),
         ("gateway", None, "New-Horizons-Gateway", [("newhorizons_gateway/wire.py", py)]),
@@ -181,7 +177,7 @@ def outputs(spec: dict) -> list[tuple[str, str | None, str, list[tuple[str, str]
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="fail when a generated file differs")
-    for name in ("hub", "desktop", "gateway"):
+    for name in ("desktop", "gateway"):
         parser.add_argument(f"--{name}", help=f"the {name} checkout (default: the sibling directory)")
     args = parser.parse_args(argv)
     spec = load_spec()
