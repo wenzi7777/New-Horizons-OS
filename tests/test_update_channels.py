@@ -103,6 +103,18 @@ class DirectModeCheckTests(unittest.TestCase):
         # Availability alone decides whether a relay starts.
         self.assertIn("updateAvailable_ = false;", reply[assigned:])
 
+    def test_a_relay_the_hub_abandons_is_given_up(self):
+        # Without a limit the device stayed "relaying" for good after the Hub
+        # stopped (chunk timeout, GitHub read failure, Hub reboot): holding
+        # the airtime, so the sensor stream stayed paused too.
+        impl = read("EspNowOtaReceiver.cpp")
+        service = impl[impl.index("void EspNowOtaReceiver::service()"):]
+        service = service[:service.index("\n}\n")]
+        self.assertIn("phase_ == Phase::kRelaying && otaRelayIdleExpired(millis(), lastRelayProgressMs_)", service)
+        self.assertIn('abortRelay("relay_timeout");', service)
+        # Progress: the relay starting, a chunk written, a lost ack re-sent.
+        self.assertEqual(impl.count("lastRelayProgressMs_ = millis();"), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

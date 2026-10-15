@@ -121,7 +121,19 @@ void testClassifyOutOfOrderChunkIsIgnored() {
 
 }  // namespace
 
+static void testRelayIdleTimeout() {
+  // Progress resets the clock; the limit is inclusive and wrap-safe.
+  CHECK(!nhos::otaRelayIdleExpired(1000, 1000));
+  CHECK(!nhos::otaRelayIdleExpired(1000 + nhos::kOtaRelayIdleTimeoutMs - 1, 1000));
+  CHECK(nhos::otaRelayIdleExpired(1000 + nhos::kOtaRelayIdleTimeoutMs, 1000));
+  CHECK(!nhos::otaRelayIdleExpired(5000, 0xFFFFF000u));  // millis() wrapped, ~9 s later
+  CHECK(nhos::otaRelayIdleExpired(40000, 0xFFFFF000u));  // ~44 s later
+  // Longer than one chunk's worst case on the Hub: 15 s of resends + 5 s read.
+  CHECK(nhos::kOtaRelayIdleTimeoutMs > 20000);
+}
+
 int main() {
+  testRelayIdleTimeout();
   testParseValidHeader();
   testParseChunkIndexHighByte();
   testParseTooShortForSubHeaderRejected();

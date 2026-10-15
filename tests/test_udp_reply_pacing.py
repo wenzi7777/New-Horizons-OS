@@ -68,11 +68,28 @@ class HeavyCommandDeferralTests(unittest.TestCase):
     def test_heavy_commands_are_deferred_after_the_ack(self):
         command = self.body("void ControlServer::serviceUdpCommand(WiFiUDP& udp) {")
         # The ack goes out first, so the Gateway does not retry while it waits.
-        self.assertLess(command.index("udp.print(ack);"), command.index("(spec->flags & kCmdHeavy) != 0"))
+        self.assertLess(command.index("udp.print(ack);"), command.index("isHeavyCommand(cmd)"))
         self.assertIn("!heavyCommandMayRun(command.sinceUs)", command)
-        self.assertIn("deferredUdp_ = std::move(command);", command)
-        # The deferred one is serviced every tick, before new packets are read.
-        self.assertLess(command.index("serviceDeferredUdpCommand(udp);"), command.index("udp.parsePacket()"))
+        self.assertIn("deferredUdp_[deferredUdpCount_++] = std::move(command);", command)
+        # The queue is serviced every tick, before new packets are read; a
+        # tick that ran a queued command reads none (one command per tick, so
+        # a scan due after a 12 ms status runs before the next one).
+        self.assertLess(command.index("if (serviceDeferredUdpCommand(udp)) {"), command.index("udp.parsePacket()"))
+
+    def test_commands_keep_their_order_behind_a_deferred_one(self):
+        # A light command after a deferred status used to run first, so the
+        # status reported a state the caller had asked to change after it.
+        command = self.body("void ControlServer::serviceUdpCommand(WiFiUDP& udp) {")
+        self.assertIn("if (deferredUdpCount_ > 0 || (isHeavyCommand(cmd) && !heavyCommandMayRun(command.sinceUs)))", command)
+        # A full queue drains in order before the new command runs.
+        full = command[command.index("if (deferredUdpCount_ == kMaxDeferredUdp)"):]
+        self.assertLess(full.index("runNextDeferredUdpCommand(udp);"), full.index("executeUdpCommand(udp, command);"))
+        # A light command behind the head waits only for it; the next heavy
+        # one waits for its own gap, timed from when it reaches the front.
+        service = self.body("bool ControlServer::serviceDeferredUdpCommand(WiFiUDP& udp) {")
+        self.assertIn("(isHeavyCommand(deferredUdp_[0].cmd) && !heavyCommandMayRun(deferredUdp_[0].sinceUs))", service)
+        run = self.body("void ControlServer::runNextDeferredUdpCommand(WiFiUDP& udp) {")
+        self.assertIn("deferredUdp_[0].sinceUs = micros();", run)
 
     def test_no_scan_coming_means_no_wait(self):
         may_run = self.body("bool ControlServer::heavyCommandMayRun(uint32_t deferredSinceUs) const {")

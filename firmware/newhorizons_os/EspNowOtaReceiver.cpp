@@ -187,9 +187,12 @@ void EspNowOtaReceiver::service() {
     return;
   }
 
-  // kRelaying / kFinished: nothing to drive here -- kRelaying advances
-  // entirely from handleOtaChunkFrame() (chunk-by-chunk, Hub-paced
-  // stop-and-wait), kFinished is terminal for this boot.
+  // kRelaying advances from handleOtaChunkFrame() (chunk-by-chunk, Hub-paced
+  // stop-and-wait); all it needs here is a way out if the Hub stops sending.
+  // kFinished is terminal until the next check or apply.
+  if (phase_ == Phase::kRelaying && otaRelayIdleExpired(millis(), lastRelayProgressMs_)) {
+    abortRelay("relay_timeout");
+  }
 }
 
 void EspNowOtaReceiver::handleHubRequestFrame(const uint8_t* data, size_t len) {
@@ -316,6 +319,7 @@ void EspNowOtaReceiver::handleRelayStartReply(const String& payload) {
   mbedtls_sha256_starts(&shaCtx_, 0);
   nextExpectedChunk_ = 0;
   hasWrittenAnyChunk_ = false;
+  lastRelayProgressMs_ = millis();
   phase_ = Phase::kRelaying;
   Serial.print(F("[espnow_ota] relay_starting total_chunks="));
   Serial.println(totalChunks_);
@@ -333,6 +337,7 @@ void EspNowOtaReceiver::handleOtaChunkFrame(const uint8_t* data, size_t len) {
       // Our ack for this (already-written) chunk was lost and the Hub
       // resent it. Only re-ack; re-calling Update.write() here would
       // append the same bytes a second time and corrupt the image.
+      lastRelayProgressMs_ = millis();
       sendChunkAck(header.chunkIndex);
       return;
     case OtaChunkDecision::kIgnore:
@@ -347,6 +352,7 @@ void EspNowOtaReceiver::handleOtaChunkFrame(const uint8_t* data, size_t len) {
   }
   mbedtls_sha256_update(&shaCtx_, chunkData, header.chunkLen);
   hasWrittenAnyChunk_ = true;
+  lastRelayProgressMs_ = millis();
   ++nextExpectedChunk_;
   sendChunkAck(header.chunkIndex);
 

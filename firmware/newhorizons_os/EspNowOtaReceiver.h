@@ -193,6 +193,9 @@ class EspNowOtaReceiver {
 
   uint16_t totalChunks_ = 0;
   uint16_t nextExpectedChunk_ = 0;
+  // When the relay last made progress (started, or a chunk written or
+  // re-acked); service() aborts it after kOtaRelayIdleTimeoutMs without.
+  uint32_t lastRelayProgressMs_ = 0;
   bool hasWrittenAnyChunk_ = false;
   mbedtls_sha256_context shaCtx_;
 };

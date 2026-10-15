@@ -45,4 +45,19 @@ enum class OtaChunkDecision {
 OtaChunkDecision classifyOtaChunk(uint16_t chunkIndex, uint16_t nextExpectedChunk,
                                    bool hasWrittenAnyChunk);
 
+// How long a device keeps waiting for the next chunk before giving the
+// transfer up. The Hub resends a chunk for at most 15 s (30 x 0.5 s) and may
+// spend up to 5 s reading the next one from GitHub, so a healthy relay never
+// goes this quiet. Without a limit a relay the Hub abandoned (chunk timeout,
+// GitHub read failure, Hub reboot or self-update) left the device "relaying"
+// for good -- holding the airtime, so the sensor stream stayed paused too,
+// and refusing every later update -- until someone power-cycled it.
+constexpr uint32_t kOtaRelayIdleTimeoutMs = 30000;
+
+// True once a relay has made no progress (no chunk written or re-acked)
+// since `lastProgressMs` for kOtaRelayIdleTimeoutMs. Wrap-safe.
+inline bool otaRelayIdleExpired(uint32_t nowMs, uint32_t lastProgressMs) {
+  return nowMs - lastProgressMs >= kOtaRelayIdleTimeoutMs;
+}
+
 }  // namespace nhos

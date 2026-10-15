@@ -221,8 +221,9 @@ class ControlServer {
     uint32_t sinceUs = 0;
   };
   void executeUdpCommand(WiFiUDP& udp, const PendingUdpCommand& command);
-  // Runs a deferred heavy command once HeavyCommandPacing allows it.
-  void serviceDeferredUdpCommand(WiFiUDP& udp);
+  // Runs the next queued command once it may (HeavyCommandPacing for a heavy
+  // one); true when one ran this tick.
+  bool serviceDeferredUdpCommand(WiFiUDP& udp);
   bool heavyCommandMayRun(uint32_t deferredSinceUs) const;
   String processCommand(const String& request);
   String ok(const String& command, const String& message, const String& data = "{}") const;
@@ -297,10 +298,15 @@ class ControlServer {
   static constexpr uint8_t kMaxPendingUdpReplies = 2;
   PendingUdpReply udpReplies_[kMaxPendingUdpReplies];
   uint8_t udpReplyCount_ = 0;
-  // One deferred heavy command (ReplyPacing.h, HeavyCommandPacing). A second
-  // heavy command arriving while one waits simply runs at once.
-  PendingUdpCommand deferredUdp_;
-  bool hasDeferredUdp_ = false;
+  // A heavy command deferred to the gap after a scan (ReplyPacing.h,
+  // HeavyCommandPacing), and the UDP commands waiting behind it, oldest first. Every
+  // command after it waits too, so replies keep the order requests came in
+  // (a set_* sent after a status must not run before it).
+  static constexpr uint8_t kMaxDeferredUdp = 4;
+  PendingUdpCommand deferredUdp_[kMaxDeferredUdp];
+  uint8_t deferredUdpCount_ = 0;
+  void runNextDeferredUdpCommand(WiFiUDP& udp);
+  static bool isHeavyCommand(const String& cmd);
   bool (*scanGate_)() = nullptr;
   uint32_t udpChunkReadyUs_ = 0;
   void sendUdpChunk(WiFiUDP& udp, const PendingUdpReply& reply, size_t index);

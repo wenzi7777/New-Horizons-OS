@@ -138,7 +138,11 @@ void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
   // every tick below: the Gateway's TIME_RESP shares this socket, and a
   // command arriving meanwhile is processed (its result queued) at once.
   serviceUdpReplies(udp);
-  serviceDeferredUdpCommand(udp);
+  // One command per tick: after a queued one has run, new packets wait in
+  // the socket for the next tick, so a scan due by then runs first.
+  if (serviceDeferredUdpCommand(udp)) {
+    return;
+  }
   const int pktSize = udp.parsePacket();
   if (pktSize <= 0) {
     return;
@@ -216,15 +220,26 @@ void ControlServer::serviceUdpCommand(WiFiUDP& udp) {
   command.ackLed = ackLed;
   command.sinceUs = micros();
   // A heavy command (status ~14 ms) waits for the gap after a scan instead of
-  // delaying one. Its ack is already out, so the Gateway will not retry.
-  const CommandSpec* spec = findCommand(cmd);
-  if (spec != nullptr && (spec->flags & kCmdHeavy) != 0 && !hasDeferredUdp_ &&
-      !heavyCommandMayRun(command.sinceUs)) {
-    deferredUdp_ = std::move(command);
-    hasDeferredUdp_ = true;
+  // delaying one. Its ack is already out, so the Gateway will not retry. Any
+  // command behind a waiting one waits too: replies keep the request order.
+  if (deferredUdpCount_ > 0 || (isHeavyCommand(cmd) && !heavyCommandMayRun(command.sinceUs))) {
+    if (deferredUdpCount_ == kMaxDeferredUdp) {
+      // Full: drain in order, then this one (never dropped).
+      while (deferredUdpCount_ > 0) {
+        runNextDeferredUdpCommand(udp);
+      }
+      executeUdpCommand(udp, command);
+      return;
+    }
+    deferredUdp_[deferredUdpCount_++] = std::move(command);
     return;
   }
   executeUdpCommand(udp, command);
+}
+
+bool ControlServer::isHeavyCommand(const String& cmd) {
+  const CommandSpec* spec = findCommand(cmd);
+  return spec != nullptr && (spec->flags & kCmdHeavy) != 0;
 }
 
 bool ControlServer::heavyCommandMayRun(uint32_t deferredSinceUs) const {
@@ -236,13 +251,28 @@ bool ControlServer::heavyCommandMayRun(uint32_t deferredSinceUs) const {
   return HeavyCommandPacing::mayRun(nowUs, deferredSinceUs, scanning, usUntilScan);
 }
 
-void ControlServer::serviceDeferredUdpCommand(WiFiUDP& udp) {
-  if (!hasDeferredUdp_ || !heavyCommandMayRun(deferredUdp_.sinceUs)) {
-    return;
+bool ControlServer::serviceDeferredUdpCommand(WiFiUDP& udp) {
+  // The head of the queue runs when it may: a heavy one in the gap after a
+  // scan, a light one (queued behind a heavy one, to keep the order) at once.
+  if (deferredUdpCount_ == 0 ||
+      (isHeavyCommand(deferredUdp_[0].cmd) && !heavyCommandMayRun(deferredUdp_[0].sinceUs))) {
+    return false;
   }
-  PendingUdpCommand command = std::move(deferredUdp_);
-  hasDeferredUdp_ = false;
-  deferredUdp_ = PendingUdpCommand{};
+  runNextDeferredUdpCommand(udp);
+  return true;
+}
+
+void ControlServer::runNextDeferredUdpCommand(WiFiUDP& udp) {
+  PendingUdpCommand command = std::move(deferredUdp_[0]);
+  for (uint8_t i = 1; i < deferredUdpCount_; ++i) {
+    deferredUdp_[i - 1] = std::move(deferredUdp_[i]);
+  }
+  --deferredUdpCount_;
+  deferredUdp_[deferredUdpCount_] = PendingUdpCommand{};
+  if (deferredUdpCount_ > 0) {
+    // The new head's wait starts now: it has only just reached the front.
+    deferredUdp_[0].sinceUs = micros();
+  }
   executeUdpCommand(udp, command);
 }
 
