@@ -497,6 +497,12 @@ void scanAndStreamIfDue() {
   }
   lastFrameReady = true;
 
+  // App events ride the stream (spec/PROTOCOL.md 3.1). They were raised on an
+  // earlier frame -- apps run after that frame's packet went out -- and carry
+  // its frame_seq, which the receiver maps to that frame's time.
+  static uint8_t eventExtensions[nhos::kPacketExtensionBudget];
+  const size_t eventBytes = apps.takeStreamEvents(eventExtensions, sizeof(eventExtensions));
+
   // Stamped with when the frame was scanned, not when this packet is built.
   const bool epochValid = deviceClock.hasSynced();
   const uint64_t epochMs = epochValid ? deviceClock.epochMsAt(frame.timestampUs) : 0;
@@ -504,7 +510,8 @@ void scanAndStreamIfDue() {
       frame, epochMs, epochValid, packetBuffer, sizeof(packetBuffer),
       matrixPayloadLen, imuSampleValid ? imuSample : nullptr,
       magSampleValid ? magSample : nullptr,
-      batterySampleValid ? &batterySample : nullptr);
+      batterySampleValid ? &batterySample : nullptr,
+      eventBytes ? eventExtensions : nullptr, eventBytes);
   if (!len) {
     scanner.recordUdpSend(false, 0);
     return;

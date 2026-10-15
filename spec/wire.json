@@ -17,6 +17,17 @@
     "extension_tlv_header_len": 2,
     "extension_budget": 128,
     "espnow_data_frame_budget": 3840,
+    "extension_types": {
+      "_comment": "TLV types in a packet's extensions block (PROTOCOL.md 3.1). A receiver skips a type it does not know.",
+      "app_event": "0x01"
+    },
+    "app_event": {
+      "_comment": "The app_event TLV: seq u32, frame_seq u32, uptime_ms u32, flags u8, [value f32 when flags & value], then app, event, detail as u8 length + bytes, at most these lengths (AppManager's EventRecord).",
+      "flag_value": "0x01",
+      "max_app": 15,
+      "max_event": 23,
+      "max_detail": 47
+    },
     "flags": {
       "imu": "0x01",
       "battery": "0x02",

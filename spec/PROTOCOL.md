@@ -126,6 +126,36 @@ count is not in the header: a receiver knows it from the device's
 `matrix_shape`, or infers it from the payload length. Versions 2–4 are frozen
 history, still accepted by the parsers.
 
+### 3.1 Extension TLVs
+
+Types (`wire.json` → `packet.extension_types`). A receiver skips a type it does
+not know, by its length.
+
+| Type | Name | Since |
+|---|---|---|
+| `0x01` | `app_event` | firmware v1.16.0 |
+
+**`app_event`** — one app event (`app_events`), little-endian:
+
+| Field | Size | |
+|---|---|---|
+| seq | u32 | the event's sequence (the `app_events` `seq`) |
+| frame_seq | u32 | the frame the event was raised on |
+| uptime_ms | u32 | device time since boot when it was raised |
+| flags | u8 | bit 0: a value follows |
+| value | f32 | only with flags bit 0 |
+| app, event, detail | u8 length + bytes each | at most 15 / 23 / 47 bytes, no terminator |
+
+Apps run after a frame's packet has gone out, so an event rides a *later*
+packet than its frame: its own `frame_seq`, not the packet's, says when it
+happened, and a receiver takes that frame's time from its own record of the
+stream. Each packet carries every event raised since the previous one that
+fits the 128-byte budget (one always fits); the rest wait for the next.
+A lost packet loses its events from the stream only: the device's ring (32
+entries) still holds them, and a receiver that sees a gap in `seq` fills it
+with `{"command":"app_events","since_seq":N}`. `app_events` replies carry
+`"streaming":true` from v1.16.0, so a receiver knows it need not poll.
+
 ## 4. Time
 
 The device keeps one wall clock (`clock_status`). Its source follows the

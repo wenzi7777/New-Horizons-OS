@@ -152,12 +152,21 @@ CXX="${CXX:-c++}"
 
 "$BUILD_DIR/test_scan_lateness"
 
+"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
+  "$SCRIPT_DIR/test_app_event_wire.cpp" \
+  "$CORE_DIR/AppEventWire.cpp" \
+  "$CORE_DIR/PacketV5Codec.cpp" \
+  -o "$BUILD_DIR/test_app_event_wire"
+
+"$BUILD_DIR/test_app_event_wire"
+
 # Wire-format fixtures the Desktop and Gateway parse in their own tests: the
 # committed file must be exactly what the firmware encoder produces today.
 "$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
   -I"$FIRMWARE_DIR" -I"$CORE_DIR" \
   "$SCRIPT_DIR/gen_packet_fixtures.cpp" \
   "$CORE_DIR/PacketV5Codec.cpp" \
+  "$CORE_DIR/AppEventWire.cpp" \
   -o "$BUILD_DIR/gen_packet_fixtures"
 
 "$BUILD_DIR/gen_packet_fixtures" > "$BUILD_DIR/packets.json"

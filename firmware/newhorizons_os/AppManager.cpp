@@ -1,5 +1,7 @@
 #include "AppManager.h"
 
+#include "AppEventWire.h"
+
 #include "JsonUtils.h"
 #include "Storage.h"
 
@@ -518,12 +520,48 @@ String AppManager::statusJson(const String& outputsFor) const {
   return json;
 }
 
+size_t AppManager::takeStreamEvents(uint8_t* out, size_t capacity) {
+  if (out == nullptr || eventSeq_ == streamedSeq_) {
+    return 0;
+  }
+  if (eventSeq_ < streamedSeq_) {
+    streamedSeq_ = 0;  // never expected: the sequence only grows until reboot
+  }
+  size_t written = 0;
+  for (uint8_t i = 0; i < kEventLogEntries; ++i) {
+    // Oldest first, as in eventsJson().
+    const EventRecord& record = events_[(eventWrite_ + i) % kEventLogEntries];
+    if (!record.valid || record.seq <= streamedSeq_) {
+      continue;
+    }
+    AppEventFields fields;
+    fields.seq = record.seq;
+    fields.frameSeq = record.frameSeq;
+    fields.uptimeMs = record.ms;
+    fields.hasValue = record.hasValue;
+    fields.value = record.value;
+    fields.app = record.app;
+    fields.event = record.event;
+    fields.detail = record.detail;
+    const size_t length = encodeAppEventTlv(fields, out + written, capacity - written);
+    if (length == 0) {
+      break;  // full: this one and the rest go in the next packet
+    }
+    written += length;
+    streamedSeq_ = record.seq;
+  }
+  return written;
+}
+
 String AppManager::eventsJson(uint32_t sinceSeq, uint8_t limit) const {
   if (limit == 0 || limit > kEventLogEntries) {
     limit = kEventLogEntries;
   }
   String json = "{\"seq\":";
   json += String(eventSeq_);
+  // Events also ride the stream packets (takeStreamEvents()), so a receiver
+  // needs this only to fill gaps, not to poll.
+  json += ",\"streaming\":true";
   json += ",\"dropped\":";
   json += String(eventsDropped_);
   json += ",\"events\":[";

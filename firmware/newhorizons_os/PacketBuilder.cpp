@@ -16,13 +16,14 @@ size_t PacketBuilder::build(const MatrixFrame& frame, uint64_t epochMs, bool epo
   return buildPacketV5(input, out, capacity);
 }
 
-size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imuData, const float* magData, const BatterySample* battery) {
+size_t PacketBuilder::buildMatrixPacketHeader(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imuData, const float* magData, const BatterySample* battery, const uint8_t* extensions, size_t extensionBytes) {
   if (frame.pointCount > kMaxSensors) {
     return 0;
   }
   const PacketV5BuildInput input{
       deviceUid_, frame.seq, epochMs, epochValid, nullptr, frame.rawValues,
-      frame.pointCount, frame.hasRaw, imuData, magData, battery};
+      frame.pointCount, frame.hasRaw, imuData, magData, battery,
+      extensions, extensionBytes};
   return buildPacketV5HeaderAndTail(input, out, capacity, matrixPayloadBytes);
 }
 

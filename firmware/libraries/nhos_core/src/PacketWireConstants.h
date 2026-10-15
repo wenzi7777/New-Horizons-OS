@@ -31,9 +31,16 @@ constexpr size_t kPacketMagBytes = kPacketMagFloatCount * sizeof(float);
 constexpr size_t kPacketBatteryBytes = 6;
 
 constexpr size_t kPacketExtensionTlvHeaderLen = 2;
-// The v5 producer does not emit TLVs yet. Reserve this bounded amount so a
-// future producer cannot silently grow a data frame beyond the ESP-NOW budget.
+// All TLVs of one packet together; bounded so a data frame never grows
+// beyond the ESP-NOW budget.
 constexpr size_t kPacketExtensionBudget = 128;
 constexpr size_t kEspNowDataFrameBudget = 3840;
+
+// Extension TLV types (spec/PROTOCOL.md 3.1).
+constexpr uint8_t kPacketExtAppEvent = 0x01;
+constexpr uint8_t kAppEventFlagValue = 0x01;
+constexpr size_t kAppEventMaxApp = 15;
+constexpr size_t kAppEventMaxEvent = 23;
+constexpr size_t kAppEventMaxDetail = 47;
 
 }  // namespace nhos

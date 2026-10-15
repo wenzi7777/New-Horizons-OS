@@ -26,6 +26,10 @@ struct PacketV5BuildInput {
   const float* imuData = nullptr;
   const float* magData = nullptr;
   const PacketBatteryBlock* battery = nullptr;
+  // Extension TLVs, already encoded (e.g. encodeAppEventTlv()); at most
+  // kPacketExtensionBudget bytes, written after the battery block.
+  const uint8_t* extensions = nullptr;
+  size_t extensionBytes = 0;
 };
 
 size_t packetV5PayloadBytes(const PacketV5BuildInput& input);

@@ -17,6 +17,7 @@
         "raw": null,
         "imu": null,
         "mag": null,
+        "app_events": [],
         "battery": null
       }
     },
@@ -34,6 +35,7 @@
         "raw": null,
         "imu": null,
         "mag": null,
+        "app_events": [],
         "battery": null
       }
     },
@@ -51,6 +53,7 @@
         "raw": null,
         "imu": [0.5, -0.25, 9.75, 0.125, -0.0625, 1.5, 36.5],
         "mag": null,
+        "app_events": [],
         "battery": null
       }
     },
@@ -68,6 +71,7 @@
         "raw": null,
         "imu": [0, 0, 1, 0, 0, 0, 25],
         "mag": [7, 8, -9.5],
+        "app_events": [],
         "battery": {"status": 1, "fault": 2, "vbat_mv": 4175, "soc_centi_percent": 7350}
       }
     },
@@ -85,6 +89,7 @@
         "raw": [512, 1024, 2047.5],
         "imu": null,
         "mag": null,
+        "app_events": [],
         "battery": null
       }
     },
@@ -102,7 +107,26 @@
         "raw": [100, 200, 300, 400, 500, 600],
         "imu": [0.25, 0.5, 0.75, 1, 1.25, 1.5, 30],
         "mag": [-1.5, 2.25, 40],
+        "app_events": [],
         "battery": {"status": 0, "fault": 0, "vbat_mv": 3700, "soc_centi_percent": 10000}
+      }
+    },
+    {
+      "name": "app_events",
+      "hex": "5aa505333cdc7545ccd0820a000082b5e93ea101000070000000803f0000004000000000000000000000803f0000000000000000000000000000c84100003c0f401f011f03000000810a000012d600000005666c6f773106736c6f7563680472697365012304000000810a000013d60000010000403f0762616c616e6365046c65616e04302e3735",
+      "expect": {
+        "flags": 51,
+        "device_uid": "3CDC7545CCD0",
+        "sequence": 2690,
+        "epoch_valid": true,
+        "epoch_ms": 1792056866178,
+        "point_count": 2,
+        "matrix": [1, 2],
+        "raw": null,
+        "imu": [0, 0, 1, 0, 0, 0, 25],
+        "mag": null,
+        "app_events": [{"seq": 3, "frame_seq": 2689, "ms": 54802, "app": "flow1", "event": "slouch", "detail": "rise", "value": null}, {"seq": 4, "frame_seq": 2689, "ms": 54803, "app": "balance", "event": "lean", "detail": "0.75", "value": 0.75}],
+        "battery": {"status": 0, "fault": 0, "vbat_mv": 3900, "soc_centi_percent": 8000}
       }
     }
   ]

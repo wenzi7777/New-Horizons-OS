@@ -38,14 +38,23 @@ uint8_t flagsFor(const PacketV5BuildInput& input) {
   if (input.imuData) flags |= kPacketFlagImu;
   if (input.magData) flags |= kPacketFlagMag;
   if (input.battery) flags |= kPacketFlagBattery;
+  if (input.extensionBytes) flags |= kPacketFlagExtensions;
   return flags;
+}
+
+bool extensionsAreValid(const PacketV5BuildInput& input) {
+  if (input.extensionBytes == 0) {
+    return true;
+  }
+  return input.extensions != nullptr && input.extensionBytes <= kPacketExtensionBudget &&
+         packetExtensionsAreWellFormed(input.extensions, input.extensionBytes);
 }
 
 bool headerAndCapacityAreValid(const PacketV5BuildInput& input, uint8_t* out,
                                size_t capacity, size_t matrixPayloadBytes,
                                size_t& payloadBytes) {
   payloadBytes = packetV5PayloadBytes(input);
-  if (!out || !input.deviceUid || matrixPayloadBytes !=
+  if (!out || !input.deviceUid || !extensionsAreValid(input) || matrixPayloadBytes !=
       static_cast<size_t>(input.pointCount) * sizeof(float) ||
       payloadBytes > std::numeric_limits<uint16_t>::max() ||
       kPacketHeaderLen > capacity || payloadBytes > capacity - kPacketHeaderLen) {
@@ -92,6 +101,10 @@ size_t writeTrailingBlocks(const PacketV5BuildInput& input, uint8_t* out,
     offset += sizeof(uint16_t);
     putU16(out + offset, input.battery->socCentiPercent);
     offset += sizeof(uint16_t);
+  }
+  if (input.extensionBytes) {
+    std::memcpy(out + offset, input.extensions, input.extensionBytes);
+    offset += input.extensionBytes;
   }
   return offset;
 }
@@ -140,6 +153,7 @@ size_t packetV5PayloadBytes(const PacketV5BuildInput& input) {
   if (input.imuData) payloadBytes += kPacketBaseImuBytes;
   if (input.magData) payloadBytes += kPacketMagBytes;
   if (input.battery) payloadBytes += kPacketBatteryBytes;
+  payloadBytes += input.extensionBytes;
   return payloadBytes;
 }
 

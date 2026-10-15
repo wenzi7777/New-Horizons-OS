@@ -72,10 +72,21 @@ def packet_header(spec: dict) -> str:
         f"constexpr size_t kPacketBatteryBytes = {p['battery_bytes']};",
         "",
         f"constexpr size_t kPacketExtensionTlvHeaderLen = {p['extension_tlv_header_len']};",
-        "// The v5 producer does not emit TLVs yet. Reserve this bounded amount so a",
-        "// future producer cannot silently grow a data frame beyond the ESP-NOW budget.",
+        "// All TLVs of one packet together; bounded so a data frame never grows",
+        "// beyond the ESP-NOW budget.",
         f"constexpr size_t kPacketExtensionBudget = {p['extension_budget']};",
         f"constexpr size_t kEspNowDataFrameBudget = {p['espnow_data_frame_budget']};",
+        "",
+        "// Extension TLV types (spec/PROTOCOL.md 3.1).",
+    ]
+    for name, value in p["extension_types"].items():
+        lines.append(f"constexpr uint8_t kPacketExt{camel(name)} = 0x{value:02X};")
+    e = p["app_event"]
+    lines += [
+        f"constexpr uint8_t kAppEventFlagValue = 0x{e['flag_value']:02X};",
+        f"constexpr size_t kAppEventMaxApp = {e['max_app']};",
+        f"constexpr size_t kAppEventMaxEvent = {e['max_event']};",
+        f"constexpr size_t kAppEventMaxDetail = {e['max_detail']};",
         "",
         "}  // namespace nhos",
         "",
@@ -145,6 +156,16 @@ def python_module(spec: dict) -> str:
     ]
     for name, bit in p["flags"].items():
         lines.append(f"FLAG_{name.upper()} = 0x{bit:02X}")
+    lines += ["", "# Extension TLV types (spec/PROTOCOL.md 3.1)."]
+    for name, value in p["extension_types"].items():
+        lines.append(f"EXT_{name.upper()} = 0x{value:02X}")
+    e = p["app_event"]
+    lines += [
+        f"APP_EVENT_FLAG_VALUE = 0x{e['flag_value']:02X}",
+        f"APP_EVENT_MAX_APP = {e['max_app']}",
+        f"APP_EVENT_MAX_EVENT = {e['max_event']}",
+        f"APP_EVENT_MAX_DETAIL = {e['max_detail']}",
+    ]
     lines += [
         "",
         "# Time exchange (TIME_REQ / TIME_RESP), over ESP-NOW and over UDP.",

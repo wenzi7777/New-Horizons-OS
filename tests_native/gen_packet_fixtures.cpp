@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "AppEventWire.h"
 #include "PacketV5Codec.h"
 #include "PacketWire.h"
 
@@ -29,7 +30,17 @@ struct Case {
   std::vector<float> mag;  // empty = no MAG block (else 3 floats)
   bool hasBattery;
   nhos::PacketBatteryBlock battery;
+  std::vector<nhos::AppEventFields> events;  // app_event extension TLVs
 };
+
+std::string jsonString(const char* text) {
+  std::string out = "\"";
+  for (const char* c = text; *c; ++c) {
+    if (*c == '"' || *c == '\\') out += '\\';
+    out += *c;
+  }
+  return out + "\"";
+}
 
 std::string floats(const std::vector<float>& values) {
   std::string out = "[";
@@ -48,18 +59,24 @@ std::string orNull(const std::vector<float>& values) { return values.empty() ? "
 
 int main() {
   const std::vector<Case> cases = {
-      {"matrix_only", 1, 1700000000123ULL, true, {0.0f, 0.5f, 1.25f, 1000.0f}, {}, {}, {}, false, {}},
-      {"epoch_not_valid", 2, 1700000000123ULL, false, {2.5f, 3.75f}, {}, {}, {}, false, {}},
+      {"matrix_only", 1, 1700000000123ULL, true, {0.0f, 0.5f, 1.25f, 1000.0f}, {}, {}, {}, false, {}, {}},
+      {"epoch_not_valid", 2, 1700000000123ULL, false, {2.5f, 3.75f}, {}, {}, {}, false, {}, {}},
       {"imu", 3, 1700000000456ULL, true, {1.0f, 2.0f, 3.0f},
-       {}, {0.5f, -0.25f, 9.75f, 0.125f, -0.0625f, 1.5f, 36.5f}, {}, false, {}},
+       {}, {0.5f, -0.25f, 9.75f, 0.125f, -0.0625f, 1.5f, 36.5f}, {}, false, {}, {}},
       {"imu_mag_battery", 4, 1700000000789ULL, true, {10.5f, 20.25f},
        {}, {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 25.0f}, {7.0f, 8.0f, -9.5f},
-       true, {1, 2, 4175, 7350}},
-      {"raw_adc", 5, 1700000001000ULL, true, {0.5f, 1.5f, 2.5f}, {512.0f, 1024.0f, 2047.5f}, {}, {}, false, {}},
+       true, {1, 2, 4175, 7350}, {}},
+      {"raw_adc", 5, 1700000001000ULL, true, {0.5f, 1.5f, 2.5f}, {512.0f, 1024.0f, 2047.5f}, {}, {}, false, {}, {}},
       {"everything", 4294967295u, 1700000009999ULL, true, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
        {100.0f, 200.0f, 300.0f, 400.0f, 500.0f, 600.0f},
        {0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 30.0f}, {-1.5f, 2.25f, 40.0f},
-       true, {0, 0, 3700, 10000}},
+       true, {0, 0, 3700, 10000}, {}},
+      // Events ride the packet after their frame's, so their frame_seq is
+      // older than the packet's sequence.
+      {"app_events", 2690, 1792056866178ULL, true, {1.0f, 2.0f},
+       {}, {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 25.0f}, {}, true, {0, 0, 3900, 8000},
+       {{3, 2689, 54802, false, 0.0f, "flow1", "slouch", "rise"},
+        {4, 2689, 54803, true, 0.75f, "balance", "lean", "0.75"}}},
   };
 
   std::printf("{\n  \"description\": \"NHO/Arduino/1 v5 stream packets from the firmware encoder "
@@ -80,6 +97,19 @@ int main() {
     input.imuData = k.imu.empty() ? nullptr : k.imu.data();
     input.magData = k.mag.empty() ? nullptr : k.mag.data();
     input.battery = k.hasBattery ? &k.battery : nullptr;
+    uint8_t extensions[nhos::kPacketExtensionBudget];
+    size_t extensionBytes = 0;
+    for (const nhos::AppEventFields& event : k.events) {
+      const size_t written = nhos::encodeAppEventTlv(event, extensions + extensionBytes,
+                                                     sizeof(extensions) - extensionBytes);
+      if (written == 0) {
+        std::fprintf(stderr, "encodeAppEventTlv overflowed for %s\n", k.name);
+        return 1;
+      }
+      extensionBytes += written;
+    }
+    input.extensions = extensionBytes ? extensions : nullptr;
+    input.extensionBytes = extensionBytes;
 
     uint8_t buffer[1024];
     const size_t length = nhos::buildPacketV5(input, buffer, sizeof(buffer));
@@ -106,6 +136,19 @@ int main() {
     std::printf("        \"raw\": %s,\n", orNull(k.raw).c_str());
     std::printf("        \"imu\": %s,\n", orNull(k.imu).c_str());
     std::printf("        \"mag\": %s,\n", orNull(k.mag).c_str());
+    std::printf("        \"app_events\": [");
+    for (size_t e = 0; e < k.events.size(); ++e) {
+      const nhos::AppEventFields& event = k.events[e];
+      char value[32];
+      std::snprintf(value, sizeof(value), "%.9g", static_cast<double>(event.value));
+      std::printf("%s{\"seq\": %u, \"frame_seq\": %u, \"ms\": %u, \"app\": %s, \"event\": %s, "
+                  "\"detail\": %s, \"value\": %s}",
+                  e ? ", " : "", static_cast<unsigned>(event.seq), static_cast<unsigned>(event.frameSeq),
+                  static_cast<unsigned>(event.uptimeMs), jsonString(event.app).c_str(),
+                  jsonString(event.event).c_str(), jsonString(event.detail).c_str(),
+                  event.hasValue ? value : "null");
+    }
+    std::printf("],\n");
     if (k.hasBattery) {
       std::printf("        \"battery\": {\"status\": %u, \"fault\": %u, \"vbat_mv\": %u, "
                   "\"soc_centi_percent\": %u}\n",

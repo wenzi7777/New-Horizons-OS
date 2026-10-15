@@ -111,6 +111,12 @@ class AppManager : public AppHost {
   // Events after `sinceSeq`, plus how many were overwritten before being read.
   String eventsJson(uint32_t sinceSeq, uint8_t limit) const;
   uint32_t eventSeq() const { return eventSeq_; }
+  // Events not yet sent in a stream packet, oldest first, encoded as
+  // app_event extension TLVs (AppEventWire.h) into at most `capacity` bytes;
+  // the rest wait for the next packet. Returns the bytes written. A packet
+  // that is then lost loses them from the stream only: the ring still has
+  // them for app_events, which is how a receiver fills the gap.
+  size_t takeStreamEvents(uint8_t* out, size_t capacity);
 
  private:
   struct Slot {
@@ -156,6 +162,8 @@ class AppManager : public AppHost {
   EventRecord events_[kEventLogEntries];
   uint8_t eventWrite_ = 0;
   uint32_t eventSeq_ = 0;
+  // Highest event sequence already handed to a stream packet.
+  uint32_t streamedSeq_ = 0;
   uint32_t eventsDropped_ = 0;
   uint32_t dispatches_ = 0;
   uint32_t frameSeq_ = 0;

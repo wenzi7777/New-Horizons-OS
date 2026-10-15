@@ -14,7 +14,8 @@ class PacketBuilder {
  public:
   void setDeviceUid(const uint8_t uid[6]);
   size_t build(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, const float* imuData = nullptr, const float* magData = nullptr, const BatterySample* battery = nullptr);
-  size_t buildMatrixPacketHeader(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imuData = nullptr, const float* magData = nullptr, const BatterySample* battery = nullptr);
+  // extensions: already-encoded TLVs (AppManager::takeStreamEvents()), or none.
+  size_t buildMatrixPacketHeader(const MatrixFrame& frame, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity, size_t matrixPayloadBytes, const float* imuData = nullptr, const float* magData = nullptr, const BatterySample* battery = nullptr, const uint8_t* extensions = nullptr, size_t extensionBytes = 0);
   size_t buildHeartbeat(uint32_t seq, uint64_t epochMs, bool epochValid, uint8_t* out, size_t capacity);
 
  private:
