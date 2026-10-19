@@ -67,6 +67,11 @@ struct ScanHealth {
   uint16_t pointCount = kMaxSensors;
   // How late scans start against their due time (ScanLateness.h).
   ScanLateness startLateness;
+  // Per ADC unit (ADC1, ADC2): reads that failed and held the cell's last
+  // value (ADC2 losing arbitration to Wi-Fi), and the eFuse calibration
+  // point the raw -> mV conversion uses (0 = none; the core converts).
+  uint32_t adcReadErrors[2] = {0, 0};
+  uint32_t adcCalDigi[2] = {0, 0};
 };
 
 class MatrixScanner {
@@ -112,6 +117,8 @@ class MatrixScanner {
     float medianValues[kFilterMedianMax] = {0};
   };
 
+  void loadAdcCalibration();
+  float readCellMv(size_t rowIndex, uint16_t cellIndex);
   bool sampleRawFrame(float* outValues, size_t count);
   bool sampleRawCell(uint16_t sensorIndex, float& outValue);
   void resetFilterState();
@@ -172,6 +179,10 @@ class MatrixScanner {
   SensorFilterState filterStates_[kMaxSensors];
   Calibration* calibration_ = nullptr;
   bool streamRawAdc_ = false;
+  uint32_t adcCalDigi_[2] = {0, 0};
+  uint32_t adcReadErrors_[2] = {0, 0};
+  // Last good reading per cell (column-major), held over a failed read.
+  float lastCellMv_[kMaxSensors] = {0};
 };
 
 }  // namespace nhos

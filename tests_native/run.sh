@@ -107,6 +107,14 @@ CXX="${CXX:-c++}"
 
 "$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
   -I"$FIRMWARE_DIR" -I"$CORE_DIR" \
+  "$SCRIPT_DIR/test_adc_curve_fit.cpp" \
+  "$FIRMWARE_DIR/AdcCurveFit.cpp" \
+  -o "$BUILD_DIR/test_adc_curve_fit"
+
+"$BUILD_DIR/test_adc_curve_fit"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
+  -I"$FIRMWARE_DIR" -I"$CORE_DIR" \
   "$SCRIPT_DIR/test_lifetime_policy.cpp" \
   "$FIRMWARE_DIR/LifetimePolicy.cpp" \
   -o "$BUILD_DIR/test_lifetime_policy"

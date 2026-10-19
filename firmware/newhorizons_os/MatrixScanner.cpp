@@ -1,12 +1,17 @@
 #include "MatrixScanner.h"
 
 #include <esp_timer.h>
+#if defined(ESP_ARDUINO_VERSION_MAJOR)
+#include <esp_efuse_rtc_calib.h>
+#include <hal/adc_types.h>
+#endif
 
 #include <memory>
 #include <new>
 
 #include "Watchdog.h"
 
+#include "AdcCurveFit.h"
 #include "BoardPins.h"
 #include "Calibration.h"
 #include "CalibrationCurve.h"
@@ -14,6 +19,10 @@
 namespace nhos {
 
 namespace {
+
+// ESP32-S3: GPIO1-10 are ADC1, GPIO11-20 ADC2 (Calibration.cpp splits its
+// readout settings the same way).
+constexpr uint8_t kFirstAdc2Gpio = 11;
 
 bool timeReached(uint32_t nowUs, uint32_t dueUs) {
   return dueUs == 0 || static_cast<int32_t>(nowUs - dueUs) >= 0;
@@ -43,7 +52,58 @@ bool MatrixScanner::begin() {
   clearPacketQueue();
   resetFilterState();
   configurePins();
+  loadAdcCalibration();
   return validatePinMap();
+}
+
+// The calibration point analogReadMilliVolts() would build its curve from,
+// read once. The rows are converted by AdcCurveFit instead: the core's curve
+// overflows near the top of the range (4983 mV on a saturated ADC2 row).
+// Attenuation 12 dB: the Arduino core's default, which nothing here changes.
+void MatrixScanner::loadAdcCalibration() {
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && defined(CONFIG_IDF_TARGET_ESP32S3)
+  const int version = esp_efuse_rtc_calib_get_ver();
+  if (version < ESP_EFUSE_ADC_CALIB_VER_MIN || version > ESP_EFUSE_ADC_CALIB_VER_MAX) {
+    return;
+  }
+  const adc_unit_t units[2] = {ADC_UNIT_1, ADC_UNIT_2};
+  for (uint8_t i = 0; i < 2; ++i) {
+    uint32_t digi = 0;
+    uint32_t mv = 0;
+    if (esp_efuse_rtc_calib_get_cal_voltage(version, units[i], ADC_ATTEN_DB_12, &digi, &mv) == ESP_OK &&
+        mv == adc_curve::kCalVoltageMv) {
+      adcCalDigi_[i] = digi;
+    }
+  }
+#endif
+}
+
+// One row's reading for the column currently driven, in mV. cellIndex is the
+// column-major sensor index, for holding the last value over a failed read.
+float MatrixScanner::readCellMv(size_t rowIndex, uint16_t cellIndex) {
+  const uint8_t pin = rows_[rowIndex];
+#if defined(ESP_ARDUINO_VERSION_MAJOR)
+  const uint8_t unit = pin >= kFirstAdc2Gpio ? 1 : 0;
+  const uint32_t digi = adcCalDigi_[unit];
+  if (digi == 0) {
+    return static_cast<float>(analogReadMilliVolts(pin));
+  }
+  // A 12-bit code; the core hands back 0xFFFF when ADC2 lost arbitration
+  // to Wi-Fi (adc_oneshot_read's -1, its error ignored).
+  const uint16_t raw = analogRead(pin);
+  if (raw > adc_curve::kMaxRaw) {
+    ++adcReadErrors_[unit];
+    return cellIndex < kMaxSensors ? lastCellMv_[cellIndex] : 0.0f;
+  }
+  const float mv = static_cast<float>(adc_curve::rawToMv(static_cast<adc_curve::Unit>(unit), digi, raw));
+  if (cellIndex < kMaxSensors) {
+    lastCellMv_[cellIndex] = mv;
+  }
+  return mv;
+#else
+  (void)cellIndex;
+  return static_cast<float>(analogRead(pin));
+#endif
 }
 
 bool MatrixScanner::start() {
@@ -144,6 +204,9 @@ bool MatrixScanner::setLayout(const uint8_t* rows, size_t rowCount, const uint8_
   colCount_ = colCount;
   nextScanDueUs_ = 0;
   resetFilterState();
+  for (size_t i = 0; i < kMaxSensors; ++i) {
+    lastCellMv_[i] = 0.0f;
+  }
   configurePins();
   return true;
 }
@@ -229,11 +292,7 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
     digitalWrite(cols_[c], LOW);
     delayMicroseconds(settleUs_);
     for (size_t r = 0; r < rowCount_; ++r) {
-#if defined(ESP_ARDUINO_VERSION_MAJOR)
-      float value = static_cast<float>(analogReadMilliVolts(rows_[r]));
-#else
-      float value = static_cast<float>(analogRead(rows_[r]));
-#endif
+      float value = readCellMv(r, colMajorIdx);
       value = applyFilter(value, colMajorIdx);
       const uint16_t rowMajorIdx = static_cast<uint16_t>(r * colCount_ + c);
       // Capture the pre-calibration reading (filtered millivolts) before it is
@@ -443,11 +502,8 @@ bool MatrixScanner::sampleRawFrame(float* outValues, size_t count) {
     digitalWrite(cols_[c], LOW);
     delayMicroseconds(settleUs_);
     for (size_t r = 0; r < rowCount_; ++r) {
-#if defined(ESP_ARDUINO_VERSION_MAJOR)
-      outValues[index++] = static_cast<float>(analogReadMilliVolts(rows_[r]));
-#else
-      outValues[index++] = static_cast<float>(analogRead(rows_[r]));
-#endif
+      outValues[index] = readCellMv(r, static_cast<uint16_t>(index));
+      ++index;
     }
     digitalWrite(cols_[c], HIGH);
   }
@@ -466,11 +522,7 @@ bool MatrixScanner::sampleRawCell(uint16_t sensorIndex, float& outValue) {
   }
   digitalWrite(cols_[colIndex], LOW);
   delayMicroseconds(settleUs_);
-#if defined(ESP_ARDUINO_VERSION_MAJOR)
-  outValue = static_cast<float>(analogReadMilliVolts(rows_[rowIndex]));
-#else
-  outValue = static_cast<float>(analogRead(rows_[rowIndex]));
-#endif
+  outValue = readCellMv(rowIndex, sensorIndex);
   digitalWrite(cols_[colIndex], HIGH);
   setAllColsInactive();
   return true;
@@ -503,13 +555,17 @@ ScanHealth MatrixScanner::health() const {
   item.sendEveryNFrames = sendEveryNFrames_;
   item.pointCount = rowCount_ * colCount_;
   item.startLateness = startLateness_;
+  for (uint8_t i = 0; i < 2; ++i) {
+    item.adcReadErrors[i] = adcReadErrors_[i];
+    item.adcCalDigi[i] = adcCalDigi_[i];
+  }
   return item;
 }
 
 String MatrixScanner::healthJson() const {
   ScanHealth h = health();
   String out = "{";
-  out.reserve(480);
+  out.reserve(540);
   out += "\"scan_active\":";
   out += h.active ? "true" : "false";
   out += ",\"requested_target_fps\":";
@@ -575,7 +631,16 @@ String MatrixScanner::healthJson() const {
     if (i > 0) out += ",";
     out += ScanLateness::kBucketBoundsUs[i];
   }
-  out += "]}}";
+  out += "]}";
+  out += ",\"adc_read_errors\":[";
+  out += h.adcReadErrors[0];
+  out += ",";
+  out += h.adcReadErrors[1];
+  out += "],\"adc_cal_digi\":[";
+  out += h.adcCalDigi[0];
+  out += ",";
+  out += h.adcCalDigi[1];
+  out += "]}";
   return out;
 }
 
