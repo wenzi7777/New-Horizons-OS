@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import re
 import sys
 from pathlib import Path
 
@@ -49,6 +50,16 @@ def header() -> str:
     )
 
 
+def unpack(header_text: str) -> bytes | None:
+    match = re.search(r"\{\n(.*?)\n\};", header_text, re.S)
+    if not match:
+        return None
+    try:
+        return gzip.decompress(bytes(int(b, 16) for b in re.findall(r"0x([0-9a-f]{2})", match.group(1))))
+    except OSError:
+        return None
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="fail when the generated header differs")
@@ -56,7 +67,10 @@ def main(argv: list[str]) -> int:
     text = header()
     current = OUTPUT.read_text(encoding="utf-8") if OUTPUT.exists() else None
     if args.check:
-        if current == text:
+        # Compare what the header unpacks to, not its bytes: zlib builds
+        # differ (macOS vs the Linux CI), so the same page can gzip to
+        # different bytes.
+        if current is not None and unpack(current) == minify(SOURCE.read_text(encoding="utf-8")).encode("utf-8"):
             print(f"  ok {OUTPUT.relative_to(REPO)}")
             return 0
         print(f"  DRIFT {OUTPUT.relative_to(REPO)} differs from setup_portal.html; run gen_portal_asset.py",
