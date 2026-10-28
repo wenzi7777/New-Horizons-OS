@@ -6,7 +6,7 @@
 #include "PacketWire.h"
 
 #ifndef NHOS_FIRMWARE_VERSION
-#define NHOS_FIRMWARE_VERSION "v1.16.1"
+#define NHOS_FIRMWARE_VERSION "v1.17.0"
 #endif
 
 namespace nhos {
