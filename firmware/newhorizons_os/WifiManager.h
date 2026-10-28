@@ -1,11 +1,10 @@
 #pragma once
 
 #include <Arduino.h>
-#include <DNSServer.h>
-#include <WebServer.h>
 #include <WiFi.h>
 
 #include "Config.h"
+#include "SetupPortal.h"
 #include "Storage.h"
 
 namespace nhos {
@@ -30,31 +29,23 @@ class WifiManager {
   bool connectStored();
   void startSetupAp();
   void stopSetupPortal();
-  void configurePortalRoutes();
   void serviceSetupPortal();
-  void handlePortalRoot();
-  void handlePortalSave();
-  void handlePortalRedirect();
-  String portalPage(const String& message, bool success) const;
+  SetupPortalHooks portalHooks();
   // Warn, not Error: a lost AP is routine for a wearable, but the default
   // "error" flash log keeps neither unless a tag override asks for warn.
   void logWarn(const char* line);
-  String wifiNetworkOptionsHtml() const;
-  String htmlEscape(const String& value) const;
 
   Storage* storage_ = nullptr;
   DeviceConfig* deviceConfig_ = nullptr;
   bool setupActive_ = false;
   bool suspended_ = false;
   bool portalStarted_ = false;
-  bool portalRoutesConfigured_ = false;
   uint32_t lastReconnectMs_ = 0;
   // 0 means "currently connected" (or not yet noticed a disconnect) --
   // stamped the first service() tick isConnected() is false, reset back
   // to 0 once reconnected. See service()'s kWifiReconnectFallbackMs check.
   uint32_t disconnectedSinceMs_ = 0;
-  DNSServer dnsServer_;
-  WebServer portalServer_{kSetupPortalPort};
+  SetupPortal portal_;
 };
 
 }  // namespace nhos

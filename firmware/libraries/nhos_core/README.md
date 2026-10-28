@@ -18,4 +18,6 @@ Rules for what lives here:
   exactly one `NHOS_BOARD_*`.
 - **Generated files** (`PacketWireConstants.h`, `TimeWireConstants.h`) come
   from `spec/wire.json` via `firmware/scripts/gen_wire.py`; do not edit them.
+  `SetupPortalAsset.h` comes from `portal/setup_portal.html` via
+  `firmware/scripts/gen_portal_asset.py` (the SoftAP setup page, gzipped).
 - Plain C++ where possible, so `tests_native/` can compile it on a desktop.

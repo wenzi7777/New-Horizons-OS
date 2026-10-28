@@ -1,0 +1,183 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NHOS</title>
+<style>
+:root{--bg:#0f1316;--card:#171d22;--line:#2a333a;--text:#eef2f5;--sub:#9aa6b0;--err:#ff8f8f;--ok:#7fe0b0;--acc:#39c5bb;--on:#04201d}
+body.hub{--acc:#a78bfa;--on:#1a1033}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","PingFang TC","Noto Sans JP",sans-serif}
+main{max-width:440px;margin:0 auto;padding:20px 16px 40px}
+header{display:flex;align-items:center;gap:8px}
+h1{font-size:22px;margin:0;font-weight:700}
+.tag{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--acc);color:var(--on);font-weight:700}
+#lang{margin-left:auto;width:auto;padding:4px 6px;font-size:14px}
+.meta{color:var(--sub);font-size:13px;margin:4px 0 16px}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin:0 0 12px}
+h2{font-size:15px;margin:0 0 10px;display:flex;align-items:center;justify-content:space-between}
+label{display:block;font-size:14px;color:var(--sub);margin:12px 0 6px}
+input,select{width:100%;font:inherit;padding:11px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+input:focus,select:focus{outline:2px solid var(--acc);outline-offset:-1px}
+button{font:inherit;cursor:pointer;border-radius:8px}
+.primary{width:100%;padding:13px;border:0;background:var(--acc);color:var(--on);font-weight:700;margin-top:4px}
+.primary:disabled{opacity:.6;cursor:default}
+.link{background:none;border:0;color:var(--acc);font-size:14px;padding:0}
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mode{border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;margin:0;color:var(--text)}
+.mode input{display:none}
+.mode b{display:block}
+.mode span{font-size:13px;color:var(--sub)}
+.mode.on{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;align-items:center;gap:10px;padding:10px 4px;border-top:1px solid var(--line);cursor:pointer}
+li:first-child{border-top:0}
+li.on{color:var(--acc);font-weight:600}
+li .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+li svg{flex:none}
+.muted{color:var(--sub);font-size:14px}
+.pw{position:relative}
+.pw input{padding-right:64px}
+.pw button{position:absolute;right:8px;top:50%;transform:translateY(-50%)}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{flex:1;border:0;border-radius:0;padding:9px 4px;background:none;color:var(--sub)}
+.seg button.on{background:var(--acc);color:var(--on);font-weight:700}
+.err{color:var(--err);font-size:13px;margin-top:4px}
+.hint{color:var(--sub);font-size:13px;margin:8px 0 0}
+#msg{margin:12px 0 0;padding:10px 12px;border-radius:8px;background:var(--card);border:1px solid var(--line)}
+#msg.ok{border-color:var(--ok);color:var(--ok)}
+#msg.bad{border-color:var(--err);color:var(--err)}
+details{margin:12px 0 0}
+summary{cursor:pointer;color:var(--sub);font-size:14px}
+dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;margin:8px 0 0}
+dt{color:var(--sub)}
+dd{margin:0;word-break:break-all}
+.danger{width:100%;padding:11px;border:1px solid var(--line);background:none;color:var(--err)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<header><h1 data-t="title"></h1><span class="tag" id="tag"></span>
+<select id="lang" aria-label="Language"><option value="ja">日本語</option><option value="en">English</option><option value="zh">繁體中文</option></select></header>
+<p class="meta" id="meta"></p>
+<form id="f" novalidate>
+<section id="modeSec" hidden>
+<h2 data-t="mode"></h2>
+<div class="modes">
+<label class="mode on" id="mWifi"><input type="radio" name="mode" value="wifi" checked><b>Wi-Fi</b><span data-t="modeWifi"></span></label>
+<label class="mode" id="mDirect"><input type="radio" name="mode" value="espnow"><b>Direct</b><span data-t="modeDirect"></span></label>
+</div>
+</section>
+<section id="wifiSec">
+<h2><span data-t="wifi"></span><button type="button" class="link" id="rescan" data-t="refresh"></button></h2>
+<ul id="nets"></ul>
+<div id="ssidBox" hidden><label for="ssid" data-t="ssid"></label>
+<input id="ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></div>
+<div class="err" id="e_ssid"></div>
+<div id="pwBox"><label for="password" data-t="password"></label>
+<div class="pw"><input id="password" type="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false">
+<button type="button" class="link" id="showPw" data-t="show"></button></div>
+<div class="err" id="e_password"></div></div>
+</section>
+<section id="serverSec" hidden>
+<h2 data-t="server"></h2>
+<div class="seg" id="seg"><button type="button" data-v="production" data-t="production"></button><button type="button" data-v="local" data-t="local"></button><button type="button" data-v="manual" data-t="manual"></button></div>
+<div id="urlBox" hidden><label for="url" data-t="url"></label>
+<input id="url" placeholder="wss://example.com/newhorizons/gateway/ws" inputmode="url" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+<div class="err" id="e_url"></div></div>
+<details><summary data-t="advanced"></summary>
+<label for="token" data-t="token"></label>
+<input id="token" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+</details>
+<p class="hint" data-t="renameLater"></p>
+</section>
+<button class="primary" id="go" type="submit"></button>
+<p id="msg" hidden></p>
+<div class="err" id="e_form"></div>
+</form>
+<details id="info"><summary data-t="details"></summary><dl id="dl"></dl></details>
+<details id="resetBox" hidden><summary data-t="reset"></summary>
+<p class="hint" data-t="resetHint"></p><button type="button" class="danger" id="reset" data-t="resetBtn"></button></details>
+</main>
+<script>
+var T={
+en:{title:"Wi-Fi setup",titleHub:"Hub setup",tagDevice:"Device",tagHub:"Hub",mode:"Connect through",modeWifi:"A Gateway on your Wi-Fi",modeDirect:"A nearby Hub, no Wi-Fi needed",wifi:"Wi-Fi",refresh:"Refresh",scanning:"Scanning…",noNets:"No networks found",other:"Other network…",ssid:"Network name",password:"Password",pwSaved:"Saved — leave blank to keep",show:"Show",hide:"Hide",server:"Server",production:"Official",local:"Local",manual:"Custom",url:"Server URL",advanced:"Advanced",token:"Auth token",tokenSaved:"Saved — leave blank to keep",renameLater:"You can rename this Hub later in the Desktop app.",connect:"Connect",save:"Save and restart",connecting:"Connecting…",connected:"Connected to {s}. Restarting…",restarting:"Saved. Restarting…",lost:"Lost contact. If the device doesn't come back online, rejoin {a} and try again.",details:"Device info",dAp:"Setup network",dUrl:"Address",dMac:"MAC",dVer:"Firmware",dBoard:"Board",dId:"Hub ID",reset:"Reset",resetHint:"Erases Wi-Fi and server settings.",resetBtn:"Erase settings",resetAsk:"Erase all settings and restart?",
+required:"Required.",bad_url:"Use a ws:// or wss:// address.",wrong_password:"Wrong password.",not_found:"Network not found. Move closer and try again.",timeout:"Couldn't connect in time. Try again.",other_fail:"Couldn't connect. Try again.",busy:"Still working on the last request.",backend_unreachable:"Wi-Fi works, but the server didn't answer. Saved anyway.",net_err:"No response from the device."},
+zh:{title:"Wi-Fi 設定",titleHub:"Hub 設定",tagDevice:"裝置",tagHub:"Hub",mode:"連線方式",modeWifi:"透過 Wi-Fi 上的 Gateway",modeDirect:"直接連附近的 Hub，不需要 Wi-Fi",wifi:"Wi-Fi",refresh:"重新整理",scanning:"掃描中…",noNets:"沒有找到網路",other:"其他網路…",ssid:"網路名稱",password:"密碼",pwSaved:"已儲存，留空則沿用",show:"顯示",hide:"隱藏",server:"伺服器",production:"正式",local:"本機",manual:"自訂",url:"伺服器網址",advanced:"進階",token:"驗證 Token",tokenSaved:"已儲存，留空則沿用",renameLater:"Hub 名稱之後可以在 Desktop 修改。",connect:"連線",save:"儲存並重新啟動",connecting:"連線中…",connected:"已連上 {s}，正在重新啟動…",restarting:"已儲存，正在重新啟動…",lost:"連線中斷。如果裝置沒有上線，請重新連上 {a} 再試一次。",details:"裝置資訊",dAp:"設定用網路",dUrl:"網址",dMac:"MAC",dVer:"韌體",dBoard:"板子",dId:"Hub ID",reset:"重設",resetHint:"清除 Wi-Fi 與伺服器設定。",resetBtn:"清除設定",resetAsk:"確定要清除所有設定並重新啟動？",
+required:"必填。",bad_url:"請輸入 ws:// 或 wss:// 開頭的網址。",wrong_password:"密碼錯誤。",not_found:"找不到這個網路，請靠近一點再試。",timeout:"連線逾時，請再試一次。",other_fail:"連線失敗，請再試一次。",busy:"上一個請求還在處理中。",backend_unreachable:"Wi-Fi 已連上，但伺服器沒有回應。設定仍已儲存。",net_err:"裝置沒有回應。"},
+ja:{title:"Wi-Fi 設定",titleHub:"Hub 設定",tagDevice:"デバイス",tagHub:"Hub",mode:"接続方法",modeWifi:"Wi-Fi 経由で Gateway に接続",modeDirect:"近くの Hub に直接接続（Wi-Fi 不要）",wifi:"Wi-Fi",refresh:"再読み込み",scanning:"検索中…",noNets:"ネットワークが見つかりません",other:"その他のネットワーク…",ssid:"ネットワーク名",password:"パスワード",pwSaved:"保存済み（空欄のままで変更なし）",show:"表示",hide:"隠す",server:"サーバー",production:"本番",local:"ローカル",manual:"カスタム",url:"サーバー URL",advanced:"詳細設定",token:"認証トークン",tokenSaved:"保存済み（空欄のままで変更なし）",renameLater:"Hub の名前はあとで Desktop から変更できます。",connect:"接続",save:"保存して再起動",connecting:"接続中…",connected:"{s} に接続しました。再起動します…",restarting:"保存しました。再起動します…",lost:"通信が途切れました。オンラインにならない場合は {a} に再接続してやり直してください。",details:"デバイス情報",dAp:"設定用ネットワーク",dUrl:"アドレス",dMac:"MAC",dVer:"ファームウェア",dBoard:"ボード",dId:"Hub ID",reset:"リセット",resetHint:"Wi-Fi とサーバーの設定を消去します。",resetBtn:"設定を消去",resetAsk:"すべての設定を消去して再起動しますか？",
+required:"入力してください。",bad_url:"ws:// または wss:// で始まる URL を入力してください。",wrong_password:"パスワードが違います。",not_found:"ネットワークが見つかりません。近づいてもう一度お試しください。",timeout:"時間内に接続できませんでした。もう一度お試しください。",other_fail:"接続できませんでした。もう一度お試しください。",busy:"前のリクエストを処理中です。",backend_unreachable:"Wi-Fi には接続できましたが、サーバーが応答しません。設定は保存しました。",net_err:"デバイスから応答がありません。"}};
+function $(i){return document.getElementById(i)}
+var info={},lang="en",nets=[],sel=null,other=false,target="production",busy=false;
+function pick(){var s=null;try{s=localStorage.getItem("nhos_lang")}catch(e){}if(T[s])return s;var l=navigator.languages||[navigator.language||"en"];for(var i=0;i<l.length;i++){var c=(l[i]||"").slice(0,2).toLowerCase();if(T[c])return c}return "en"}
+function t(k,v){var s=T[lang][k]||T.en[k]||k;for(var n in v)s=s.replace("{"+n+"}",v[n]);return s}
+function hub(){return info.product=="hub"}
+function full(){return info.variant!="wifi_only"}
+function mode(){var r=document.querySelector("input[name=mode]:checked");return r?r.value:"wifi"}
+function render(){
+document.documentElement.lang=lang=="zh"?"zh-Hant":lang;
+var a=document.querySelectorAll("[data-t]");for(var i=0;i<a.length;i++)a[i].textContent=t(a[i].getAttribute("data-t"));
+document.querySelector("h1").textContent=t(hub()?"titleHub":"title");
+$("tag").textContent=t(hub()?"tagHub":"tagDevice");
+$("meta").textContent=[info.board,info.version,info.mac?info.mac.slice(-5):""].filter(Boolean).join(" · ");
+$("showPw").textContent=t($("password").type=="password"?"show":"hide");
+if(!busy)$("go").textContent=t(hub()&&full()?"save":"connect");
+$("password").placeholder=info.saved_ssid&&curSsid()==info.saved_ssid?t("pwSaved"):"";
+$("token").placeholder=info.token_saved?t("tokenSaved"):"";
+var rows=[["dAp",info.ap_ssid],["dUrl","http://"+info.domain],["dMac",info.mac],["dBoard",info.board],["dVer",info.version],["dId",info.hub_id]],h="";
+for(var j=0;j<rows.length;j++)if(rows[j][1])h+="<dt>"+t(rows[j][0])+"</dt><dd>"+esc(rows[j][1])+"</dd>";
+$("dl").innerHTML=h;renderNets()}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function bars(r){var n=r>-55?4:r>-67?3:r>-78?2:1,s='<svg width="18" height="14" viewBox="0 0 18 14" aria-hidden="true">';for(var i=0;i<4;i++)s+='<rect x="'+(i*5)+'" y="'+(10-i*3)+'" width="3" height="'+(4+i*3)+'" rx="1" fill="currentColor" opacity="'+(i<n?1:.25)+'"/>';return s+"</svg>"}
+var LOCK='<svg width="12" height="14" viewBox="0 0 12 14" aria-hidden="true"><rect x="1" y="6" width="10" height="7" rx="2" fill="currentColor"/><path d="M3 6V4a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>';
+function renderNets(scanning){
+var h="";for(var i=0;i<nets.length;i++){var n=nets[i];h+='<li data-i="'+i+'" class="'+(!other&&sel==n.ssid?"on":"")+'">'+bars(n.rssi)+'<span class="n">'+esc(n.ssid)+"</span>"+(n.open?"":LOCK)+"</li>"}
+if(!nets.length)h+='<li class="muted" style="cursor:default">'+t(scanning?"scanning":"noNets")+"</li>";
+h+='<li data-i="-1" class="'+(other?"on":"")+'"><span class="n">'+t("other")+"</span></li>";
+$("nets").innerHTML=h;$("ssidBox").hidden=!other;
+var n2=other?null:find(sel);$("pwBox").hidden=!!(n2&&n2.open)}
+function find(s){for(var i=0;i<nets.length;i++)if(nets[i].ssid==s)return nets[i];return null}
+function curSsid(){return other?$("ssid").value.trim():(sel||"")}
+$("nets").onclick=function(e){var li=e.target.closest("li");if(!li||!li.hasAttribute("data-i"))return;var i=+li.getAttribute("data-i");if(i<0){other=true}else{other=false;sel=nets[i].ssid}clr("ssid");render();(other?$("ssid"):$("password")).focus()};
+function api(p,o){return fetch(p,o).then(function(r){return r.json()})}
+function scan(refresh){api("/api/scan"+(refresh?"?refresh=1":"")).then(function(d){nets=d.networks||[];if(!d.scanning&&sel&&!find(sel)&&!other&&sel==info.saved_ssid){other=true;$("ssid").value=sel}renderNets(d.scanning);if(d.scanning)setTimeout(scan,1500)}).catch(function(){})}
+$("rescan").onclick=function(){scan(true)};
+$("showPw").onclick=function(){var p=$("password");p.type=p.type=="password"?"text":"password";render()};
+var radios=document.querySelectorAll("input[name=mode]");for(var i=0;i<radios.length;i++)radios[i].onchange=modeUi;
+function modeUi(){var d=mode()=="espnow";$("mWifi").classList.toggle("on",!d);$("mDirect").classList.toggle("on",d);$("wifiSec").hidden=d}
+$("seg").onclick=function(e){var b=e.target.closest("button");if(!b)return;target=b.getAttribute("data-v");segUi()};
+function segUi(){var b=$("seg").children;for(var i=0;i<b.length;i++)b[i].classList.toggle("on",b[i].getAttribute("data-v")==target);$("urlBox").hidden=target!="manual";clr("url")}
+function clr(k){$("e_"+k).textContent=""}
+["ssid","password","url"].forEach(function(k){$(k).oninput=function(){clr(k);clr("form")}});
+function msg(text,cls){var m=$("msg");m.hidden=!text;m.textContent=text||"";m.className=cls||""}
+function setBusy(b,label){busy=b;$("go").disabled=b;$("go").textContent=b?label:t(hub()&&full()?"save":"connect")}
+function validate(){var e={};if(!(hub()==false&&mode()=="espnow")){if(!curSsid())e.ssid="required"}
+if(hub()&&full()&&target=="manual"){var u=$("url").value.trim();if(!u)e.url="required";else if(!/^wss?:\/\/./.test(u))e.url="bad_url"}return e}
+function showErrors(e){for(var k in e){var el=$("e_"+k);if(el)el.textContent=t(e[k])}}
+$("f").onsubmit=function(ev){ev.preventDefault();if(busy)return;clr("ssid");clr("password");clr("url");clr("form");msg("");
+var e=validate();if(Object.keys(e).length){showErrors(e);return}
+var b=new URLSearchParams();b.append("mode",mode());b.append("ssid",curSsid());b.append("password",$("password").value);
+if(hub()&&full()){b.append("target_mode",target);b.append("manual_url",$("url").value.trim());b.append("auth_token",$("token").value.trim())}
+setBusy(true,t("connecting"));
+fetch("/api/save",{method:"POST",body:b}).then(function(r){return r.json()}).then(function(d){
+if(!d.ok){setBusy(false);showErrors(d.errors||{});return}
+if(d.state=="restarting"){msg(t("restarting"),"ok");return}
+poll(0)}).catch(function(){setBusy(false);msg(t("net_err"),"bad")})};
+function poll(miss){setTimeout(function(){api("/api/status").then(function(s){status(s)||poll(0)}).catch(function(){if(miss>=20){setBusy(false);msg(t("lost",{a:info.ap_ssid||""}),"bad")}else poll(miss+1)})},1000)}
+function status(s){if(s.state=="ok"){msg(t("connected",{s:s.ssid})+(s.warning?" "+t(s.warning):""),"ok");return true}
+if(s.state=="failed"){setBusy(false);msg(t(s.reason=="other"?"other_fail":s.reason),"bad");if(s.reason=="wrong_password")$("password").focus();return true}
+return s.state!="connecting"}
+$("reset").onclick=function(){if(!confirm(t("resetAsk")))return;fetch("/api/reset",{method:"POST"}).then(function(){msg(t("restarting"),"ok")}).catch(function(){msg(t("net_err"),"bad")})};
+$("lang").onchange=function(){lang=this.value;try{localStorage.setItem("nhos_lang",lang)}catch(e){}render()};
+lang=pick();$("lang").value=lang;segUi();render();
+api("/api/info").then(function(d){info=d;document.body.className=hub()?"hub":"";
+$("modeSec").hidden=hub();$("serverSec").hidden=!(hub()&&full());$("resetBox").hidden=!d.can_reset;
+if(d.mode=="espnow"){document.querySelector("input[value=espnow]").checked=true;modeUi()}
+if(d.target_mode){target=d.target_mode;segUi()}if(d.manual_url)$("url").value=d.manual_url;
+if(d.saved_ssid)sel=d.saved_ssid;render();scan(false);
+api("/api/status").then(function(s){if(s.state=="connecting"){setBusy(true,t("connecting"));poll(0)}else if(s.state!="idle")status(s)}).catch(function(){})}).catch(function(){msg(t("net_err"),"bad")});
+</script>
+</body>
+</html>

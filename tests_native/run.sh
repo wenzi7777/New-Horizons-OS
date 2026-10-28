@@ -198,3 +198,11 @@ echo "packet fixtures: up to date"
   -o "$BUILD_DIR/test_heavy_pacing"
 
 "$BUILD_DIR/test_heavy_pacing"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
+  "$SCRIPT_DIR/test_setup_portal_logic.cpp" \
+  "$CORE_DIR/WifiScanList.cpp" \
+  "$CORE_DIR/StaConnectReason.cpp" \
+  -o "$BUILD_DIR/test_setup_portal_logic"
+
+"$BUILD_DIR/test_setup_portal_logic"

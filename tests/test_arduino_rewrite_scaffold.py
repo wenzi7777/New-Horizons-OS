@@ -494,22 +494,30 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
                 re.S,
             ),
         )
-        self.assertIn("WiFi.softAP(ssid);", wifi)
-        self.assertNotIn("WiFi.softAP(ssid, kDefaultApPassword);", wifi)
+        portal = read_firmware("SetupPortal.cpp")
+        self.assertIn("portal_.begin(ssid, kSetupPortalDomain", wifi)
+        # An open AP: no password argument.
+        self.assertIn("WiFi.softAP(apSsid);", portal)
 
     def test_wifi_setup_starts_captive_portal_dns_and_http(self):
         header = read_firmware("WifiManager.h")
         wifi = read_firmware("WifiManager.cpp")
 
-        self.assertIn("#include <DNSServer.h>", header)
-        self.assertIn("#include <WebServer.h>", header)
-        self.assertIn("DNSServer dnsServer_", header)
-        self.assertIn("WebServer portalServer_", header)
-        self.assertIn("dnsServer_.start", wifi)
-        self.assertIn("portalServer_.begin()", wifi)
-        self.assertIn("portalServer_.handleClient()", wifi)
-        self.assertIn("enableDhcpCaptivePortal", wifi)
-        self.assertIn("handlePortalSave", wifi)
+        portal_header = read_firmware("SetupPortal.h")
+        portal = read_firmware("SetupPortal.cpp")
+
+        self.assertIn('#include "SetupPortal.h"', header)
+        self.assertIn("SetupPortal portal_;", header)
+        self.assertIn("portal_.service()", wifi)
+        self.assertIn("hooks.save", wifi)
+        self.assertIn("#include <DNSServer.h>", portal_header)
+        self.assertIn("#include <WebServer.h>", portal_header)
+        self.assertIn("DNSServer dns_", portal_header)
+        self.assertIn("WebServer server_", portal_header)
+        self.assertIn("dns_.start", portal)
+        self.assertIn("server_.begin()", portal)
+        self.assertIn("server_.handleClient()", portal)
+        self.assertIn("enableDhcpCaptivePortal", portal)
 
     def test_wifi_setup_enters_portal_without_credentials_or_boot_button_request(self):
         header = read_firmware("WifiManager.h")
@@ -561,12 +569,15 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         header = read_firmware("WifiManager.h")
         wifi = read_firmware("WifiManager.cpp")
 
-        self.assertIn("String wifiNetworkOptionsHtml() const;", header)
-        self.assertIn("WiFi.scanNetworks", wifi)
-        self.assertIn('id=\\"ssid_select\\"', wifi)
-        self.assertIn('onchange=\\"document.getElementById(\\\'ssid\\\').value=this.value\\"', wifi)
-        self.assertIn("WiFi.RSSI(i)", wifi)
-        self.assertIn("WiFi.encryptionType(i)", wifi)
+        portal = read_firmware("SetupPortal.cpp")
+
+        # Async: a page load must never wait on a scan.
+        self.assertIn("WiFi.scanNetworks(true,", portal)
+        self.assertIn("WiFi.scanComplete()", portal)
+        self.assertIn("WiFi.RSSI(i)", portal)
+        self.assertIn("WiFi.encryptionType(i)", portal)
+        self.assertIn("tidyWifiScan", portal)
+        self.assertNotIn("scanNetworks", wifi)
 
     def test_serial_boot_log_has_operational_milestones(self):
         sketch = read_firmware("newhorizons_os.ino")

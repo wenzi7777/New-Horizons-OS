@@ -5,6 +5,7 @@
 #include "Config.h"
 #include "DeviceConfig.h"
 #include "EspNowPairing.h"  // kEspNowPairingFailFlagKey, so this stays in sync with EspNowPairing.cpp's own check
+#include "JsonUtils.h"
 
 #include <esp_mac.h>
 
@@ -207,13 +208,12 @@ void WifiManager::startSetupAp() {
       mac[4],
       mac[5]);
   Serial.println(F("wifi_setup_ap_starting"));
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
-  WiFi.softAP(ssid);
-  WiFi.AP.enableDhcpCaptivePortal();
-  configurePortalRoutes();
-  dnsServer_.start(DNS_DEFAULT_PORT, "*", WiFi.softAPIP());
-  portalServer_.begin();
+  SetupPortalIdentity identity;
+  identity.product = "device";
+  identity.variant = "full";
+  identity.board = kHardwareModel;
+  identity.version = kFirmwareVersion;
+  portal_.begin(ssid, kSetupPortalDomain, identity, portalHooks());
   portalStarted_ = true;
   setupActive_ = true;
   Serial.print(F("wifi_setup_ap_started ssid="));
@@ -227,8 +227,7 @@ void WifiManager::startSetupAp() {
 void WifiManager::stopSetupPortal() {
   const bool apWasActive = portalStarted_ || setupActive_;
   if (portalStarted_) {
-    portalServer_.stop();
-    dnsServer_.stop();
+    portal_.stop();
     portalStarted_ = false;
   }
   setupActive_ = false;
@@ -237,214 +236,65 @@ void WifiManager::stopSetupPortal() {
   }
 }
 
-void WifiManager::configurePortalRoutes() {
-  if (portalRoutesConfigured_) {
-    return;
-  }
-  portalServer_.on("/", HTTP_GET, [this]() {
-    handlePortalRoot();
-  });
-  portalServer_.on("/portal", HTTP_GET, [this]() {
-    handlePortalRoot();
-  });
-  portalServer_.on("/save", HTTP_POST, [this]() {
-    handlePortalSave();
-  });
-  portalServer_.on("/generate_204", HTTP_GET, [this]() {
-    handlePortalRedirect();
-  });
-  portalServer_.on("/gen_204", HTTP_GET, [this]() {
-    handlePortalRedirect();
-  });
-  portalServer_.on("/hotspot-detect.html", HTTP_GET, [this]() {
-    handlePortalRoot();
-  });
-  portalServer_.on("/connecttest.txt", HTTP_GET, [this]() {
-    handlePortalRedirect();
-  });
-  portalServer_.on("/ncsi.txt", HTTP_GET, [this]() {
-    handlePortalRedirect();
-  });
-  portalServer_.onNotFound([this]() {
-    handlePortalRedirect();
-  });
-  portalRoutesConfigured_ = true;
-}
-
 void WifiManager::serviceSetupPortal() {
   if (!portalStarted_) {
     return;
   }
-  dnsServer_.processNextRequest();
-  portalServer_.handleClient();
+  portal_.service();
 }
 
-void WifiManager::handlePortalRoot() {
-  portalServer_.sendHeader("Cache-Control", "no-store");
-  portalServer_.send(200, "text/html", portalPage("", false));
-}
-
-void WifiManager::handlePortalSave() {
-  String mode = portalServer_.arg("mode");
-  if (mode == "espnow") {
-    // hub_mac is deliberately left blank -- EspNowPairing's broadcast
-    // discovery bootstrap fills it in on the next boot (see
-    // ~/.claude/plans/linked-strolling-puppy.md's "新裝置免 Gateway 直接
-    // 配對 Hub" section). Not routed through applyCredentials(), which is
-    // WiFi-STA-specific.
-    if (!deviceConfig_ || !deviceConfig_->setTransport("espnow", "")) {
-      portalServer_.sendHeader("Cache-Control", "no-store");
-      portalServer_.send(400, "text/html", portalPage("Could not enable Direct/Hub mode.", false));
+SetupPortalHooks WifiManager::portalHooks() {
+  SetupPortalHooks hooks;
+  hooks.info = [this](String& out) {
+    bool first = false;
+    const bool espnow = deviceConfig_ && deviceConfig_->data().transport.mode == "espnow";
+    jsonStringField(out, "mode", espnow ? "espnow" : "wifi", first);
+    jsonStringField(out, "saved_ssid", storage_ ? storage_->getString("wifi_ssid", "") : String(), first);
+  };
+  hooks.save = [this](WebServer& server, String& errors, String& ssid, String& password) {
+    if (server.arg("mode") == "espnow") {
+      // hub_mac is deliberately left blank -- EspNowPairing's broadcast
+      // discovery fills it in on the next boot.
+      if (!deviceConfig_ || !deviceConfig_->setTransport("espnow", "")) {
+        errors = "\"form\":\"other_fail\"";
+        return SetupPortalSave::Invalid;
+      }
+      // Clear any stale pairing-timeout flag so a deliberate retry from
+      // this portal gets a full fresh pairing window, not an immediate
+      // bounce back here -- see newhorizons_os.ino's boot-time check.
+      if (storage_) {
+        storage_->putUInt(kEspNowPairingFailFlagKey, 0);
+        deviceConfig_->save(*storage_);
+      }
+      return SetupPortalSave::Restart;
+    }
+    ssid = server.arg("ssid");
+    ssid.trim();
+    password = server.arg("password");
+    if (ssid.isEmpty()) {
+      errors = "\"ssid\":\"required\"";
+      return SetupPortalSave::Invalid;
+    }
+    // Same network, password left blank: keep the saved one.
+    if (password.isEmpty() && storage_ && ssid == storage_->getString("wifi_ssid", "")) {
+      password = storage_->getString("wifi_pass", "");
+    }
+    return SetupPortalSave::TestWifi;
+  };
+  hooks.onConnected = [this](const String& ssid, const String& password) {
+    if (!storage_) {
       return;
     }
-    // Clear any stale pairing-timeout flag so a deliberate retry from
-    // this portal gets a full fresh pairing window, not an immediate
-    // bounce back here -- see newhorizons_os.ino's boot-time check.
-    if (storage_) {
-      storage_->putUInt(kEspNowPairingFailFlagKey, 0);
+    storage_->putString("wifi_ssid", ssid);
+    storage_->putString("wifi_pass", password);
+    // Choosing Wi-Fi here is a deliberate "use Gateway/WiFi mode": without
+    // this a device that was ever paired with a Hub goes straight back to
+    // ESP-NOW on the reboot that follows.
+    if (deviceConfig_ && deviceConfig_->setTransport("wifi_udp", "")) {
       deviceConfig_->save(*storage_);
     }
-    portalServer_.sendHeader("Cache-Control", "no-store");
-    portalServer_.send(200, "text/html", portalPage("Direct/Hub mode saved. Restarting...", true));
-    delay(150);
-    ESP.restart();
-    return;
-  }
-
-  String ssid = portalServer_.arg("ssid");
-  String password = portalServer_.arg("password");
-  ssid.trim();
-  if (ssid.isEmpty()) {
-    portalServer_.sendHeader("Cache-Control", "no-store");
-    portalServer_.send(400, "text/html", portalPage("SSID is required.", false));
-    return;
-  }
-
-  // Submitting WiFi credentials through this portal is a deliberate
-  // "use Gateway/WiFi mode" choice -- persist it, or a device that was
-  // ever paired with a Hub reverts straight back to transport.mode ==
-  // "espnow" on its very next reboot regardless of these credentials
-  // working, since nothing else in this function ever touches
-  // transport.mode. Saved even if the connect attempt below fails so the
-  // portal (which this device can still reach either way) reflects the
-  // mode the user actually asked for.
-  if (deviceConfig_ && deviceConfig_->setTransport("wifi_udp", "") && storage_) {
-    deviceConfig_->save(*storage_);
-  }
-
-  portalServer_.sendHeader("Cache-Control", "no-store");
-  portalServer_.send(200, "text/html", portalPage("Credentials saved. Connecting...", true));
-  delay(150);
-  applyCredentials(ssid, password);
-}
-
-void WifiManager::handlePortalRedirect() {
-  portalServer_.sendHeader("Location", String("http://") + kSetupPortalDomain + "/portal", true);
-  portalServer_.send(302, "text/plain", "redirect to New Horizons OS Wi-Fi setup");
-}
-
-String WifiManager::portalPage(const String& message, bool success) const {
-  String savedSsid = storage_ ? storage_->getString("wifi_ssid", "") : "";
-  String out;
-  out.reserve(1800);
-  out += F("<!doctype html><html><head><meta charset=\"utf-8\">");
-  out += F("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
-  out += F("<title>NHOS Wi-Fi Setup</title>");
-  out += F("<style>body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;margin:0;background:#101417;color:#eef2f5}");
-  out += F("main{max-width:440px;margin:0 auto;padding:28px 20px}h1{font-size:24px;margin:0 0 8px}");
-  out += F("p{color:#b9c2ca;line-height:1.45}label{display:block;margin:16px 0 6px;color:#dce3e8}");
-  out += F("input,select{box-sizing:border-box;width:100%;font-size:16px;padding:12px;border-radius:6px;border:1px solid #5f6b74;background:#151b20;color:#fff}");
-  out += F("button{width:100%;margin-top:20px;padding:12px;font-size:16px;border:0;border-radius:6px;background:#2dd4bf;color:#041011;font-weight:700}");
-  out += F(".msg{padding:10px 12px;border-radius:6px;background:#1f2930}.ok{background:#12382f}</style></head><body><main>");
-  out += F("<h1>NHOS Wi-Fi Setup</h1>");
-  out += F("<p>Connect this board to your local Wi-Fi network.</p>");
-  if (!message.isEmpty()) {
-    out += success ? F("<p class=\"msg ok\">") : F("<p class=\"msg\">");
-    out += htmlEscape(message);
-    out += F("</p>");
-  }
-  out += F("<form method=\"post\" action=\"/save\">");
-  out += F("<label for=\"mode_select\">Connection mode</label>");
-  out += F("<select id=\"mode_select\" name=\"mode\" onchange=\"");
-  out += F("document.getElementById(\'wifi_fields\').style.display=this.value==\'espnow\'?\'none\':\'block\';");
-  out += F("document.getElementById(\'ssid\').required=this.value!=\'espnow\';\">");
-  out += F("<option value=\"wifi\">Wi-Fi (connect to a Gateway)</option>");
-  out += F("<option value=\"espnow\">Direct / Hub (no Wi-Fi network needed)</option>");
-  out += F("</select>");
-  out += F("<div id=\"wifi_fields\">");
-  out += F("<label for=\"ssid_select\">Nearby Wi-Fi</label>");
-  out += F("<select id=\"ssid_select\" onchange=\"document.getElementById(\'ssid\').value=this.value\">");
-  out += F("<option value=\"\">Select a network or type manually</option>");
-  out += wifiNetworkOptionsHtml();
-  out += F("</select>");
-  out += F("<label for=\"ssid\">Wi-Fi SSID</label>");
-  out += F("<input id=\"ssid\" name=\"ssid\" autocomplete=\"off\" value=\"");
-  out += htmlEscape(savedSsid);
-  out += F("\" required>");
-  out += F("<label for=\"password\">Password</label>");
-  out += F("<input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\">");
-  out += F("</div>");
-  out += F("<p>Direct/Hub mode broadcasts to find any New Horizons Hub in range -- no Wi-Fi network or Gateway needed.</p>");
-  out += F("<button type=\"submit\">Save</button>");
-  out += F("</form><p>Setup AP: ");
-  out += htmlEscape(WiFi.softAPSSID());
-  out += F("<br>Manual URL: http://");
-  out += kSetupPortalDomain;
-  out += F("<br>Fallback: http://");
-  out += WiFi.softAPIP().toString();
-  out += F("</p></main></body></html>");
-  return out;
-}
-
-String WifiManager::wifiNetworkOptionsHtml() const {
-  String out;
-  int16_t count = WiFi.scanNetworks(false, true, false, 160);
-  if (count <= 0) {
-    out += F("<option value=\"\">No networks found</option>");
-    WiFi.scanDelete();
-    return out;
-  }
-  for (int16_t i = 0; i < count && i < 16; ++i) {
-    String ssid = WiFi.SSID(i);
-    if (ssid.isEmpty()) {
-      continue;
-    }
-    out += F("<option value=\"");
-    out += htmlEscape(ssid);
-    out += F("\">");
-    out += htmlEscape(ssid);
-    out += F(" (");
-    out += WiFi.RSSI(i);
-    out += F(" dBm, ");
-    if (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) {
-      out += F("open");
-    } else {
-      out += F("secure");
-    }
-    out += F(")</option>");
-  }
-  WiFi.scanDelete();
-  return out;
-}
-
-String WifiManager::htmlEscape(const String& value) const {
-  String out;
-  out.reserve(value.length());
-  for (size_t i = 0; i < value.length(); ++i) {
-    char c = value.charAt(i);
-    if (c == '&') {
-      out += F("&amp;");
-    } else if (c == '<') {
-      out += F("&lt;");
-    } else if (c == '>') {
-      out += F("&gt;");
-    } else if (c == '"') {
-      out += F("&quot;");
-    } else {
-      out += c;
-    }
-  }
-  return out;
+  };
+  return hooks;
 }
 
 }  // namespace nhos
