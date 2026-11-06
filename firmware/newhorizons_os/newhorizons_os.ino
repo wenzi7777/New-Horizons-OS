@@ -541,8 +541,20 @@ void sendQueuedPacketIfAny() {
   scanner.sendQueuedPacket(*activeTransport);
 }
 
+// Also runs in ESP-NOW mode, but only while the scanner is stopped
+// (maintenance mode, no layout): the Hub learns a device's UID solely from
+// the NHO header of a data frame (HELLO carries none), so without this a
+// device that rebooted into maintenance -- or one whose Hub restarted --
+// never shows up in the Backend's routing table and can't be reached to
+// leave maintenance. While scanning, the data frames already carry the UID,
+// and EspNowStreamTransport's single-frame buffer would let a heartbeat
+// displace a sensor frame.
 void sendHeartbeatIfDue() {
-  if (!wifi.isConnected() || !findme.hasGateway()) {
+  if (espNowMode) {
+    if (!espNowTransport.ready() || scanner.active()) {
+      return;
+    }
+  } else if (!wifi.isConnected() || !findme.hasGateway()) {
     return;
   }
   uint32_t now = millis();
@@ -902,6 +914,8 @@ void registerRuntimeTasks() {
   scheduler.registerTask("apps", &taskApps, false);
   if (espNowMode) {
     scheduler.registerTask("espnow", &taskEspNow, false);
+    // See sendHeartbeatIfDue(): keeps a non-scanning device known to the Hub.
+    scheduler.registerTask("heartbeat", &sendHeartbeatIfDue, false);
   } else {
     scheduler.registerTask("wifi", &taskWifi, false);
     scheduler.registerTask("findme", &taskFindMe, false);
