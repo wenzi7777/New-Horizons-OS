@@ -39,7 +39,25 @@ struct AppPackageManifest {
 // device rather than living in whichever Desktop installed it -- but it is
 // never dispatched: no slot, no budget, no frame time. The firmware does not
 // interpret its contents at all; the Desktop renders it.
-enum AppPackageKind : uint8_t { kAppPackageFlow = 0, kAppPackageReadout = 1 };
+//
+// A panel (v1.19.0) is a readout that may also declare actions -- buttons the
+// Desktop draws that send a fixed set of device commands, gated by the
+// package's declared permissions. To the device it is exactly a readout:
+// stored, reported, never dispatched. The permission gate lives where the
+// commands are sent from (the Desktop and the App Library); the commands
+// themselves enforce their own protection here regardless of who sends them.
+enum AppPackageKind : uint8_t { kAppPackageFlow = 0, kAppPackageReadout = 1, kAppPackagePanel = 2 };
+
+// Readouts and panels: declarative, drawn by the Desktop, never dispatched.
+inline bool appPackageIsView(uint8_t kind) {
+  return kind == kAppPackageReadout || kind == kAppPackagePanel;
+}
+inline const char* appPackageKindName(uint8_t kind) {
+  return kind == kAppPackagePanel ? "panel" : kind == kAppPackageReadout ? "readout" : "flow";
+}
+inline AppPackageKind appPackageKindFromName(const String& name) {
+  return name == "panel" ? kAppPackagePanel : name == "readout" ? kAppPackageReadout : kAppPackageFlow;
+}
 
 class AppPackage {
  public:

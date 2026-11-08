@@ -18,6 +18,10 @@ enum class AppState : uint8_t {
   // a suspension that needed an operator to clear it would mean one busy
   // moment takes an app away permanently, with nothing saying why.
   Suspended = 4,
+  // Stopped by an operator (app_stop) for this boot only. Unlike app_disable
+  // nothing is persisted, so a reboot brings the app back as it was; unlike
+  // Suspended it does not come back by itself.
+  Stopped = 5,
 };
 
 // Installs, dispatches and contains apps.
@@ -52,6 +56,13 @@ class AppManager : public AppHost {
   // as ServiceManager::restart(). Does not apply to Suspended -- that clears
   // itself.
   bool revive(const String& name);
+  // Runtime-only stop/start (app_stop / app_start): the "end task" of an app.
+  // stop() applies to a Running or Suspended app; start() only to one that
+  // stop() stopped -- anything else goes through app_enable or app_revive.
+  enum class OpResult : uint8_t { Ok = 0, UnknownApp, NotRunning, NotStopped, StartFailed };
+  OpResult stop(const String& name);
+  OpResult start(const String& name);
+  static const char* opResultCode(OpResult result);
 
   // Dispatches one event to every running app subscribed to its kind.
   void dispatch(const AppEvent& event);

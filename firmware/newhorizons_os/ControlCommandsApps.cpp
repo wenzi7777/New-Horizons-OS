@@ -28,7 +28,7 @@ String ControlServer::cmdAppList(const CommandContext& ctx) {
     return error(cmd, "app_manager_unavailable");
   }
   // {"command":"app_list","outputs":"flow1"} adds that slot's per-node values.
-  return ok(cmd, "app_list", apps_->statusJson(extractString(request, "outputs")));
+  return ok(cmd, "app_list", appListJson(extractString(request, "outputs")));
 }
 
 // app_view
@@ -58,6 +58,25 @@ String ControlServer::cmdAppEnable(const CommandContext& ctx) {
     return error(cmd, "app_state_change_rejected");
   }
   return ok(cmd, enable ? "app_enabled" : "app_disabled", apps_->statusJson());
+}
+
+// app_stop, app_start -- runtime only, nothing persisted.
+String ControlServer::cmdAppStopStart(const CommandContext& ctx) {
+  const String& cmd = ctx.cmd;
+  const String& request = ctx.request;
+  if (!apps_) {
+    return error(cmd, "app_manager_unavailable");
+  }
+  const String name = extractString(request, "name");
+  if (name.isEmpty()) {
+    return error(cmd, "name_required");
+  }
+  const bool stopping = cmd == "app_stop";
+  const AppManager::OpResult result = stopping ? apps_->stop(name) : apps_->start(name);
+  if (result != AppManager::OpResult::Ok) {
+    return error(cmd, AppManager::opResultCode(result));
+  }
+  return ok(cmd, stopping ? "app_stopped" : "app_started", appListJson());
 }
 
 // app_revive

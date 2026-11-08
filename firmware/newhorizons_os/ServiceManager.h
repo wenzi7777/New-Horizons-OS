@@ -33,6 +33,19 @@ class ServiceManager {
   using StartFn = bool (*)(void* ctx);
   // nullptr means "assumed healthy whenever it is Running".
   using HealthFn = bool (*)(void* ctx);
+  // Operator stop. nullptr means the service cannot be stopped at runtime --
+  // the default, so stopping is something a service opts into.
+  using StopFn = void (*)(void* ctx);
+
+  enum class OpResult : uint8_t {
+    Ok = 0,
+    UnknownService,
+    NotStoppable,
+    NotRestartable,
+    AlreadyStopped,
+    AlreadyRunning,
+    StartFailed,
+  };
 
   // Retry backoff: 5s doubling to a 5min ceiling, then give up.
   static constexpr uint32_t kBaseBackoffMs = 5000;
@@ -41,15 +54,28 @@ class ServiceManager {
   static constexpr uint32_t kHealthPollMs = 1000;
 
   bool registerService(const char* name, bool startedOk, StartFn start = nullptr,
-                       HealthFn healthy = nullptr, void* ctx = nullptr);
+                       HealthFn healthy = nullptr, void* ctx = nullptr, StopFn stop = nullptr);
 
   void service(uint32_t nowMs);
 
   // Operator-initiated. Clears the backoff and the Failed verdict, so a
   // service that exhausted its automatic retries can still be recovered
   // without rebooting the whole device.
+  // Also clears an operator stop: a restart is a start.
   bool restart(const char* name);
   bool exists(const char* name) const { return indexOf(name) >= 0; }
+
+  // Operator stop/start (service_stop / service_start). Runtime only: never
+  // persisted, so a reboot brings every service back. A stopped service is
+  // left alone by supervision -- no health probe, no automatic retry -- until
+  // an operator starts it again.
+  OpResult stop(const char* name);
+  OpResult start(const char* name);
+  // Code that brings a module back on its own (soft-off resume, leaving
+  // maintenance, a layout change) asks this first, or it would silently undo
+  // the operator's stop.
+  bool isOperatorStopped(const char* name) const;
+  static const char* opResultCode(OpResult result);
 
   static const char* stateName(ServiceState state);
   String statusJson() const;
@@ -62,7 +88,9 @@ class ServiceManager {
     const char* name = nullptr;
     StartFn start = nullptr;
     HealthFn healthy = nullptr;
+    StopFn stop = nullptr;
     void* ctx = nullptr;
+    bool operatorStopped = false;
     ServiceState state = ServiceState::Stopped;
     uint8_t attempts = 0;
     uint32_t nextAttemptMs = 0;

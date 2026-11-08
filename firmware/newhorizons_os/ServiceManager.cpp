@@ -5,7 +5,7 @@
 namespace nhos {
 
 bool ServiceManager::registerService(const char* name, bool startedOk, StartFn start,
-                                     HealthFn healthy, void* ctx) {
+                                     HealthFn healthy, void* ctx, StopFn stop) {
   if (count_ >= kMaxServices || name == nullptr || indexOf(name) >= 0) {
     return false;
   }
@@ -13,6 +13,7 @@ bool ServiceManager::registerService(const char* name, bool startedOk, StartFn s
   service.name = name;
   service.start = start;
   service.healthy = healthy;
+  service.stop = stop;
   service.ctx = ctx;
   service.state = startedOk ? ServiceState::Running : ServiceState::Degraded;
   if (!startedOk) {
@@ -107,9 +108,62 @@ bool ServiceManager::restart(const char* name) {
   if (service.start == nullptr) {
     return false;
   }
+  service.operatorStopped = false;
   service.attempts = 0;
   attemptRestart(service, millis());
   return service.state == ServiceState::Running;
+}
+
+ServiceManager::OpResult ServiceManager::stop(const char* name) {
+  const int8_t index = indexOf(name);
+  if (index < 0) {
+    return OpResult::UnknownService;
+  }
+  Service& service = services_[index];
+  if (service.stop == nullptr) {
+    return OpResult::NotStoppable;
+  }
+  if (service.operatorStopped) {
+    return OpResult::AlreadyStopped;
+  }
+  service.stop(service.ctx);
+  service.operatorStopped = true;
+  service.attempts = 0;
+  service.state = ServiceState::Stopped;
+  return OpResult::Ok;
+}
+
+ServiceManager::OpResult ServiceManager::start(const char* name) {
+  const int8_t index = indexOf(name);
+  if (index < 0) {
+    return OpResult::UnknownService;
+  }
+  Service& service = services_[index];
+  if (!service.operatorStopped) {
+    return OpResult::AlreadyRunning;
+  }
+  if (service.start == nullptr) {
+    return OpResult::NotRestartable;
+  }
+  return restart(name) ? OpResult::Ok : OpResult::StartFailed;
+}
+
+bool ServiceManager::isOperatorStopped(const char* name) const {
+  const int8_t index = indexOf(name);
+  return index >= 0 && services_[index].operatorStopped;
+}
+
+const char* ServiceManager::opResultCode(OpResult result) {
+  switch (result) {
+    case OpResult::Ok: return "ok";
+    case OpResult::UnknownService: return "unknown_service";
+    case OpResult::NotStoppable: return "service_protected";
+    case OpResult::NotRestartable: return "service_not_restartable";
+    case OpResult::AlreadyStopped: return "already_stopped";
+    case OpResult::AlreadyRunning: return "already_running";
+    case OpResult::StartFailed: return "service_start_failed";
+    default: return "unknown";
+  }
 }
 
 const char* ServiceManager::stateName(ServiceState state) {
@@ -138,6 +192,10 @@ String ServiceManager::statusJson() const {
     json += stateName(service.state);
     json += "\",\"restartable\":";
     json += service.start != nullptr ? "true" : "false";
+    json += ",\"stoppable\":";
+    json += service.stop != nullptr ? "true" : "false";
+    json += ",\"operator_stopped\":";
+    json += service.operatorStopped ? "true" : "false";
     json += ",\"restarts\":";
     json += String(service.restarts);
     json += ",\"health_failures\":";

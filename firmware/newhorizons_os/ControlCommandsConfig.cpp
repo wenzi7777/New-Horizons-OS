@@ -371,7 +371,8 @@ String ControlServer::cmdSetMatrixLayout(const CommandContext& ctx) {
   if (calibration_) {
     calibration_->setLayout(rows, rowCount, cols, colCount);
   }
-  if (boot_->mode() == RunMode::Normal && scanner_->hasLayout() && !scanner_->active()) {
+  if (boot_->mode() == RunMode::Normal && scanner_->hasLayout() && !scanner_->active() &&
+      !(services_ && services_->isOperatorStopped("scanner"))) {
     scanner_->start();
     Serial.println(F("scan_task_started_by_layout_update"));
   }
@@ -540,7 +541,13 @@ String ControlServer::cmdSetImu(const CommandContext& ctx) {
       return error(cmd, "config_write_failed");
     }
   }
-  if (imu_) {
+  if (services_ && services_->isOperatorStopped("imu")) {
+    // Persisting "on" is an explicit start; persisting "off" leaves the
+    // runtime stop as it is (the IMU is already down).
+    if (enabled) {
+      services_->start("imu");
+    }
+  } else if (imu_) {
     imu_->setEnabled(enabled);
   }
   String data = "{\"imu\":";

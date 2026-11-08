@@ -86,7 +86,10 @@ class FlowApp : public App {
   static constexpr uint16_t kMaxWindow = 128;
   // Shared ring-buffer pool. Sized at load, never allocated at runtime.
   static constexpr uint16_t kWindowPool = 128;
-  static constexpr size_t kMaxPackageBytes = 4096;
+  // 8192 since v1.19.0: the sysmon panel alone is ~5.4 KB. Read transiently
+  // (file buffer + one String), never held, so the cost is a short-lived
+  // ~16 KB on install/activate, not resident RAM. Must match the SDK's limit.
+  static constexpr size_t kMaxPackageBytes = 8192;
   static constexpr uint32_t kDefaultBudgetUs = 1500;
   // Presses held for frames not yet evaluated. Small on purpose: presses made
   // while no frames arrive (streaming paused) must not replay as a burst later.

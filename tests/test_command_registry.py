@@ -28,6 +28,12 @@ V1_14_COMMANDS = [
     "crash_clear", "set_ota_config", "check_update", "apply_update", "reboot", "reboot_wifi_setup",
 ]
 
+# v1.19.0: the system monitor's snapshot and its operator controls.
+V1_19_ADDED = [
+    "app_stop", "app_start", "service_stop", "service_start", "task_stop", "task_start",
+    "task_set_period", "thread_list", "sysmon",
+]
+
 # v1.14.0 gated these inside their bodies (two idioms); exit_maintenance joins
 # them on purpose -- it was a silent no-op in normal mode.
 MAINTENANCE = {
@@ -44,13 +50,17 @@ class CommandTableTests(unittest.TestCase):
     def test_same_commands_as_before_plus_commands(self):
         names = command_names()
         self.assertEqual(len(names), len(set(names)), "duplicate rows")
-        self.assertEqual([n for n in names if n != "commands"], V1_14_COMMANDS)
+        self.assertEqual([n for n in names if n != "commands" and n not in V1_19_ADDED],
+                         V1_14_COMMANDS)
+        for name in V1_19_ADDED:
+            self.assertIn(name, names)
         self.assertIn("commands", names)
 
     def test_flags(self):
         self.assertEqual(flagged("kCmdNeedsMaintenance"), MAINTENANCE)
-        self.assertEqual(flagged("kCmdQuietLed"), {"app_view", "app_events"})
-        self.assertEqual(flagged("kCmdHeavy"), {"status", "query", "storage_status", "commands"})
+        self.assertEqual(flagged("kCmdQuietLed"), {"app_view", "app_events", "thread_list", "sysmon"})
+        self.assertEqual(flagged("kCmdHeavy"),
+                         {"status", "query", "storage_status", "commands", "sysmon"})
         self.assertEqual(flagged("kCmdInternal"), {"set_transport", "set_wifi"})
         self.assertEqual(flagged("kCmdStatusSnapshot"),
                          {"status", "query", "memory_status", "scan_health", "storage_status"})

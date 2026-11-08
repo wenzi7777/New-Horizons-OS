@@ -150,7 +150,7 @@ bool AppRegistry::install(const String& path, const String& expectedSha256, bool
   // install time rather than discovered at activation. A readout has no graph
   // -- the device stores and reports it without interpreting it.
   uint32_t estimatedUs = 0;
-  if (manifest.kind != kAppPackageReadout) {
+  if (!appPackageIsView(manifest.kind)) {
     String graphError;
     if (!FlowApp::dryRun(json, cellCount_,
                          manifest.declaredBudgetUs != 0 ? manifest.declaredBudgetUs
@@ -270,10 +270,10 @@ bool AppRegistry::activate(const String& id, int8_t slot, String& error) {
     return false;
   }
   Entry& entry = entries_[index];
-  if (entry.manifest.kind == kAppPackageReadout) {
+  if (appPackageIsView(entry.manifest.kind)) {
     // Nothing to dispatch. Saying so is better than binding it to a slot that
     // would then sit idle and mislead anyone reading the roster.
-    error = "not_activatable:readout";
+    error = String("not_activatable:") + appPackageKindName(entry.manifest.kind);
     return false;
   }
   if (entry.slot >= 0) {
@@ -463,7 +463,7 @@ bool AppRegistry::saveIndex() {
     json += "\",\"sha256\":\"";
     json += jsonEscape(String(entry.manifest.sha256));
     json += "\",\"kind\":\"";
-    json += entry.manifest.kind == kAppPackageReadout ? "readout" : "flow";
+    json += appPackageKindName(entry.manifest.kind);
     json += "\",\"capabilities\":";
     json += String(entry.manifest.capabilities);
     json += ",\"budget_us\":";
@@ -525,9 +525,7 @@ bool AppRegistry::loadIndex() {
               jsonExtractString(object, "min_os", "v1.0.0"));
     copyField(entry.manifest.sha256, sizeof(entry.manifest.sha256),
               jsonExtractString(object, "sha256", ""));
-    entry.manifest.kind =
-        jsonExtractString(object, "kind", "flow") == "readout" ? kAppPackageReadout
-                                                               : kAppPackageFlow;
+    entry.manifest.kind = appPackageKindFromName(jsonExtractString(object, "kind", "flow"));
     long number = 0;
     if (jsonExtractInt(object, "capabilities", number)) {
       entry.manifest.capabilities = static_cast<uint16_t>(number);
@@ -575,7 +573,7 @@ void AppRegistry::restore() {
   for (uint8_t i = 0; i < kMaxPackages; ++i) {
     Entry& entry = entries_[i];
     if (!entry.valid || entry.slot < 0) continue;
-    if (entry.manifest.kind == kAppPackageReadout) {
+    if (appPackageIsView(entry.manifest.kind)) {
       entry.slot = -1;
       continue;
     }
@@ -642,7 +640,7 @@ String AppRegistry::statusJson() const {
     json += "\",\"sha256\":\"";
     json += jsonEscape(String(entry.manifest.sha256));
     json += "\",\"kind\":\"";
-    json += entry.manifest.kind == kAppPackageReadout ? "readout" : "flow";
+    json += appPackageKindName(entry.manifest.kind);
     json += "\",\"capabilities\":";
     json += String(entry.manifest.capabilities);
     json += ",\"size\":";

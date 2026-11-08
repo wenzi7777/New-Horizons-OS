@@ -147,21 +147,8 @@ String ControlServer::cmdSensorSample(const CommandContext& ctx) {
 // memory_status
 String ControlServer::cmdMemoryStatus(const CommandContext& ctx) {
   const String& cmd = ctx.cmd;
-  // Diagnostic JSON fields: "heap_total", "heap_used".
-  const uint32_t heapTotal = ESP.getHeapSize();
-  const uint32_t heapFree = ESP.getFreeHeap();
-  String data = "{\"heap_free\":";
-  data += heapFree;
-  data += ",\"heap_total\":";
-  data += heapTotal;
-  data += ",\"heap_used\":";
-  data += heapTotal > heapFree ? heapTotal - heapFree : 0;
-  data += ",\"heap_largest_free_block\":";
-  data += ESP.getMaxAllocHeap();
-  data += ",\"heap_min_free\":";
-  data += ESP.getMinFreeHeap();
-  data += "}";
-  return ok(cmd, "memory_status", data);
+  // Diagnostic JSON fields: "heap_total", "heap_used" (memoryJson()).
+  return ok(cmd, "memory_status", memoryJson());
 }
 
 // task_list
@@ -258,7 +245,9 @@ String ControlServer::cmdEnterMaintenance(const CommandContext& ctx) {
 String ControlServer::cmdExitMaintenance(const CommandContext& ctx) {
   const String& cmd = ctx.cmd;
   boot_->exitMaintenance();
-  scanner_->start();
+  if (!(services_ && services_->isOperatorStopped("scanner"))) {
+    scanner_->start();
+  }
   return ok(cmd, "maintenance_exited");
 }
 

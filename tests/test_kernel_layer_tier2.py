@@ -465,9 +465,9 @@ class AppOutputArbitrationTests(unittest.TestCase):
         rule = control[control.index("bool acknowledgesOnLed") : control.index("}  // namespace")]
         self.assertIn("if (quiet) {\n    return false;", rule)
         # Quiet regardless, for callers from before the flag: the table's
-        # kCmdQuietLed, set on exactly the two polled reads.
+        # kCmdQuietLed, set on exactly the polled reads.
         self.assertIn("(spec->flags & kCmdQuietLed) == 0", rule)
-        self.assertEqual(flagged("kCmdQuietLed"), {"app_view", "app_events"})
+        self.assertEqual(flagged("kCmdQuietLed"), {"app_view", "app_events", "thread_list", "sysmon"})
         # All three transports (TCP, UDP, ESP-NOW) read the flag from the
         # command itself, and gate both flashes on it.
         self.assertEqual(control.count('extractBool(request, "quiet", false)'), 2)
@@ -815,19 +815,21 @@ class ReadoutPackageTests(unittest.TestCase):
     def test_a_readout_has_no_graph_to_dry_run(self):
         impl = read("AppRegistry.cpp")
         install = impl[impl.index("bool AppRegistry::install"):impl.index("bool AppRegistry::uninstall")]
-        self.assertIn("manifest.kind != kAppPackageReadout", install)
+        # Panels (v1.19.0) are views too: neither has a graph.
+        self.assertIn("if (!appPackageIsView(manifest.kind))", install)
 
     def test_a_readout_cannot_be_bound_to_a_slot(self):
         impl = read("AppRegistry.cpp")
         activate = impl[impl.index("bool AppRegistry::activate"):impl.index("bool AppRegistry::deactivate")]
         # Binding it would leave a slot that looks occupied but dispatches
         # nothing, which misleads anyone reading the roster.
-        self.assertIn("not_activatable:readout", activate)
+        self.assertIn("appPackageIsView(entry.manifest.kind)", activate)
+        self.assertIn('"not_activatable:") + appPackageKindName', activate)
 
     def test_restore_never_binds_a_readout(self):
         impl = read("AppRegistry.cpp")
         restore = impl[impl.index("void AppRegistry::restore"):impl.index("String AppRegistry::statusJson")]
-        self.assertIn("kAppPackageReadout", restore)
+        self.assertIn("appPackageIsView(entry.manifest.kind)", restore)
 
     def test_the_index_persists_the_kind(self):
         impl = read("AppRegistry.cpp")
@@ -1099,7 +1101,7 @@ class TwentyFourNodeTests(unittest.TestCase):
         body = flow[flow.index("String FlowApp::statusJson(bool withOutputs)"):]
         self.assertLess(body.index("if (!withOutputs)"), body.index('\\"outputs\\":['))
         control = control_source()
-        self.assertIn('apps_->statusJson(extractString(request, "outputs"))', control)
+        self.assertIn('appListJson(extractString(request, "outputs"))', control)
 
 
 if __name__ == "__main__":

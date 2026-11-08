@@ -43,7 +43,42 @@ class Scheduler {
   void setRuntimeGate(RuntimeGate gate) { gate_ = gate; }
 
   bool registerTask(const char* name, TaskFn fn, bool alwaysRun, uint32_t periodUs = 0);
+  // Internal switch, for the firmware's own modules. Independent of the
+  // operator stop below: a task runs only when both say it may.
   bool setEnabled(const char* name, bool enabled);
+
+  // --- Operator control (task_stop / task_start / task_set_period) --------
+  //
+  // Runtime only, never persisted: a reboot brings every task back with its
+  // registered period, so a mistaken stop can never brick a device.
+  //
+  // Protection is enforced HERE, not in whatever UI sends the command. A
+  // protected task is one whose absence leaves the device unreachable
+  // (control, the transport) or its power unsupervised; every alwaysRun task
+  // is protected implicitly.
+  enum class OpResult : uint8_t {
+    Ok = 0,
+    UnknownTask,
+    Protected,
+    AlreadyStopped,
+    AlreadyRunning,
+    FixedPeriod,
+    PeriodOutOfRange,
+  };
+  static constexpr uint32_t kMaxOperatorPeriodUs = 10000000;  // 10 s
+
+  bool setProtected(const char* name);
+  // The task's rate is owned elsewhere (scan_stream: set_scan_timing), so an
+  // operator period would be overridden or, worse, fight it.
+  bool setFixedPeriod(const char* name);
+  OpResult operatorStop(const char* name);
+  OpResult operatorStart(const char* name);
+  // periodUs 0 means "every pass"; resetPeriod restores the registered one.
+  OpResult operatorSetPeriod(const char* name, uint32_t periodUs);
+  OpResult operatorResetPeriod(const char* name);
+  bool exists(const char* name) const { return indexOf(name) >= 0; }
+  bool isProtected(const char* name) const;
+  static const char* opResultCode(OpResult result);
   // The task (already registered) that may jump the order. It still obeys
   // enabled/gate/period like any task, and still runs at its own place too
   // (where it finds nothing due and returns at once).
@@ -80,9 +115,13 @@ class Scheduler {
     const char* name = nullptr;
     TaskFn fn = nullptr;
     uint32_t periodUs = 0;
+    uint32_t defaultPeriodUs = 0;
     uint32_t nextDueUs = 0;
     bool alwaysRun = false;
     bool enabled = true;
+    bool isProtected = false;
+    bool fixedPeriod = false;
+    bool operatorStopped = false;
     TaskStats stats;
   };
 

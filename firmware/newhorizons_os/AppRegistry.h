@@ -22,7 +22,10 @@ class AppRegistry {
  public:
   static constexpr uint8_t kMaxPackages = 8;
   static constexpr uint8_t kMaxSlots = 4;
-  static constexpr size_t kMaxPackageBytes = 4096;
+  // 8192 since v1.19.0: the sysmon panel alone is ~5.4 KB. Read transiently
+  // (file buffer + one String), never held, so the cost is a short-lived
+  // ~16 KB on install/activate, not resident RAM. Must match the SDK's limit.
+  static constexpr size_t kMaxPackageBytes = 8192;
   static constexpr const char* kIndexPath = "apps/index.json";
   static constexpr const char* kIndexAbsPath = "/files/apps/index.json";
   static constexpr const char* kIndexTmpPath = "/files/apps/index.json.tmp";

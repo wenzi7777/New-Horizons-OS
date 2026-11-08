@@ -134,6 +134,56 @@ bool AppManager::revive(const String& name) {
   return slot.state == AppState::Running;
 }
 
+AppManager::OpResult AppManager::stop(const String& name) {
+  const int8_t index = indexOf(name);
+  if (index < 0) {
+    return OpResult::UnknownApp;
+  }
+  Slot& slot = slots_[index];
+  if (slot.state != AppState::Running && slot.state != AppState::Suspended) {
+    return OpResult::NotRunning;
+  }
+  if (slot.state == AppState::Running) {
+    slot.app->stop();
+  }
+  slot.state = AppState::Stopped;
+  recordEvent(slot.app->manifest().name, "stopped", "operator", false, 0);
+  reallocate();
+  return OpResult::Ok;
+}
+
+AppManager::OpResult AppManager::start(const String& name) {
+  const int8_t index = indexOf(name);
+  if (index < 0) {
+    return OpResult::UnknownApp;
+  }
+  Slot& slot = slots_[index];
+  if (slot.state != AppState::Stopped) {
+    return OpResult::NotStopped;
+  }
+  slot.consecutiveOverruns = 0;
+  if (totalBudgetUs_ == 0) {
+    // The governor has every app suspended right now; join them, and come
+    // back with them when the scan recovers.
+    slot.state = AppState::Suspended;
+    return OpResult::Ok;
+  }
+  slot.state = slot.app->start() ? AppState::Running : AppState::Faulted;
+  reallocate();
+  return slot.state == AppState::Running ? OpResult::Ok : OpResult::StartFailed;
+}
+
+const char* AppManager::opResultCode(OpResult result) {
+  switch (result) {
+    case OpResult::Ok: return "ok";
+    case OpResult::UnknownApp: return "unknown_app";
+    case OpResult::NotRunning: return "app_not_running";
+    case OpResult::NotStopped: return "app_not_stopped";
+    case OpResult::StartFailed: return "app_start_failed";
+    default: return "unknown";
+  }
+}
+
 void AppManager::setTotalBudgetUs(uint32_t totalUs, bool throttled) {
   throttled_ = throttled;
   if (totalUs == totalBudgetUs_) {
@@ -460,6 +510,7 @@ const char* AppManager::stateName(AppState state) {
     case AppState::Killed: return "killed";
     case AppState::Faulted: return "faulted";
     case AppState::Suspended: return "suspended";
+    case AppState::Stopped: return "stopped";
     case AppState::Installed:
     default: return "installed";
   }

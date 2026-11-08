@@ -255,8 +255,11 @@ void applyNormalRuntimeState() {
   powerGovernor.service(scanner.active(), true);
   nhos::watchdogArm();
   wifi.resume();
-  imu.setEnabled(deviceConfig.data().imuEnabled);
-  if (bootMode.mode() == nhos::RunMode::Normal && scanner.hasLayout() && !scanner.active()) {
+  // An operator stop (service_stop) outlives soft-off; only a reboot or an
+  // explicit start clears it.
+  imu.setEnabled(deviceConfig.data().imuEnabled && !services.isOperatorStopped("imu"));
+  if (bootMode.mode() == nhos::RunMode::Normal && scanner.hasLayout() && !scanner.active() &&
+      !services.isOperatorStopped("scanner")) {
     scanner.start();
   }
   runtimeServicesSuspended = false;
@@ -817,6 +820,10 @@ bool imuStart(void*) {
   return imuHealthy(nullptr);
 }
 
+// service_stop: powers the IMU down for this boot only. set_imu is the
+// persisted switch; this never touches deviceConfig.
+void imuStop(void*) { imu.setEnabled(false); }
+
 #if NHOS_BOARD_HAS_MAG
 bool magnetometerHealthy(void*) { return magnetometer.initialized(); }
 
@@ -857,6 +864,10 @@ bool scannerStart(void*) {
   return scanner.start();
 }
 
+// service_stop: no more frames until service_start (or a reboot). The
+// layout and calibration stay loaded.
+void scannerStop(void*) { scanner.stop(); }
+
 bool clockHealthy(void*) { return deviceClock.healthy(); }
 
 bool clockStart(void*) {
@@ -875,8 +886,13 @@ void registerServices() {
   services.registerService("power", true);
   services.registerService("control", true);
 
-  services.registerService("scanner", scanner.hasLayout(), &scannerStart, &scannerHealthy);
-  services.registerService("imu", imuHealthy(nullptr), &imuStart, &imuHealthy);
+  // The only two an operator may stop (service_stop): everything else is
+  // either foundational or something other modules lean on (the magnetometer
+  // rides the IMU's driver, the battery gauge feeds charge control, the
+  // clock stamps every packet).
+  services.registerService("scanner", scanner.hasLayout(), &scannerStart, &scannerHealthy, nullptr,
+                           &scannerStop);
+  services.registerService("imu", imuHealthy(nullptr), &imuStart, &imuHealthy, nullptr, &imuStop);
 #if NHOS_BOARD_HAS_MAG
   services.registerService("magnetometer", magnetometer.initialized(), &magnetometerStart,
                            &magnetometerHealthy);
@@ -946,6 +962,20 @@ void registerRuntimeTasks() {
   // frame: it takes a handed-over frame at its own place, before the next
   // scan can be due.
   scheduler.setUrgentTask("scan_stream", &scanUrgent);
+
+  // Operator control (task_stop / task_set_period). Every alwaysRun task is
+  // protected implicitly; these are the rest whose absence would leave the
+  // device unreachable, its stream wedged or a power transition half done.
+  // Names that this transport mode did not register are simply not found.
+  static const char* const kProtectedTasks[] = {
+      "control", "control_udp", "wifi", "espnow", "heartbeat", "findme",
+      "time_heartbeat", "stream_queue", "power_transition",
+  };
+  for (const char* name : kProtectedTasks) {
+    scheduler.setProtected(name);
+  }
+  // Paced by set_scan_timing, not by the table.
+  scheduler.setFixedPeriod("scan_stream");
 }
 
 }  // namespace

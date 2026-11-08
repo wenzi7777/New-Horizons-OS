@@ -2,7 +2,7 @@
 
 # Device commands
 
-90 commands, in dispatch-table order. A device reports the same table at run time
+99 commands, in dispatch-table order. A device reports the same table at run time
 with the `commands` command (firmware v1.15.0+). See PROTOCOL.md for the request and
 reply envelope.
 
@@ -26,6 +26,8 @@ Flags:
 | `app_enable` |  | Enable an installed app slot. (same handler as `app_disable`) |
 | `app_disable` |  | Disable an app slot without uninstalling its package. (same handler as `app_enable`) |
 | `app_revive` |  | Clear a budget-overrun kill and restart the app. |
+| `app_stop` |  | Stop a running app for this boot only (nothing persisted; app_disable is the persistent switch). (same handler as `app_start`) |
+| `app_start` |  | Start an app that app_stop stopped. (same handler as `app_stop`) |
 | `app_events` | quiet | Events emitted by apps since a sequence number, with a dropped count. |
 | `app_load_flow` |  | Load a flow graph into slot 0; rejected at load time if it exceeds the budget. |
 | `app_unload_flow` |  | Unload the flow graph in slot 0. |
@@ -48,6 +50,13 @@ Flags:
 | `set_clock_config` |  | Set the NTP server and the NTP / Gateway sync intervals. |
 | `service_list` |  | List supervised services with state, restart count, and health failures. |
 | `service_restart` |  | Restart one supervised service without rebooting the device. |
+| `service_stop` |  | Stop a stoppable service (scanner, imu) for this boot only; supervision leaves it alone. (same handler as `service_start`) |
+| `service_start` |  | Start a service that service_stop stopped. (same handler as `service_stop`) |
+| `task_stop` |  | Stop a scheduler task for this boot only; protected tasks are refused (task_protected). (same handler as `task_start`) |
+| `task_start` |  | Start a scheduler task that task_stop stopped. (same handler as `task_stop`) |
+| `task_set_period` |  | Change how often a scheduler task runs (period_us, 0 = every pass, "default" restores it); this boot only. |
+| `thread_list` | quiet | FreeRTOS threads under the scheduler, with stack low-water, CPU share and per-core load. |
+| `sysmon` | heavy, quiet | Everything a system monitor shows in one reply: tasks, services, apps, memory, scan, threads, airtime. |
 | `scan_health` | status snapshot | Query lightweight scan, stream, memory, and control health. |
 | `storage_status` | heavy, status snapshot | Flash filesystem usage per category (walks SPIFFS; slow). |
 | `enter_maintenance` |  | Enter maintenance mode and stop normal scanning. |

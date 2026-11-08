@@ -31,6 +31,7 @@
 #include "CommandRegistry.h"
 #include "FlowApp.h"
 #include "Scheduler.h"
+#include "ThreadMonitor.h"
 #include "ServiceManager.h"
 #include "Storage.h"
 #include "ClockService.h"
@@ -142,6 +143,13 @@ class ControlServer {
   String cmdSetClockConfig(const CommandContext& ctx);
   String cmdServiceList(const CommandContext& ctx);
   String cmdServiceRestart(const CommandContext& ctx);
+  // System monitor (ControlCommandsMonitor.cpp).
+  String cmdSysmon(const CommandContext& ctx);
+  String cmdThreadList(const CommandContext& ctx);
+  String cmdTaskStopStart(const CommandContext& ctx);
+  String cmdTaskSetPeriod(const CommandContext& ctx);
+  String cmdServiceStopStart(const CommandContext& ctx);
+  String cmdAppStopStart(const CommandContext& ctx);
   String cmdScanHealth(const CommandContext& ctx);
   String cmdStorageStatus(const CommandContext& ctx);
   String cmdEnterMaintenance(const CommandContext& ctx);
@@ -234,6 +242,9 @@ class ControlServer {
   String layoutStatusJson() const;
   String indicatorsStatusJson() const;
   String appViewJson() const;
+  String memoryJson() const;
+  // app_list's data: AppManager::statusJson() plus the AppGovernor.
+  String appListJson(const String& outputsFor = String()) const;
   String actionButtonStatusJson() const;
   String batteryStatusJson() const;
   // check_update/apply_update: the request's manifest_url when it names
@@ -271,6 +282,8 @@ class ControlServer {
   FlowApp* flow_ = nullptr;
   AppRegistry* appRegistry_ = nullptr;
   AppGovernor* appGovernor_ = nullptr;
+  // Holds the previous run-time counters, so CPU shares are per-interval.
+  ThreadMonitor threads_;
   FindMeClient* findme_ = nullptr;
   PowerManager* power_ = nullptr;
   BatteryGaugeManager* batteryGauge_ = nullptr;
