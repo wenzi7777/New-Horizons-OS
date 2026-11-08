@@ -32,6 +32,12 @@ class PowerManager {
   // Caps every charge profile at the battery's maximum charge current and
   // re-applies the current profile. actualMa is the resulting charge current.
   bool setChargeCeilingMa(uint16_t ceilingMa, uint16_t& actualMa);
+  // Suspends charging (BQ25180 ICHG_CTRL.CHG_DIS) while VIN stays connected,
+  // so the cell can relax before the fuel gauge takes an OCV reading.
+  // begin() and every profile write keep the current setting; a reboot
+  // always comes back charging.
+  bool setChargingPaused(bool paused);
+  bool chargingPaused() const { return chargingPaused_; }
   String profileName() const;
   String statusJson() const;
 
@@ -58,6 +64,7 @@ class PowerManager {
   ChargeProfile profile_ = ChargeProfile::Balanced;
   bool detected_ = false;
   bool configured_ = false;
+  bool chargingPaused_ = false;
   uint16_t chargeCurrentMa_ = 250;
   uint16_t chargeCeilingMa_ = 0;  // 0 = no battery ceiling
   uint16_t inputLimitMa_ = 500;

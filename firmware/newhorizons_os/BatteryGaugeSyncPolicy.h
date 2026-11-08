@@ -14,6 +14,8 @@ enum class GaugeSyncReason : uint8_t {
   Boot = 0,
   AutomaticSwap,
   Manual,
+  // The gauge reported a power-on reset (STATUS.RI): the cell was pulled.
+  GaugeReset,
 };
 
 enum class GaugeSyncStartResult : uint8_t {
@@ -27,6 +29,7 @@ class BatteryGaugeSyncPolicy {
   void observeCharger(uint32_t nowMs, bool detected);
   bool observeVoltage(uint32_t nowMs, bool valid, uint16_t vbatMv);
   GaugeSyncStartResult requestManual(uint32_t nowMs);
+  GaugeSyncStartResult requestGaugeReset(uint32_t nowMs);
   void recordQuickStartWrite(uint32_t nowMs, bool succeeded);
   bool pollDue(uint32_t nowMs) const;
   void recordPoll(uint32_t nowMs, bool succeeded);

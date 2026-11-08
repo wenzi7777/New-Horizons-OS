@@ -16,6 +16,8 @@ constexpr uint8_t kBq25180ChargeCtrl0Register = 0x05;
 constexpr uint8_t kBq25180IcCtrlRegister = 0x07;
 constexpr uint8_t kBq25180TmrIlimRegister = 0x08;
 constexpr uint8_t kBq25180Vbat4200Mv = 0x46;
+// ICHG_CTRL bit 7: 1 = battery charging disabled, bits 6:0 = ICHG code.
+constexpr uint8_t kBq25180ChargeDisableBit = 0x80;
 constexpr uint32_t kPowerStatusPollMs = 1000;
 
 // ICHG codes come from bq25180IchgCodeForMa(): 0x25 = 100 mA, +10 mA per
@@ -65,6 +67,7 @@ void PowerManager::begin(const String& profileName) {
   chargeState_ = ChargeState::NotCharging;
   detected_ = false;
   configured_ = false;
+  chargingPaused_ = false;
   lastError_ = "";
   lastConfigError_ = "";
   if (!supportsChargeProfiles()) {
@@ -151,7 +154,9 @@ bool PowerManager::applyProfile(ChargeProfile profile) {
   if (!writeRegister(kBq25180VbatCtrlRegister, kBq25180Vbat4200Mv)) {
     return failProfile("bq25180_vbat_write_failed");
   }
-  if (!writeRegister(kBq25180IchgCtrlRegister, ichg)) {
+  const uint8_t ichgCtrl = static_cast<uint8_t>(
+      ichg | (chargingPaused_ ? kBq25180ChargeDisableBit : 0));
+  if (!writeRegister(kBq25180IchgCtrlRegister, ichgCtrl)) {
     return failProfile("bq25180_ichg_write_failed");
   }
   if (!updateRegister(kBq25180ChargeCtrl0Register, 0x70, 0x20)) {
@@ -168,7 +173,7 @@ bool PowerManager::applyProfile(ChargeProfile profile) {
   if (!readRegister(kBq25180VbatCtrlRegister, value) || (value & 0x7F) != kBq25180Vbat4200Mv) {
     return failProfile("bq25180_vbat_verify_failed");
   }
-  if (!readRegister(kBq25180IchgCtrlRegister, value) || (value & 0x7F) != ichg) {
+  if (!readRegister(kBq25180IchgCtrlRegister, value) || value != ichgCtrl) {
     return failProfile("bq25180_ichg_verify_failed");
   }
   if (!readRegister(kBq25180ChargeCtrl0Register, value) || (value & 0x70) != 0x20) {
@@ -225,6 +230,24 @@ bool PowerManager::setChargeCeilingMa(uint16_t ceilingMa, uint16_t& actualMa) {
     return false;
   }
   actualMa = chargeCurrentMa_;
+  return true;
+}
+
+bool PowerManager::setChargingPaused(bool paused) {
+  if (!supportsChargeProfiles()) {
+    return false;
+  }
+  if (!updateRegister(kBq25180IchgCtrlRegister, kBq25180ChargeDisableBit,
+                      paused ? kBq25180ChargeDisableBit : 0)) {
+    return false;
+  }
+  uint8_t value = 0;
+  if (!readRegister(kBq25180IchgCtrlRegister, value) ||
+      ((value & kBq25180ChargeDisableBit) != 0) != paused) {
+    lastError_ = "bq25180_chg_dis_verify_failed";
+    return false;
+  }
+  chargingPaused_ = paused;
   return true;
 }
 

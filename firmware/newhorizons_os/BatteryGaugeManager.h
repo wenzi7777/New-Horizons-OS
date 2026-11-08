@@ -4,10 +4,13 @@
 #include "BatteryGaugeSyncPolicy.h"
 #include "BatteryManualProfile.h"
 #include "BatteryProfile.h"
+#include "BatterySocScaler.h"
 
 namespace nhos {
 class PowerManager;
-struct BatteryGaugeSample { bool valid = false; uint8_t status = 0; uint8_t fault = 0; uint16_t vbatMv = 0; uint16_t socCentiPercent = 0; int16_t rate = 0; };
+// socCentiPercent is what everything reports (scaled to the charger's full,
+// 0..100%); rawSocCentiPercent is the gauge register as read, for diagnostics.
+struct BatteryGaugeSample { bool valid = false; uint8_t status = 0; uint8_t fault = 0; uint16_t vbatMv = 0; uint16_t socCentiPercent = 0; int16_t rate = 0; uint16_t rawSocCentiPercent = 0; };
 
 enum class GaugeResyncResult : uint8_t {
   Started = 0,
@@ -32,6 +35,9 @@ class BatteryGaugeManager {
   bool readWord(uint8_t reg, uint16_t& value);
   bool writeWord(uint8_t reg, uint16_t value);
   bool startQuickStart(uint32_t nowMs);
+  bool writeQuickStart(uint32_t nowMs);
+  void resumeChargingIfPaused();
+  void checkGaugeReset(uint32_t nowMs);
   void applySample(const BatteryGaugeSample& sample);
   void markReadFailed(const char* diagnostic);
   void updateProfile(const BatteryProfile& profile);
@@ -45,5 +51,13 @@ class BatteryGaugeManager {
   bool hasAppliedChargeLimit_ = false;
   uint16_t appliedChargeLimitMa_ = 0;
   BatteryGaugeSyncPolicy syncPolicy_;
+  BatterySocScaler socScaler_;
+  // Quick-start reads VCELL as the open-circuit voltage, which the charge
+  // current pushes up; with a charger attached, charging is paused and the
+  // write waits until relaxUntilMs_.
+  bool quickStartPending_ = false;
+  uint32_t relaxUntilMs_ = 0;
+  bool pausedCharging_ = false;
+  bool resetFlagChecked_ = false;
 };
 }  // namespace nhos

@@ -92,9 +92,34 @@ void testQuickStartWriteFailureEndsSyncAndStartsCooldownAtFailure() {
   assert(policy.observeVoltage(32100, true, 3900));
 }
 
+void testQuickStartWriteRestartsPollTimer() {
+  BatteryGaugeSyncPolicy policy;
+  policy.begin(0);
+  assert(policy.requestManual(0) == GaugeSyncStartResult::Started);
+  // Charging paused for 1.5 s before the quick-start is written.
+  policy.recordQuickStartWrite(1500, true);
+  assert(policy.state() == GaugeSyncState::Syncing);
+  assert(!policy.pollDue(2499));
+  assert(policy.pollDue(2500));
+  policy.recordPoll(4499, false);
+  assert(policy.state() == GaugeSyncState::Syncing);
+  policy.recordPoll(4500, false);
+  assert(policy.state() == GaugeSyncState::Error);
+}
+
+void testGaugeResetStartsSyncWithItsOwnReason() {
+  BatteryGaugeSyncPolicy policy;
+  policy.begin(0);
+  assert(policy.requestGaugeReset(10) == GaugeSyncStartResult::Started);
+  assert(policy.lastReason() == GaugeSyncReason::GaugeReset);
+  assert(policy.requestGaugeReset(20) == GaugeSyncStartResult::InProgress);
+}
+
 }  // namespace
 
 int main() {
+  testQuickStartWriteRestartsPollTimer();
+  testGaugeResetStartsSyncWithItsOwnReason();
   testAutomaticSyncRequiresStableChargerAnd250MvStep();
   testAutomaticSyncRejectsSubthresholdAndInvalidSamples();
   testSyncPollsAfterOneSecondThenRetriesUntilThreeSecondDeadline();

@@ -56,8 +56,23 @@ GaugeSyncStartResult BatteryGaugeSyncPolicy::requestManual(uint32_t nowMs) {
   return GaugeSyncStartResult::Started;
 }
 
+GaugeSyncStartResult BatteryGaugeSyncPolicy::requestGaugeReset(uint32_t nowMs) {
+  if (state_ == GaugeSyncState::Syncing) {
+    return GaugeSyncStartResult::InProgress;
+  }
+  start(nowMs, GaugeSyncReason::GaugeReset);
+  return GaugeSyncStartResult::Started;
+}
+
 void BatteryGaugeSyncPolicy::recordQuickStartWrite(uint32_t nowMs,
                                                    bool succeeded) {
+  if (state_ == GaugeSyncState::Syncing && succeeded) {
+    // The write can come well after start() -- charging is paused first so
+    // the cell relaxes -- so the first poll and the deadline count from it.
+    syncStartedMs_ = nowMs;
+    nextPollMs_ = nowMs + kFirstPollDelayMs;
+    return;
+  }
   if (state_ == GaugeSyncState::Syncing && !succeeded) {
     state_ = GaugeSyncState::Error;
     nextPollMs_ = 0;
@@ -129,6 +144,8 @@ const char* gaugeSyncReasonName(GaugeSyncReason reason) {
       return "automatic_swap";
     case GaugeSyncReason::Manual:
       return "manual";
+    case GaugeSyncReason::GaugeReset:
+      return "gauge_reset";
   }
   return "boot";
 }

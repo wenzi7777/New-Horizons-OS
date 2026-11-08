@@ -55,7 +55,9 @@ class ManualBatteryProfileTests(unittest.TestCase):
         apply = power[power.index("bool PowerManager::applyProfile("):]
         apply = apply[:apply.index("\n}\n")]
         self.assertIn("effectiveChargeCurrentMa(config.chargeCurrentMa, chargeCeilingMa_)", apply)
-        self.assertIn("writeRegister(kBq25180IchgCtrlRegister, ichg)", apply)
+        self.assertIn("writeRegister(kBq25180IchgCtrlRegister, ichgCtrl)", apply)
+        # A profile write must not silently resume a paused charge.
+        self.assertIn("ichg | (chargingPaused_ ? kBq25180ChargeDisableBit : 0)", apply)
         self.assertNotIn("applyBatteryChargeLimit", power + read("PowerManager.h"))
         self.assertIn("power_->setChargeCeilingMa(profile_.maxChargeCurrentMa, actualMa)",
                       read("BatteryGaugeManager.cpp"))

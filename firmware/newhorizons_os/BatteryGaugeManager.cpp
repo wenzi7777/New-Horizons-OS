@@ -14,6 +14,10 @@ constexpr uint8_t kMax17048SocRegister = 0x04;
 constexpr uint8_t kMax17048ModeRegister = 0x06;
 constexpr uint8_t kMax17048CrateRegister = 0x16;
 constexpr uint16_t kMax17048QuickStart = 0x4000;
+constexpr uint8_t kMax17048StatusRegister = 0x1A;
+constexpr uint16_t kMax17048StatusResetIndicator = 0x0100;  // RI
+// How long the cell rests with charging paused before quick-start.
+constexpr uint32_t kChargeRelaxMs = 1500;
 constexpr uint32_t kNormalPollMs = 1000;
 constexpr uint32_t kChargingPollMs = 250;
 }  // namespace
@@ -25,6 +29,11 @@ void BatteryGaugeManager::begin() {
   lastPollMs_ = 0;
   hasAppliedChargeLimit_ = false;
   syncPolicy_.begin(millis());
+  socScaler_.reset();
+  quickStartPending_ = false;
+  resetFlagChecked_ = false;
+  // A restart in the middle of a sync must never leave charging off.
+  resumeChargingIfPaused();
   updateProfile(resolveBatteryProfile(manualProfile_));
 }
 
@@ -36,6 +45,8 @@ void BatteryGaugeManager::setPowerManager(PowerManager& power) {
 void BatteryGaugeManager::setManualProfile(const ManualBatteryProfile& profile) {
   manualProfile_ = profile;
   manualProfile_.configured = manualBatteryProfileIsUsable(profile);
+  // A new battery setting usually means a different cell.
+  socScaler_.reset();
   updateProfile(resolveBatteryProfile(manualProfile_));
 }
 
@@ -54,12 +65,25 @@ void BatteryGaugeManager::service(uint32_t nowMs) {
   syncPolicy_.observeCharger(nowMs, chargerDetected);
 
   if (syncPolicy_.state() == GaugeSyncState::Syncing) {
+    if (quickStartPending_) {
+      if (static_cast<int32_t>(nowMs - relaxUntilMs_) < 0) {
+        return;
+      }
+      writeQuickStart(nowMs);
+      if (syncPolicy_.state() != GaugeSyncState::Syncing) {
+        resumeChargingIfPaused();
+      }
+      return;
+    }
     if (!syncPolicy_.pollDue(nowMs)) {
       return;
     }
     BatteryGaugeSample next;
     const bool readSucceeded = readGauge(next) && next.valid;
     syncPolicy_.recordPoll(nowMs, readSucceeded);
+    if (syncPolicy_.state() != GaugeSyncState::Syncing) {
+      resumeChargingIfPaused();
+    }
     if (readSucceeded) {
       applySample(next);
       diagnostic_ = "ok";
@@ -74,6 +98,9 @@ void BatteryGaugeManager::service(uint32_t nowMs) {
                       : "max17048_resyncing";
     return;
   }
+
+  // Not syncing: charging must be on. Retried every pass if the write failed.
+  resumeChargingIfPaused();
 
   const uint32_t pollMs = chargerDetected ? kChargingPollMs : kNormalPollMs;
   if (lastPollMs_ && nowMs - lastPollMs_ < pollMs) {
@@ -107,7 +134,9 @@ void BatteryGaugeManager::service(uint32_t nowMs) {
 
   if (syncPolicy_.observeVoltage(nowMs, sample_.valid, sample_.vbatMv)) {
     startQuickStart(nowMs);
+    return;
   }
+  checkGaugeReset(nowMs);
 #endif
 }
 
@@ -174,18 +203,72 @@ bool BatteryGaugeManager::writeWord(uint8_t reg, uint16_t value) {
 }
 
 bool BatteryGaugeManager::startQuickStart(uint32_t nowMs) {
-  (void)nowMs;
   sample_.valid = false;
   sample_.status = 0;
   sample_.fault = 1;
+  // Whatever triggered a resync, the old full-charge scale no longer holds.
+  socScaler_.reset();
+  quickStartPending_ = false;
+  if (power_ && power_->chargerDetected()) {
+    if (pausedCharging_ || power_->setChargingPaused(true)) {
+      pausedCharging_ = true;
+      quickStartPending_ = true;
+      relaxUntilMs_ = nowMs + kChargeRelaxMs;
+      diagnostic_ = "max17048_relaxing";
+      return true;
+    }
+    // Could not pause: quick-start under charge as before (reads high).
+  }
+  return writeQuickStart(nowMs);
+}
+
+bool BatteryGaugeManager::writeQuickStart(uint32_t nowMs) {
+  quickStartPending_ = false;
   const bool written = writeWord(kMax17048ModeRegister, kMax17048QuickStart);
   syncPolicy_.recordQuickStartWrite(nowMs, written);
   diagnostic_ = written ? "max17048_resyncing" : "max17048_quick_start_failed";
   return written;
 }
 
+void BatteryGaugeManager::resumeChargingIfPaused() {
+  if (pausedCharging_ && power_ && power_->setChargingPaused(false)) {
+    pausedCharging_ = false;
+  }
+}
+
+void BatteryGaugeManager::checkGaugeReset(uint32_t nowMs) {
+  uint16_t status = 0;
+  if (!readWord(kMax17048StatusRegister, status) ||
+      (status & kMax17048StatusResetIndicator) == 0) {
+    resetFlagChecked_ = true;
+    return;
+  }
+  // RI: the gauge lost power since it was last cleared -- the cell was
+  // pulled (CELL and VDD both hang off VBAT). Clear it so the next pull
+  // shows up again.
+  if (!writeWord(kMax17048StatusRegister,
+                 static_cast<uint16_t>(status & ~kMax17048StatusResetIndicator))) {
+    return;
+  }
+  socScaler_.reset();
+  const bool atBoot = !resetFlagChecked_;
+  resetFlagChecked_ = true;
+  // At boot RI is set after any power-up; the gauge's own power-on estimate
+  // stands. While running it means a swap, and the gauge's power-on
+  // estimate was likely taken under charge, so redo it relaxed.
+  if (!atBoot &&
+      syncPolicy_.requestGaugeReset(nowMs) == GaugeSyncStartResult::Started) {
+    startQuickStart(nowMs);
+  }
+}
+
 void BatteryGaugeManager::applySample(const BatteryGaugeSample& sample) {
   sample_ = sample;
+  sample_.rawSocCentiPercent = sample.socCentiPercent;
+  const bool chargeDone = power_ && power_->chargeState() == ChargeState::ChargeDone;
+  const bool chargerPresent = power_ && power_->chargerDetected();
+  sample_.socCentiPercent =
+      socScaler_.apply(sample.socCentiPercent, chargeDone, chargerPresent);
   detected_ = true;
 }
 
@@ -227,6 +310,13 @@ String BatteryGaugeManager::statusJson() const {
   out += sample_.valid ? String(sample_.vbatMv) : "null";
   out += ",\"soc_centi_percent\":";
   out += sample_.valid ? String(sample_.socCentiPercent) : "null";
+  out += ",\"soc_raw_centi_percent\":";
+  out += sample_.valid ? String(sample_.rawSocCentiPercent) : "null";
+  out += ",\"soc_full_centi_percent\":" + String(socScaler_.fullCentiPercent());
+  out += ",\"soc_full_learned\":";
+  out += socScaler_.learned() ? "true" : "false";
+  out += ",\"charging_paused_for_sync\":";
+  out += pausedCharging_ ? "true" : "false";
   out += ",\"rate\":";
   out += sample_.valid ? String(sample_.rate) : "null";
   out += ",\"gauge_sync_state\":\"";

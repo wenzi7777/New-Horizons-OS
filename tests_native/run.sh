@@ -50,6 +50,14 @@ CXX="${CXX:-c++}"
 "$BUILD_DIR/test_battery_gauge_sync_policy"
 
 "$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
+  -I"$FIRMWARE_DIR" -I"$CORE_DIR" \
+  "$SCRIPT_DIR/test_battery_soc_scaler.cpp" \
+  "$FIRMWARE_DIR/BatterySocScaler.cpp" \
+  -o "$BUILD_DIR/test_battery_soc_scaler"
+
+"$BUILD_DIR/test_battery_soc_scaler"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
   -DNHOS_BOARD_V15F \
   -I"$FIRMWARE_DIR" -I"$CORE_DIR" \
   "$SCRIPT_DIR/test_v15f_board_capabilities.cpp" \
