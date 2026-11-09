@@ -7,7 +7,7 @@ Writes (or with --check, compares):
   this repo  firmware/libraries/nhos_core/src/PacketWireConstants.h, TimeWireConstants.h
              (the library the firmware and the Hub both build with)
   Desktop    backend/newhorizons_backend/wire.py
-  Gateway    newhorizons_gateway/wire.py
+  Gateway    newhorizons_gateway/wire.py, ts/packages/core/src/wire.ts
 
 The sibling repositories default to the checkouts beside this one; a missing
 one is skipped with a note unless it was named explicitly.
@@ -180,18 +180,38 @@ def python_module(spec: dict) -> str:
     return "\n".join(lines)
 
 
+def ts_module(spec: dict) -> str:
+    """The same constants as python_module(), for the TypeScript Gateway core.
+
+    Built from the Python text so the two can never list different names."""
+    lines = [f"// {NOTICE}", f"// {DO_NOT_EDIT}"]
+    for line in python_module(spec).splitlines()[4:]:
+        if not line:
+            lines.append("")
+        elif line.startswith("# "):
+            lines.append("// " + line[2:])
+        else:
+            name, value = line.split(" = ", 1)
+            lines.append(f"export const {name} = {value};")
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
 def outputs(spec: dict) -> list[tuple[str, str | None, str, list[tuple[str, str]]]]:
     """(label, explicit dir or None, default sibling name, [(relative path, text)])."""
     packet = packet_header(spec)
     time = time_header(spec)
     py = python_module(spec)
+    ts = ts_module(spec)
     return [
         ("firmware", str(REPO), "NewHorizonsOS-OTA", [
             ("firmware/libraries/nhos_core/src/PacketWireConstants.h", packet),
             ("firmware/libraries/nhos_core/src/TimeWireConstants.h", time),
         ]),
         ("desktop", None, "New-Horizons-Desktop", [("backend/newhorizons_backend/wire.py", py)]),
-        ("gateway", None, "New-Horizons-Gateway", [("newhorizons_gateway/wire.py", py)]),
+        ("gateway", None, "New-Horizons-Gateway", [
+            ("newhorizons_gateway/wire.py", py),
+            ("ts/packages/core/src/wire.ts", ts),
+        ]),
     ]
 
 
