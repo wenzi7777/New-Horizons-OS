@@ -134,6 +134,19 @@ bool EspNowPairing::begin(Storage& storage, DeviceConfig& deviceConfig, ControlS
     Serial.printf("[espnow_pairing] esp_wifi_set_protocol -> %d\n", protoErr);
   }
 
+  // The radio starts in ESP-IDF's world-safe country "01" (channels 1-11
+  // only), and in ESP-NOW mode this device never joins an AP, so it never
+  // learns a wider country from a beacon: esp_wifi_set_channel(12/13)
+  // fails and the scan silently skips them. The Hub, by contrast, takes
+  // its AP's country (policy AUTO), so behind an AP on channel 12 or 13 it
+  // sits where this device cannot follow -- paired fine in the lab, never
+  // found in the field. Japan permits 1-13 (14 is 11b-only and unused by
+  // APs), so widen to JP, fixed rather than auto.
+  const esp_err_t countryErr = esp_wifi_set_country_code("JP", false);
+  if (countryErr != ESP_OK) {
+    Serial.printf("[espnow_pairing] esp_wifi_set_country_code(JP) -> %d\n", countryErr);
+  }
+
   if (esp_now_init() != ESP_OK) {
     Serial.println("[espnow_pairing] esp_now_init FAILED");
     return false;
@@ -186,7 +199,14 @@ void EspNowPairing::startScanIfNeeded() {
   lastChannelSwitchMs_ = now;
   const uint8_t channel = scanChannels_[scanIndex_];
   scanIndex_ = static_cast<uint8_t>((scanIndex_ + 1) % scanChannelCount_);
-  esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+  const esp_err_t chanErr = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+  static uint16_t reportedChannelErrors = 0;  // bit per channel, logged once per boot
+  if (chanErr != ESP_OK && channel < 16 && !(reportedChannelErrors & (1u << channel))) {
+    // A channel the radio refuses is otherwise invisible -- the scan just
+    // never finds a Hub sitting there.
+    reportedChannelErrors |= static_cast<uint16_t>(1u << channel);
+    Serial.printf("[espnow_pairing] esp_wifi_set_channel(%u) -> %d\n", channel, chanErr);
+  }
   lastHelloMs_ = 0;  // force an immediate HELLO on the new channel
 }
 
