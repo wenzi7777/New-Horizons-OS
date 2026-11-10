@@ -6,7 +6,7 @@
 #include "BoardPins.h"
 #include "PowerAnimation.h"
 
-#if defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_EXT_LED_RMT
 #include "Ws2812RmtEncoder.h"
 #include <esp32-hal-rmt.h>
 #endif
@@ -57,7 +57,7 @@ void ExternalLedController::begin(const ExternalLedConfig& config) {
   activePreset_ = "off";
   config_ = config;
   return;
-#elif defined(NHOS_BOARD_V15F)
+#elif NHOS_BOARD_EXT_LED_RMT
   pinMode(kExternalLedPin, OUTPUT);
   if (!rmtInit(kExternalLedPin, RMT_TX_MODE, RMT_MEM_NUM_BLOCKS_1, 10000000)) {
     initialized_ = false;
@@ -349,7 +349,7 @@ String ExternalLedController::statusJson() const {
   out += ",\"initialized\":";
   out += initialized_ ? "true" : "false";
   out += ",\"transport\":\"";
-#if defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_EXT_LED_RMT
   out += "dedicated_rmt";
 #elif NHOS_BOARD_HAS_EXT_LED
   out += "adafruit_neopixel";
@@ -494,7 +494,7 @@ uint32_t ExternalLedController::color(LedColor colorValue) const {
 }
 
 void ExternalLedController::setPixelColor(uint16_t index, uint32_t rgb) {
-#if defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_EXT_LED_RMT
   if (index >= kExternalLedCount) {
     return;
   }
@@ -511,7 +511,7 @@ void ExternalLedController::setPixelColor(uint16_t index, uint32_t rgb) {
 }
 
 void ExternalLedController::clearPixels() {
-#if defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_EXT_LED_RMT
   for (size_t i = 0; i < kPixelByteCount; ++i) {
     pixelBytes_[i] = 0;
   }
@@ -521,8 +521,8 @@ void ExternalLedController::clearPixels() {
 }
 
 bool ExternalLedController::showPixels() {
-#if defined(NHOS_BOARD_V15F) || NHOS_BOARD_HAS_EXT_LED
-#if defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_EXT_LED_RMT || NHOS_BOARD_HAS_EXT_LED
+#if NHOS_BOARD_EXT_LED_RMT
   const uint8_t* current = pixelBytes_;
 #else
   const uint8_t* current = pixels_.getPixels();
@@ -533,7 +533,7 @@ bool ExternalLedController::showPixels() {
     return true;
   }
 #endif
-#if defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_EXT_LED_RMT
   if (!rmtReady_) {
     return false;
   }

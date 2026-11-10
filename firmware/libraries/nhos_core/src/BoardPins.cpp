@@ -2,7 +2,7 @@
 
 namespace nhos {
 
-#if defined(NHOS_BOARD_V15F)
+#if defined(NHOS_BOARD_V15F) || defined(NHOS_BOARD_V20F)
 
 const uint8_t kRowAdcPins[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14};
 const uint8_t kColPins[] = {17, 18, 21, 26, 47, 33, 34, 48, 35, 36, 37, 38, 39, 45};
@@ -11,6 +11,9 @@ const uint8_t kI2cSda = 40;
 const uint8_t kStatusLedPin = 46;
 const uint8_t kExternalLedPin = 16;
 const uint8_t kActionButtonPin = 41;
+#if NHOS_BOARD_HAS_BATID
+const uint8_t kBatteryIdPin = 15;
+#endif
 
 #elif defined(NHOS_BOARD_GCU_V21_LTS)
 
@@ -82,6 +85,11 @@ bool isAllowedBoardPin(uint8_t pin) {
   if (pin == kI2cScl || pin == kI2cSda || pin == kStatusLedPin) {
     return false;
   }
+#if NHOS_BOARD_HAS_BATID
+  if (pin == kBatteryIdPin) {
+    return false;
+  }
+#endif
 #if NHOS_BOARD_HAS_EXT_LED
   if (pin == kExternalLedPin) {
     return false;

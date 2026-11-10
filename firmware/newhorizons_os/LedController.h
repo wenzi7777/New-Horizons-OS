@@ -28,7 +28,7 @@ static constexpr LedColor Warning{28, 18, 0};
 static constexpr LedColor White{24, 24, 24};
 // Command acknowledgement and completion must remain visually distinct from
 // the normal online-green base state. WS2812B is GRB on the wire but accepts
-// these logical RGB values through Adafruit_NeoPixel's NEO_GRB configuration.
+// these logical RGB values as a GRB byte stream through the V6-timed RMT encoder.
 static constexpr LedColor CommandReceived{16, 48, 180};
 static constexpr LedColor CommandSuccess{0, 160, 90};
 static constexpr LedColor ChargeDone{0x39, 0xc5, 0xbb};

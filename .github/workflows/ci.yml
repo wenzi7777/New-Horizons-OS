@@ -44,6 +44,8 @@ jobs:
             fqbn: esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB
           - board: V15F
             fqbn: esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc,CDCOnBoot=cdc
+          - board: V20F
+            fqbn: esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc,CDCOnBoot=cdc
           - board: GCU_V21_LTS
             fqbn: esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs
           - board: GCU_V22C_LTS

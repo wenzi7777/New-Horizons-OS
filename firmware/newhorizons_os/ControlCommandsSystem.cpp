@@ -63,6 +63,9 @@ String ControlServer::cmdStatus(const CommandContext& ctx) {
   jsonRawField(data, "wifi", wifi_->statusJson(), first);
   jsonRawField(data, "battery", batteryStatusJson(), first);
   jsonRawField(data, "battery_gauge", batteryGauge_ ? batteryGauge_->statusJson() : "{}", first);
+#if NHOS_BOARD_HAS_DAC_VREF
+  jsonRawField(data, "vref", vref_ ? vref_->statusJson() : "{}", first);
+#endif
   jsonRawField(data, "power", powerState_ ? powerState_->statusJson() : "{}", first);
   jsonRawField(data, "config", deviceConfig_ ? deviceConfig_->statusJson() : "{}", first);
   jsonRawField(data, "logging", storage_ ? storage_->logStatusJson() : "{}", first);
@@ -293,6 +296,13 @@ String ControlServer::cmdPowerSetState(const CommandContext& ctx) {
 }
 
 // battery_status
+// i2c_scan: which of the addresses this firmware family uses answer. The
+// probe lives in VrefManager but is a plain static, so it works on every board.
+String ControlServer::cmdI2cScan(const CommandContext& ctx) {
+  String data = "{\"addresses\":" + VrefManager::i2cScanJson() + "}";
+  return ok(ctx.cmd, "i2c_scan", data);
+}
+
 String ControlServer::cmdBatteryStatus(const CommandContext& ctx) {
   const String& cmd = ctx.cmd;
   // The battery card's own slice of `status`: what the Desktop polls while

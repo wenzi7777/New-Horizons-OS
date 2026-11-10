@@ -51,19 +51,38 @@ CXX="${CXX:-c++}"
 
 "$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
   -I"$FIRMWARE_DIR" -I"$CORE_DIR" \
+  "$SCRIPT_DIR/test_vref_policy.cpp" \
+  "$FIRMWARE_DIR/VrefPolicy.cpp" \
+  -o "$BUILD_DIR/test_vref_policy"
+
+"$BUILD_DIR/test_vref_policy"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
+  -I"$FIRMWARE_DIR" -I"$CORE_DIR" \
+  "$SCRIPT_DIR/test_battery_id_policy.cpp" \
+  "$FIRMWARE_DIR/BatteryIdPolicy.cpp" \
+  -o "$BUILD_DIR/test_battery_id_policy"
+
+"$BUILD_DIR/test_battery_id_policy"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
+  -I"$FIRMWARE_DIR" -I"$CORE_DIR" \
   "$SCRIPT_DIR/test_battery_soc_scaler.cpp" \
   "$FIRMWARE_DIR/BatterySocScaler.cpp" \
   -o "$BUILD_DIR/test_battery_soc_scaler"
 
 "$BUILD_DIR/test_battery_soc_scaler"
 
-"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
-  -DNHOS_BOARD_V15F \
-  -I"$FIRMWARE_DIR" -I"$CORE_DIR" \
-  "$SCRIPT_DIR/test_v15f_board_capabilities.cpp" \
-  -o "$BUILD_DIR/test_v15f_board_capabilities"
+for board in v15f v20f; do
+  define="NHOS_BOARD_$(echo "$board" | tr a-z A-Z)"
+  "$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
+    -D"$define" \
+    -I"$FIRMWARE_DIR" -I"$CORE_DIR" \
+    "$SCRIPT_DIR/test_${board}_board_capabilities.cpp" \
+    -o "$BUILD_DIR/test_${board}_board_capabilities"
 
-"$BUILD_DIR/test_v15f_board_capabilities"
+  "$BUILD_DIR/test_${board}_board_capabilities"
+done
 
 "$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
   -I"$FIRMWARE_DIR" -I"$CORE_DIR" \

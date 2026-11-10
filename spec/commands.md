@@ -2,7 +2,7 @@
 
 # Device commands
 
-99 commands, in dispatch-table order. A device reports the same table at run time
+102 commands, in dispatch-table order. A device reports the same table at run time
 with the `commands` command (firmware v1.15.0+). See PROTOCOL.md for the request and
 reply envelope.
 
@@ -74,6 +74,9 @@ Flags:
 | `set_filter` |  | Configure the per-cell median and low-pass filter. |
 | `set_raw_adc` |  | Include the raw ADC block in streamed frames. |
 | `set_battery_profile` |  | Set the manual battery profile (capacity, max charge current). |
+| `set_vref` |  | Set the Vref DAC (mV, register only) and its operator ceiling (v2.0.F). |
+| `calibration_switch` |  | Switch the calibration network on or off (v2.0.F; opens again on reboot). |
+| `i2c_scan` |  | List which of the board's known I2C addresses answer. |
 | `battery_status` |  | The battery card's slice of status: charger, gauge and power state. |
 | `resync_battery_gauge` |  | Restart the fuel gauge's state-of-charge estimate. |
 | `set_imu` |  | Enable or disable the optional IMU service. |

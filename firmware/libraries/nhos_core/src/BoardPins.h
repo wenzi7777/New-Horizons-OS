@@ -25,14 +25,13 @@ extern const uint8_t kActionButtonPin;
 static constexpr uint8_t kActionButtonPin = 0xFF;
 #endif
 
+#if NHOS_BOARD_HAS_BATID
+extern const uint8_t kBatteryIdPin;
+#endif
+
 static constexpr size_t kRowAdcPinCount = NHOS_BOARD_ROWS;
 static constexpr size_t kColPinCount = NHOS_BOARD_COLS;
-static constexpr uint16_t kBoardStatusLedCount =
-#if defined(NHOS_BOARD_V15F)
-    2;
-#else
-    1;
-#endif
+static constexpr uint16_t kBoardStatusLedCount = NHOS_BOARD_STATUS_LED_COUNT;
 static constexpr uint16_t kStatusLedCount = kBoardStatusLedCount;
 static constexpr uint8_t kSystemStatusLedPixelIndex = 0;
 static constexpr bool kHasBatteryStatusLedPixel = kBoardStatusLedCount > 1;

@@ -9,7 +9,7 @@
 #include "LedController.h"
 #include "MatrixScanner.h"
 
-#if NHOS_BOARD_HAS_EXT_LED && !defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_HAS_EXT_LED && !NHOS_BOARD_EXT_LED_RMT
 #include <Adafruit_NeoPixel.h>
 #endif
 
@@ -72,7 +72,7 @@ class ExternalLedController {
   // v1.5.F's FPC 3.0 uses WS2812B-2020-V6 and needs a dedicated RMT channel:
   // Adafruit_NeoPixel's ESP-IDF v5 backend owns one static channel for every
   // instance, which makes GPIO16 and the two-pixel GPIO46 chain interfere.
-#if defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_EXT_LED_RMT
   static constexpr size_t kPixelByteCount =
       NHOS_BOARD_EXTERNAL_LED_COUNT * 3U;
   uint8_t pixelBytes_[kPixelByteCount] = {};

@@ -34,6 +34,9 @@ V1_19_ADDED = [
     "task_set_period", "thread_list", "sysmon",
 ]
 
+# v2.0.F: the Vref DAC, the calibration switch and the I2C probe.
+V2_0_ADDED = ["set_vref", "calibration_switch", "i2c_scan"]
+
 # v1.14.0 gated these inside their bodies (two idioms); exit_maintenance joins
 # them on purpose -- it was a silent no-op in normal mode.
 MAINTENANCE = {
@@ -50,9 +53,10 @@ class CommandTableTests(unittest.TestCase):
     def test_same_commands_as_before_plus_commands(self):
         names = command_names()
         self.assertEqual(len(names), len(set(names)), "duplicate rows")
-        self.assertEqual([n for n in names if n != "commands" and n not in V1_19_ADDED],
+        self.assertEqual([n for n in names if n != "commands" and n not in V1_19_ADDED
+                          and n not in V2_0_ADDED],
                          V1_14_COMMANDS)
-        for name in V1_19_ADDED:
+        for name in V1_19_ADDED + V2_0_ADDED:
             self.assertIn(name, names)
         self.assertIn("commands", names)
 

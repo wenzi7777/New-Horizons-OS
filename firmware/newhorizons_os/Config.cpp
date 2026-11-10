@@ -2,8 +2,8 @@
 
 namespace nhos {
 
-#if defined(NHOS_BOARD_V15F)
-static_assert(kMaxSensors == 196, "v1.5.F matrix must stay 14x14");
+#if defined(NHOS_BOARD_V15F) || defined(NHOS_BOARD_V20F)
+static_assert(kMaxSensors == 196, "v1.5.F/v2.0.F matrix must stay 14x14");
 #elif defined(NHOS_BOARD_GCU_V21_LTS)
 static_assert(kMaxSensors == 120, "GCU v2.1 LTS matrix must stay 10x12");
 #elif defined(NHOS_BOARD_GCU_V22C_LTS)

@@ -651,7 +651,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertRegex(
             sketch,
             re.compile(
-                r"#if defined\(NHOS_BOARD_V15F\)(?:(?!#else).)*?"
+                r"#if NHOS_BOARD_HAS_BATTERY_LED(?:(?!#else).)*?"
                 r"leds\.setSignal\(nhos::LedSignal::Off\);\s+"
                 r"#else\s+"
                 r"if \(power\.chargeState\(\) == nhos::ChargeState::ChargingOrMissing\)",
@@ -661,7 +661,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertRegex(
             sketch,
             re.compile(
-                r"#if !defined\(NHOS_BOARD_V15F\)\s+"
+                r"#if !NHOS_BOARD_HAS_BATTERY_LED\s+"
                 r"\} else if \(power\.chargeState\(\) == nhos::ChargeState::ChargeDone\) \{\s+"
                 r"activeSignal = nhos::LedSignal::ChargeDone;\s+"
                 r"\} else if \(power\.chargeState\(\) == nhos::ChargeState::ChargingOrMissing\)",
@@ -725,7 +725,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
 
         self.assertEqual(
             sorted(branches),
-            sorted(["NHOS_BOARD_V10F", "NHOS_BOARD_V15F", "NHOS_BOARD_GCU_V21_LTS",
+            sorted(["NHOS_BOARD_V10F", "NHOS_BOARD_V15F", "NHOS_BOARD_V20F", "NHOS_BOARD_GCU_V21_LTS",
                     "NHOS_BOARD_GCU_V22C_LTS", "NHOS_BOARD_GCU_V23D_LTS"]),
         )
         self.assertRegex(config, r'#else\s+#error "No board selected')
@@ -737,6 +737,8 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
             "build_arduino_release": "-DNHOS_BOARD_V10F",
             "flash_arduino_firmware_v15f": "-DNHOS_BOARD_V15F",
             "build_arduino_release_v15f": "-DNHOS_BOARD_V15F",
+            "flash_arduino_firmware_v20f": "-DNHOS_BOARD_V20F",
+            "build_arduino_release_v20f": "-DNHOS_BOARD_V20F",
             "flash_arduino_firmware_gcu_v21_lts": "-DNHOS_BOARD_GCU_V21_LTS",
             "build_arduino_release_gcu_v21_lts": "-DNHOS_BOARD_GCU_V21_LTS",
             "flash_arduino_firmware_gcu_v22c_lts": "-DNHOS_BOARD_GCU_V22C_LTS",
@@ -1115,7 +1117,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("rmtInit(kExternalLedPin", external)
         self.assertIn("rmtWrite(kExternalLedPin", external)
         self.assertIn("dedicated_rmt", external)
-        self.assertIn("#if defined(NHOS_BOARD_V15F)", external)
+        self.assertIn("#if NHOS_BOARD_EXT_LED_RMT", external)
         self.assertIn("Adafruit_NeoPixel", external_header)
         self.assertIn("adafruit_neopixel", external)
         self.assertIn("kExternalLedCount", external)

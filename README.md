@@ -57,7 +57,7 @@ ESP-NOW framing, clock core, version order; see its README). The build,
 flash and release scripts pass it.
 
 Every build must name its board (`-DNHOS_BOARD_V10F`, `-DNHOS_BOARD_V15F`,
-`-DNHOS_BOARD_GCU_V21_LTS`, `-DNHOS_BOARD_GCU_V22C_LTS` or
+`-DNHOS_BOARD_V20F`, `-DNHOS_BOARD_GCU_V21_LTS`, `-DNHOS_BOARD_GCU_V22C_LTS` or
 `-DNHOS_BOARD_GCU_V23D_LTS`); a build with none fails with `#error` instead of
 silently becoming v1.0.F. The per-board scripts below pass it for you.
 
@@ -90,6 +90,9 @@ firmware/scripts/flash_arduino_firmware_gcu_v21_lts.sh /dev/cu.usbserial-10
 
 # TIA-CTL v1.5.F 2026.7 (native USB CDC; defaults to first /dev/cu.usbmodem*)
 firmware/scripts/flash_arduino_firmware_v15f.sh
+
+# TIA-CTL v2.0.F 2026.10 (same as v1.5.F; adds the Vref DAC, calibration switch and BAT_ID)
+firmware/scripts/flash_arduino_firmware_v20f.sh
 ```
 
 On Windows, the same per-board scripts exist as PowerShell (compile + upload;
@@ -102,6 +105,7 @@ cd NewHorizonsOS-OTA
 .\firmware\scripts\flash_arduino_firmware_gcu_v22c_lts.ps1 COM5  # v2.2.C GCU LTS
 .\firmware\scripts\flash_arduino_firmware_gcu_v21_lts.ps1 COM5   # v2.1 GCU LTS
 .\firmware\scripts\flash_arduino_firmware_v15f.ps1               # v1.5.F (auto-detects native USB)
+.\firmware\scripts\flash_arduino_firmware_v20f.ps1               # v2.0.F (auto-detects native USB)
 ```
 
 If script execution is blocked, run it as

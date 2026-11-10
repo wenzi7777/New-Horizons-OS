@@ -722,7 +722,7 @@ String ControlServer::indicatorsStatusJson() const {
   boardLed += "}";
   jsonRawField(data, "board_led", boardLed, first);
   String batteryLed = "{\"supported\":";
-#if defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_HAS_BATTERY_LED
   batteryLed += "true";
 #else
   batteryLed += "false";
@@ -740,7 +740,7 @@ String ControlServer::indicatorsStatusJson() const {
 
 String ControlServer::actionButtonStatusJson() const {
   String data = "{\"supported\":";
-#if defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_HAS_CONFIGURABLE_BUTTON
   data += "true";
 #else
   data += "false";

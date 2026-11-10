@@ -26,7 +26,7 @@ class UpdateChannelTests(unittest.TestCase):
     def test_every_board_declares_a_manifest_base_without_suffix(self):
         board = read("BoardConfig.h")
         bases = re.findall(r'#define NHOS_BOARD_OTA_MANIFEST_BASE \\\n\s+"([^"]+)"', board)
-        self.assertEqual(len(bases), 5, bases)
+        self.assertEqual(len(bases), 6, bases)
         for base in bases:
             self.assertFalse(base.endswith(".json"), base)
         self.assertNotIn("NHOS_BOARD_DEFAULT_OTA_MANIFEST_URL", board)

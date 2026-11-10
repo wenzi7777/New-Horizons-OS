@@ -13,9 +13,9 @@ namespace nhos {
 // the one trustworthy "full", so the raw reading at that moment becomes the
 // divisor for everything reported afterwards.
 //
-// Batteries are swappable and cannot be identified (v1.5.F has no usable
-// BAT_ID; later boards still take any cell on the JST), so nothing here is
-// tied to a battery: the learned value lives in RAM only and reset() drops
+// Batteries are swappable and the learned "full" is never tied to one
+// (v1.5.F has no usable BAT_ID; v2.0.F reads an ID only once, at boot, and
+// still accepts any cell on the JST), so nothing here is tied to a battery: the learned value lives in RAM only and reset() drops
 // it on every sign that the cell may have changed. Before anything is
 // learned the output is the raw reading clamped to 100%.
 class BatterySocScaler {

@@ -232,7 +232,7 @@ String PowerStateManager::statusJson() const {
   out += ",\"charge_state\":\"";
   out += chargeStateName();
   out += "\"";
-#if defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_HAS_PHYSICAL_POWER_SWITCH
   out += ",\"power_topology\":\"physical_switch_cuts_main_rails\"";
   out += ",\"physical_switch_behavior\":\"cuts_main_rails\"";
   out += ",\"soft_off_behavior\":\"light_sleep\"";

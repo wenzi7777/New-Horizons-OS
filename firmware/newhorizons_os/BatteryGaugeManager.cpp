@@ -34,7 +34,7 @@ void BatteryGaugeManager::begin() {
   resetFlagChecked_ = false;
   // A restart in the middle of a sync must never leave charging off.
   resumeChargingIfPaused();
-  updateProfile(resolveBatteryProfile(manualProfile_));
+  updateProfile(resolveBatteryProfile(manualProfile_, batteryId_));
 }
 
 void BatteryGaugeManager::setPowerManager(PowerManager& power) {
@@ -47,7 +47,15 @@ void BatteryGaugeManager::setManualProfile(const ManualBatteryProfile& profile) 
   manualProfile_.configured = manualBatteryProfileIsUsable(profile);
   // A new battery setting usually means a different cell.
   socScaler_.reset();
-  updateProfile(resolveBatteryProfile(manualProfile_));
+  updateProfile(resolveBatteryProfile(manualProfile_, batteryId_));
+}
+
+void BatteryGaugeManager::setBatteryId(const BatteryIdResult& id, bool readOk) {
+  batteryId_ = id;
+  batteryIdReadOk_ = readOk;
+  // A different cell than the one the scaler learned "full" for.
+  socScaler_.reset();
+  updateProfile(resolveBatteryProfile(manualProfile_, batteryId_));
 }
 
 void BatteryGaugeManager::service(uint32_t nowMs) {
@@ -325,15 +333,27 @@ String BatteryGaugeManager::statusJson() const {
   out += gaugeSyncReasonName(syncPolicy_.lastReason());
   out += "\",\"gauge_sync_count\":";
   out += String(syncPolicy_.syncCount());
-  // Kept for older Desktops: the profile is always manual now.
+  // `battery_profile` / `profile_source` are what older Desktops read: "manual"
+  // unless v2.0.F recognised the battery's ID resistor ("auto").
   out += ",\"battery_profile\":\"";
-  out += profile_.resolved ? "manual" : "none";
-  out += "\",\"profile_source\":\"manual\",\"profile_resolved\":";
+  out += profile_.resolved ? (profile_.automatic ? "auto" : "manual") : "none";
+  out += "\",\"profile_source\":\"";
+  out += profile_.automatic ? "auto" : "manual";
+  out += "\",\"profile_resolved\":";
   out += profile_.resolved ? "true" : "false";
   out += ",\"profile_required\":";
   out += profile_.required ? "true" : "false";
   out += ",\"capacity_mah\":" + String(profile_.capacityMah);
   out += ",\"max_charge_current_ma\":" + String(profile_.maxChargeCurrentMa);
+#if NHOS_BOARD_HAS_BATID
+  out += ",\"battery_id\":{\"read_ok\":";
+  out += batteryIdReadOk_ ? "true" : "false";
+  out += ",\"kind\":\"";
+  out += batteryIdKindName(batteryId_.kind);
+  out += "\",\"mv\":" + String(batteryId_.mv);
+  out += ",\"ohm\":" + String(static_cast<unsigned long>(batteryId_.resistanceOhm));
+  out += "}";
+#endif
   out += ",\"charge_limit_applied\":";
   out += hasAppliedChargeLimit_ ? "true" : "false";
   out += ",\"applied_charge_limit_ma\":" + String(appliedChargeLimitMa_);

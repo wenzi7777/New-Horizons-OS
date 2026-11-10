@@ -116,6 +116,7 @@ class ArduinoManifestGeneratorTests(unittest.TestCase):
         tracks = {
             "build_arduino_release.sh": "arduino-v10f",
             "build_arduino_release_v15f.sh": "arduino-v15f",
+            "build_arduino_release_v20f.sh": "arduino-v20f",
             "build_arduino_release_gcu_lts.sh": "arduino-gcu-v23d-lts",
             "build_arduino_release_gcu_v22c_lts.sh": "arduino-gcu-v22c-lts",
             "build_arduino_release_gcu_v21_lts.sh": "arduino-gcu-v21-lts",

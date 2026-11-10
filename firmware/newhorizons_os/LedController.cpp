@@ -3,16 +3,43 @@
 #include "BatteryLedPolicy.h"
 #include "BoardPins.h"
 
-#if defined(NHOS_BOARD_V15F)
-#include <Adafruit_NeoPixel.h>
+#if NHOS_BOARD_HAS_BATTERY_LED
+#include <esp32-hal-rmt.h>
+
+#include "Ws2812RmtEncoder.h"
 #endif
 
 namespace nhos {
 namespace {
 
-#if defined(NHOS_BOARD_V15F)
-Adafruit_NeoPixel statusPixels(kBoardStatusLedCount, kStatusLedPin,
-                               NEO_GRB + NEO_KHZ800);
+#if NHOS_BOARD_HAS_BATTERY_LED
+// The two status pixels are WS2812B-2427-V6. Adafruit_NeoPixel's NEO_KHZ800
+// timing (T1L about 450 ns) is outside what the V6 data sheet allows (T1L at
+// least 580 ns, T0H 220..380 ns), and the symptom is random colours and full
+// white whenever an animation rewrites the pixels. The external strip hit the
+// same thing and is driven through RMT with the V6 symbols
+// (Ws2812RmtEncoder.h); the status pair now uses that path too.
+constexpr size_t kStatusPixelBytes = kBoardStatusLedCount * 3U;
+constexpr size_t kStatusSymbolCount = kStatusPixelBytes * 8U;
+bool statusRmtReady = false;
+
+bool writeStatusPixelBytes(const uint8_t* grb) {
+  if (!statusRmtReady) {
+    return false;
+  }
+  Ws2812RmtSymbol encoded[kStatusSymbolCount] = {};
+  rmt_data_t rmtData[kStatusSymbolCount] = {};
+  if (encodeWs2812Grb(grb, kStatusPixelBytes, encoded, kStatusSymbolCount) != kStatusSymbolCount) {
+    return false;
+  }
+  for (size_t i = 0; i < kStatusSymbolCount; ++i) {
+    rmtData[i].level0 = encoded[i].level0;
+    rmtData[i].duration0 = encoded[i].duration0;
+    rmtData[i].level1 = encoded[i].level1;
+    rmtData[i].duration1 = encoded[i].duration1;
+  }
+  return rmtWrite(kStatusLedPin, rmtData, kStatusSymbolCount, RMT_WAIT_FOR_EVER);
+}
 #endif
 
 bool sameColor(LedColor lhs, LedColor rhs) {
@@ -22,8 +49,12 @@ bool sameColor(LedColor lhs, LedColor rhs) {
 }  // namespace
 
 void LedController::begin() {
-#if defined(NHOS_BOARD_V15F)
-  statusPixels.begin();
+#if NHOS_BOARD_HAS_BATTERY_LED
+  pinMode(kStatusLedPin, OUTPUT);
+  statusRmtReady = rmtInit(kStatusLedPin, RMT_TX_MODE, RMT_MEM_NUM_BLOCKS_1, 10000000);
+  if (statusRmtReady) {
+    rmtSetEOT(kStatusLedPin, LOW);
+  }
 #else
   pinMode(kStatusLedPin, OUTPUT);
 #endif
@@ -329,12 +360,15 @@ void LedController::writePixel(uint8_t pin, LedColor color) {
 void LedController::writeStatusPixels(LedColor system, LedColor battery) {
   const LedColor appliedSystem = applyBrightness(system);
   const LedColor appliedBattery = applyBrightness(battery);
-#if defined(NHOS_BOARD_V15F)
-  statusPixels.setPixelColor(kSystemStatusLedPixelIndex, appliedSystem.r,
-                             appliedSystem.g, appliedSystem.b);
-  statusPixels.setPixelColor(kBatteryStatusLedPixelIndex, appliedBattery.r,
-                             appliedBattery.g, appliedBattery.b);
-  statusPixels.show();
+#if NHOS_BOARD_HAS_BATTERY_LED
+  uint8_t grb[kStatusPixelBytes] = {};
+  grb[kSystemStatusLedPixelIndex * 3U + 0U] = appliedSystem.g;
+  grb[kSystemStatusLedPixelIndex * 3U + 1U] = appliedSystem.r;
+  grb[kSystemStatusLedPixelIndex * 3U + 2U] = appliedSystem.b;
+  grb[kBatteryStatusLedPixelIndex * 3U + 0U] = appliedBattery.g;
+  grb[kBatteryStatusLedPixelIndex * 3U + 1U] = appliedBattery.r;
+  grb[kBatteryStatusLedPixelIndex * 3U + 2U] = appliedBattery.b;
+  writeStatusPixelBytes(grb);
 #else
   (void)appliedBattery;
   writePixel(kStatusLedPin, appliedSystem);

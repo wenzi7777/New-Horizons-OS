@@ -28,6 +28,8 @@
 #include "PacketBuilder.h"
 #include "PowerAnimation.h"
 #include "PowerGovernor.h"
+#include "VrefManager.h"
+#include "BatteryIdReader.h"
 #include "AppGovernor.h"
 #include "AppRegistry.h"
 #include "FlowApp.h"
@@ -92,6 +94,7 @@ nhos::PacketBuilder packetBuilder;
 nhos::PowerManager power;
 nhos::PowerStateManager powerState;
 nhos::PowerGovernor powerGovernor;
+nhos::VrefManager vref;
 nhos::ImuManager imu;
 nhos::BatteryGaugeManager batteryGauge;
 nhos::MagnetometerManager magnetometer;
@@ -305,7 +308,7 @@ void servicePowerState() {
     apps.dispatch(press);
   }
 #endif
-#if defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_HAS_CONFIGURABLE_BUTTON
   if (gesture != nhos::ActionButtonGesture::None) {
     const String actionName = gesture == nhos::ActionButtonGesture::ShortPress
         ? deviceConfig.data().actionButton.shortPress
@@ -686,7 +689,7 @@ void updateLedState() {
     return;
   }
   if (powerState.state() == nhos::PowerState::SoftOffCharging) {
-#if defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_HAS_BATTERY_LED
     // v1.5.F has a dedicated battery WS2812B. Keep the system pixel reserved
     // for connectivity even when the legacy soft-off path is exercised.
     leds.setSignal(nhos::LedSignal::Off);
@@ -731,7 +734,7 @@ void updateLedState() {
     activeSignal = nhos::LedSignal::SafeMode;
   } else if (control.maintenanceMode()) {
     activeSignal = nhos::LedSignal::Maintenance;
-#if !defined(NHOS_BOARD_V15F)
+#if !NHOS_BOARD_HAS_BATTERY_LED
   } else if (power.chargeState() == nhos::ChargeState::ChargeDone) {
     activeSignal = nhos::LedSignal::ChargeDone;
   } else if (power.chargeState() == nhos::ChargeState::ChargingOrMissing) {
@@ -776,6 +779,10 @@ void taskSoftOff() {
   // powerState.lightSleep() emits:
   // soft_off_sleep_enter state=
   // soft_off_wake cause=
+#if NHOS_BOARD_HAS_DAC_VREF
+  // Soft-off is where the board is most likely to be unplugged or reset next.
+  vref.restoreSafeState();
+#endif
   powerState.lightSleep();
 }
 
@@ -885,6 +892,9 @@ void registerServices() {
   services.registerService("leds", true);
   services.registerService("power", true);
   services.registerService("control", true);
+#if NHOS_BOARD_HAS_DAC_VREF
+  services.registerService("vref", vref.available());
+#endif
 
   // The only two an operator may stop (service_stop): everything else is
   // either foundational or something other modules lean on (the magnetometer
@@ -982,7 +992,7 @@ void registerRuntimeTasks() {
 
 void setup() {
   Serial.begin(115200);
-#if defined(NHOS_BOARD_V15F) && ARDUINO_USB_MODE
+#if NHOS_BOARD_HAS_NATIVE_USB && ARDUINO_USB_MODE
   // Native USB must never stall the real-time loop when the host has no
   // serial reader. Logs remain best-effort and resume when a reader opens.
   Serial.setTxTimeoutMs(0);
@@ -1025,6 +1035,25 @@ void setup() {
   logBoot(String("boot_stage=power_state_ready ") + powerState.statusJson());
   Wire.begin(nhos::kI2cSda, nhos::kI2cScl, NHOS_BOARD_I2C_HZ);
   logBoot(String("boot_stage=i2c_ready sda=") + String(nhos::kI2cSda) + " scl=" + String(nhos::kI2cScl));
+#if NHOS_BOARD_HAS_DAC_VREF
+  // Before anything can start the radio or the scanner: Vref back at 0.33 V,
+  // its EEPROM repaired if needed, the calibration switch open.
+  vref.begin(storage);
+  logBoot(String("boot_stage=vref_ready ") + vref.statusJson());
+#endif
+#if NHOS_BOARD_HAS_BATID
+  // BAT_ID is on ADC2, which Wi-Fi takes over once it starts: read it now.
+  {
+    uint16_t batteryIdMv = 0;
+    const bool batteryIdOk = nhos::readBatteryIdMv(nhos::kBatteryIdPin, batteryIdMv);
+    const nhos::BatteryIdResult batteryId =
+        batteryIdOk ? nhos::classifyBatteryId(batteryIdMv) : nhos::BatteryIdResult();
+    batteryGauge.setBatteryId(batteryId, batteryIdOk);
+    logBoot(String("boot_stage=battery_id_ready ok=") + (batteryIdOk ? "1" : "0") +
+            " kind=" + nhos::batteryIdKindName(batteryId.kind) + " mv=" + String(batteryIdMv) +
+            " ohm=" + String(static_cast<unsigned long>(batteryId.resistanceOhm)));
+  }
+#endif
   displayManager.setAppLineSource(&appDisplayLine);
   displayManager.begin(deviceConfig.data().oled);
   logBoot(String("boot_stage=display_ready ") + displayManager.statusJson());
@@ -1207,6 +1236,7 @@ void setup() {
   procFs.setStorage(&storage);
   control.setClock(&deviceClock);
   control.setPowerGovernor(&powerGovernor);
+  control.setVrefManager(&vref);
   procFs.setPowerGovernor(&powerGovernor);
   control.setAppManager(&apps, &flowApp, &appRegistry, &appGovernor);
   procFs.setAppManager(&apps);

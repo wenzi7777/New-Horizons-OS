@@ -164,6 +164,12 @@ String ControlServer::cmdCapabilities(const CommandContext& ctx) {
   data += NHOS_BOARD_HAS_OLED ? "true" : "false";
   data += ",\"gpio_wake\":";
   data += NHOS_BOARD_SUPPORTS_GPIO_WAKE ? "true" : "false";
+  data += ",\"dac_vref\":";
+  data += NHOS_BOARD_HAS_DAC_VREF ? "true" : "false";
+  data += ",\"calibration_switch\":";
+  data += NHOS_BOARD_HAS_PCA9536 ? "true" : "false";
+  data += ",\"battery_id\":";
+  data += NHOS_BOARD_HAS_BATID ? "true" : "false";
   data += ",\"ota_channels\":true";
   data += "},\"subsystems\":{\"scheduler\":";
   data += scheduler_ != nullptr ? "true" : "false";
@@ -420,7 +426,7 @@ String ControlServer::cmdSetChargeProfile(const CommandContext& ctx) {
 String ControlServer::cmdSetActionButton(const CommandContext& ctx) {
   const String& cmd = ctx.cmd;
   const String& request = ctx.request;
-#if !defined(NHOS_BOARD_V15F)
+#if !NHOS_BOARD_HAS_CONFIGURABLE_BUTTON
   return error(cmd, "action_button_unsupported");
 #else
   if (!deviceConfig_) {
@@ -624,7 +630,7 @@ String ControlServer::cmdSetIndicators(const CommandContext& ctx) {
   }
   const String batteryLed = extractObject(request, "battery_led");
   if (!batteryLed.isEmpty()) {
-#if defined(NHOS_BOARD_V15F)
+#if NHOS_BOARD_HAS_BATTERY_LED
     const int threshold = extractInt(
         batteryLed, "low_battery_threshold_percent",
         next.batteryLed.lowBatteryThresholdPercent);
@@ -752,6 +758,60 @@ String ControlServer::cmdSetOtaConfig(const CommandContext& ctx) {
 // commands
 String ControlServer::cmdCommands(const CommandContext& ctx) {
   return ok(ctx.cmd, "commands", commandsJson());
+}
+
+// set_vref (v2.0.F): Vref goes to the DAC register only. The EEPROM -- what
+// the chip powers up with -- is repaired at boot and never touched here, so a
+// reboot, a reset or a power cycle always returns to 0.33 V.
+String ControlServer::cmdSetVref(const CommandContext& ctx) {
+  const String& cmd = ctx.cmd;
+  const String& request = ctx.request;
+#if !NHOS_BOARD_HAS_DAC_VREF
+  (void)request;
+  return error(cmd, "vref_unsupported");
+#else
+  if (!vref_ || !vref_->available()) {
+    return error(cmd, "vref_unavailable");
+  }
+  const int limitMv = extractInt(request, "limit_mv", -1);
+  if (limitMv >= 0) {
+    if (limitMv < kVrefSafeMv || limitMv > kVrefAbsoluteMaxMv) {
+      return error(cmd, "vref_limit_invalid");
+    }
+    vref_->setLimitMv(static_cast<uint32_t>(limitMv));
+  }
+  const int mv = extractInt(request, "mv", -1);
+  if (mv >= 0) {
+    const char* failure = "vref_set_failed";
+    if (!vref_->setVrefMv(static_cast<uint32_t>(mv), failure)) {
+      return error(cmd, failure);
+    }
+  } else if (limitMv < 0) {
+    return error(cmd, "vref_mv_required");
+  }
+  String data = "{\"vref\":" + vref_->statusJson() + "}";
+  return ok(cmd, "vref_updated", data);
+#endif
+}
+
+String ControlServer::cmdCalibrationSwitch(const CommandContext& ctx) {
+  const String& cmd = ctx.cmd;
+  const String& request = ctx.request;
+#if !NHOS_BOARD_HAS_PCA9536
+  (void)request;
+  return error(cmd, "calibration_switch_unsupported");
+#else
+  if (!vref_ || !vref_->calibrationAvailable()) {
+    return error(cmd, "calibration_switch_unavailable");
+  }
+  const bool on = extractBool(request, "on", false);
+  const char* failure = "calibration_switch_failed";
+  if (!vref_->setCalibration(on, failure)) {
+    return error(cmd, failure);
+  }
+  String data = "{\"vref\":" + vref_->statusJson() + "}";
+  return ok(cmd, on ? "calibration_on" : "calibration_off", data);
+#endif
 }
 
 }  // namespace nhos

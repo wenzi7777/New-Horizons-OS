@@ -10,6 +10,7 @@ VERSION=vX.Y.Z firmware/scripts/build_arduino_release_gcu_lts.sh
 VERSION=vX.Y.Z firmware/scripts/build_arduino_release_gcu_v22c_lts.sh
 VERSION=vX.Y.Z firmware/scripts/build_arduino_release_gcu_v21_lts.sh
 VERSION=vX.Y.Z firmware/scripts/build_arduino_release_v15f.sh
+VERSION=vX.Y.Z firmware/scripts/build_arduino_release_v20f.sh
 ```
 
 Generated binaries are copied to `releases/artifacts/` so tagged raw GitHub URLs can serve OTA payloads.
@@ -18,6 +19,7 @@ Publish two manifest tracks:
 
 - `releases/arduino-v10f-latest.json` and `releases/arduino-v10f-vX.Y.Z.json` for `TIA-CTL v1.0.F 2026.4`
 - `releases/arduino-v15f-latest.json` and `releases/arduino-v15f-vX.Y.Z.json` for `TIA-CTL v1.5.F 2026.7`
+- `releases/arduino-v20f-latest.json` and `releases/arduino-v20f-vX.Y.Z.json` for `TIA-CTL v2.0.F 2026.10`
 - `releases/arduino-gcu-v23d-lts-latest.json` and `releases/arduino-gcu-v23d-lts-vX.Y.Z.json` for `TIA-CTL v2.3.D GCU LTS`
 - `releases/arduino-gcu-v22c-lts-latest.json` and `releases/arduino-gcu-v22c-lts-vX.Y.Z.json` for `TIA-CTL v2.2.C GCU LTS`
 - `releases/arduino-gcu-v21-lts-latest.json` and `releases/arduino-gcu-v21-lts-vX.Y.Z.json` for `TIA-CTL v2.1 GCU LTS`

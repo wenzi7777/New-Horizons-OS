@@ -24,6 +24,9 @@ class BatteryGaugeManager {
   void begin();
   void setPowerManager(PowerManager& power);
   void setManualProfile(const ManualBatteryProfile& profile);
+  // v2.0.F: the result of the one boot-time BAT_ID read. `readOk` false means
+  // the pin could not be read (treated like no ID).
+  void setBatteryId(const BatteryIdResult& id, bool readOk);
   void service(uint32_t nowMs);
   GaugeResyncResult requestResync(uint32_t nowMs);
   bool copyLatestSample(BatteryGaugeSample& out) const;
@@ -44,6 +47,8 @@ class BatteryGaugeManager {
   BatteryGaugeSample sample_;
   BatteryProfile profile_{false, true, 0, kUnconfiguredBatteryChargeLimitMa};
   ManualBatteryProfile manualProfile_{};
+  BatteryIdResult batteryId_{};
+  bool batteryIdReadOk_ = false;
   bool detected_ = false;
   String diagnostic_;
   uint32_t lastPollMs_ = 0;

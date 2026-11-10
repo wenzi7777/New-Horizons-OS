@@ -17,7 +17,7 @@
 // NHOS_BOARD_OTA_MANIFEST_BASE has no file suffix: the update channel adds
 // "-latest.json" (stable) or "-beta.json" (beta), see UpdateChannel.h.
 #if (defined(NHOS_BOARD_V10F) + defined(NHOS_BOARD_V15F) + \
-     defined(NHOS_BOARD_GCU_V21_LTS) + defined(NHOS_BOARD_GCU_V22C_LTS) + \
+     defined(NHOS_BOARD_V20F) + defined(NHOS_BOARD_GCU_V21_LTS) + defined(NHOS_BOARD_GCU_V22C_LTS) + \
      defined(NHOS_BOARD_GCU_V23D_LTS)) > 1
 #error "More than one NHOS_BOARD_* is defined; pass exactly one."
 #endif
@@ -43,8 +43,52 @@
 #define NHOS_BOARD_HAS_MAX17048 1
 #define NHOS_BOARD_HAS_BMM350   1
 #define NHOS_BOARD_EXTERNAL_LED_COUNT 9
+// Capabilities the sources test instead of naming a board: a second
+// F-family board shares them, a GCU or v1.0.F board does not.
+#define NHOS_BOARD_STATUS_LED_COUNT 2
+#define NHOS_BOARD_HAS_BATTERY_LED 1
+#define NHOS_BOARD_HAS_CONFIGURABLE_BUTTON 1
+#define NHOS_BOARD_HAS_PHYSICAL_POWER_SWITCH 1
+#define NHOS_BOARD_EXT_LED_RMT 1
 #define NHOS_BOARD_OTA_MANIFEST_BASE \
   "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v15f"
+
+#elif defined(NHOS_BOARD_V20F)
+
+#define NHOS_BOARD_NAME         "TIA-CTL v2.0.F 2026.10"
+#define NHOS_BOARD_OTA_MODEL    "VD-CTL/R v2.0.F 2026.10"
+#define NHOS_BOARD_ROWS         14
+#define NHOS_BOARD_COLS         14
+#define NHOS_BOARD_I2C_HZ       400000
+#define NHOS_BOARD_BQ25180_I2C_HZ 400000
+#define NHOS_BOARD_HAS_MAG      1
+#define NHOS_BOARD_MAG_MODEL    2
+#define NHOS_BOARD_HAS_BQ25180  1
+#define NHOS_BOARD_HAS_BUTTON   1
+#define NHOS_BOARD_HAS_EXT_LED  1
+// Not a panel on the board but an exposed I2C bus: an SSD1306 on 0x3C/0x3D
+// is picked up once the operator turns the OLED on.
+#define NHOS_BOARD_HAS_OLED     1
+#define NHOS_BOARD_SUPPORTS_GPIO_WAKE 1
+#define NHOS_BOARD_HAS_NATIVE_USB 1
+#define NHOS_BOARD_HAS_MAX17048 1
+#define NHOS_BOARD_HAS_BMM350   1
+#define NHOS_BOARD_EXTERNAL_LED_COUNT 9
+// Capabilities the sources test instead of naming a board: a second
+// F-family board shares them, a GCU or v1.0.F board does not.
+#define NHOS_BOARD_STATUS_LED_COUNT 2
+#define NHOS_BOARD_HAS_BATTERY_LED 1
+#define NHOS_BOARD_HAS_CONFIGURABLE_BUTTON 1
+#define NHOS_BOARD_HAS_PHYSICAL_POWER_SWITCH 1
+#define NHOS_BOARD_EXT_LED_RMT 1
+// v2.0.F: Vref comes from an MCP4725 (0x60) and the calibration switch
+// from a PCA9536 (0x41, IO0 high = on). The battery cell carries a BAT_ID
+// resistor on GPIO15 (200k pull-up on the board).
+#define NHOS_BOARD_HAS_DAC_VREF 1
+#define NHOS_BOARD_HAS_PCA9536 1
+#define NHOS_BOARD_HAS_BATID 1
+#define NHOS_BOARD_OTA_MANIFEST_BASE \
+  "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v20f"
 
 #elif defined(NHOS_BOARD_GCU_V21_LTS)
 
@@ -123,10 +167,34 @@
 
 #else
 
-#error "No board selected: pass one of -DNHOS_BOARD_V10F, -DNHOS_BOARD_V15F, -DNHOS_BOARD_GCU_V21_LTS, -DNHOS_BOARD_GCU_V22C_LTS, -DNHOS_BOARD_GCU_V23D_LTS (the firmware/scripts/ flash and build scripts do this for you)."
+#error "No board selected: pass one of -DNHOS_BOARD_V10F, -DNHOS_BOARD_V15F, -DNHOS_BOARD_V20F, -DNHOS_BOARD_GCU_V21_LTS, -DNHOS_BOARD_GCU_V22C_LTS, -DNHOS_BOARD_GCU_V23D_LTS (the firmware/scripts/ flash and build scripts do this for you)."
 
 #endif
 
+#ifndef NHOS_BOARD_STATUS_LED_COUNT
+#define NHOS_BOARD_STATUS_LED_COUNT 1
+#endif
+#ifndef NHOS_BOARD_HAS_BATTERY_LED
+#define NHOS_BOARD_HAS_BATTERY_LED 0
+#endif
+#ifndef NHOS_BOARD_HAS_CONFIGURABLE_BUTTON
+#define NHOS_BOARD_HAS_CONFIGURABLE_BUTTON 0
+#endif
+#ifndef NHOS_BOARD_HAS_PHYSICAL_POWER_SWITCH
+#define NHOS_BOARD_HAS_PHYSICAL_POWER_SWITCH 0
+#endif
+#ifndef NHOS_BOARD_EXT_LED_RMT
+#define NHOS_BOARD_EXT_LED_RMT 0
+#endif
+#ifndef NHOS_BOARD_HAS_DAC_VREF
+#define NHOS_BOARD_HAS_DAC_VREF 0
+#endif
+#ifndef NHOS_BOARD_HAS_PCA9536
+#define NHOS_BOARD_HAS_PCA9536 0
+#endif
+#ifndef NHOS_BOARD_HAS_BATID
+#define NHOS_BOARD_HAS_BATID 0
+#endif
 #ifndef NHOS_BOARD_HAS_NATIVE_USB
 #define NHOS_BOARD_HAS_NATIVE_USB 0
 #endif
