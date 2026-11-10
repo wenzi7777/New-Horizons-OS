@@ -23,6 +23,7 @@
 #include "OtaManager.h"
 #include "PowerManager.h"
 #include "PowerGovernor.h"
+#include "RangeCompensator.h"
 #include "VrefManager.h"
 #include "PowerStateManager.h"
 #include "AirtimeArbiter.h"
@@ -89,6 +90,7 @@ class ControlServer {
   void setClock(ClockService* clock) { clock_ = clock; }
   void setPowerGovernor(PowerGovernor* governor) { governor_ = governor; }
   void setVrefManager(VrefManager* vref) { vref_ = vref; }
+  void setRangeCompensator(RangeCompensator* range) { range_ = range; }
   void setAppManager(AppManager* apps, FlowApp* flow, AppRegistry* registry,
                      AppGovernor* governor) {
     apps_ = apps;
@@ -173,6 +175,9 @@ class ControlServer {
   String cmdSetVref(const CommandContext& ctx);
   String cmdCalibrationSwitch(const CommandContext& ctx);
   String cmdI2cScan(const CommandContext& ctx);
+  String cmdSetRange(const CommandContext& ctx);
+  String cmdRfbMeasure(const CommandContext& ctx);
+  String cmdVrefSweep(const CommandContext& ctx);
   String cmdResyncBatteryGauge(const CommandContext& ctx);
   String cmdSetImu(const CommandContext& ctx);
   String cmdSetLog(const CommandContext& ctx);
@@ -293,6 +298,7 @@ class ControlServer {
   PowerManager* power_ = nullptr;
   BatteryGaugeManager* batteryGauge_ = nullptr;
   VrefManager* vref_ = nullptr;
+  RangeCompensator* range_ = nullptr;
   PowerStateManager* powerState_ = nullptr;
   ImuManager* imu_ = nullptr;
   MagnetometerManager* magnetometer_ = nullptr;

@@ -35,7 +35,7 @@ V1_19_ADDED = [
 ]
 
 # v2.0.F: the Vref DAC, the calibration switch and the I2C probe.
-V2_0_ADDED = ["set_vref", "calibration_switch", "i2c_scan"]
+V2_0_ADDED = ["set_vref", "calibration_switch", "i2c_scan", "set_range", "rfb_measure", "vref_sweep"]
 
 # v1.14.0 gated these inside their bodies (two idioms); exit_maintenance joins
 # them on purpose -- it was a silent no-op in normal mode.
@@ -64,7 +64,7 @@ class CommandTableTests(unittest.TestCase):
         self.assertEqual(flagged("kCmdNeedsMaintenance"), MAINTENANCE)
         self.assertEqual(flagged("kCmdQuietLed"), {"app_view", "app_events", "thread_list", "sysmon"})
         self.assertEqual(flagged("kCmdHeavy"),
-                         {"status", "query", "storage_status", "commands", "sysmon"})
+                         {"status", "query", "storage_status", "commands", "sysmon", "vref_sweep"})
         self.assertEqual(flagged("kCmdInternal"), {"set_transport", "set_wifi"})
         self.assertEqual(flagged("kCmdStatusSnapshot"),
                          {"status", "query", "memory_status", "scan_health", "storage_status"})

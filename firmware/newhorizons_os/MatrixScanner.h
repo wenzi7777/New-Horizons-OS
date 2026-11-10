@@ -10,6 +10,7 @@
 namespace nhos {
 
 class Calibration;
+class RangeCompensator;
 
 // Units of MatrixFrame::values.
 //
@@ -86,6 +87,11 @@ class MatrixScanner {
   bool setFilterConfig(const FilterConfig& config);
   bool setLayout(const uint8_t* rows, size_t rowCount, const uint8_t* cols, size_t colCount);
   void setCalibration(Calibration* calibration);
+  // v2.0.F: leak / virtual-Rfb correction applied to every row reading.
+  void setRangeCompensator(RangeCompensator* range) { range_ = range; }
+  // Every column released, so a row reads its op-amp alone (Rfb measurement):
+  // the mean of `samples` reads per row, in millivolts.
+  bool readIdleRows(float* outMv, size_t rows, uint8_t samples);
   void setStreamRawAdc(bool enabled) { streamRawAdc_ = enabled; }
   bool scanDue() const;
   size_t scanIntoPacketPayload(uint8_t* out, size_t capacity, MatrixFrame& frame);
@@ -109,6 +115,7 @@ class MatrixScanner {
   uint16_t lastActiveCells() const { return lastActiveCells_; }
 
  private:
+  RangeCompensator* range_ = nullptr;
   struct SensorFilterState {
     bool initialized = false;
     float lowpass = 0.0f;
@@ -119,6 +126,8 @@ class MatrixScanner {
 
   void loadAdcCalibration();
   float readCellMv(size_t rowIndex, uint16_t cellIndex);
+  // readCellMv() through the range compensator (when there is one).
+  float readCompensatedMv(size_t rowIndex, size_t colIndex, uint16_t cellIndex);
   bool sampleRawFrame(float* outValues, size_t count);
   bool sampleRawCell(uint16_t sensorIndex, float& outValue);
   void resetFilterState();

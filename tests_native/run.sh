@@ -59,6 +59,14 @@ CXX="${CXX:-c++}"
 
 "$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
   -I"$FIRMWARE_DIR" -I"$CORE_DIR" \
+  "$SCRIPT_DIR/test_range_math.cpp" \
+  "$FIRMWARE_DIR/RangeMath.cpp" \
+  -o "$BUILD_DIR/test_range_math"
+
+"$BUILD_DIR/test_range_math"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \
+  -I"$FIRMWARE_DIR" -I"$CORE_DIR" \
   "$SCRIPT_DIR/test_battery_id_policy.cpp" \
   "$FIRMWARE_DIR/BatteryIdPolicy.cpp" \
   -o "$BUILD_DIR/test_battery_id_policy"

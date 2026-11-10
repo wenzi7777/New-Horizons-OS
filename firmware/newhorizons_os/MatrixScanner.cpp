@@ -15,6 +15,7 @@
 #include "BoardPins.h"
 #include "Calibration.h"
 #include "CalibrationCurve.h"
+#include "RangeCompensator.h"
 
 namespace nhos {
 
@@ -76,6 +77,32 @@ void MatrixScanner::loadAdcCalibration() {
     }
   }
 #endif
+}
+
+float MatrixScanner::readCompensatedMv(size_t rowIndex, size_t colIndex, uint16_t cellIndex) {
+  const float raw = readCellMv(rowIndex, cellIndex);
+  if (!range_) {
+    return raw;
+  }
+  return range_->process(rowIndex, colIndex, cols_[colIndex], raw);
+}
+
+bool MatrixScanner::readIdleRows(float* outMv, size_t rows, uint8_t samples) {
+  if (!outMv || rows == 0 || rows > rowCount_ || samples == 0) {
+    return false;
+  }
+  setAllColsInactive();
+  delayMicroseconds(settleUs_ > 50 ? settleUs_ : 50);
+  for (size_t r = 0; r < rows; ++r) {
+    float total = 0.0f;
+    for (uint8_t s = 0; s < samples; ++s) {
+      // kMaxSensors as the cell index: a failed read must not pick up a stale
+      // sensor value (readCellMv holds the last value for a real index).
+      total += readCellMv(r, kMaxSensors);
+    }
+    outMv[r] = total / static_cast<float>(samples);
+  }
+  return true;
 }
 
 // One row's reading for the column currently driven, in mV. cellIndex is the
@@ -287,12 +314,15 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
   float peakValue = 0.0f;
   uint16_t activeCells = 0;
 
+  if (range_) {
+    range_->beginFrame();
+  }
   uint16_t colMajorIdx = 0;
   for (size_t c = 0; c < colCount_; ++c) {
     digitalWrite(cols_[c], LOW);
     delayMicroseconds(settleUs_);
     for (size_t r = 0; r < rowCount_; ++r) {
-      float value = readCellMv(r, colMajorIdx);
+      float value = readCompensatedMv(r, c, colMajorIdx);
       value = applyFilter(value, colMajorIdx);
       const uint16_t rowMajorIdx = static_cast<uint16_t>(r * colCount_ + c);
       // Capture the pre-calibration reading (filtered millivolts) before it is
@@ -316,6 +346,9 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
     digitalWrite(cols_[c], HIGH);
   }
   setAllColsInactive();
+  if (range_) {
+    range_->endFrame(millis());
+  }
 
   float peak01 = peakValue / kPressureFullScale;
   if (peak01 < 0.0f) {
@@ -502,7 +535,7 @@ bool MatrixScanner::sampleRawFrame(float* outValues, size_t count) {
     digitalWrite(cols_[c], LOW);
     delayMicroseconds(settleUs_);
     for (size_t r = 0; r < rowCount_; ++r) {
-      outValues[index] = readCellMv(r, static_cast<uint16_t>(index));
+      outValues[index] = readCompensatedMv(r, c, static_cast<uint16_t>(index));
       ++index;
     }
     digitalWrite(cols_[c], HIGH);
@@ -522,7 +555,7 @@ bool MatrixScanner::sampleRawCell(uint16_t sensorIndex, float& outValue) {
   }
   digitalWrite(cols_[colIndex], LOW);
   delayMicroseconds(settleUs_);
-  outValue = readCellMv(rowIndex, sensorIndex);
+  outValue = readCompensatedMv(rowIndex, colIndex, sensorIndex);
   digitalWrite(cols_[colIndex], HIGH);
   setAllColsInactive();
   return true;

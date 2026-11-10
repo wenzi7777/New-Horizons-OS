@@ -6,6 +6,8 @@
 #include "ControlServer.h"
 #include "EspNowOtaReceiver.h"
 #include <esp_timer.h>
+#include <memory>
+#include <new>
 #include <utility>
 #include <vector>
 #include "Config.h"
@@ -16,6 +18,7 @@
 #include "JsonUtils.h"
 #include "ReplyPacing.h"
 #include "UpdateChannel.h"
+#include "Watchdog.h"
 #include "VersionCompare.h"
 
 namespace nhos {
@@ -168,6 +171,8 @@ String ControlServer::cmdCapabilities(const CommandContext& ctx) {
   data += NHOS_BOARD_HAS_DAC_VREF ? "true" : "false";
   data += ",\"calibration_switch\":";
   data += NHOS_BOARD_HAS_PCA9536 ? "true" : "false";
+  data += ",\"range_modes\":";
+  data += NHOS_BOARD_HAS_DAC_VREF ? "true" : "false";
   data += ",\"battery_id\":";
   data += NHOS_BOARD_HAS_BATID ? "true" : "false";
   data += ",\"ota_channels\":true";
@@ -811,6 +816,274 @@ String ControlServer::cmdCalibrationSwitch(const CommandContext& ctx) {
   }
   String data = "{\"vref\":" + vref_->statusJson() + "}";
   return ok(cmd, on ? "calibration_on" : "calibration_off", data);
+#endif
+}
+
+// set_range (v2.0.F): how a row reading is presented. raw leaves it as read;
+// virtual re-expresses it as the reference Vref / Rfb would have read it, so
+// stored calibrations from a 20k board stay valid whatever Rfb is soldered and
+// whatever Vref is set; auto does the same and also lowers Vref when rows clip.
+// Both need the measured Rfb (rfb_measure).
+String ControlServer::cmdSetRange(const CommandContext& ctx) {
+  const String& cmd = ctx.cmd;
+  const String& request = ctx.request;
+#if !NHOS_BOARD_HAS_DAC_VREF
+  (void)request;
+  return error(cmd, "range_unsupported");
+#else
+  if (!range_ || !range_->enabled() || !vref_) {
+    return error(cmd, "range_unavailable");
+  }
+  if (extractBool(request, "clear_rfb", false)) {
+    range_->clearRfb();
+    range_->setMode(RangeMode::Raw);
+  }
+  const int refRfb = extractInt(request, "ref_rfb_ohm", -1);
+  if (refRfb >= 0 && !range_->setRefRfbOhm(static_cast<uint32_t>(refRfb))) {
+    return error(cmd, "range_ref_rfb_invalid");
+  }
+  if (request.indexOf("\"leak_comp\"") >= 0) {
+    range_->setLeakCompensation(extractBool(request, "leak_comp", range_->leakCompensation()));
+  }
+  const String mode = extractString(request, "mode");
+  if (!mode.isEmpty()) {
+    RangeMode next;
+    if (mode == "raw") {
+      next = RangeMode::Raw;
+    } else if (mode == "virtual") {
+      next = RangeMode::Virtual;
+    } else if (mode == "auto") {
+      next = RangeMode::Auto;
+    } else {
+      return error(cmd, "range_mode_invalid");
+    }
+    if (next != RangeMode::Raw && range_->rfbKnownRows() == 0) {
+      return error(cmd, "range_rfb_required");
+    }
+    const bool leavingAuto = range_->mode() == RangeMode::Auto && next != RangeMode::Auto;
+    range_->setMode(next);
+    if (leavingAuto) {
+      // Auto may have left Vref lowered; hand it back at the safe value.
+      const char* failure = "";
+      vref_->setVrefMv(kVrefSafeMv, failure);
+    }
+  }
+  range_->setVrefMv(static_cast<float>(vref_->vrefMv()));
+  String data = "{\"range\":" + range_->statusJson() + ",\"vref\":" + vref_->statusJson() + "}";
+  return ok(cmd, "range_updated", data);
+#endif
+}
+
+// rfb_measure (v2.0.F): with every column released a row's op-amp sees only
+// Rfb and, once the calibration network is on, a known 10k:
+//   Vout = Vref * (1 + Rfb / 10k).
+// The reading with the network off is the row's own Vref (it cancels the DAC's
+// and the ADC's offsets) when it sits within 3 % of the DAC's value. Sensors may
+// stay connected: a released column draws nothing, apart from column 13's 100k.
+String ControlServer::cmdRfbMeasure(const CommandContext& ctx) {
+  const String& cmd = ctx.cmd;
+  const String& request = ctx.request;
+#if !NHOS_BOARD_HAS_DAC_VREF
+  (void)request;
+  return error(cmd, "rfb_measure_unsupported");
+#else
+  if (!scanner_ || !range_ || !range_->enabled() || !vref_ || !vref_->available() ||
+      !vref_->calibrationAvailable()) {
+    return error(cmd, "rfb_measure_unavailable");
+  }
+  const ScanHealth health = scanner_->health();
+  const size_t rows = health.rows;
+  if (rows == 0 || rows > kRows) {
+    return error(cmd, "rfb_measure_no_layout");
+  }
+  int samples = extractInt(request, "samples", 16);
+  samples = samples < 4 ? 4 : (samples > 64 ? 64 : samples);
+  const int measureVref = extractInt(request, "vref_mv", -1);
+  const uint16_t previousVref = vref_->vrefMv();
+  const bool previousCal = vref_->calibrationOn();
+  const char* failure = "rfb_measure_failed";
+
+  const bool pauseScan = !maintenanceMode() && scanner_->active();
+  if (pauseScan) scanner_->stop();
+  bool good = true;
+  if (measureVref >= 0) {
+    good = vref_->setVrefMv(static_cast<uint32_t>(measureVref), failure);
+  }
+  const float vrefNow = static_cast<float>(vref_->vrefMv());
+  float offMv[kRows] = {0};
+  float onMv[kRows] = {0};
+  if (good) {
+    delay(60);  // the op-amps follow the new Vref
+    good = vref_->setCalibration(false, failure);
+  }
+  if (good) {
+    delay(30);
+    good = scanner_->readIdleRows(offMv, rows, static_cast<uint8_t>(samples));
+  }
+  if (good) {
+    good = vref_->setCalibration(true, failure);
+  }
+  if (good) {
+    delay(40);
+    good = scanner_->readIdleRows(onMv, rows, static_cast<uint8_t>(samples));
+  }
+  const char* ignored = "";
+  vref_->setCalibration(previousCal, ignored);
+  if (measureVref >= 0) {
+    vref_->setVrefMv(previousVref, ignored);
+  }
+  if (pauseScan) scanner_->start();
+  if (!good) {
+    return error(cmd, failure);
+  }
+
+  float rfb[kRows] = {0};
+  String rowsJson = "[";
+  size_t fitted = 0;
+  for (size_t r = 0; r < rows; ++r) {
+    const float diff = offMv[r] > vrefNow ? offMv[r] - vrefNow : vrefNow - offMv[r];
+    const bool usedIdle = diff <= vrefNow * 0.03f;
+    const float reference = usedIdle ? offMv[r] : vrefNow;
+    rfb[r] = rfbFromCalibration(onMv[r], reference);
+    // ok; no_feedback = the row is at the rail even with the network off (no
+    // Rfb soldered, so the op-amp has no feedback); saturated = only with it on
+    // (Rfb too large for this Vref: try rfb_measure with a lower vref_mv);
+    // open = the output stays at Vref (nothing connected to the calibration net).
+    const char* status = rfb[r] > 0.0f
+        ? "ok"
+        : (isSaturatedMv(offMv[r]) ? "no_feedback" : (isSaturatedMv(onMv[r]) ? "saturated" : "open"));
+    fitted += rfb[r] > 0.0f ? 1 : 0;
+    if (r) rowsJson += ",";
+    rowsJson += "{\"row\":" + String(static_cast<unsigned>(r));
+    rowsJson += ",\"off_mv\":" + String(offMv[r], 1);
+    rowsJson += ",\"on_mv\":" + String(onMv[r], 1);
+    rowsJson += ",\"rfb_ohm\":" + String(static_cast<unsigned long>(rfb[r] + 0.5f));
+    rowsJson += ",\"reference\":\"" + String(usedIdle ? "idle" : "dac") + "\"";
+    rowsJson += ",\"status\":\"" + String(status) + "\"}";
+  }
+  rowsJson += "]";
+  range_->setRfbTable(rfb, rows);
+  range_->setVrefMv(static_cast<float>(vref_->vrefMv()));
+  String data = "{\"vref_mv\":" + String(vrefNow, 1) + ",\"fitted_rows\":" + String(static_cast<unsigned>(fitted));
+  data += ",\"rows\":" + rowsJson + ",\"range\":" + range_->statusJson() + "}";
+  return ok(cmd, "rfb_measured", data);
+#endif
+}
+
+// vref_sweep (v2.0.F): holds the pressure, steps Vref, and for every step
+// records the Rfb the calibration network reports and the raw matrix (median
+// over duration_ms). If a material is a pure resistance, Rs computed from each
+// step -- Rs = Rfb * Vref / (Vout - Vref) -- stays the same; how it moves with
+// Vref is what the experiment is for. Compensation is bypassed meanwhile.
+String ControlServer::cmdVrefSweep(const CommandContext& ctx) {
+  const String& cmd = ctx.cmd;
+  const String& request = ctx.request;
+#if !NHOS_BOARD_HAS_DAC_VREF
+  (void)request;
+  return error(cmd, "vref_sweep_unsupported");
+#else
+  if (!scanner_ || !range_ || !range_->enabled() || !vref_ || !vref_->available()) {
+    return error(cmd, "vref_sweep_unavailable");
+  }
+  const ScanHealth health = scanner_->health();
+  const size_t rows = health.rows;
+  const size_t cols = health.cols;
+  const size_t points = health.pointCount;
+  if (rows == 0 || cols == 0 || rows > kRows || points == 0 || points > kMaxSensors) {
+    return error(cmd, "vref_sweep_no_layout");
+  }
+  const int startMv = extractInt(request, "start_mv", kVrefMinMv);
+  const int stopMv = extractInt(request, "stop_mv", vref_->limitMv());
+  const int stepMv = extractInt(request, "step_mv", 100);
+  int settleMs = extractInt(request, "settle_ms", 150);
+  int durationMs = extractInt(request, "duration_ms", 300);
+  const bool measureRfb = extractBool(request, "measure_rfb", true) && vref_->calibrationAvailable();
+  settleMs = settleMs < 20 ? 20 : (settleMs > 1000 ? 1000 : settleMs);
+  durationMs = durationMs < 100 ? 100 : (durationMs > 1000 ? 1000 : durationMs);
+  if (startMv < kVrefMinMv || stopMv < startMv || stepMv < 10 || stopMv > vref_->limitMv()) {
+    return error(cmd, "vref_sweep_range_invalid");
+  }
+  const int steps = (stopMv - startMv) / stepMv + 1;
+  if (steps > 24) {
+    return error(cmd, "vref_sweep_too_many_steps");
+  }
+
+  const uint16_t previousVref = vref_->vrefMv();
+  const bool previousCal = vref_->calibrationOn();
+  const bool pauseScan = !maintenanceMode() && scanner_->active();
+  if (pauseScan) scanner_->stop();
+  range_->setBypass(true);
+
+  String data;
+  data.reserve(512 + static_cast<size_t>(steps) * (points * 5 + 160));
+  data = "{\"rows\":" + String(static_cast<unsigned>(rows)) + ",\"cols\":" + String(static_cast<unsigned>(cols));
+  data += ",\"measure_rfb\":" + String(measureRfb ? "true" : "false") + ",\"steps\":[";
+  std::unique_ptr<float[]> matrix(new (std::nothrow) float[points]);
+  const char* failure = "";
+  bool good = matrix != nullptr;
+  int done = 0;
+  for (int s = 0; s < steps && good; ++s) {
+    const int mv = startMv + s * stepMv;
+    good = vref_->setVrefMv(static_cast<uint32_t>(mv), failure);
+    if (!good) break;
+    for (int waited = 0; waited < settleMs; waited += 20) {
+      delay(20);
+      watchdogFeed();
+    }
+    float offMv[kRows] = {0};
+    float onMv[kRows] = {0};
+    if (measureRfb) {
+      good = vref_->setCalibration(false, failure) && scanner_->readIdleRows(offMv, rows, 8);
+      if (good) good = vref_->setCalibration(true, failure);
+      if (good) {
+        delay(40);
+        good = scanner_->readIdleRows(onMv, rows, 8);
+      }
+      vref_->setCalibration(false, failure);
+      if (!good) break;
+    }
+    good = scanner_->captureAllBlockMedians(matrix.get(), points, static_cast<uint32_t>(durationMs));
+    if (!good) {
+      failure = "vref_sweep_capture_failed";
+      break;
+    }
+    const float vrefNow = static_cast<float>(vref_->vrefMv());
+    if (done) data += ",";
+    data += "{\"vref_mv\":" + String(vrefNow, 1);
+    if (measureRfb) {
+      data += ",\"rfb_ohm\":[";
+      for (size_t r = 0; r < rows; ++r) {
+        const float diff = offMv[r] > vrefNow ? offMv[r] - vrefNow : vrefNow - offMv[r];
+        const float reference = diff <= vrefNow * 0.03f ? offMv[r] : vrefNow;
+        if (r) data += ",";
+        data += String(static_cast<unsigned long>(rfbFromCalibration(onMv[r], reference) + 0.5f));
+      }
+      data += "]";
+    }
+    // captureAllBlockMedians is column-major (index = col * rows + row); the
+    // reply is row-major like every other matrix on the wire.
+    data += ",\"matrix_mv\":[";
+    for (size_t r = 0; r < rows; ++r) {
+      for (size_t c = 0; c < cols; ++c) {
+        if (r || c) data += ",";
+        data += String(static_cast<long>(matrix[c * rows + r] + 0.5f));
+      }
+    }
+    data += "]}";
+    ++done;
+  }
+  data += "]}";
+
+  const char* ignored = "";
+  vref_->setCalibration(previousCal, ignored);
+  vref_->setVrefMv(previousVref, ignored);
+  range_->setVrefMv(static_cast<float>(vref_->vrefMv()));
+  range_->setBypass(false);
+  if (pauseScan) scanner_->start();
+  if (!good) {
+    return error(cmd, failure[0] ? failure : "vref_sweep_failed");
+  }
+  return ok(cmd, "vref_sweep", data);
 #endif
 }
 

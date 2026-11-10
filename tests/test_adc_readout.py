@@ -26,8 +26,13 @@ class AdcReadoutTests(unittest.TestCase):
                           "bool MatrixScanner::sampleRawCell("):
             with self.subTest(signature=signature):
                 body = self.body(signature)
-                self.assertIn("readCellMv(", body)
+                # v2.0.F: the paths read through the range compensator, which
+                # wraps readCellMv() and nothing else.
+                self.assertIn("readCompensatedMv(", body)
                 self.assertNotIn("analogRead", body)
+        wrapper = self.body("float MatrixScanner::readCompensatedMv(")
+        self.assertIn("readCellMv(", wrapper)
+        self.assertNotIn("analogRead", wrapper)
 
     def test_core_millivolts_only_without_an_efuse_point(self):
         # analogReadMilliVolts() survives only as the no-calibration fallback.

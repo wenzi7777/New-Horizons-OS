@@ -28,6 +28,7 @@
 #include "PacketBuilder.h"
 #include "PowerAnimation.h"
 #include "PowerGovernor.h"
+#include "RangeCompensator.h"
 #include "VrefManager.h"
 #include "BatteryIdReader.h"
 #include "AppGovernor.h"
@@ -95,6 +96,7 @@ nhos::PowerManager power;
 nhos::PowerStateManager powerState;
 nhos::PowerGovernor powerGovernor;
 nhos::VrefManager vref;
+nhos::RangeCompensator range;
 nhos::ImuManager imu;
 nhos::BatteryGaugeManager batteryGauge;
 nhos::MagnetometerManager magnetometer;
@@ -597,6 +599,9 @@ void sendHeartbeatIfDue() {
 // ---------------------------------------------------------------------------
 void taskPower() { power.service(millis()); }
 void taskBatteryGauge() { batteryGauge.service(millis()); }
+#if NHOS_BOARD_HAS_DAC_VREF
+void taskRange() { range.service(millis(), vref); }
+#endif
 void taskImu() { imu.service(micros()); }
 void taskMagnetometer() { magnetometer.service(millis()); }
 
@@ -934,6 +939,9 @@ void registerRuntimeTasks() {
 
   scheduler.registerTask("imu", &taskImu, false);
   scheduler.registerTask("magnetometer", &taskMagnetometer, false);
+#if NHOS_BOARD_HAS_DAC_VREF
+  scheduler.registerTask("range", &taskRange, false, 100000);
+#endif
   scheduler.registerTask("scan_stream", &scanAndStreamIfDue, false);
   scheduler.registerTask("stream_queue", &sendQueuedPacketIfAny, false);
   // MUST follow scan_stream: taskApps reads the frame it just produced.
@@ -1040,6 +1048,9 @@ void setup() {
   // its EEPROM repaired if needed, the calibration switch open.
   vref.begin(storage);
   logBoot(String("boot_stage=vref_ready ") + vref.statusJson());
+  range.begin(storage);
+  range.setVrefMv(static_cast<float>(vref.vrefMv()));
+  logBoot(String("boot_stage=range_ready ") + range.statusJson());
 #endif
 #if NHOS_BOARD_HAS_BATID
   // BAT_ID is on ADC2, which Wi-Fi takes over once it starts: read it now.
@@ -1117,6 +1128,9 @@ void setup() {
       deviceConfig.data().matrixLayout.selectCount);
   calibration.begin(storage);
   scanner.setCalibration(&calibration);
+#if NHOS_BOARD_HAS_DAC_VREF
+  scanner.setRangeCompensator(&range);
+#endif
   logBoot(String("boot_stage=scanner_ready shape=") + scanner.matrixShapeJson());
   if (bootMode.mode() == nhos::RunMode::Normal && scanner.hasLayout()) {
     scanner.start();
@@ -1237,6 +1251,7 @@ void setup() {
   control.setClock(&deviceClock);
   control.setPowerGovernor(&powerGovernor);
   control.setVrefManager(&vref);
+  control.setRangeCompensator(&range);
   procFs.setPowerGovernor(&powerGovernor);
   control.setAppManager(&apps, &flowApp, &appRegistry, &appGovernor);
   procFs.setAppManager(&apps);

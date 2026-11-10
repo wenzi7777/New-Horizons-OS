@@ -65,6 +65,7 @@ String ControlServer::cmdStatus(const CommandContext& ctx) {
   jsonRawField(data, "battery_gauge", batteryGauge_ ? batteryGauge_->statusJson() : "{}", first);
 #if NHOS_BOARD_HAS_DAC_VREF
   jsonRawField(data, "vref", vref_ ? vref_->statusJson() : "{}", first);
+  jsonRawField(data, "range", range_ ? range_->statusJson() : "{}", first);
 #endif
   jsonRawField(data, "power", powerState_ ? powerState_->statusJson() : "{}", first);
   jsonRawField(data, "config", deviceConfig_ ? deviceConfig_->statusJson() : "{}", first);
