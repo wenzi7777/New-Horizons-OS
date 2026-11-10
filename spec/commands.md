@@ -2,7 +2,7 @@
 
 # Device commands
 
-105 commands, in dispatch-table order. A device reports the same table at run time
+106 commands, in dispatch-table order. A device reports the same table at run time
 with the `commands` command (firmware v1.15.0+). See PROTOCOL.md for the request and
 reply envelope.
 
@@ -78,6 +78,7 @@ Flags:
 | `calibration_switch` |  | Switch the calibration network on or off (v2.0.F; opens again on reboot). |
 | `set_range` |  | Choose raw, virtual-Rfb or auto range, the reference Rfb, and GPIO45 leak compensation (v2.0.F). |
 | `rfb_measure` |  | Measure each row's Rfb through the calibration network and keep it (v2.0.F). |
+| `matrix_sample` | heavy | The median of each cell over duration_ms, as the stream would carry it (range applied) or raw (v2.0.F). |
 | `vref_sweep` | heavy | Step Vref and record each step's Rfb and raw matrix, for checking whether a material is a pure resistance (v2.0.F). |
 | `i2c_scan` |  | List which of the board's known I2C addresses answer. |
 | `battery_status` |  | The battery card's slice of status: charger, gauge and power state. |

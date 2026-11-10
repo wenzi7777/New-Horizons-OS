@@ -25,12 +25,16 @@ void RangeCompensator::begin(Storage& storage) {
   const uint32_t ref = storage.getUInt(kRefRfbKey, kDefaultRefRfbOhm);
   refRfbOhm_ = (ref >= 1000 && ref <= 1000000) ? ref : kDefaultRefRfbOhm;
   leakComp_ = storage.getUInt(kLeakKey, 1) != 0;
-  float table[kRows] = {0};
+  // Rfb per row, then the ADC offset per row. A table from before the offsets
+  // existed has the wrong length and is ignored (measure again).
+  float table[2 * kRows] = {0};
   Preferences& prefs = storage.prefs();
   if (prefs.getBytesLength(kRfbKey) == sizeof(table) &&
       prefs.getBytes(kRfbKey, table, sizeof(table)) == sizeof(table)) {
     for (size_t i = 0; i < kRows; ++i) {
-      rfb_[i] = (table[i] > 0.0f && table[i] < 10000000.0f) ? table[i] : 0.0f;
+      const bool good = table[i] > 0.0f && table[i] < 10000000.0f;
+      rfb_[i] = good ? table[i] : 0.0f;
+      offset_[i] = (good && table[kRows + i] > -100.0f && table[kRows + i] < 100.0f) ? table[kRows + i] : 0.0f;
     }
   }
 #endif
@@ -73,18 +77,23 @@ bool RangeCompensator::setLeakCompensation(bool on) {
   return true;
 }
 
-void RangeCompensator::setRfbTable(const float* ohm, size_t rows) {
+void RangeCompensator::setRfbTable(const float* ohm, const float* offsetMv, size_t rows) {
+  float table[2 * kRows] = {0};
   for (size_t i = 0; i < kRows; ++i) {
     rfb_[i] = (i < rows && ohm[i] > 0.0f) ? ohm[i] : 0.0f;
+    offset_[i] = (rfb_[i] > 0.0f && i < rows) ? offsetMv[i] : 0.0f;
+    table[i] = rfb_[i];
+    table[kRows + i] = offset_[i];
   }
   if (storage_ != nullptr) {
-    storage_->prefs().putBytes(kRfbKey, rfb_, sizeof(rfb_));
+    storage_->prefs().putBytes(kRfbKey, table, sizeof(table));
   }
 }
 
 void RangeCompensator::clearRfb() {
   for (size_t i = 0; i < kRows; ++i) {
     rfb_[i] = 0.0f;
+    offset_[i] = 0.0f;
   }
   if (storage_ != nullptr) {
     storage_->prefs().remove(kRfbKey);
@@ -115,11 +124,11 @@ float RangeCompensator::process(size_t row, size_t col, uint8_t colPin, float ra
     leakV13_[row] = rawMv;
     leakValid_[row] = true;
   } else if (leakComp_ && rfb > 0.0f && leakValid_[row]) {
-    rawMv -= leakMv(leakV13_[row], vrefMv_, rfb);
+    rawMv -= leakMv(leakV13_[row], vrefMv_, rfb, kLeakResistorOhm, offset_[row]);
   }
   if (mode_ != RangeMode::Raw && rfb > 0.0f) {
     rawMv = virtualizeMv(rawMv, vrefMv_, rfb, static_cast<float>(kVrefSafeMv),
-                         static_cast<float>(refRfbOhm_));
+                         static_cast<float>(refRfbOhm_), offset_[row]);
   }
   return rawMv;
 }
@@ -186,6 +195,15 @@ String RangeCompensator::statusJson() const {
   }
   table += "]";
   jsonRawField(out, "rfb_ohm", table, first);
+  String offsets = "[";
+  for (size_t i = 0; i < kRows; ++i) {
+    if (i) {
+      offsets += ",";
+    }
+    offsets += String(offset_[i], 1);
+  }
+  offsets += "]";
+  jsonRawField(out, "offset_mv", offsets, first);
   jsonUnsignedField(out, "saturated_rows", __builtin_popcount(lastSatMask_), first);
   jsonUnsignedField(out, "saturated_rows_mask", lastSatMask_, first);
   jsonUnsignedField(out, "saturated_frames", satFrames_, first);

@@ -32,14 +32,31 @@ float rfbFromCalibration(float calOnMv, float vrefMv);
 // cell would give at (refVrefMv, refRfbOhm): the part above Vref scales by
 // (refVref * refRfb) / (vref * rfb). Readings at or below Vref are no signal
 // and map to refVrefMv. Returns the input unchanged if rfbOhm is unknown.
-float virtualizeMv(float voutMv, float vrefMv, float rfbOhm, float refVrefMv, float refRfbOhm);
+//
+// offsetMv is the row's ADC offset: with nothing pressed the row reads
+// vref + offsetMv (the ESP32 ADC is a few to ten mV off at this end of the range,
+// and the sign differs between ADC1 and ADC2), so that is where "no signal" is.
+float virtualizeMv(float voutMv, float vrefMv, float rfbOhm, float refVrefMv, float refRfbOhm,
+                   float offsetMv = 0.0f);
 
 // How much the idle column 13 adds to a row's Vout while another column is
 // scanned: its sensor Rs13 in series with the 100k pull-down.
 //   Rs13 = Rfb * Vref / (V13 - Vref)
 //   leak = Vref * Rfb / (Rs13 + 100k)
 // v13Mv is that row's reading while column 13 itself was driven low.
-float leakMv(float v13Mv, float vrefMv, float rfbOhm, float leakOhm = kLeakResistorOhm);
+float leakMv(float v13Mv, float vrefMv, float rfbOhm, float leakOhm = kLeakResistorOhm,
+             float offsetMv = 0.0f);
+
+// Rfb from several Vref points, each read with the calibration network off and on.
+// The readings are  off = g*V + e  and  on = g*V*(1 + Rfb/10k) + e,  so the
+// slopes of both against V cancel the ADC offset e and gain g (and the DAC's):
+//   Rfb = 10k * (slopeOn / slopeOff - 1).
+// A least-squares fit over the points averages out the ADC's few-mV scatter, which
+// two points alone cannot. `offsetMv` returns e as the row's reading above Vref
+// with nothing pressed. Returns 0 when there are fewer than two points, they span
+// less than 100 mV, or any reading is at the rail.
+float rfbFromPoints(const float* vrefMv, const float* offMv, const float* onMv, size_t count,
+                    float* offsetMv);
 
 inline bool isSaturatedMv(float voutMv) { return voutMv >= kSaturationMv; }
 

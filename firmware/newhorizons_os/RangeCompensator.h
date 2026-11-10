@@ -41,9 +41,11 @@ class RangeCompensator {
   float vrefMv() const { return vrefMv_; }
 
   // Measured Rfb per row (0 = unknown). Persisted.
-  void setRfbTable(const float* ohm, size_t rows);
+  // Measured Rfb and ADC offset per row (0 = unknown). Persisted.
+  void setRfbTable(const float* ohm, const float* offsetMv, size_t rows);
   void clearRfb();
   float rfbOhm(size_t row) const { return row < kRows ? rfb_[row] : 0.0f; }
+  float offsetMv(size_t row) const { return row < kRows ? offset_[row] : 0.0f; }
   size_t rfbKnownRows() const;
 
   // The scan path. One pass over a frame is bracketed by beginFrame/endFrame.
@@ -67,6 +69,7 @@ class RangeCompensator {
   bool leakComp_ = true;
   float vrefMv_ = 330.0f;
   float rfb_[kRows] = {0};
+  float offset_[kRows] = {0};
   float leakV13_[kRows] = {0};
   bool leakValid_[kRows] = {false};
 

@@ -178,6 +178,7 @@ class ControlServer {
   String cmdSetRange(const CommandContext& ctx);
   String cmdRfbMeasure(const CommandContext& ctx);
   String cmdVrefSweep(const CommandContext& ctx);
+  String cmdMatrixSample(const CommandContext& ctx);
   String cmdResyncBatteryGauge(const CommandContext& ctx);
   String cmdSetImu(const CommandContext& ctx);
   String cmdSetLog(const CommandContext& ctx);

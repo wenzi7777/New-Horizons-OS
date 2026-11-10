@@ -133,6 +133,8 @@ const CommandSpec* ControlServer::commandTable(size_t& count) {
        "Choose raw, virtual-Rfb or auto range, the reference Rfb, and GPIO45 leak compensation (v2.0.F)."},
       {"rfb_measure", &ControlServer::cmdRfbMeasure, 0,
        "Measure each row's Rfb through the calibration network and keep it (v2.0.F)."},
+      {"matrix_sample", &ControlServer::cmdMatrixSample, kCmdHeavy,
+       "The median of each cell over duration_ms, as the stream would carry it (range applied) or raw (v2.0.F)."},
       {"vref_sweep", &ControlServer::cmdVrefSweep, kCmdHeavy,
        "Step Vref and record each step's Rfb and raw matrix, for checking whether a material is a pure resistance (v2.0.F)."},
       {"i2c_scan", &ControlServer::cmdI2cScan, 0,
