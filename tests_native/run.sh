@@ -71,6 +71,13 @@ CXX="${CXX:-c++}"
   "$FIRMWARE_DIR/ActionButtonPolicy.cpp" \
   -o "$BUILD_DIR/test_action_button_policy"
 
+"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_findme_offer_policy.cpp" \
+  "$FIRMWARE_DIR/FindMeOfferPolicy.cpp" \
+  -o "$BUILD_DIR/test_findme_offer_policy"
+
+"$BUILD_DIR/test_findme_offer_policy"
+
 "$BUILD_DIR/test_action_button_policy"
 
 "$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \

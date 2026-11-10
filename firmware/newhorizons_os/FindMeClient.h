@@ -4,6 +4,7 @@
 #include <WiFiUdp.h>
 
 #include "Config.h"
+#include "FindMeOfferPolicy.h"
 #include "Storage.h"
 #include "WifiManager.h"
 
@@ -83,6 +84,8 @@ class FindMeClient {
   uint32_t lastDiscoverMs_ = 0;
   // Whether an offer was already taken in the current discovery round.
   bool acceptedThisRound_ = false;
+  // Sticks an attached device to its Gateway (see FindMeOfferPolicy.h).
+  FindMeOfferPolicy offerPolicy_;
   uint32_t attachGeneration_ = 0;
   uint32_t lastSuccessMs_ = 0;
   uint32_t lastHeartbeatMs_ = 0;

@@ -190,6 +190,7 @@ void FindMeClient::sendDiscover() {
     lastError_ = "findme_discover_send_failed";
   }
   lastDiscoverMs_ = millis();
+  offerPolicy_.onRoundStart(hasGateway());
   acceptedThisRound_ = false;
   nextDiscoverMs_ = lastDiscoverMs_ + kDiscoverIntervalMs;
   state_ = "discovering";
@@ -275,14 +276,17 @@ void FindMeClient::readOffers() {
     // with two Gateways on the LAN the device attached to the first and moved
     // to the second 80ms later -- and the first frames to a new host can fail
     // while its address resolves, which flashed ScanWarning on some boots.
-    // Now: the first offer of a round (it may replace a Gateway remembered
-    // from an earlier boot), the current Gateway refreshing itself, a
-    // strictly higher priority, or the Gateway a transfer asked for.
+    // And once attached it stays: the current Gateway refreshing itself, the
+    // Gateway a transfer asked for, or -- only after the current Gateway has
+    // missed 3 rounds (~9 s) -- the first offer of a round. Taking the first
+    // offer of every round, or any higher priority, let two hosts (NH Studio
+    // and NH Pocket) trade the device on reply timing. FindMeOfferPolicy.h.
     const bool inWindow = (millis() - lastDiscoverMs_) <= kOfferReadWindowMs;
     const bool sameGateway = hasGateway() && offer.gatewayId == gatewayId_;
-    if (!hasGateway() || transferring || sameGateway || offer.priority > priority_ ||
-        (inWindow && !acceptedThisRound_)) {
+    const bool firstOfRound = inWindow && !acceptedThisRound_;
+    if (offerPolicy_.shouldAccept(hasGateway(), transferring, sameGateway, firstOfRound)) {
       acceptOffer(offer, udp_.remoteIP());
+      offerPolicy_.onAccepted();
       if (inWindow) {
         acceptedThisRound_ = true;
       }

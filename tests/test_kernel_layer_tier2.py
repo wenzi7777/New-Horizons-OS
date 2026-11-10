@@ -496,11 +496,15 @@ class GatewayAttachTests(unittest.TestCase):
         # from the first Gateway to answer to the second 80ms later.
         findme = read("FindMeClient.cpp")
         read_offers = findme[findme.index("void FindMeClient::readOffers") : findme.index("void FindMeClient::acceptOffer")]
-        self.assertNotIn("offer.priority >= priority_", read_offers)
-        self.assertIn("offer.priority > priority_", read_offers)
-        self.assertIn("(inWindow && !acceptedThisRound_)", read_offers)
-        self.assertIn("transferring", read_offers[read_offers.index("const bool inWindow"):])
-        discover = findme[findme.index("lastDiscoverMs_ = millis();") :][:120]
+        # v1.20.0: priority no longer steals an attached device; the first
+        # offer of a round only counts once the current Gateway is gone
+        # (FindMeOfferPolicy, tests_native/test_findme_offer_policy.cpp).
+        self.assertNotIn("offer.priority", read_offers)
+        self.assertIn("inWindow && !acceptedThisRound_", read_offers)
+        self.assertIn("offerPolicy_.shouldAccept(hasGateway(), transferring, sameGateway, firstOfRound)", read_offers)
+        self.assertIn("offerPolicy_.onAccepted();", read_offers)
+        discover = findme[findme.index("lastDiscoverMs_ = millis();") :][:160]
+        self.assertIn("offerPolicy_.onRoundStart(hasGateway());", discover)
         self.assertIn("acceptedThisRound_ = false;", discover)
 
     def test_a_new_attachment_is_counted(self):
