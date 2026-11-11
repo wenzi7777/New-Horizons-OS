@@ -794,6 +794,11 @@ String ControlServer::cmdSetVref(const CommandContext& ctx) {
   } else if (limitMv < 0) {
     return error(cmd, "vref_mv_required");
   }
+  // The compensator must use the new Vref from the very next reading, not
+  // from whenever its service() next runs (a lowered limit may move it too).
+  if (range_) {
+    range_->setVrefMv(static_cast<float>(vref_->vrefMv()));
+  }
   String data = "{\"vref\":" + vref_->statusJson() + "}";
   return ok(cmd, "vref_updated", data);
 #endif
@@ -834,9 +839,24 @@ String ControlServer::cmdSetRange(const CommandContext& ctx) {
   if (!range_ || !range_->enabled() || !vref_) {
     return error(cmd, "range_unavailable");
   }
+  // Auto may have left Vref lowered; leaving it (by mode or by clear_rfb)
+  // hands Vref back at the safe value at once, before any later check can
+  // return, and a failure to do so is reported.
+  const char* restoreFailure = "";
+  auto restoreSafeVref = [&]() {
+    const char* failure = "";
+    if (!vref_->setVrefMv(kVrefSafeMv, failure)) {
+      restoreFailure = failure[0] ? failure : "vref_set_failed";
+    }
+    range_->setVrefMv(static_cast<float>(vref_->vrefMv()));
+  };
   if (extractBool(request, "clear_rfb", false)) {
+    const bool wasAuto = range_->mode() == RangeMode::Auto;
     range_->clearRfb();
     range_->setMode(RangeMode::Raw);
+    if (wasAuto) {
+      restoreSafeVref();
+    }
   }
   const int refRfb = extractInt(request, "ref_rfb_ohm", -1);
   if (refRfb >= 0 && !range_->setRefRfbOhm(static_cast<uint32_t>(refRfb))) {
@@ -863,13 +883,15 @@ String ControlServer::cmdSetRange(const CommandContext& ctx) {
     const bool leavingAuto = range_->mode() == RangeMode::Auto && next != RangeMode::Auto;
     range_->setMode(next);
     if (leavingAuto) {
-      // Auto may have left Vref lowered; hand it back at the safe value.
-      const char* failure = "";
-      vref_->setVrefMv(kVrefSafeMv, failure);
+      restoreSafeVref();
     }
   }
   range_->setVrefMv(static_cast<float>(vref_->vrefMv()));
-  String data = "{\"range\":" + range_->statusJson() + ",\"vref\":" + vref_->statusJson() + "}";
+  String data = "{\"range\":" + range_->statusJson() + ",\"vref\":" + vref_->statusJson();
+  if (restoreFailure[0]) {
+    data += ",\"warnings\":[\"vref_restore_failed\"],\"vref_restore_error\":\"" + String(restoreFailure) + "\"";
+  }
+  data += "}";
   return ok(cmd, "range_updated", data);
 #endif
 }
@@ -890,7 +912,23 @@ namespace {
 struct RfbPass {
   float off[kRows] = {0};
   float on[kRows] = {0};
+  bool offOk[kRows] = {false};
+  bool onOk[kRows] = {false};
+  bool rowOk(size_t r) const { return offOk[r] && onOk[r]; }
 };
+
+// Restoring Vref / the calibration switch after a measurement: a failure is
+// reported (warnings) instead of being swallowed behind an "ok".
+[[maybe_unused]] void restoreVrefState(VrefManager& vref, bool calibrationOn, uint16_t vrefMv, String& warnings) {
+  const char* failure = "";
+  if (vref.calibrationAvailable() && !vref.setCalibration(calibrationOn, failure)) {
+    warnings += String(warnings.isEmpty() ? "" : ",") + "\"calibration_switch_restore_failed\"";
+  }
+  failure = "";
+  if (!vref.setVrefMv(vrefMv, failure)) {
+    warnings += String(warnings.isEmpty() ? "" : ",") + "\"vref_restore_failed\"";
+  }
+}
 }  // namespace
 
 static bool measureRfbPass(VrefManager& vref, MatrixScanner& scanner, size_t rows, uint8_t samples,
@@ -906,7 +944,7 @@ static bool measureRfbPass(VrefManager& vref, MatrixScanner& scanner, size_t row
     return false;
   }
   delay(30);
-  if (!scanner.readIdleRows(pass.off, rows, samples)) {
+  if (!scanner.readIdleRows(pass.off, pass.offOk, rows, samples)) {
     failure = "rfb_measure_failed";
     return false;
   }
@@ -914,13 +952,19 @@ static bool measureRfbPass(VrefManager& vref, MatrixScanner& scanner, size_t row
     return false;
   }
   delay(40);
-  const bool read = scanner.readIdleRows(pass.on, rows, samples);
-  const char* ignored = "";
-  vref.setCalibration(false, ignored);
+  const bool read = scanner.readIdleRows(pass.on, pass.onOk, rows, samples);
+  const char* switchFailure = "";
+  const bool switchedOff = vref.setCalibration(false, switchFailure);
   if (!read) {
     failure = "rfb_measure_failed";
+    return false;
   }
-  return read;
+  if (!switchedOff) {
+    // The network would stay on and load every row: stop here.
+    failure = switchFailure[0] ? switchFailure : "calibration_switch_failed";
+    return false;
+  }
+  return true;
 }
 
 String ControlServer::cmdRfbMeasure(const CommandContext& ctx) {
@@ -957,6 +1001,9 @@ String ControlServer::cmdRfbMeasure(const CommandContext& ctx) {
   float biggest = 0.0f;
   if (good) {
     for (size_t r = 0; r < rows; ++r) {
+      if (!first.rowOk(r)) {
+        continue;  // every ADC read of this row failed: no value, reported below
+      }
       const float diff = first.off[r] > firstVref ? first.off[r] - firstVref : firstVref - first.off[r];
       const float reference = diff <= firstVref * 0.05f ? first.off[r] : static_cast<float>(firstVref);
       coarse[r] = rfbFromCalibration(first.on[r], reference);
@@ -973,9 +1020,9 @@ String ControlServer::cmdRfbMeasure(const CommandContext& ctx) {
   float pointMv[kFitPoints] = {0};
   bool fitted_points = false;
   if (good && biggest > 0.0f) {
-    float top = 2600.0f / (1.0f + biggest / kCalResistorOhm);
-    const float ceiling = static_cast<float>(vref_->limitMv());
-    top = top > ceiling ? ceiling : top;
+    // Never at or above the GPIO45 strap risk, whatever limit the operator set.
+    const float top = rfbFitTopMv(biggest, static_cast<float>(vref_->limitMv()),
+                                  static_cast<float>(kRfbFitMaxVrefMv));
     const int highMv = static_cast<int>(top);
     const int lowMv = static_cast<int>(kVrefMinMv);
     if (highMv - lowMv >= 100) {
@@ -987,22 +1034,29 @@ String ControlServer::cmdRfbMeasure(const CommandContext& ctx) {
       }
     }
   }
-  const char* ignored = "";
-  vref_->setCalibration(previousCal, ignored);
-  vref_->setVrefMv(previousVref, ignored);
+  String warnings;
+  restoreVrefState(*vref_, previousCal, previousVref, warnings);
   range_->setVrefMv(static_cast<float>(vref_->vrefMv()));
   range_->setBypass(false);
   if (pauseScan) scanner_->start();
   if (!good) {
+    if (!warnings.isEmpty()) {
+      return error(cmd, failure, "{\"warnings\":[" + warnings + "]}");
+    }
     return error(cmd, failure);
   }
 
   String rowsJson = "[";
+  size_t failedRows = 0;
   size_t fitted = 0;
   for (size_t r = 0; r < rows; ++r) {
     float result = 0.0f;
     float rowOffset = 0.0f;
-    if (fitted_points && coarse[r] > 0.0f) {
+    bool fitReadsOk = fitted_points;
+    for (size_t i = 0; fitted_points && i < kFitPoints; ++i) {
+      fitReadsOk = fitReadsOk && pass[i].rowOk(r);
+    }
+    if (fitReadsOk && coarse[r] > 0.0f) {
       float offs[kFitPoints], ons[kFitPoints];
       for (size_t i = 0; i < kFitPoints; ++i) {
         offs[i] = pass[i].off[r];
@@ -1017,11 +1071,20 @@ String ControlServer::cmdRfbMeasure(const CommandContext& ctx) {
       result = coarse[r];
       rowOffset = 0.0f;
     }
+    // A row whose first pass had no good ADC read stores nothing (0 = unknown).
+    const bool adcFailed = !first.rowOk(r);
+    if (adcFailed) {
+      result = 0.0f;
+      rowOffset = 0.0f;
+      ++failedRows;
+    }
     rfb[r] = result;
     offset[r] = rowOffset;
-    const char* status = result > 0.0f
-        ? "ok"
-        : (isSaturatedMv(first.off[r]) ? "no_feedback" : (isSaturatedMv(first.on[r]) ? "saturated" : "open"));
+    const char* status = adcFailed
+        ? "adc_read_failed"
+        : (result > 0.0f
+               ? "ok"
+               : (isSaturatedMv(first.off[r]) ? "no_feedback" : (isSaturatedMv(first.on[r]) ? "saturated" : "open")));
     fitted += result > 0.0f ? 1 : 0;
     if (r) rowsJson += ",";
     rowsJson += "{\"row\":" + String(static_cast<unsigned>(r));
@@ -1029,7 +1092,7 @@ String ControlServer::cmdRfbMeasure(const CommandContext& ctx) {
     rowsJson += ",\"on_mv\":" + String(first.on[r], 1);
     rowsJson += ",\"rfb_ohm\":" + String(static_cast<unsigned long>(result + 0.5f));
     rowsJson += ",\"offset_mv\":" + String(rowOffset, 1);
-    rowsJson += ",\"method\":\"" + String(resolved ? "fit" : "single") + "\"";
+    rowsJson += ",\"method\":\"" + String(adcFailed ? "none" : (resolved ? "fit" : "single")) + "\"";
     rowsJson += ",\"status\":\"" + String(status) + "\"}";
   }
   rowsJson += "]";
@@ -1041,6 +1104,13 @@ String ControlServer::cmdRfbMeasure(const CommandContext& ctx) {
     data += (i ? "," : "") + String(static_cast<int>(pointMv[i]));
   }
   data += "]";
+  data += ",\"failed_rows\":" + String(static_cast<unsigned>(failedRows));
+  if (failedRows > 0) {
+    warnings += String(warnings.isEmpty() ? "" : ",") + "\"adc_read_failed_rows\"";
+  }
+  if (!warnings.isEmpty()) {
+    data += ",\"warnings\":[" + warnings + "]";
+  }
   data += ",\"rows\":" + rowsJson + ",\"range\":" + range_->statusJson() + "}";
   return ok(cmd, "rfb_measured", data);
 #endif
@@ -1090,8 +1160,15 @@ String ControlServer::cmdVrefSweep(const CommandContext& ctx) {
   const bool pauseScan = !maintenanceMode() && scanner_->active();
   if (pauseScan) scanner_->stop();
   range_->setBypass(true);
-  const char* ignored = "";
-  vref_->setCalibration(false, ignored);
+  if (vref_->calibrationAvailable()) {
+    // With the network left on every row would read the 10k as well.
+    const char* switchFailure = "";
+    if (!vref_->setCalibration(false, switchFailure)) {
+      range_->setBypass(false);
+      if (pauseScan) scanner_->start();
+      return error(cmd, switchFailure[0] ? switchFailure : "calibration_switch_failed");
+    }
+  }
 
   String data;
   data.reserve(512 + static_cast<size_t>(steps) * (points * 5 + 60));
@@ -1138,16 +1215,24 @@ String ControlServer::cmdVrefSweep(const CommandContext& ctx) {
     data += "]}";
     ++done;
   }
-  data += "]}";
+  data += "]";
 
-  vref_->setCalibration(previousCal, ignored);
-  vref_->setVrefMv(previousVref, ignored);
+  String warnings;
+  restoreVrefState(*vref_, previousCal, previousVref, warnings);
   range_->setVrefMv(static_cast<float>(vref_->vrefMv()));
   range_->setBypass(false);
   if (pauseScan) scanner_->start();
   if (!good) {
-    return error(cmd, failure[0] ? failure : "vref_sweep_failed");
+    const char* message = failure[0] ? failure : "vref_sweep_failed";
+    if (!warnings.isEmpty()) {
+      return error(cmd, message, "{\"warnings\":[" + warnings + "]}");
+    }
+    return error(cmd, message);
   }
+  if (!warnings.isEmpty()) {
+    data += ",\"warnings\":[" + warnings + "]";
+  }
+  data += "}";
   return ok(cmd, "vref_sweep", data);
 #endif
 }

@@ -32,8 +32,19 @@ void testLimitAndRequest() {
   assert(checkVrefRequest(100, 800) == VrefRequest::Ok);
   assert(checkVrefRequest(800, 800) == VrefRequest::Ok);
   assert(checkVrefRequest(801, 800) == VrefRequest::AboveLimit);
-  // The default ceiling keeps the GPIO45 reset strap safe.
-  assert(kVrefDefaultLimitMv <= 800);
+  // The default ceiling keeps the GPIO45 reset strap safe, with margin: a
+  // reset that skips the shutdown handler keeps the DAC register value.
+  assert(kVrefDefaultLimitMv == 700);
+  assert(kVrefDefaultLimitMv < kVrefStrapRiskMv);
+  assert(kVrefStrapRiskMv == 800);
+  // rfb_measure's top fit point stays below the strap risk whatever the limit.
+  assert(kRfbFitMaxVrefMv < kVrefStrapRiskMv);
+  assert(kRfbFitMaxVrefMv >= kVrefSafeMv);
+  // The default limit is what a fresh board reads back from clampVrefLimitMv.
+  assert(clampVrefLimitMv(kVrefDefaultLimitMv) == kVrefDefaultLimitMv);
+  assert(checkVrefRequest(700, kVrefDefaultLimitMv) == VrefRequest::Ok);
+  assert(checkVrefRequest(701, kVrefDefaultLimitMv) == VrefRequest::AboveLimit);
+  assert(checkVrefRequest(800, kVrefDefaultLimitMv) == VrefRequest::AboveLimit);
 }
 
 void testEepromDecision() {

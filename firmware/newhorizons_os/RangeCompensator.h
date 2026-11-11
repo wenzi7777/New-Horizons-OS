@@ -77,6 +77,8 @@ class RangeCompensator {
   uint32_t lastSatMask_ = 0;
   uint32_t satFrames_ = 0;
   uint32_t lastSatMs_ = 0;
+  bool haveFrame_ = false;
+  uint32_t lastFrameMs_ = 0;
   uint32_t lastAutoStepMs_ = 0;
   uint32_t autoSteps_ = 0;
 };

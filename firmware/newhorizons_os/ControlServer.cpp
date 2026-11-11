@@ -514,13 +514,17 @@ String ControlServer::ok(const String& command, const String& message, const Str
 }
 
 String ControlServer::error(const String& command, const String& message) const {
+  return error(command, message, "{}");
+}
+
+String ControlServer::error(const String& command, const String& message, const String& data) const {
   String out = "{";
-  out.reserve(command.length() + message.length() * 2 + 48);
+  out.reserve(command.length() + message.length() * 2 + data.length() + 48);
   bool first = true;
   jsonBoolField(out, "ok", false, first);
   jsonStringField(out, "cmd", command, first);
   jsonStringField(out, "message", message, first);
-  jsonRawField(out, "data", "{}", first);
+  jsonRawField(out, "data", data, first);
   jsonStringField(out, "error", message, first);
   out += "}";
   return out;

@@ -135,6 +135,8 @@ float RangeCompensator::process(size_t row, size_t col, uint8_t colPin, float ra
 
 void RangeCompensator::endFrame(uint32_t nowMs) {
   lastSatMask_ = frameSatMask_;
+  haveFrame_ = true;
+  lastFrameMs_ = nowMs;
   if (frameSatMask_ != 0) {
     ++satFrames_;
     lastSatMs_ = nowMs;
@@ -151,6 +153,11 @@ void RangeCompensator::service(uint32_t nowMs, VrefManager& vref) {
     return;
   }
   if (nowMs - lastAutoStepMs_ < kAutoStepMinMs) {
+    return;
+  }
+  // No frame for a while (scan stopped or stalled): the saturation mask is
+  // stale, so it must not keep lowering Vref.
+  if (!autoRangeFrameFresh(haveFrame_, nowMs - lastFrameMs_)) {
     return;
   }
   size_t saturatedRows = 0;

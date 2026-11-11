@@ -247,6 +247,8 @@ class ControlServer {
   String processCommand(const String& request);
   String ok(const String& command, const String& message, const String& data = "{}") const;
   String error(const String& command, const String& message) const;
+  // An error that still carries data (e.g. warnings about a failed restore).
+  String error(const String& command, const String& message, const String& data) const;
   String deviceUidString() const;
   String commandName(const String& request) const;
   String scanTimingStatusJson() const;

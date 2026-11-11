@@ -16,9 +16,16 @@ namespace nhos {
 static constexpr uint16_t kVrefSafeMv = 330;
 // Lowest request set_vref accepts (the Vref sweep starts at 0.1 V).
 static constexpr uint16_t kVrefMinMv = 100;
-// Default ceiling for set_vref; the operator may raise it, never above
-// kVrefAbsoluteMaxMv, but accepts the reset-strap risk by doing so.
-static constexpr uint16_t kVrefDefaultLimitMv = 800;
+// Where the GPIO45 strap stops being safe: a reset that does not pass through
+// the shutdown handler (watchdog, brown-out, EN) keeps the DAC's register
+// value, and the 100k pull-down only wins below about this Vref.
+static constexpr uint16_t kVrefStrapRiskMv = 800;
+// Default ceiling for set_vref, with margin below kVrefStrapRiskMv; the
+// operator may raise it, never above kVrefAbsoluteMaxMv, but accepts the
+// reset-strap risk by doing so.
+static constexpr uint16_t kVrefDefaultLimitMv = 700;
+// rfb_measure's highest fit point, whatever the limit: below the strap risk.
+static constexpr uint16_t kRfbFitMaxVrefMv = 750;
 static constexpr uint16_t kVrefAbsoluteMaxMv = 2000;
 // DAC full scale: the MCP4725's reference is its supply.
 static constexpr uint16_t kDacSupplyMv = 3300;

@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "RangeMath.h"
+#include "VrefPolicy.h"
 
 using namespace nhos;
 
@@ -120,6 +121,61 @@ void testAutoRange() {
 
 }  // namespace
 
+void testReadingMean() {
+  // Failed ADC2 reads are skipped, not averaged in as 0 mV.
+  ReadingMean m;
+  m.add(true, 330.0f);
+  m.add(false, 0.0f);
+  m.add(true, 334.0f);
+  m.add(false, 0.0f);
+  float out = -1.0f;
+  assert(m.mean(out));
+  assert(near(out, 332.0f, 0.001f));
+  assert(m.good == 2 && m.failed == 2);
+  // Every read failed: no value, reported as a failure.
+  ReadingMean none;
+  for (int i = 0; i < 24; ++i) none.add(false, 0.0f);
+  out = 123.0f;
+  assert(!none.mean(out));
+  assert(out == 123.0f);
+  // Nothing added at all is a failure too.
+  ReadingMean empty;
+  assert(!empty.mean(out));
+}
+
+void testAutoRangeStaleFrames() {
+  // No frame yet: never act on the (empty) mask.
+  assert(!autoRangeFrameFresh(false, 0));
+  // Frames coming at 1..1000 fps are fresh.
+  assert(autoRangeFrameFresh(true, 0));
+  assert(autoRangeFrameFresh(true, 1000));
+  assert(autoRangeFrameFresh(true, kAutoRangeFrameStaleMs));
+  // Scan stopped: a stale saturation mask must not keep lowering Vref.
+  assert(!autoRangeFrameFresh(true, kAutoRangeFrameStaleMs + 1));
+  assert(!autoRangeFrameFresh(true, 60000));
+  assert(kAutoRangeFrameStaleMs >= 1000 && kAutoRangeFrameStaleMs <= 2000);
+}
+
+void testRfbFitTop() {
+  const float limit = static_cast<float>(kVrefDefaultLimitMv);
+  const float strap = static_cast<float>(kRfbFitMaxVrefMv);
+  // Small Rfb: 2.6 V / (1 + 5k/10k) = 1733 mV, capped by the 700 mV limit.
+  assert(near(rfbFitTopMv(5000.0f, limit, strap), 700.0f, 0.01f));
+  // Operator raised the limit to 2 V: still capped below the 0.8 V strap risk.
+  assert(rfbFitTopMv(5000.0f, 2000.0f, strap) < static_cast<float>(kVrefStrapRiskMv));
+  assert(near(rfbFitTopMv(5000.0f, 2000.0f, strap), strap, 0.01f));
+  // Large Rfb: the rail wins (2.6 V / (1 + 390k/10k) = 65 mV).
+  assert(near(rfbFitTopMv(390000.0f, limit, strap), 65.0f, 0.1f));
+  // 47k: 2600 / 5.7 = 456 mV, below every cap.
+  assert(near(rfbFitTopMv(47000.0f, 2000.0f, strap), 456.14f, 0.1f));
+  // Whatever the inputs, the top never reaches the strap risk.
+  for (float rfb = 0.0f; rfb <= 200000.0f; rfb += 1000.0f) {
+    for (float lim = 330.0f; lim <= 2000.0f; lim += 170.0f) {
+      assert(rfbFitTopMv(rfb, lim, strap) < static_cast<float>(kVrefStrapRiskMv));
+    }
+  }
+}
+
 int main() {
   testRfbFromCalibration();
   testVirtualize();
@@ -128,6 +184,9 @@ int main() {
   testOffsets();
   testSaturation();
   testAutoRange();
+  testReadingMean();
+  testAutoRangeStaleFrames();
+  testRfbFitTop();
   std::cout << "range math tests passed\n";
   return 0;
 }

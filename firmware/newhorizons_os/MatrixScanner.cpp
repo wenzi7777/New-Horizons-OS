@@ -87,27 +87,36 @@ float MatrixScanner::readCompensatedMv(size_t rowIndex, size_t colIndex, uint16_
   return range_->process(rowIndex, colIndex, cols_[colIndex], raw);
 }
 
-bool MatrixScanner::readIdleRows(float* outMv, size_t rows, uint8_t samples) {
-  if (!outMv || rows == 0 || rows > rowCount_ || samples == 0) {
+bool MatrixScanner::readIdleRows(float* outMv, bool* rowOk, size_t rows, uint8_t samples) {
+  if (!outMv || !rowOk || rows == 0 || rows > rowCount_ || samples == 0) {
     return false;
   }
   setAllColsInactive();
   delayMicroseconds(settleUs_ > 50 ? settleUs_ : 50);
   for (size_t r = 0; r < rows; ++r) {
-    float total = 0.0f;
+    // A failed read (ADC2 lost to Wi-Fi) is skipped, not averaged in as 0 mV;
+    // a row with no good read at all is reported as failed.
+    ReadingMean mean;
     for (uint8_t s = 0; s < samples; ++s) {
-      // kMaxSensors as the cell index: a failed read must not pick up a stale
-      // sensor value (readCellMv holds the last value for a real index).
-      total += readCellMv(r, kMaxSensors);
+      bool good = true;
+      // kMaxSensors as the cell index: no last-value hold for a failed read.
+      const float mv = readCellMv(r, kMaxSensors, &good);
+      mean.add(good, mv);
     }
-    outMv[r] = total / static_cast<float>(samples);
+    rowOk[r] = mean.mean(outMv[r]);
+    if (!rowOk[r]) {
+      outMv[r] = 0.0f;
+    }
   }
   return true;
 }
 
 // One row's reading for the column currently driven, in mV. cellIndex is the
 // column-major sensor index, for holding the last value over a failed read.
-float MatrixScanner::readCellMv(size_t rowIndex, uint16_t cellIndex) {
+float MatrixScanner::readCellMv(size_t rowIndex, uint16_t cellIndex, bool* ok) {
+  if (ok) {
+    *ok = true;
+  }
   const uint8_t pin = rows_[rowIndex];
 #if defined(ESP_ARDUINO_VERSION_MAJOR)
   const uint8_t unit = pin >= kFirstAdc2Gpio ? 1 : 0;
@@ -120,6 +129,9 @@ float MatrixScanner::readCellMv(size_t rowIndex, uint16_t cellIndex) {
   const uint16_t raw = analogRead(pin);
   if (raw > adc_curve::kMaxRaw) {
     ++adcReadErrors_[unit];
+    if (ok) {
+      *ok = false;
+    }
     return cellIndex < kMaxSensors ? lastCellMv_[cellIndex] : 0.0f;
   }
   const float mv = static_cast<float>(adc_curve::rawToMv(static_cast<adc_curve::Unit>(unit), digi, raw));

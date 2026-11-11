@@ -68,4 +68,42 @@ inline bool isSaturatedMv(float voutMv) { return voutMv >= kSaturationMv; }
 float autoRangeNextVrefMv(float currentVrefMv, size_t saturatedRows, uint32_t quietMs,
                           float safeVrefMv, float minVrefMv);
 
+// Auto range acts on the last frame's saturation mask only while frames keep
+// coming: once the scan has stopped (or stalled) for this long the mask is
+// stale and Vref is left where it is. 1.5 s: the slowest scan (1 fps) still
+// counts as running.
+static constexpr uint32_t kAutoRangeFrameStaleMs = 1500;
+// frameAgeMs: time since the last endFrame; haveFrame false = none yet.
+inline bool autoRangeFrameFresh(bool haveFrame, uint32_t frameAgeMs) {
+  return haveFrame && frameAgeMs <= kAutoRangeFrameStaleMs;
+}
+
+// Mean of the ADC reads that succeeded (ADC2 loses reads to Wi-Fi; a failed
+// read is skipped, not counted as 0 mV). mean() is false when none succeeded.
+struct ReadingMean {
+  float total = 0.0f;
+  uint32_t good = 0;
+  uint32_t failed = 0;
+  void add(bool ok, float mv) {
+    if (ok) {
+      total += mv;
+      ++good;
+    } else {
+      ++failed;
+    }
+  }
+  bool mean(float& out) const {
+    if (good == 0) {
+      return false;
+    }
+    out = total / static_cast<float>(good);
+    return true;
+  }
+};
+
+// rfb_measure: the highest Vref of the fit. Where the largest Rfb stays off the
+// rail (about 2.6 V out), but never above the operator's limit nor at or above
+// strapCeilingMv (GPIO45 strap: Vref must stay below about 0.8 V).
+float rfbFitTopMv(float biggestRfbOhm, float limitMv, float strapCeilingMv);
+
 }  // namespace nhos

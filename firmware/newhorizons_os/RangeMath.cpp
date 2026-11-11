@@ -105,4 +105,11 @@ float autoRangeNextVrefMv(float currentVrefMv, size_t saturatedRows, uint32_t qu
   return currentVrefMv;
 }
 
+float rfbFitTopMv(float biggestRfbOhm, float limitMv, float strapCeilingMv) {
+  float top = biggestRfbOhm > 0.0f ? 2600.0f / (1.0f + biggestRfbOhm / kCalResistorOhm) : 2600.0f;
+  top = top > limitMv ? limitMv : top;
+  top = top > strapCeilingMv ? strapCeilingMv : top;
+  return top < 0.0f ? 0.0f : top;
+}
+
 }  // namespace nhos

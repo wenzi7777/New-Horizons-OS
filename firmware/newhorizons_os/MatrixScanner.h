@@ -90,8 +90,10 @@ class MatrixScanner {
   // v2.0.F: leak / virtual-Rfb correction applied to every row reading.
   void setRangeCompensator(RangeCompensator* range) { range_ = range; }
   // Every column released, so a row reads its op-amp alone (Rfb measurement):
-  // the mean of `samples` reads per row, in millivolts.
-  bool readIdleRows(float* outMv, size_t rows, uint8_t samples);
+  // the mean of the successful reads out of `samples` per row, in millivolts.
+  // rowOk[r] is false when every read of that row failed (ADC2 vs Wi-Fi).
+  // Returns false only for bad arguments.
+  bool readIdleRows(float* outMv, bool* rowOk, size_t rows, uint8_t samples);
   void setStreamRawAdc(bool enabled) { streamRawAdc_ = enabled; }
   bool scanDue() const;
   size_t scanIntoPacketPayload(uint8_t* out, size_t capacity, MatrixFrame& frame);
@@ -125,7 +127,8 @@ class MatrixScanner {
   };
 
   void loadAdcCalibration();
-  float readCellMv(size_t rowIndex, uint16_t cellIndex);
+  // ok (optional) is set false when the ADC read failed.
+  float readCellMv(size_t rowIndex, uint16_t cellIndex, bool* ok = nullptr);
   // readCellMv() through the range compensator (when there is one).
   float readCompensatedMv(size_t rowIndex, size_t colIndex, uint16_t cellIndex);
   bool sampleRawFrame(float* outValues, size_t count);
