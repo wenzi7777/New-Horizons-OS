@@ -66,7 +66,6 @@ class FindMeClient {
   bool extractJsonBool(const String& json, const char* key, bool fallback) const;
 
   void respondToProbe(const IPAddress& host);
-  String encodeDiscoverJsonWithCurrentGateway() const;
 
   Storage* storage_ = nullptr;
   WifiManager* wifi_ = nullptr;
