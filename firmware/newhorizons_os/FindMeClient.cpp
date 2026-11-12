@@ -174,7 +174,12 @@ bool FindMeClient::ensureUdp() {
 }
 
 void FindMeClient::sendDiscover() {
-  String payload = encodeDiscoverJson();
+  // While attached (and not leaving it), name the relay and the priority it
+  // was taken at: the owner of a device then knows whether another relay took
+  // it over (owner priority) or only picked it up while the owner was away.
+  // Not while that relay is lost or a transfer runs: other relays must offer.
+  const bool named = hasGateway() && !transferActive() && !offerPolicy_.currentGatewayLost();
+  String payload = encodeDiscoverJson(named);
   if (payload.isEmpty()) {
     lastError_ = "findme_encode_failed";
     nextDiscoverMs_ = millis() + kDiscoverIntervalMs;
@@ -191,7 +196,7 @@ void FindMeClient::sendDiscover() {
   }
   lastDiscoverMs_ = millis();
   offerPolicy_.onRoundStart(hasGateway());
-  acceptedThisRound_ = false;
+  hasCandidate_ = false;
   nextDiscoverMs_ = lastDiscoverMs_ + kDiscoverIntervalMs;
   state_ = "discovering";
   Serial.println(F("findme_discover_sent"));
@@ -224,7 +229,7 @@ void FindMeClient::respondToProbe(const IPAddress& host) {
     return;
   }
   lastProbeResponseMs_ = now;
-  const String payload = encodeDiscoverJsonWithCurrentGateway();
+  const String payload = encodeDiscoverJson(attachedThisBoot_ && !gatewayId_.isEmpty());
   if (payload.isEmpty()) {
     return;
   }
@@ -258,6 +263,10 @@ void FindMeClient::readOffers() {
     if (!offer.valid) {
       continue;
     }
+    if (offer.version < kFindMeMinOfferVersion) {
+      // The retired Python NH Gateway: never attach to it.
+      continue;
+    }
     const bool transferring = transferActive();
     if (transferring && offer.gatewayId != preferredGatewayId_) {
       continue;
@@ -271,27 +280,46 @@ void FindMeClient::readOffers() {
       lastError_ = "findme_transfer_offer_mismatch";
       continue;
     }
-    // One Gateway per round, and it stays. Before, every offer inside the
-    // read window was taken and so was any equal-priority one outside it, so
-    // with two Gateways on the LAN the device attached to the first and moved
-    // to the second 80ms later -- and the first frames to a new host can fail
-    // while its address resolves, which flashed ScanWarning on some boots.
-    // And once attached it stays: the current Gateway refreshing itself, the
-    // Gateway a transfer asked for, or -- only after the current Gateway has
-    // missed 3 rounds (~9 s) -- the first offer of a round. Taking the first
-    // offer of every round, or any higher priority, let two hosts (NH Studio
-    // and NH Pocket) trade the device on reply timing. FindMeOfferPolicy.h.
-    const bool inWindow = (millis() - lastDiscoverMs_) <= kOfferReadWindowMs;
-    const bool sameGateway = hasGateway() && offer.gatewayId == gatewayId_;
-    const bool firstOfRound = inWindow && !acceptedThisRound_;
-    if (offerPolicy_.shouldAccept(hasGateway(), transferring, sameGateway, firstOfRound)) {
+    const bool attached = hasGateway();
+    const bool sameGateway = attached && offer.gatewayId == gatewayId_;
+    // The Gateway a transfer asked for, or the current one refreshing itself:
+    // taken at once (FindMeOfferPolicy.h).
+    if (transferring || sameGateway) {
       acceptOffer(offer, udp_.remoteIP());
       offerPolicy_.onAccepted();
-      if (inWindow) {
-        acceptedThisRound_ = true;
-      }
+      continue;
+    }
+    // Choosing a relay (not attached, or the current one is gone): collect
+    // the round's offers and take the best when the read window closes.
+    if (!offerPolicy_.shouldAccept(attached, false, false, true)) {
+      continue;
+    }
+    FindMeOfferRank rank;
+    rank.priority = offer.priority;
+    rank.upstreamOnline = offer.upstreamOnline;
+    rank.rttMs = findMeOfferRtt(lastDiscoverMs_, millis(), offer.heldMs);
+    rank.servedDevices = offer.servedDevices;
+    if (!hasCandidate_ || findMeOfferBetter(rank, candidateRank_)) {
+      hasCandidate_ = true;
+      candidate_ = offer;
+      candidateHost_ = udp_.remoteIP();
+      candidateRank_ = rank;
     }
   }
+  finishChoosing();
+}
+
+void FindMeClient::finishChoosing() {
+  if (!hasCandidate_ || (millis() - lastDiscoverMs_) <= kOfferReadWindowMs) {
+    return;
+  }
+  hasCandidate_ = false;
+  // Attached meanwhile (a transfer, or the old relay came back): keep that.
+  if (hasGateway() && !offerPolicy_.currentGatewayLost()) {
+    return;
+  }
+  acceptOffer(candidate_, candidateHost_);
+  offerPolicy_.onAccepted();
 }
 
 void FindMeClient::acceptOffer(const Offer& offer, const IPAddress& host) {
@@ -370,6 +398,12 @@ FindMeClient::Offer FindMeClient::decodeOffer(const uint8_t* data, size_t len) c
   offer.priority = extractJsonInt(json, "priority", 0);
   int32_t ttl = extractJsonInt(json, "ttl_ms", 0);
   offer.ttlMs = static_cast<uint32_t>(ttl > 0 ? ttl : 0);
+  offer.version = extractJsonInt(json, "version", 0);
+  offer.upstreamOnline = extractJsonString(json, "upstream_status") == "online";
+  const int32_t served = extractJsonInt(json, "served_devices", 0);
+  offer.servedDevices = static_cast<uint32_t>(served > 0 ? served : 0);
+  const int32_t held = extractJsonInt(json, "held_ms", 0);
+  offer.heldMs = static_cast<uint32_t>(held > 0 ? held : 0);
   return offer;
 }
 
@@ -392,7 +426,7 @@ String FindMeClient::jsonEscape(const String& value) const {
   return out;
 }
 
-String FindMeClient::encodeDiscoverJson() const {
+String FindMeClient::encodeDiscoverJson(bool withCurrentGateway) const {
   const String uid = deviceUidString();
   String out = "{";
   out += "\"type\":\"findme_discover\"";
@@ -418,22 +452,13 @@ String FindMeClient::encodeDiscoverJson() const {
     out += jsonEscape(claimId_);
     out += "\"";
   }
-  out += "}";
-  return out;
-}
-
-String FindMeClient::encodeDiscoverJsonWithCurrentGateway() const {
-  String out = encodeDiscoverJson();
-  if (out.isEmpty() || !attachedThisBoot_ || gatewayId_.isEmpty()) {
-    return out;
-  }
-  // Remove closing brace and append current_gateway_id before closing.
-  if (out.endsWith("}")) {
-    out.remove(out.length() - 1);
+  if (withCurrentGateway && !gatewayId_.isEmpty()) {
     out += ",\"current_gateway_id\":\"";
     out += jsonEscape(gatewayId_);
-    out += "\"}";
+    out += "\",\"current_priority\":";
+    out += String(priority_);
   }
+  out += "}";
   return out;
 }
 

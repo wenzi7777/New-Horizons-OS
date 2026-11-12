@@ -36,6 +36,36 @@ Ports (`wire.json` → `ports`):
 | 22345/tcp | control, one JSON request per connection (local tools) |
 | 22346/udp | FindMe: device discovery of Gateways |
 
+### FindMe: choosing a relay, and who owns a device
+
+Every 3 s the device broadcasts `findme_discover`; relays (NH Studio, NH Pocket,
+NH Studio headless) and the Desktop server answer with `findme_offer`. Offer
+`version` 2 adds `served_devices` (the relay's load) and, when the relay held its
+answer back on purpose, `held_ms`. The device ignores offers below version 2:
+the retired Python NH Gateway sent 1.
+
+- **Attached** (its relay answered within the last 3 rounds): the device stays.
+  Only its own relay refreshing, or a transfer it was asked to make
+  (`findme_switch_gateway` + matching `claim_id`), is taken.
+- **Choosing** (not attached, or its relay missed 3 rounds, ~9 s): every offer of
+  the 600 ms read window is collected and the best is taken
+  (`FindMeOfferSelect.h`), in this order:
+  1. `priority`, highest first. A relay's base is 100; the device's **owner** —
+     the relay that adopted it, or took it over last — offers at 200 or more; a
+     live claim adds 10000.
+  2. `upstream_status` `"online"` first.
+  3. RTT (discover sent → offer received, minus `held_ms`), lowest first; RTTs
+     within 30 ms count as equal…
+  4. …then fewer `served_devices`.
+
+While attached (and not transferring), `findme_discover` and the probe answer
+carry `current_gateway_id` and `current_priority` (the priority it attached
+at). A relay that owns the device and sees it attached elsewhere:
+`current_priority` ≥ 200 means another relay took it over — the owner yields
+(keeps it listed as taken over, offers only as a fallback); below 200 means a
+relay only picked it up while the owner was away — the owner takes it back.
+Without `current_priority` (older firmware) a relay treats it as a takeover.
+
 ## 2. Control commands
 
 ### Request

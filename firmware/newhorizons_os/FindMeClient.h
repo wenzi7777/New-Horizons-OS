@@ -5,6 +5,7 @@
 
 #include "Config.h"
 #include "FindMeOfferPolicy.h"
+#include "FindMeOfferSelect.h"
 #include "Storage.h"
 #include "WifiManager.h"
 
@@ -40,6 +41,11 @@ class FindMeClient {
     uint16_t udpPort = kUdpStreamPort;
     int priority = 0;
     uint32_t ttlMs = 0;
+    int32_t version = 0;
+    bool upstreamOnline = false;
+    uint32_t servedDevices = 0;
+    // How long the relay held this answer back on purpose (not network delay).
+    uint32_t heldMs = 0;
   };
 
   bool ensureUdp();
@@ -53,7 +59,8 @@ class FindMeClient {
   Offer decodeOffer(const uint8_t* data, size_t len) const;
   String deviceUidString() const;
   String jsonEscape(const String& value) const;
-  String encodeDiscoverJson() const;
+  String encodeDiscoverJson(bool withCurrentGateway) const;
+  void finishChoosing();
   String extractJsonString(const String& json, const char* key) const;
   int32_t extractJsonInt(const String& json, const char* key, int32_t fallback) const;
   bool extractJsonBool(const String& json, const char* key, bool fallback) const;
@@ -82,8 +89,12 @@ class FindMeClient {
   uint16_t seq_ = 1;
   uint32_t nextDiscoverMs_ = 0;
   uint32_t lastDiscoverMs_ = 0;
-  // Whether an offer was already taken in the current discovery round.
-  bool acceptedThisRound_ = false;
+  // The best offer of the current round while choosing a relay
+  // (FindMeOfferSelect.h); taken once the read window closes.
+  bool hasCandidate_ = false;
+  Offer candidate_;
+  IPAddress candidateHost_;
+  FindMeOfferRank candidateRank_;
   // Sticks an attached device to its Gateway (see FindMeOfferPolicy.h).
   FindMeOfferPolicy offerPolicy_;
   uint32_t attachGeneration_ = 0;

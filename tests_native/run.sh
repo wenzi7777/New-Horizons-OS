@@ -105,6 +105,13 @@ done
 
 "$BUILD_DIR/test_findme_offer_policy"
 
+"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_findme_offer_select.cpp" \
+  "$FIRMWARE_DIR/FindMeOfferSelect.cpp" \
+  -o "$BUILD_DIR/test_findme_offer_select"
+
+"$BUILD_DIR/test_findme_offer_select"
+
 "$BUILD_DIR/test_action_button_policy"
 
 "$CXX" -std=c++17 -Wall -Wextra -Werror -I"$CORE_DIR" \

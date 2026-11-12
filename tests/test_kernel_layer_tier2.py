@@ -496,16 +496,30 @@ class GatewayAttachTests(unittest.TestCase):
         # from the first Gateway to answer to the second 80ms later.
         findme = read("FindMeClient.cpp")
         read_offers = findme[findme.index("void FindMeClient::readOffers") : findme.index("void FindMeClient::acceptOffer")]
-        # v1.20.0: priority no longer steals an attached device; the first
-        # offer of a round only counts once the current Gateway is gone
+        # v1.20.0: priority no longer steals an ATTACHED device: only a
+        # transfer or the current relay refreshing is taken at once
         # (FindMeOfferPolicy, tests_native/test_findme_offer_policy.cpp).
-        self.assertNotIn("offer.priority", read_offers)
-        self.assertIn("inWindow && !acceptedThisRound_", read_offers)
-        self.assertIn("offerPolicy_.shouldAccept(hasGateway(), transferring, sameGateway, firstOfRound)", read_offers)
+        self.assertIn("if (transferring || sameGateway) {", read_offers)
+        self.assertIn("offerPolicy_.shouldAccept(attached, false, false, true)", read_offers)
         self.assertIn("offerPolicy_.onAccepted();", read_offers)
+        # Relay ownership: while choosing, the round's offers are collected and
+        # the best one (priority, upstream, RTT, load) is taken when the read
+        # window closes (FindMeOfferSelect, test_findme_offer_select.cpp);
+        # offers below version 2 (the retired Python Gateway) are ignored.
+        self.assertIn("findMeOfferBetter(rank, candidateRank_)", read_offers)
+        self.assertIn("offer.version < kFindMeMinOfferVersion", read_offers)
+        self.assertIn("(millis() - lastDiscoverMs_) <= kOfferReadWindowMs", read_offers)
         discover = findme[findme.index("lastDiscoverMs_ = millis();") :][:160]
         self.assertIn("offerPolicy_.onRoundStart(hasGateway());", discover)
-        self.assertIn("acceptedThisRound_ = false;", discover)
+        self.assertIn("hasCandidate_ = false;", discover)
+
+    def test_discover_names_the_current_relay_and_its_priority(self):
+        findme = read("FindMeClient.cpp")
+        send = findme[findme.index("void FindMeClient::sendDiscover") : findme.index("bool FindMeClient::sendDiscoverTo")]
+        # Not while the relay is lost or a transfer runs: others must offer then.
+        self.assertIn("hasGateway() && !transferActive() && !offerPolicy_.currentGatewayLost()", send)
+        encode = findme[findme.index("String FindMeClient::encodeDiscoverJson") :]
+        self.assertIn('\\"current_priority\\":', encode)
 
     def test_a_new_attachment_is_counted(self):
         findme = read("FindMeClient.cpp")
