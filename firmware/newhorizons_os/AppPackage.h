@@ -62,7 +62,7 @@ inline AppPackageKind appPackageKindFromName(const String& name) {
 class AppPackage {
  public:
   // Validates the manifest block only. Does NOT parse the graph -- that stays
-  // in FlowApp, which is the only thing that knows what a graph costs.
+  // in AppVm, which is the only thing that knows what an image costs.
   static bool parseManifest(const String& json, AppPackageManifest& out, String& error);
 
   // Registry-side id rules, enforced here so install and reindex agree.

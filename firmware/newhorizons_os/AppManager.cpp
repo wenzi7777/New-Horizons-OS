@@ -315,6 +315,7 @@ void AppManager::dispatch(const AppEvent& event) {
       delivered.linked = false;
     }
     delivered.host = this;
+    delivered.sliceUs = slot.allocatedUs != 0 ? slot.allocatedUs : manifest.frameBudgetUs;
 
     const uint32_t startedUs = micros();
     slot.app->onEvent(delivered);

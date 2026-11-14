@@ -1,6 +1,20 @@
 #include "FlowMath.h"
 
 #include <math.h>
+#if defined(ESP_PLATFORM)
+#include "esp_attr.h"
+#define VM_HOT IRAM_ATTR
+#else
+#define VM_HOT
+#endif
+
+// Bit-for-bit agreement with the App Library's JavaScript VM: no fused
+// multiply-add (GCC fuses by default for GNU C++, the JS side never does).
+#if defined(__clang__)
+#pragma STDC FP_CONTRACT OFF
+#elif defined(__GNUC__)
+#pragma GCC optimize("fp-contract=off")
+#endif
 
 namespace nhos {
 namespace {
@@ -9,7 +23,7 @@ constexpr float kRadToDeg = 57.29578f;
 
 }  // namespace
 
-FlowSpan flowResolveSpan(uint8_t a, uint8_t b, bool relative, uint16_t count) {
+VM_HOT FlowSpan flowResolveSpan(uint8_t a, uint8_t b, bool relative, uint16_t count) {
   if (!relative) {
     return {a, b};
   }
@@ -30,7 +44,7 @@ float flowSqrt(float x) { return x > 0 ? sqrtf(x) : 0.0f; }
 
 float flowAtan2Deg(float y, float x) { return atan2f(y, x) * kRadToDeg; }
 
-float flowImuField(const float* s, uint8_t field) {
+VM_HOT float flowImuField(const float* s, uint8_t field) {
   const float ax = s[0];
   const float ay = s[1];
   const float az = s[2];
@@ -51,7 +65,7 @@ float flowImuField(const float* s, uint8_t field) {
   }
 }
 
-float flowMagField(const float* s, uint8_t field) {
+VM_HOT float flowMagField(const float* s, uint8_t field) {
   const float mx = s[0];
   const float my = s[1];
   const float mz = s[2];

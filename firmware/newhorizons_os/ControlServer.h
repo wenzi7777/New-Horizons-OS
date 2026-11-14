@@ -31,7 +31,7 @@
 #include "AppGovernor.h"
 #include "AppRegistry.h"
 #include "CommandRegistry.h"
-#include "FlowApp.h"
+#include "AppVm.h"
 #include "Scheduler.h"
 #include "ThreadMonitor.h"
 #include "ServiceManager.h"
@@ -91,7 +91,7 @@ class ControlServer {
   void setPowerGovernor(PowerGovernor* governor) { governor_ = governor; }
   void setVrefManager(VrefManager* vref) { vref_ = vref; }
   void setRangeCompensator(RangeCompensator* range) { range_ = range; }
-  void setAppManager(AppManager* apps, FlowApp* flow, AppRegistry* registry,
+  void setAppManager(AppManager* apps, AppVm* flow, AppRegistry* registry,
                      AppGovernor* governor) {
     apps_ = apps;
     flow_ = flow;
@@ -292,7 +292,7 @@ class ControlServer {
   ClockService* clock_ = nullptr;
   PowerGovernor* governor_ = nullptr;
   AppManager* apps_ = nullptr;
-  FlowApp* flow_ = nullptr;
+  AppVm* flow_ = nullptr;
   AppRegistry* appRegistry_ = nullptr;
   AppGovernor* appGovernor_ = nullptr;
   // Holds the previous run-time counters, so CPU shares are per-interval.

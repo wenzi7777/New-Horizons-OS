@@ -7,6 +7,7 @@
 // sent the command.
 #include "ControlServer.h"
 
+#include "HeapWatermark.h"
 #include "JsonUtils.h"
 
 namespace nhos {
@@ -22,6 +23,8 @@ String ControlServer::memoryJson() const {
   data += heapTotal > heapFree ? heapTotal - heapFree : 0;
   data += ",\"heap_largest_free_block\":";
   data += ESP.getMaxAllocHeap();
+  data += ",\"heap_min_largest_free_block\":";
+  data += HeapWatermark::minLargestFreeBlock();
   data += ",\"heap_min_free\":";
   data += ESP.getMinFreeHeap();
   data += "}";

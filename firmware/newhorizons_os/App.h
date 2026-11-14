@@ -100,6 +100,10 @@ struct AppEvent {
   // overruns this app has before it is stopped.
   float load = 0.0f;
   uint8_t graceLeft = 0;
+  // The app's time allocation for this delivery (AppManager's share, or the
+  // manifest's budget). An app that can stop part-way -- AppVm -- suspends
+  // itself before running past it; 0 means use the manifest's.
+  uint32_t sliceUs = 0;
 };
 
 // An application: its own lifecycle, declared permissions, measured cost, and

@@ -32,8 +32,9 @@
 #include "VrefManager.h"
 #include "BatteryIdReader.h"
 #include "AppGovernor.h"
+#include "HeapWatermark.h"
 #include "AppRegistry.h"
-#include "FlowApp.h"
+#include "AppVm.h"
 #include "PowerManager.h"
 #include "PowerStateManager.h"
 #include "ProcFs.h"
@@ -73,8 +74,8 @@ nhos::ServiceManager services;
 nhos::AppManager apps;
 nhos::AppGovernor appGovernor;
 nhos::AppRegistry appRegistry;
-nhos::FlowApp flowApps[nhos::AppRegistry::kMaxSlots];
-nhos::FlowApp& flowApp = flowApps[0];  // slot 0, the target of app_load_flow
+nhos::AppVm flowApps[nhos::AppRegistry::kMaxSlots];
+nhos::AppVm& flowApp = flowApps[0];  // slot 0, the target of app_load_flow
 // The last scanned frame, kept at file scope so the apps task can read it
 // after scan_stream has returned. Single-threaded, so this is a handover, not
 // sharing -- and it is the same buffer the scanner filled, not a copy.
@@ -798,6 +799,7 @@ bool runtimeGate() {
 void taskServices() { services.service(millis()); }
 
 void taskLifetime() {
+  nhos::HeapWatermark::sample();
   const bool awake = powerState.shouldRunServices();
   // Only a drop while awake counts: soft-off suspends WiFi on purpose.
   static bool wifiWasConnected = false;
@@ -1302,7 +1304,7 @@ void setup() {
         scanner.health().pointCount != 0 ? scanner.health().pointCount : nhos::kMaxSensors;
     static const char* kSlotNames[nhos::AppRegistry::kMaxSlots] = {"flow", "flow1", "flow2",
                                                                    "flow3"};
-    nhos::FlowApp* slotPtrs[nhos::AppRegistry::kMaxSlots];
+    nhos::AppVm* slotPtrs[nhos::AppRegistry::kMaxSlots];
     for (uint8_t i = 0; i < nhos::AppRegistry::kMaxSlots; ++i) {
       flowApps[i].attach(storage);
       // MUST precede install(): install() indexes by name and persists

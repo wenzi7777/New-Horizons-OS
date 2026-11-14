@@ -51,7 +51,7 @@ class NvsKeyLengthTests(unittest.TestCase):
 
     def test_dynamic_keys_stay_bounded(self):
         # Keys built at runtime: prefix + a bounded suffix.
-        flow = (ROOT / "firmware" / "newhorizons_os" / "FlowApp.cpp").read_text(encoding="utf-8")
+        flow = (ROOT / "firmware" / "newhorizons_os" / "AppVm.cpp").read_text(encoding="utf-8")
         self.assertIn('String key = "pc_";', flow)
         self.assertIn("substring(0, 12)", flow)  # 3 + 12 = 15
         apps = (ROOT / "firmware" / "newhorizons_os" / "AppManager.cpp").read_text(encoding="utf-8")

@@ -261,4 +261,238 @@ static constexpr FlowColour kFlowColours[] = {
     {"off", {0, 0, 0}},
 };
 
+// NHVM/1. Opcodes are the index into kVmOps; APPEND only.
+static constexpr uint8_t kVmImageVersion = 1;
+static constexpr uint8_t kVmHeaderBytes = 20;
+static constexpr uint16_t kVmMaxCode = 8192;
+static constexpr uint16_t kVmMaxConsts = 512;
+static constexpr uint16_t kVmMaxArena = 1536;
+static constexpr uint8_t kVmMaxStack = 64;
+static constexpr uint8_t kVmMaxFunctions = 32;
+static constexpr uint8_t kVmMaxStrings = 32;
+static constexpr uint8_t kVmMaxString = 23;
+static constexpr uint8_t kVmMaxCallDepth = 8;
+static constexpr uint8_t kVmMaxNodes = 32;
+static constexpr uint16_t kVmFuelCheck = 64;
+static constexpr uint32_t kVmStarvedMs = 5000;
+static constexpr uint16_t kVmInsnNs = 80;
+enum class VmOp : uint8_t {
+  End = 0,
+  Pushk = 1,
+  Push0 = 2,
+  Push1 = 3,
+  Pop = 4,
+  Dup = 5,
+  Swap = 6,
+  Loadg = 7,
+  Storeg = 8,
+  Loadl = 9,
+  Storel = 10,
+  Aload = 11,
+  Astore = 12,
+  Add = 13,
+  Sub = 14,
+  Mul = 15,
+  Div = 16,
+  Mod = 17,
+  Neg = 18,
+  Abs = 19,
+  Min = 20,
+  Max = 21,
+  Floor = 22,
+  Sqrt = 23,
+  Atan2 = 24,
+  Clamp = 25,
+  Lt = 26,
+  Le = 27,
+  Gt = 28,
+  Ge = 29,
+  Eq = 30,
+  Ne = 31,
+  Not = 32,
+  And = 33,
+  Or = 34,
+  Band = 35,
+  Bor = 36,
+  Bxor = 37,
+  Shl = 38,
+  Shr = 39,
+  Jmp = 40,
+  Jz = 41,
+  Jnz = 42,
+  Call = 43,
+  Ret = 44,
+  Nat = 45,
+  Sys = 46,
+  Degraded = 47,
+};
+static constexpr uint8_t kVmOpCount = 48;
+// Operand layout: 0 none, 1 u8, 2 u16, 3 i16, 4 u16 u16, 5 nat (u8 u16 u16).
+struct VmOpInfo {
+  const char* name;
+  uint8_t operands;
+  uint8_t size;   // bytes with the opcode
+  int8_t pops;    // -1: depends on the operand
+  int8_t pushes;
+};
+static constexpr VmOpInfo kVmOps[kVmOpCount] = {
+    {"end", 0, 1, 0, 0},
+    {"pushk", 2, 3, 0, 1},
+    {"push0", 0, 1, 0, 1},
+    {"push1", 0, 1, 0, 1},
+    {"pop", 0, 1, 1, 0},
+    {"dup", 0, 1, 1, 2},
+    {"swap", 0, 1, 2, 2},
+    {"loadg", 2, 3, 0, 1},
+    {"storeg", 2, 3, 1, 0},
+    {"loadl", 1, 2, 0, 1},
+    {"storel", 1, 2, 1, 0},
+    {"aload", 4, 5, 1, 1},
+    {"astore", 4, 5, 2, 0},
+    {"add", 0, 1, 2, 1},
+    {"sub", 0, 1, 2, 1},
+    {"mul", 0, 1, 2, 1},
+    {"div", 0, 1, 2, 1},
+    {"mod", 0, 1, 2, 1},
+    {"neg", 0, 1, 1, 1},
+    {"abs", 0, 1, 1, 1},
+    {"min", 0, 1, 2, 1},
+    {"max", 0, 1, 2, 1},
+    {"floor", 0, 1, 1, 1},
+    {"sqrt", 0, 1, 1, 1},
+    {"atan2", 0, 1, 2, 1},
+    {"clamp", 0, 1, 3, 1},
+    {"lt", 0, 1, 2, 1},
+    {"le", 0, 1, 2, 1},
+    {"gt", 0, 1, 2, 1},
+    {"ge", 0, 1, 2, 1},
+    {"eq", 0, 1, 2, 1},
+    {"ne", 0, 1, 2, 1},
+    {"not", 0, 1, 1, 1},
+    {"and", 0, 1, 2, 1},
+    {"or", 0, 1, 2, 1},
+    {"band", 0, 1, 2, 1},
+    {"bor", 0, 1, 2, 1},
+    {"bxor", 0, 1, 2, 1},
+    {"shl", 0, 1, 2, 1},
+    {"shr", 0, 1, 2, 1},
+    {"jmp", 3, 3, 0, 0},
+    {"jz", 3, 3, 1, 0},
+    {"jnz", 3, 3, 1, 0},
+    {"call", 2, 3, -1, -1},
+    {"ret", 1, 2, -1, -1},
+    {"nat", 5, 6, -1, 1},
+    {"sys", 2, 3, -1, -1},
+    {"degraded", 0, 1, 0, 0},
+};
+
+// Handler entry points, by event id.
+enum class VmEvent : uint8_t {
+  Start = 0,
+  Frame = 1,
+  Tick = 2,
+  Button = 3,
+  Message = 4,
+  Budget = 5,
+  Stop = 6,
+  IdleTick = 7,
+};
+static constexpr uint8_t kVmEventCount = 8;
+
+// Why an app faulted; kVmFaultNames[code].
+static constexpr const char* kVmFaultNames[] = {
+    "none",
+    "array_bounds",
+    "stack_overflow",
+    "stack_underflow",
+    "bad_syscall_arg",
+    "capability_denied",
+    "native_fault",
+    "starved",
+    "bad_opcode",
+};
+
+// Native operators: the FlowOps a NAT instruction may run, with their
+// parameter-record length and state slots (a windowed op adds its window).
+struct VmNativeInfo {
+  uint8_t params;  // 0xFF: not a native op
+  uint8_t state;
+};
+static constexpr VmNativeInfo kVmNatives[kFlowOpCount] = {
+    {0xFF, 0},  // invalid
+    {0, 1},  // total
+    {0, 1},  // peak
+    {6, 1},  // region_sum
+    {1, 1},  // active_cells
+    {2, 1},  // threshold
+    {1, 3},  // debounce
+    {1, 2},  // emit
+    {0xFF, 0},  // const: plain instructions
+    {0xFF, 0},  // add: plain instructions
+    {0xFF, 0},  // sub: plain instructions
+    {0xFF, 0},  // mul: plain instructions
+    {0xFF, 0},  // div: plain instructions
+    {0xFF, 0},  // min: plain instructions
+    {0xFF, 0},  // max: plain instructions
+    {0xFF, 0},  // abs: plain instructions
+    {0xFF, 0},  // clamp: plain instructions
+    {1, 3},  // mean
+    {1, 3},  // max_hold
+    {0, 2},  // delta
+    {1, 3},  // integrate
+    {1, 2},  // counter
+    {0, 9},  // features
+    {0xFF, 0},  // feature_get: plain instructions
+    {0, 1},  // arg_max
+    {0, 1},  // row_centroid
+    {0, 1},  // col_centroid
+    {3, 2},  // led
+    {2, 2},  // emit_value
+    {0xFF, 0},  // select: plain instructions
+    {0xFF, 0},  // gate: plain instructions
+    {0, 1},  // budget_load
+    {0, 1},  // grace_left
+    {0xFF, 0},  // mod: plain instructions
+    {0, 1},  // button
+    {3, 1},  // oled_text
+    {4, 1},  // oled_bar
+    {4, 1},  // ext_pixel
+    {2, 1},  // ext_meter
+    {0xFF, 0},  // not: plain instructions
+    {0, 3},  // duration
+    {0, 4},  // interval
+    {0, 3},  // peak_since
+    {1, 3},  // counter_reset
+    {0xFF, 0},  // sqrt: plain instructions
+    {0xFF, 0},  // atan2: plain instructions
+    {6, 1},  // region_peak
+    {6, 1},  // region_active
+    {6, 1},  // region_row_centroid
+    {6, 1},  // region_col_centroid
+    {1, 1},  // imu
+    {1, 1},  // mag
+    {0, 1},  // battery
+    {0, 1},  // linked
+    {0, 1},  // uptime
+};
+
+// System calls, by id; APPEND only.
+struct VmSyscallInfo {
+  const char* name;
+  uint16_t capability;
+  uint8_t args;
+  uint8_t results;
+  uint8_t fuel;
+};
+static constexpr uint8_t kVmSyscallCount = 7;
+static constexpr VmSyscallInfo kVmSyscalls[kVmSyscallCount] = {
+    {"now_ms", kAppCapNone, 0, 1, 1},
+    {"frame_seq", kAppCapNone, 0, 1, 1},
+    {"rows", kAppCapReadMatrix, 0, 1, 1},
+    {"cols", kAppCapReadMatrix, 0, 1, 1},
+    {"cell", kAppCapReadMatrix, 2, 1, 2},
+    {"emit_value", kAppCapEmitEvent, 2, 0, 16},
+    {"log", kAppCapNone, 2, 0, 16},
+};
+
 }  // namespace nhos

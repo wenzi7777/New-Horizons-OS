@@ -427,7 +427,7 @@ class AppOutputArbitrationTests(unittest.TestCase):
     def test_the_led_op_no_longer_writes_the_pixel(self):
         # Until v1.7.0 it went straight to LedController::setStatus and the LED
         # task painted the system pattern back within 10ms.
-        flow = read("FlowApp.cpp")
+        flow = read("AppVm.cpp") + read("VmCore.cpp")
         sketch = read("newhorizons_os.ino")
         self.assertNotIn("host->setLed", flow)
         self.assertNotIn("applyAppLed", sketch)
@@ -586,42 +586,39 @@ class AppFrameworkTests(unittest.TestCase):
         self.assertIn("case AppEventKind::Imu: return kAppCapReadImu;", table)
 
     def test_flow_graph_cost_is_checked_before_it_ever_runs(self):
-        impl = read("FlowApp.cpp")
+        impl = read("AppVm.cpp")
+        load = impl[impl.index("bool AppVm::loadFromJson") : impl.index("bool AppVm::loadFromFile")]
+        # A rejected image must not disturb the one already running: it is
+        # verified and costed on a transient copy, BEFORE anything reaches the
+        # pool or the machine.
+        self.assertLess(load.index("decodeAndVerify("), load.index("AppVmPool::allocate"))
+        self.assertLess(load.index("withinBudget("), load.index("AppVmPool::allocate"))
+        self.assertLess(load.index("AppVmPool::allocate"), load.index("machine_.bind("))
+        self.assertIn("over_budget:", impl)
 
-        parse = impl[impl.index("bool FlowApp::parse(") : impl.index("bool FlowApp::loadFromFile")]
-        self.assertIn("estimateNodesUs(g_parseScratch, count, cellCount)", parse)
-        self.assertIn("over_budget:", parse)
-        # A rejected graph must not disturb the one already running: the cost
-        # is checked on the scratch copy, BEFORE anything reaches nodes_.
-        # (Until v1.3.0 the nodes were copied first and only the count was
-        # restored, so an over-budget load overwrote the running graph.)
-        self.assertLess(parse.index("over_budget:"), parse.index("nodes_[i] = g_parseScratch[i];"))
-
-    def test_flow_graphs_cannot_express_a_cycle(self):
-        impl = read("FlowApp.cpp")
-
-        parse = impl[impl.index("bool FlowApp::parseNodes") : impl.index("bool FlowApp::dryRun")]
-        self.assertIn("input_out_of_order", parse)
-        # Every reference, including the multi-input forms, is checked against
-        # the count of nodes parsed SO FAR.
-        self.assertEqual(parse.count("value >= count") + parse.count("input >= count"), 2)
+    def test_images_are_verified_before_they_run(self):
+        # The VM may loop (a time slice bounds it), but nothing reaches the
+        # interpreter without passing the verifier: jumps, stack depth, arena
+        # indices, capabilities.
+        core = read("VmCore.cpp")
+        verify = core[core.index("bool vmVerify(") : core.index("// --- machine")]
+        for reason in ("bad_jump", "stack_unbalanced_at_end", "arena_out_of_range", "capability_not_declared", "recursion"):
+            self.assertIn(reason, verify)
+        impl = read("AppVm.cpp")
+        self.assertIn("vmVerify(image.get()", impl)
 
     def test_threshold_has_hysteresis_so_events_do_not_chatter(self):
-        impl = read("FlowApp.cpp")
-
+        impl = read("VmCore.cpp")
         self.assertIn("releaseAt", impl)
-        self.assertIn("node.boolResult ? (input > releaseAt) : (input >= node.value)", impl)
+        self.assertIn("(latched ? a > releaseAt : a >= K(0))", impl)
 
     def test_gate_is_costed_at_its_worst_case(self):
-        impl = read("FlowApp.cpp")
-
-        estimate = impl[impl.index("uint32_t FlowApp::estimateUs") : impl.index("bool FlowApp::parse")]
-        # Costing the average would understate the bound on exactly the frames
-        # where the gate does not fire, so the estimator has no Gate case at
-        # all -- every node is charged as if it runs.
-        self.assertIn("never skips", estimate)
-        self.assertNotIn("FlowOp::Gate", estimate)
-
+        core = read("VmCore.cpp")
+        verify = core[core.index("bool vmVerify(") : core.index("// --- machine")]
+        # Every instruction is charged as if it runs: a skipped branch costs
+        # the same as a taken one, so the bound holds on every frame.
+        self.assertIn("estimatedNs += kVmInsnNs;", verify)
+        self.assertIn("out.estimatedNs = loopFree ?", verify)
 
 class AppEventModelTests(unittest.TestCase):
     """Apps are their own scheduler entry, not passengers on the scan."""
@@ -664,22 +661,20 @@ class AppEventModelTests(unittest.TestCase):
                         sketch.index("apps.install(slotPtrs[i])"))
 
     def test_the_flow_engine_has_per_instance_identity(self):
-        header = read("FlowApp.h")
-        impl = read("FlowApp.cpp")
+        header = read("AppVm.h")
+        impl = read("AppVm.cpp")
         # A file-static manifest cannot name four coexisting instances, and
         # AppManager::install() rejects the second one by name.
         self.assertNotIn("const AppManifest kManifest", impl)
         self.assertIn("AppManifest manifest_;", header)
-        self.assertIn("FlowApp(const FlowApp&) = delete;", header)
+        self.assertIn("AppVm(const AppVm&) = delete;", header)
 
     def test_events_are_attributed_to_the_emitting_slot(self):
-        impl = read("FlowApp.cpp")
-        evaluate = impl[impl.index("void FlowApp::evaluate") : impl.index("void FlowApp::onEvent")]
-        emit = evaluate[evaluate.index("case FlowOp::Emit:") : evaluate.index("case FlowOp::EmitValue:")]
+        impl = read("AppVm.cpp")
+        emit = impl[impl.index("void AppVm::vmEmitEvent") : impl.index("void AppVm::vmEmitValue")]
         # Four slots share this class, so a file-static name would credit every
         # slot's events to the first one.
         self.assertIn("emitEvent(manifest_.name", emit)
-
 
 class AppBudgetTests(unittest.TestCase):
     """Scanning wins. Apps are what gives way."""
@@ -752,15 +747,13 @@ class HardwareRegressionTests(unittest.TestCase):
     one gets an assertion rather than a memory.
     """
 
-    def test_multi_input_parsing_skips_the_array_brackets(self):
-        impl = read("FlowApp.cpp")
-        # jsonExtractArray hands back the value WITH its brackets, so a parser
-        # that stops at a non-digit stopped at '[' -- and every multi-input
-        # operator (add, sub, mul, div, min, max, select, gate, emit_value)
-        # silently had no inputs at all.
-        parse = impl[impl.index("String inputArray;"):impl.index("float number = 0;")]
-        self.assertIn("'['", parse)
-        self.assertIn("']'", parse)
+    def test_the_image_is_read_without_copying_the_package(self):
+        impl = read("AppVm.cpp")
+        # The image is most of the package: located in place and decoded into
+        # one transient buffer, not extracted into a second String first.
+        find = impl[impl.index("bool findImage(") : impl.index("bool decodeAndVerify(")]
+        self.assertIn('strstr(body, "\\"vm\\"")', find)
+        self.assertNotIn("jsonExtractString", find)
 
     def test_reindex_uses_paths_it_can_reopen(self):
         registry = read("AppRegistry.cpp")
@@ -869,7 +862,7 @@ class IdleSlotTests(unittest.TestCase):
 
     def test_flow_slots_are_idle_without_a_graph(self):
         self.assertIn("virtual bool idle() const { return false; }", read("App.h"))
-        self.assertIn("bool idle() const override { return !loaded(); }", read("FlowApp.h"))
+        self.assertIn("bool idle() const override { return !loaded() || fault_ != 0; }", read("AppVm.h"))
 
     def test_idle_slots_take_no_share(self):
         impl = read("AppManager.cpp")
@@ -1026,8 +1019,6 @@ class CostModelTests(unittest.TestCase):
         self.assertIn('{"total", 0, true, 300, 600,', contract)
         self.assertIn('{"features", 0, true, 500, 600,', contract)
         self.assertIn('{"add", 2, false, 300, 600,', contract)
-        self.assertIn("MEASURED", read("FlowApp.h"))
-
 
 class AppRegistryTests(unittest.TestCase):
     def test_package_ids_fit_the_spiffs_path_cap(self):
@@ -1044,7 +1035,7 @@ class AppRegistryTests(unittest.TestCase):
         # Dry-run, so a broken package is refused at install rather than
         # discovered at activation.
         self.assertIn("graph_invalid:", install)
-        self.assertLess(install.index("FlowApp::dryRun"), install.index("saveIndex()"))
+        self.assertLess(install.index("AppVm::dryRun"), install.index("saveIndex()"))
 
     def test_the_manifest_id_must_match_the_filename(self):
         impl = read("AppRegistry.cpp")
@@ -1078,11 +1069,12 @@ class AppRegistryTests(unittest.TestCase):
         self.assertIn("app_restore_failed", restore)
 
     def test_a_package_cannot_widen_its_own_permissions(self):
-        impl = read("FlowApp.cpp")
-        apply = impl[impl.index("void FlowApp::applyPackageManifest") : impl.index("FlowOp FlowApp::opFromName")]
-        self.assertIn("capabilities & allowed", apply)
-
-
+        impl = read("AppVm.cpp")
+        apply = impl[impl.index("void AppVm::applyPackageManifest") : impl.index("bool AppVm::dryRun")]
+        self.assertIn("capabilities & kSlotAllowedCaps", apply)
+        # ... and an image needing a capability its manifest does not declare
+        # is refused by the verifier.
+        self.assertIn("declaredCaps & kSlotAllowedCaps", impl)
 
 class TwentyFourNodeTests(unittest.TestCase):
     """v1.3.0 raised the node limit from 12 to 24.
@@ -1092,31 +1084,39 @@ class TwentyFourNodeTests(unittest.TestCase):
     and per-node outputs out of every app_list reply.
     """
 
-    def test_the_limit_is_24(self):
-        self.assertIn("static constexpr uint8_t kMaxNodes = 24;", read("FlowApp.h"))
+    def test_a_package_without_an_image_needs_an_update(self):
+        # Every package built before v2.0.0: refused as needs_update, which the
+        # registry reports as a state of its own.
+        impl = read("AppVm.cpp")
+        self.assertIn('error = "needs_update";', impl)
+        registry = read("AppRegistry.cpp")
+        self.assertIn('entry.needsUpdate ? "needs_update"', registry)
 
-    def test_parsing_does_not_put_a_graph_on_the_stack(self):
-        impl = read("FlowApp.cpp")
-        # One static buffer, not a FlowNode array per call on the 8 KB loop task.
-        self.assertIn("FlowNode g_parseScratch[FlowApp::kMaxNodes];", impl)
-        self.assertNotIn("FlowNode scratch[kMaxNodes];", impl)
-        # The install-time dry run needs no FlowApp (24 nodes + a window pool).
+    def test_images_live_in_one_static_pool(self):
+        impl = read("AppVm.cpp")
+        # Never the heap while running: one static pool, sized to what the four
+        # FlowApp slots held, shared first fit.
+        self.assertIn("alignas(4) uint8_t g_pool[AppVm::kPoolBytes];", impl)
+        self.assertIn("static constexpr uint32_t kPoolBytes = 4096;", read("AppVm.h"))
+        self.assertIn('error = "app_pool_exhausted";', impl)
+        # The install-time dry run needs no slot.
         install = read("AppRegistry.cpp")
-        self.assertNotIn("FlowApp scratch", install)
-        self.assertIn("FlowApp::dryRun(", install)
+        self.assertIn("AppVm::dryRun(", install)
 
     def test_the_dry_run_checks_everything_loading_would(self):
-        impl = read("FlowApp.cpp")
-        dry = impl[impl.index("bool FlowApp::dryRun") : impl.index("bool FlowApp::parse(")]
-        self.assertIn("parseNodes(json, g_parseScratch", dry)
-        self.assertIn("over_budget:", dry)
+        impl = read("AppVm.cpp")
+        dry = impl[impl.index("bool AppVm::dryRun") : impl.index("bool AppVm::loadFromJson")]
+        load = impl[impl.index("bool AppVm::loadFromJson") : impl.index("bool AppVm::loadFromFile")]
+        for body in (dry, load):
+            self.assertIn("decodeAndVerify(", body)
+            self.assertIn("withinBudget(", body)
 
     def test_app_list_carries_outputs_only_for_the_slot_asked_for(self):
         # Four slots of 24 outputs each would not fit an ESP-NOW reply (7680 B).
         manager = read("AppManager.cpp")
         self.assertIn("statusJson(outputsFor.length() > 0 && outputsFor == manifest.name)", manager)
-        flow = read("FlowApp.cpp")
-        body = flow[flow.index("String FlowApp::statusJson(bool withOutputs)"):]
+        flow = read("AppVm.cpp")
+        body = flow[flow.index("String AppVm::statusJson(bool withOutputs)"):]
         self.assertLess(body.index("if (!withOutputs)"), body.index('\\"outputs\\":['))
         control = control_source()
         self.assertIn('appListJson(extractString(request, "outputs"))', control)
@@ -1138,24 +1138,25 @@ class FlowV16Tests(unittest.TestCase):
             self.assertIn("delivered.{} =".format(field), dispatch)
 
     def test_a_flow_slot_may_hold_the_new_capabilities(self):
-        impl = read("FlowApp.cpp")
-        apply = impl[impl.index("void FlowApp::applyPackageManifest") : impl.index("FlowOp FlowApp::opFromName")]
+        impl = read("AppVm.cpp")
+        allowed = impl[impl.index("constexpr uint16_t kSlotAllowedCaps") :]
+        allowed = allowed[: allowed.index(";")]
         for cap in ("kAppCapReadMag", "kAppCapPower", "kAppCapLink", "kAppCapPersist"):
-            self.assertIn(cap, apply)
+            self.assertIn(cap, allowed)
 
     def test_tick_evaluation_only_fills_in_for_missing_frames(self):
-        impl = read("FlowApp.cpp")
-        on_event = impl[impl.index("void FlowApp::onEvent") : impl.index("bool FlowApp::displayLine")]
-        tick = on_event[on_event.index("AppEventKind::Tick") : on_event.index("++frames_;")]
-        # Only a graph that asked for it, and never while frames are arriving.
+        impl = read("AppVm.cpp")
+        on_event = impl[impl.index("void AppVm::onEvent") : impl.index("void AppVm::deliver")]
+        tick = on_event[on_event.index("case AppEventKind::Tick:") : on_event.index("case AppEventKind::Frame:")]
+        # Only an image that asked for it, and never while frames are arriving.
         self.assertIn("kAppCapTick", tick)
         self.assertIn("kTickFallbackMs", tick)
-        self.assertIn("evaluate(event);", tick)
+        self.assertIn("VmEvent::IdleTick", tick)
 
     def test_matrix_reads_hold_on_a_tick(self):
-        impl = read("FlowApp.cpp")
-        evaluate = impl[impl.index("void FlowApp::evaluate") : impl.index("void FlowApp::onEvent")]
-        self.assertIn("if (frame == nullptr && isSweepOp(node.op)) {", evaluate)
+        impl = read("VmCore.cpp")
+        native = impl[impl.index("void VmMachine::native") :]
+        self.assertIn("if (ctx.values == nullptr && isSweep(op)) return;", native)
 
     def test_ticks_carry_the_latest_sensor_readings(self):
         sketch = read("newhorizons_os.ino")
@@ -1166,35 +1167,33 @@ class FlowV16Tests(unittest.TestCase):
         self.assertIn("fillAppContext(tick);", tick)
 
     def test_persisting_never_happens_inside_the_timed_dispatch(self):
-        impl = read("FlowApp.cpp")
-        evaluate = impl[impl.index("void FlowApp::evaluate") : impl.index("void FlowApp::onEvent")]
-        on_event = impl[impl.index("void FlowApp::onEvent") : impl.index("bool FlowApp::displayLine")]
-        # A flash write is milliseconds: evaluate() only marks the count dirty.
-        for body in (evaluate, on_event):
-            self.assertNotIn("savePersisted()", body)
-            self.assertNotIn("putBytes", body)
-        self.assertIn("persistDirty_ = true;", evaluate)
-        service = impl[impl.index("void FlowApp::service") :]
+        impl = read("AppVm.cpp")
+        on_event = impl[impl.index("void AppVm::onEvent") : impl.index("void AppVm::raiseFault")]
+        # A flash write is milliseconds: a run only marks the count dirty.
+        self.assertNotIn("savePersisted()", on_event)
+        self.assertNotIn("putBytes", on_event)
+        self.assertIn("persistDirty_ = true;", read("VmCore.cpp"))
+        service = impl[impl.index("void AppVm::service") :]
         self.assertIn("kPersistIntervalMs", service)
         # The sketch calls it after dispatching, untimed.
         sketch = read("newhorizons_os.ino")
         task = sketch[sketch.index("void taskApps()") : sketch.index("void scanAndStreamIfDue()")]
         self.assertGreater(task.index("apps.service(nowMs);"), task.rindex("apps.dispatch("))
-        self.assertNotIn("void stop() override;", read("FlowApp.h"))
+        self.assertNotIn("void stop() override;", read("AppVm.h"))
 
     def test_uninstall_clears_a_persisted_count_and_deactivate_keeps_it(self):
         registry = read("AppRegistry.cpp")
         uninstall = registry[registry.index("bool AppRegistry::uninstall") : registry.index("bool AppRegistry::bind")]
-        self.assertIn("FlowApp::clearPersisted(", uninstall)
+        self.assertIn("AppVm::clearPersisted(", uninstall)
         deactivate = registry[registry.index("bool AppRegistry::deactivate") : registry.index("bool AppRegistry::verify")]
         self.assertNotIn("clearPersisted", deactivate)
-        impl = read("FlowApp.cpp")
-        unload = impl[impl.index("void FlowApp::unload") : impl.index("bool FlowApp::start")]
-        self.assertLess(unload.index("savePersisted();"), unload.index("nodeCount_ = 0;"))
+        impl = read("AppVm.cpp")
+        unload = impl[impl.index("void AppVm::unload") : impl.index("void AppVm::relocate")]
+        self.assertLess(unload.index("savePersisted();"), unload.index("machine_.unbind();"))
 
     def test_a_restore_needs_the_same_package_and_version(self):
-        impl = read("FlowApp.cpp")
-        restore = impl[impl.index("void FlowApp::restorePersisted") : impl.index("void FlowApp::savePersisted")]
+        impl = read("AppVm.cpp")
+        restore = impl[impl.index("void AppVm::restorePersisted") : impl.index("void AppVm::savePersisted")]
         self.assertIn("strcmp(id, packageId_) != 0 || strcmp(version, versionBuf_) != 0", restore)
 
     def test_sensor_sample_is_a_read_only_command(self):

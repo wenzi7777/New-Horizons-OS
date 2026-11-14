@@ -3,7 +3,7 @@
 #include <vector>
 
 #include "AppManager.h"
-#include "FlowApp.h"
+#include "AppVm.h"
 #include "JsonUtils.h"
 #include "Storage.h"
 
@@ -39,7 +39,7 @@ void copyField(char* dest, size_t size, const String& value) {
 
 }  // namespace
 
-void AppRegistry::begin(Storage& storage, AppManager& apps, FlowApp* const slots[kMaxSlots],
+void AppRegistry::begin(Storage& storage, AppManager& apps, AppVm* const slots[kMaxSlots],
                         uint16_t cellCount) {
   storage_ = &storage;
   apps_ = &apps;
@@ -152,11 +152,13 @@ bool AppRegistry::install(const String& path, const String& expectedSha256, bool
   uint32_t estimatedUs = 0;
   if (!appPackageIsView(manifest.kind)) {
     String graphError;
-    if (!FlowApp::dryRun(json, cellCount_,
-                         manifest.declaredBudgetUs != 0 ? manifest.declaredBudgetUs
-                                                        : FlowApp::kDefaultBudgetUs,
-                         estimatedUs, graphError)) {
-      error = String("graph_invalid:") + graphError;
+    if (!AppVm::dryRun(json, cellCount_,
+                       manifest.declaredBudgetUs != 0 ? manifest.declaredBudgetUs
+                                                      : AppVm::kDefaultBudgetUs,
+                       manifest.capabilities, estimatedUs, graphError)) {
+      // A package built before v2.0.0 is not broken, only old: say so plainly
+      // so the Desktop/Studio can offer the rebuilt one.
+      error = graphError == "needs_update" ? graphError : String("graph_invalid:") + graphError;
       return false;
     }
   }
@@ -215,7 +217,7 @@ bool AppRegistry::uninstall(const String& id, bool keepFile, String& error) {
   // Uninstalling is the one way to start a persisted count over; deactivating
   // keeps it.
   if (storage_ != nullptr) {
-    FlowApp::clearPersisted(*storage_, entry.manifest.id);
+    AppVm::clearPersisted(*storage_, entry.manifest.id);
   }
   Entry previous = entry;
   entry = Entry();
@@ -237,16 +239,18 @@ bool AppRegistry::uninstall(const String& id, bool keepFile, String& error) {
 }
 
 bool AppRegistry::bind(Entry& entry, int8_t slot, const String& json, String& error) {
-  FlowApp* app = slots_[slot];
+  AppVm* app = slots_[slot];
   if (app == nullptr) {
     error = "slot_unavailable";
     return false;
   }
   if (!app->loadFromJson(json, AppPackage::packagePath(String(entry.manifest.id)), cellCount_,
-                         error)) {
-    error = String("graph_invalid:") + error;
+                         entry.manifest.capabilities, error)) {
+    entry.needsUpdate = error == "needs_update";
+    if (!entry.needsUpdate && error != "app_pool_exhausted") error = String("graph_invalid:") + error;
     return false;
   }
+  entry.needsUpdate = false;
   app->applyPackageManifest(entry.manifest.version, entry.manifest.summary, entry.manifest.id,
                             entry.manifest.capabilities);
   entry.estimatedUs = app->estimatedUs();
@@ -650,7 +654,7 @@ String AppRegistry::statusJson() const {
     json += ",\"slot\":";
     json += String(entry.slot);
     json += ",\"state\":\"";
-    json += entry.loadFailed ? "load_failed" : (entry.slot >= 0 ? "active" : "installed");
+    json += entry.needsUpdate ? "needs_update" : entry.loadFailed ? "load_failed" : (entry.slot >= 0 ? "active" : "installed");
     json += "\"}";
   }
   json += "]}";
@@ -678,7 +682,7 @@ String AppRegistry::packagesText() const {
     while (estimated.length() < 9) estimated = " " + estimated;
     out += estimated;
     out += "  ";
-    out += entry.loadFailed ? "load_failed" : (entry.slot >= 0 ? "active" : "installed");
+    out += entry.needsUpdate ? "needs_update" : entry.loadFailed ? "load_failed" : (entry.slot >= 0 ? "active" : "installed");
     out += '\n';
   }
   return out;

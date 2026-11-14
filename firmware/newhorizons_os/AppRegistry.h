@@ -8,7 +8,7 @@ namespace nhos {
 
 class Storage;
 class AppManager;
-class FlowApp;
+class AppVm;
 
 // The on-device package registry: apps/index.json plus the binding of packages
 // to the fixed flow slots.
@@ -37,9 +37,12 @@ class AppRegistry {
     uint32_t sizeBytes = 0;
     uint32_t estimatedUs = 0;
     bool loadFailed = false;
+    // Built before the app VM (v2.0.0): no image to run. Kept in the index so
+    // the Desktop/Studio can offer the rebuilt package in its place.
+    bool needsUpdate = false;
   };
 
-  void begin(Storage& storage, AppManager& apps, FlowApp* const slots[kMaxSlots],
+  void begin(Storage& storage, AppManager& apps, AppVm* const slots[kMaxSlots],
              uint16_t cellCount);
   // Reads apps/index.json, then re-activates every entry with slot >= 0. A
   // package that fails to reload is kept in the index with slot = -1 and a
@@ -77,7 +80,7 @@ class AppRegistry {
 
   Storage* storage_ = nullptr;
   AppManager* apps_ = nullptr;
-  FlowApp* slots_[kMaxSlots] = {nullptr, nullptr, nullptr, nullptr};
+  AppVm* slots_[kMaxSlots] = {nullptr, nullptr, nullptr, nullptr};
   int8_t slotOwner_[kMaxSlots] = {-1, -1, -1, -1};
   Entry entries_[kMaxPackages];
   uint16_t cellCount_ = 0;
