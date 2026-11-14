@@ -40,6 +40,9 @@ class AppRegistry {
     // Built before the app VM (v2.0.0): no image to run. Kept in the index so
     // the Desktop/Studio can offer the rebuilt package in its place.
     bool needsUpdate = false;
+    // The dangerous capabilities the operator consented to at install
+    // (app_install `grant`); never wider than what the package declares.
+    uint32_t granted = 0;
   };
 
   void begin(Storage& storage, AppManager& apps, AppVm* const slots[kMaxSlots],
@@ -50,7 +53,7 @@ class AppRegistry {
   void restore();
 
   bool install(const String& path, const String& expectedSha256, bool replace,
-               String& installedId, String& error);
+               uint32_t granted, String& installedId, String& error);
   bool uninstall(const String& id, bool keepFile, String& error);
   bool activate(const String& id, int8_t slot, String& error);
   bool deactivate(const String& id, int8_t slot, String& error);

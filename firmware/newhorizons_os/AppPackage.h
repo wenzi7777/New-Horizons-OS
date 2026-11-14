@@ -26,7 +26,7 @@ struct AppPackageManifest {
   char category[kCategoryLen] = {0};
   char minOs[kVersionLen] = {0};
   char sha256[kSha256Len] = {0};
-  uint16_t capabilities = kAppCapNone;
+  uint32_t capabilities = kAppCapNone;
   uint8_t kind = 0;             // 0 = flow graph
   uint32_t declaredBudgetUs = 0;  // 0 -> use the slot's allocation
 };
@@ -75,7 +75,15 @@ class AppPackage {
 
   static String sha256Hex(const uint8_t* data, size_t length);
 
-  static uint16_t capabilityFromName(const String& name);
+  static uint32_t capabilityFromName(const String& name);
+  // A JSON array of capability names (a manifest's `capabilities`, or
+  // app_install's `grant`) as a mask. False with `unknown_capability:<name>`.
+  static bool capabilityMask(const String& array, uint32_t& mask, String& error);
+  static const char* capabilityName(uint32_t bit);
+  // The first dangerous capability `declared` uses that `granted` lacks, or
+  // one this board cannot offer: error is capability_not_granted:<cap> /
+  // capability_unsupported:<cap>.
+  static bool checkGrant(uint32_t declared, uint32_t granted, String& error);
 };
 
 }  // namespace nhos

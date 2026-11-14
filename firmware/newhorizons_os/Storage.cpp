@@ -526,6 +526,10 @@ String Storage::scopedPath(const String& scope, const String& path) const {
     root = "/cal";
   } else if (scope == "offline") {
     root = "/offline";
+  } else if (scope == "appdata") {
+    // What apps write with store.append (AppStore): "<app id>/<file>.csv".
+    // Two letters of root because SPIFFS names stop at 31 characters.
+    root = "/a";
   }
   if (path.isEmpty()) {
     return root;
@@ -546,7 +550,7 @@ void Storage::accumulateCategories(File& dir, CategoryBytes& out) const {
     } else {
       const String path = file.path();
       const size_t size = file.size();
-      if (path.startsWith("/files/")) {
+      if (path.startsWith("/files/") || path.startsWith("/a/")) {
         out.user += size;
       } else if (path.startsWith("/logs/")) {
         out.logs += size;
@@ -568,6 +572,7 @@ bool Storage::ensureDirs() {
   SPIFFS.mkdir("/cal");
   SPIFFS.mkdir("/calibration");
   SPIFFS.mkdir("/offline");
+  SPIFFS.mkdir("/a");
   SPIFFS.mkdir("/config");
   return true;
 }

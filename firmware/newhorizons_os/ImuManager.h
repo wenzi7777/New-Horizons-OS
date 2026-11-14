@@ -14,6 +14,7 @@ class ImuManager {
   void service(uint32_t nowUs);
   bool copyLatestSample(float out[kImuSampleFloats]) const;
   bool initialized() const { return initialized_; }
+  bool enabled() const { return enabled_; }
   String statusJson() const;
   void setServiceIntervalUs(uint32_t us) { serviceIntervalUs_ = us; }
   // Actual samples-per-second achieved over the last ~1s window, for

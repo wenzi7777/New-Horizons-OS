@@ -62,7 +62,7 @@ struct VmVerified {
   bool loopFree = false;
   uint32_t estimatedNs = 0;  // a bound when loopFree, else 0
   uint16_t maxStack = 0;
-  uint16_t usedCapabilities = 0;
+  uint32_t usedCapabilities = 0;
 };
 
 // Reads the header and tables and checks their layout (not the code).
@@ -72,7 +72,7 @@ bool vmParseLayout(const uint8_t* image, size_t length, VmLayout& out, const cha
 // The install-time checks, docs/vm.md §9. `scratch` must hold at least
 // layout.codeLen * 3 bytes (stack depth per byte + a work list); null means
 // "allocate it", which only the host-side harness and the install path do.
-bool vmVerify(const uint8_t* image, size_t length, uint16_t declaredCaps, uint16_t cellCount,
+bool vmVerify(const uint8_t* image, size_t length, uint32_t declaredCaps, uint16_t cellCount,
               VmVerified& out, const char*& error);
 
 // Base64 (standard alphabet, padded) decoding without allocation. Returns the
@@ -92,7 +92,14 @@ struct VmContext {
   const float* mag = nullptr;     // mx my mz, or nullptr
   float battery = -1.0f;
   bool linked = false;
+  // In a message handler: the topic (FNV-1a of its name) and the value.
+  bool hasMessage = false;
+  uint32_t messageTopic = 0;
+  float messageValue = 0.0f;
 };
+
+// FNV-1a, 32-bit: how keys, files and topics are matched (vm.mjs fnv1a).
+uint32_t vmHash(const char* text);
 
 class VmHostSink {
  public:
@@ -102,6 +109,43 @@ class VmHostSink {
   virtual void vmLog(const char* text, float value) = 0;
   // The status LED changed: held in `rgb` while `on`, released when not.
   virtual void vmLed(bool on, const uint8_t rgb[3], uint16_t stateSlot) = 0;
+
+  // v2.1.0 system calls (docs/vm.md §8). The VM has already checked the
+  // arguments it can (strings, buffers, I2C addresses, byte values, baud
+  // range); a host that lacks a facility keeps the default, which refuses it
+  // the way vm.mjs does for a missing hook.
+  virtual float vmStoreGet(const char* key) { (void)key; return 0.0f; }
+  virtual void vmStoreSet(const char* key, float value) { (void)key; (void)value; }
+  // `values` are a b c d; NaN is an empty column. False: the quota is full.
+  virtual bool vmStoreAppend(const char* file, uint32_t nowMs, const float values[4]) {
+    (void)file; (void)nowMs; (void)values;
+    return false;
+  }
+  virtual void vmStoreClear(const char* file) { (void)file; }
+  virtual void vmPublish(const char* topic, float value) { (void)topic; (void)value; }
+  virtual float vmConfigGet(const char* key) { (void)key; return 0.0f; }
+  virtual bool vmConfigSet(const char* key, float value, uint32_t nowMs) {
+    (void)key; (void)value; (void)nowMs;
+    return false;
+  }
+  virtual void vmStream(bool on) { (void)on; }
+  // I2C: false on a NACK or a timeout.
+  virtual bool vmI2cRead(uint8_t addr, uint8_t reg, uint8_t* out, uint8_t n) {
+    (void)addr; (void)reg; (void)out; (void)n;
+    return false;
+  }
+  // bytes[0] is the register.
+  virtual bool vmI2cWrite(uint8_t addr, const uint8_t* bytes, uint8_t n) {
+    (void)addr; (void)bytes; (void)n;
+    return false;
+  }
+  virtual bool vmUartOpen(uint32_t baud) { (void)baud; return false; }
+  virtual void vmUartClose() {}
+  // Bytes queued.
+  virtual int32_t vmUartWrite(const uint8_t* bytes, uint8_t n) { (void)bytes; (void)n; return 0; }
+  virtual int32_t vmUartAvailable() { return 0; }
+  // A byte, or -1.
+  virtual int32_t vmUartRead() { return -1; }
 };
 
 enum class VmRunResult : uint8_t { Done = 0, Suspended = 1, Fault = 2 };
@@ -193,6 +237,9 @@ class VmMachine {
   void native(uint8_t op, uint16_t s, uint16_t p, const float* in, const VmContext& ctx,
               VmHostSink& host, uint16_t pc);
   bool syscall(uint16_t id, float* args, float& result, const VmContext& ctx, VmHostSink& host);
+  bool extendedSyscall(uint16_t id, float* args, float& result, const VmContext& ctx, VmHostSink& host);
+  // A buffer argument: arena slots [base, base + n), n <= kVmI2cMaxTransfer.
+  bool span(const float* args, uint16_t& base, uint8_t& n) const;
   float* arena() const { return reinterpret_cast<float*>(mem_ + layout_.arenaAt()); }
   float* stack() const { return reinterpret_cast<float*>(mem_ + layout_.stackAt()); }
 

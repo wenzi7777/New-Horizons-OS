@@ -498,6 +498,15 @@ void AppManager::extLedFrame(AppExtLedFrame& out) const {
   }
 }
 
+void AppManager::publish(const char* app, uint32_t topic, float value) {
+  for (uint8_t i = 0; i < count_; ++i) {
+    Slot& slot = slots_[i];
+    if (slot.state != AppState::Running || slot.app->idle()) continue;
+    if (app != nullptr && strcmp(slot.app->manifest().name, app) == 0) continue;
+    slot.app->queueMessage(topic, value);
+  }
+}
+
 void AppManager::logLine(const char* app, const String& line) {
   if (storage_ == nullptr) {
     return;

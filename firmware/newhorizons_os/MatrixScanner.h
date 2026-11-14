@@ -110,6 +110,8 @@ class MatrixScanner {
   String matrixShapeJson() const;
   String matrixLayoutJson() const;
   uint32_t scanIntervalUs() const;
+  uint16_t targetFps() const { return targetFps_; }
+  uint16_t sendEveryNFrames() const { return sendEveryNFrames_; }
   uint32_t nextScanDueUs() const { return nextScanDueUs_; }
   // Most recent frame's normalized peak pressure (0..1) and active cell count,
   // for driving indicator LEDs. Reset to 0 when scanning stops.

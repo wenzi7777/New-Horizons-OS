@@ -11,7 +11,7 @@ namespace nhos {
 
 // What an app may touch and, for the event sources, what it is woken for.
 // Explained where it is used: App.h.
-enum AppCapability : uint16_t {
+enum AppCapability : uint32_t {
   kAppCapNone = 0,
   kAppCapReadMatrix = 1 << 0,
   kAppCapReadImu = 1 << 1,
@@ -27,11 +27,17 @@ enum AppCapability : uint16_t {
   kAppCapExtLed = 1 << 11,
   kAppCapReadMag = 1 << 12,
   kAppCapPersist = 1 << 13,
+  kAppCapStorage = 1 << 14,
+  kAppCapAppIpc = 1 << 15,
+  kAppCapDeviceConfig = 1 << 16,
+  kAppCapDeviceStream = 1 << 17,
+  kAppCapIoI2c = 1 << 18,
+  kAppCapIoUart = 1 << 19,
 };
 
 struct AppCapabilityName {
   const char* name;
-  uint16_t bit;
+  uint32_t bit;
 };
 // The names a package's manifest may use. `budget` is set by the device; the
 // App Library never declares it, but a hand-made package may.
@@ -50,6 +56,12 @@ static constexpr AppCapabilityName kAppCapabilityNames[] = {
     {"drive_ext_led", kAppCapExtLed},
     {"read_mag", kAppCapReadMag},
     {"persist", kAppCapPersist},
+    {"storage", kAppCapStorage},
+    {"app_ipc", kAppCapAppIpc},
+    {"device_config", kAppCapDeviceConfig},
+    {"device_stream", kAppCapDeviceStream},
+    {"io_i2c", kAppCapIoI2c},
+    {"io_uart", kAppCapIoUart},
 };
 
 // The operators a flow graph can use, in opset.mjs order. The device persists
@@ -479,12 +491,12 @@ static constexpr VmNativeInfo kVmNatives[kFlowOpCount] = {
 // System calls, by id; APPEND only.
 struct VmSyscallInfo {
   const char* name;
-  uint16_t capability;
+  uint32_t capability;
   uint8_t args;
   uint8_t results;
   uint8_t fuel;
 };
-static constexpr uint8_t kVmSyscallCount = 7;
+static constexpr uint8_t kVmSyscallCount = 28;
 static constexpr VmSyscallInfo kVmSyscalls[kVmSyscallCount] = {
     {"now_ms", kAppCapNone, 0, 1, 1},
     {"frame_seq", kAppCapNone, 0, 1, 1},
@@ -493,6 +505,50 @@ static constexpr VmSyscallInfo kVmSyscalls[kVmSyscallCount] = {
     {"cell", kAppCapReadMatrix, 2, 1, 2},
     {"emit_value", kAppCapEmitEvent, 2, 0, 16},
     {"log", kAppCapNone, 2, 0, 16},
+    {"store_get", kAppCapStorage, 1, 1, 8},
+    {"store_set", kAppCapStorage, 2, 0, 8},
+    {"store_append", kAppCapStorage, 5, 1, 32},
+    {"store_clear", kAppCapStorage, 1, 0, 16},
+    {"app_publish", kAppCapAppIpc, 2, 0, 16},
+    {"msg_value", kAppCapAppIpc, 0, 1, 1},
+    {"msg_is", kAppCapAppIpc, 1, 1, 2},
+    {"device_config_get", kAppCapDeviceConfig, 1, 1, 8},
+    {"device_config_set", kAppCapDeviceConfig, 2, 1, 32},
+    {"device_stream", kAppCapDeviceStream, 1, 0, 8},
+    {"i2c_read8", kAppCapIoI2c, 2, 1, 32},
+    {"i2c_read16", kAppCapIoI2c, 2, 1, 32},
+    {"i2c_write8", kAppCapIoI2c, 3, 1, 32},
+    {"i2c_read", kAppCapIoI2c, 4, 1, 64},
+    {"i2c_write", kAppCapIoI2c, 3, 1, 64},
+    {"uart_open", kAppCapIoUart, 1, 1, 32},
+    {"uart_close", kAppCapIoUart, 0, 0, 16},
+    {"uart_write", kAppCapIoUart, 1, 1, 4},
+    {"uart_write_buf", kAppCapIoUart, 2, 1, 32},
+    {"uart_available", kAppCapIoUart, 0, 1, 2},
+    {"uart_read", kAppCapIoUart, 0, 1, 2},
 };
+
+// v2.1.0: what the system calls above may touch (docs/vm.md §8).
+static constexpr uint32_t kAppDangerousCapabilities = kAppCapStorage | kAppCapDeviceConfig | kAppCapDeviceStream | kAppCapIoI2c | kAppCapIoUart;
+static constexpr uint16_t kVmStoreQuotaBytes = 16384;
+static constexpr uint16_t kVmStoreBufferBytes = 256;
+static constexpr uint32_t kVmStoreFlushMs = 10000;
+static constexpr uint8_t kVmStoreMaxKeys = 16;
+static constexpr uint8_t kVmMessageQueue = 4;
+static constexpr uint32_t kVmDeviceConfigIntervalMs = 1000;
+static constexpr uint8_t kVmDeviceConfigKeyCount = 6;
+static constexpr const char* kVmDeviceConfigKeys[kVmDeviceConfigKeyCount] = {
+    "scan.target_fps",
+    "scan.send_every_n_frames",
+    "filter.enabled",
+    "filter.median",
+    "filter.alpha",
+    "imu.enabled",
+};
+static constexpr uint8_t kVmI2cDeniedCount = 8;
+static constexpr uint8_t kVmI2cDenied[kVmI2cDeniedCount] = {0x14, 0x36, 0x3c, 0x3d, 0x41, 0x60, 0x68, 0x6a};
+static constexpr uint8_t kVmI2cMaxTransfer = 32;
+static constexpr uint32_t kVmUartMinBaud = 1200;
+static constexpr uint32_t kVmUartMaxBaud = 921600;
 
 }  // namespace nhos

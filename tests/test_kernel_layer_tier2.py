@@ -1139,9 +1139,11 @@ class FlowV16Tests(unittest.TestCase):
 
     def test_a_flow_slot_may_hold_the_new_capabilities(self):
         impl = read("AppVm.cpp")
-        allowed = impl[impl.index("constexpr uint16_t kSlotAllowedCaps") :]
+        allowed = impl[impl.index("constexpr uint32_t kSlotAllowedCaps") :]
         allowed = allowed[: allowed.index(";")]
-        for cap in ("kAppCapReadMag", "kAppCapPower", "kAppCapLink", "kAppCapPersist"):
+        for cap in ("kAppCapReadMag", "kAppCapPower", "kAppCapLink", "kAppCapPersist",
+                    "kAppCapStorage", "kAppCapAppIpc", "kAppCapDeviceConfig",
+                    "kAppCapDeviceStream", "kAppCapIoI2c", "kAppCapIoUart"):
             self.assertIn(cap, allowed)
 
     def test_tick_evaluation_only_fills_in_for_missing_frames(self):
@@ -1179,7 +1181,10 @@ class FlowV16Tests(unittest.TestCase):
         sketch = read("newhorizons_os.ino")
         task = sketch[sketch.index("void taskApps()") : sketch.index("void scanAndStreamIfDue()")]
         self.assertGreater(task.index("apps.service(nowMs);"), task.rindex("apps.dispatch("))
-        self.assertNotIn("void stop() override;", read("AppVm.h"))
+        # stop() (v2.1.0) runs on("stop") and gives resources back; the count
+        # is still written by service() or unload(), never by a handler.
+        stop = impl[impl.index("void AppVm::stop()") : impl.index("void AppVm::releaseResources()")]
+        self.assertNotIn("savePersisted()", stop)
 
     def test_uninstall_clears_a_persisted_count_and_deactivate_keeps_it(self):
         registry = read("AppRegistry.cpp")

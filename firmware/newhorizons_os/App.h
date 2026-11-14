@@ -37,7 +37,7 @@ namespace nhos {
 struct AppManifest {
   const char* name = nullptr;
   const char* version = "0.0.0";
-  uint16_t capabilities = kAppCapNone;
+  uint32_t capabilities = kAppCapNone;
   // Per-invocation time allocation. This is the containment mechanism: the
   // runtime has no preemption, so an app cannot be interrupted mid-call --
   // but it can be measured and, after repeated overruns, taken out of the
@@ -77,6 +77,10 @@ class AppHost {
   // As above, but carrying a number -- the common case for a measurement.
   virtual void emitValue(const char* app, const char* event, float value) = 0;
   virtual void logLine(const char* app, const String& line) = 0;
+  // app.publish: `topic` (FNV-1a of its name) to every other running app.
+  virtual void publish(const char* app, uint32_t topic, float value) {
+    (void)app; (void)topic; (void)value;
+  }
 };
 
 // One delivery. Read-only, and every pointer is valid only for this call.
@@ -122,6 +126,8 @@ class App {
   virtual bool start() { return true; }
   virtual void stop() {}
   virtual void onEvent(const AppEvent& event) = 0;
+  // A message another app published (AppHost::publish).
+  virtual void queueMessage(uint32_t topic, float value) { (void)topic; (void)value; }
   // Housekeeping that must not be charged to the app's allocation, such as a
   // flash write: called outside dispatch, untimed. Must return quickly when
   // there is nothing to do, since it runs every apps tick.

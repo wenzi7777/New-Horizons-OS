@@ -35,6 +35,7 @@
 #include "HeapWatermark.h"
 #include "AppRegistry.h"
 #include "AppVm.h"
+#include "AppDeviceControl.h"
 #include "PowerManager.h"
 #include "PowerStateManager.h"
 #include "ProcFs.h"
@@ -505,6 +506,11 @@ void scanAndStreamIfDue() {
     memcpy(lastMagSample, magSample, sizeof(lastMagSample));
   }
   lastFrameReady = true;
+  // An app paused streaming (device.stream(false)): scanning and the apps go
+  // on, nothing is sent. Its events wait in the app_events ring.
+  if (nhos::AppDeviceControl::streamPaused()) {
+    return;
+  }
 
   // App events ride the stream (spec/PROTOCOL.md 3.1). They were raised on an
   // earlier frame -- apps run after that frame's packet went out -- and carry
@@ -1299,6 +1305,7 @@ void setup() {
   }
   apps.begin(&storage);
   appGovernor.begin(&apps);
+  nhos::AppDeviceControl::begin(&deviceConfig, &scanner, &imu);
   {
     const uint16_t cellCount =
         scanner.health().pointCount != 0 ? scanner.health().pointCount : nhos::kMaxSensors;

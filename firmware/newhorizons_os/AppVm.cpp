@@ -6,6 +6,8 @@
 #include <new>
 #include <vector>
 
+#include "AppDeviceControl.h"
+#include "AppIo.h"
 #include "JsonUtils.h"
 #include <esp_attr.h>
 #include "Storage.h"
@@ -127,7 +129,7 @@ bool findImage(const String& json, const char*& text, size_t& length) {
 
 // Decodes and verifies a package's image into a transient buffer. Install and
 // bind time only: the buffer is gone before anything runs.
-bool decodeAndVerify(const String& json, uint16_t cellCount, uint16_t declaredCaps,
+bool decodeAndVerify(const String& json, uint16_t cellCount, uint32_t declaredCaps,
                      std::unique_ptr<uint8_t[]>& image, size_t& length, VmVerified& verified,
                      String& error) {
   const char* text = nullptr;
@@ -191,10 +193,12 @@ String persistKey(const char* packageId) {
   return key;
 }
 
-constexpr uint16_t kSlotAllowedCaps = kAppCapReadMatrix | kAppCapReadImu | kAppCapEmitEvent |
+constexpr uint32_t kSlotAllowedCaps = kAppCapReadMatrix | kAppCapReadImu | kAppCapEmitEvent |
                                       kAppCapDriveLed | kAppCapTick | kAppCapBudget |
                                       kAppCapButton | kAppCapDisplay | kAppCapExtLed |
-                                      kAppCapReadMag | kAppCapPower | kAppCapLink | kAppCapPersist;
+                                      kAppCapReadMag | kAppCapPower | kAppCapLink | kAppCapPersist |
+                                      kAppCapStorage | kAppCapAppIpc | kAppCapDeviceConfig |
+                                      kAppCapDeviceStream | kAppCapIoI2c | kAppCapIoUart;
 
 uint32_t clockUs() { return micros(); }
 
@@ -218,7 +222,7 @@ void AppVm::setIdentity(const char* name, uint32_t budgetUs) {
 }
 
 void AppVm::applyPackageManifest(const char* version, const char* summary,
-                                 const char* packageId, uint16_t capabilities) {
+                                 const char* packageId, uint32_t capabilities) {
   if (version != nullptr) {
     strncpy(versionBuf_, version, sizeof(versionBuf_) - 1);
     versionBuf_[sizeof(versionBuf_) - 1] = '\0';
@@ -237,10 +241,15 @@ void AppVm::applyPackageManifest(const char* version, const char* summary,
   // The package id and capabilities arrive after the image is bound, and
   // both are needed to find -- and be allowed -- the saved values.
   restorePersisted();
+  if ((manifest_.capabilities & kAppCapStorage) != 0 && packageId_[0] != '\0') {
+    store_.open(packageId_);
+  } else {
+    store_.close();
+  }
 }
 
 bool AppVm::dryRun(const String& json, uint16_t cellCount, uint32_t budgetUs,
-                   uint16_t declaredCaps, uint32_t& estimatedUs, String& error) {
+                   uint32_t declaredCaps, uint32_t& estimatedUs, String& error) {
   std::unique_ptr<uint8_t[]> image;
   size_t length = 0;
   VmVerified verified;
@@ -258,7 +267,7 @@ bool AppVm::dryRun(const String& json, uint16_t cellCount, uint32_t budgetUs,
 }
 
 bool AppVm::loadFromJson(const String& json, const String& sourcePath, uint16_t cellCount,
-                         uint16_t declaredCaps, String& error) {
+                         uint32_t declaredCaps, String& error) {
   std::unique_ptr<uint8_t[]> image;
   size_t length = 0;
   VmVerified verified;
@@ -295,6 +304,11 @@ bool AppVm::loadFromJson(const String& json, const String& sourcePath, uint16_t 
   framesSkipped_ = 0;
   pendingPresses_ = 0;
   pressShown_ = false;
+  started_ = false;
+  stopped_ = false;
+  inboxCount_ = 0;
+  runMessage_ = false;
+  configSet_ = false;
   return true;
 }
 
@@ -334,8 +348,12 @@ bool AppVm::loadFromFile(const String& path, uint16_t cellCount, String& error) 
 }
 
 void AppVm::unload() {
+  // Removed is stopped: on("stop") runs and the device gets back what the app
+  // changed, before the image goes.
+  if (loaded()) stop();
+  store_.close();
   // Written out before the image goes: deactivating keeps a count, so
-  // re-activating the package carries on from it.
+  // re-activating the package carries on counting.
   savePersisted();
   if (memory_ != nullptr) AppVmPool::release(memory_);
   memory_ = nullptr;
@@ -353,6 +371,11 @@ void AppVm::unload() {
   graphName_ = "";
   framesSeen_ = false;
   ticks_ = 0;
+  started_ = false;
+  stopped_ = false;
+  inboxCount_ = 0;
+  runMessage_ = false;
+  configSet_ = false;
 }
 
 void AppVm::relocate(uint8_t* memory) {
@@ -360,7 +383,46 @@ void AppVm::relocate(uint8_t* memory) {
   machine_.relocate(memory);
 }
 
-bool AppVm::start() { return true; }
+bool AppVm::start() {
+  // Enabled again: on("start") runs before the next handler, and on("stop")
+  // will run again when it stops.
+  started_ = false;
+  stopped_ = false;
+  return true;
+}
+
+void AppVm::stop() {
+  if (loaded() && !stopped_ && fault_ == 0 && !machine_.suspended() &&
+      machine_.hasEntry(VmEvent::Stop)) {
+    AppEvent event;
+    event.kind = AppEventKind::Tick;
+    event.nowMs = millis();
+    event.frameSeq = lastFrameSeq_;
+    event.host = lastHost_;
+    setDeadline(event);
+    deliver(event, static_cast<int8_t>(VmEvent::Stop));
+  }
+  stopped_ = true;
+  inboxCount_ = 0;
+  releaseResources();
+}
+
+void AppVm::releaseResources() {
+  store_.flush();
+  AppDeviceControl::release(this);
+  AppIo::uartClose(this);
+}
+
+void AppVm::queueMessage(uint32_t topic, float value) {
+  if (!loaded() || fault_ != 0 || !machine_.hasEntry(VmEvent::Message)) return;
+  if (inboxCount_ >= kVmMessageQueue) {
+    ++messagesDropped_;
+    return;
+  }
+  inbox_[inboxCount_].topic = topic;
+  inbox_[inboxCount_].value = value;
+  ++inboxCount_;
+}
 
 // --- persistence -------------------------------------------------------------------
 
@@ -447,6 +509,7 @@ void AppVm::clearPersisted(Storage& storage, const char* packageId) {
 }
 
 void AppVm::service(uint32_t nowMs) {
+  store_.service(nowMs);
   // At most every kPersistIntervalMs, and only when a count moved: a flash
   // write is milliseconds, so it happens here, untimed, never in a handler.
   if (!machine_.persistDirty() || nowMs - lastPersistMs_ < kPersistIntervalMs) {
@@ -460,12 +523,20 @@ void AppVm::service(uint32_t nowMs) {
 
 IRAM_ATTR void AppVm::onEvent(const AppEvent& event) {
   if (!loaded() || fault_ != 0) return;
+  if (event.host != nullptr) lastHost_ = event.host;
+  setDeadline(event);
   switch (event.kind) {
     case AppEventKind::Budget:
       // Latched, then read by budget_load/grace_left on the next run.
       machine_.setBudget(event.load, event.graceLeft);
       return;
     case AppEventKind::Button:
+      // An on("button") handler takes each press as a run of its own; without
+      // one, button.pressed() reads it on a later run.
+      if (machine_.hasEntry(VmEvent::Button)) {
+        deliver(event, machine_.suspended() ? -1 : static_cast<int8_t>(VmEvent::Button));
+        return;
+      }
       if (pendingPresses_ < kMaxPendingPresses) ++pendingPresses_;
       return;
     case AppEventKind::Tick:
@@ -473,6 +544,10 @@ IRAM_ATTR void AppVm::onEvent(const AppEvent& event) {
       if (machine_.suspended()) {
         deliver(event, -1);
         return;
+      }
+      if ((manifest_.capabilities & kAppCapTick) != 0 && machine_.hasEntry(VmEvent::Tick)) {
+        deliver(event, static_cast<int8_t>(VmEvent::Tick));
+        if (machine_.suspended() || fault_ != 0) return;
       }
       // The scanner is stopped or nothing streams: keep an image that asked
       // for it running at the tick's 10 Hz, with the matrix reads holding.
@@ -489,6 +564,7 @@ IRAM_ATTR void AppVm::onEvent(const AppEvent& event) {
       ++frames_;
       framesSeen_ = true;
       lastFrameMs_ = event.nowMs;
+      lastFrameSeq_ = event.frameSeq;
       deliver(event, static_cast<int8_t>(VmEvent::Frame));
       return;
     default:
@@ -505,6 +581,26 @@ IRAM_ATTR void AppVm::deliver(const AppEvent& event, int8_t handler) {
     ~Done() { p.deliverCyc += vmCycles() - t0; ++p.deliveries; }
   } done{machine_.prof, d0};
 #endif
+  if (fault_ != 0) return;
+  const bool resuming = machine_.suspended();
+  if (!started_ && handler != static_cast<int8_t>(VmEvent::Start) && !resuming) {
+    started_ = true;
+    if (machine_.hasEntry(VmEvent::Start)) {
+      deliver(event, static_cast<int8_t>(VmEvent::Start));
+      if (machine_.suspended() || fault_ != 0) return;
+    }
+  }
+  // Messages waiting from other apps run first, each as its own run.
+  if (handler != static_cast<int8_t>(VmEvent::Message) &&
+      handler != static_cast<int8_t>(VmEvent::Start) && !resuming) {
+    while (inboxCount_ > 0 && !machine_.suspended() && fault_ == 0) {
+      nextMessage_ = inbox_[0];
+      --inboxCount_;
+      memmove(inbox_, inbox_ + 1, inboxCount_ * sizeof(Message));
+      deliver(event, static_cast<int8_t>(VmEvent::Message));
+    }
+    if (machine_.suspended() || fault_ != 0) return;
+  }
   const bool wasSuspended = machine_.suspended();
   if (wasSuspended) {
     // Resuming. A frame that arrives meanwhile is one the frame handler never
@@ -521,7 +617,9 @@ IRAM_ATTR void AppVm::deliver(const AppEvent& event, int8_t handler) {
   } else {
     if (handler < 0 || !machine_.hasEntry(static_cast<VmEvent>(handler))) return;
     bool pressed = false;
-    if (pressShown_) {
+    if (handler == static_cast<int8_t>(VmEvent::Button)) {
+      pressed = true;
+    } else if (pressShown_) {
       pressShown_ = false;
     } else if (pendingPresses_ != 0) {
       --pendingPresses_;
@@ -529,6 +627,8 @@ IRAM_ATTR void AppVm::deliver(const AppEvent& event, int8_t handler) {
       pressShown_ = true;
     }
     handler_ = handler;
+    runMessage_ = handler == static_cast<int8_t>(VmEvent::Message);
+    if (runMessage_) message_ = nextMessage_;
     machine_.begin(static_cast<VmEvent>(handler), pressed);
   }
 
@@ -545,14 +645,15 @@ IRAM_ATTR void AppVm::deliver(const AppEvent& event, int8_t handler) {
   ctx.mag = event.magSample;
   ctx.battery = event.batteryPercent;
   ctx.linked = event.linked;
+  ctx.hasMessage = runMessage_;
+  ctx.messageTopic = message_.topic;
+  ctx.messageValue = message_.value;
 
-  const uint32_t allocation = event.sliceUs != 0 ? event.sliceUs : manifest_.frameBudgetUs;
-  const uint32_t slice = allocation / 100U * kSlicePercent;
   host_ = event.host;
 #if NHOS_VM_PROFILE
   const uint32_t r0 = vmCycles();
 #endif
-  const VmRunResult result = machine_.run(ctx, *this, UINT32_MAX, clockUs, clockUs() + slice);
+  const VmRunResult result = machine_.run(ctx, *this, UINT32_MAX, clockUs, deadlineUs_);
 #if NHOS_VM_PROFILE
   machine_.prof.runCyc += vmCycles() - r0;
 #endif
@@ -568,6 +669,7 @@ IRAM_ATTR void AppVm::deliver(const AppEvent& event, int8_t handler) {
     return;
   }
   handler_ = -1;
+  runMessage_ = false;
   // Degradation is recorded, not silent. On a research instrument a signal
   // that quietly changes fidelity because another app was enabled would put a
   // step change in the data that has nothing to do with the subject.
@@ -586,10 +688,20 @@ IRAM_ATTR void AppVm::deliver(const AppEvent& event, int8_t handler) {
   }
 }
 
+void AppVm::setDeadline(const AppEvent& event) {
+  // One slice per delivery, shared by everything it runs (on("start"),
+  // waiting messages and the handler itself).
+  const uint32_t allocation = event.sliceUs != 0 ? event.sliceUs : manifest_.frameBudgetUs;
+  deadlineUs_ = clockUs() + allocation / 100U * kSlicePercent;
+}
+
 void AppVm::raiseFault(uint8_t fault, const AppEvent& event) {
   fault_ = fault != 0 ? fault : 6;  // native_fault when unspecified
   handler_ = -1;
+  runMessage_ = false;
+  inboxCount_ = 0;
   suspendedSinceMs_ = 0;
+  releaseResources();
   if (event.host != nullptr) {
     const uint8_t count = sizeof(kVmFaultNames) / sizeof(kVmFaultNames[0]);
     event.host->emitEvent(manifest_.name, "fault", fault_ < count ? kVmFaultNames[fault_] : "fault");
@@ -619,6 +731,58 @@ void AppVm::vmLed(bool on, const uint8_t rgb[3], uint16_t stateSlot) {
   (void)rgb;
   (void)stateSlot;
 }
+
+// --- v2.1.0 system calls -------------------------------------------------------------
+// The capability behind each was checked by the verifier against the
+// manifest, and the manifest's dangerous ones against the operator's grant.
+
+float AppVm::vmStoreGet(const char* key) { return store_.get(key); }
+
+void AppVm::vmStoreSet(const char* key, float value) { store_.set(key, value); }
+
+bool AppVm::vmStoreAppend(const char* file, uint32_t nowMs, const float values[4]) {
+  bool reportFull = false;
+  const bool written = store_.append(file, nowMs, values, reportFull);
+  if (reportFull && host_ != nullptr) {
+    host_->emitEvent(manifest_.name, "store_full", file);
+    if (storage_ != nullptr) {
+      storage_->logTagged("apps", String("app_store_full app=") + packageId_, LogLevel::Warn);
+    }
+  }
+  return written;
+}
+
+void AppVm::vmStoreClear(const char* file) { store_.clear(file); }
+
+void AppVm::vmPublish(const char* topic, float value) {
+  if (host_ != nullptr) host_->publish(manifest_.name, vmHash(topic), value);
+}
+
+float AppVm::vmConfigGet(const char* key) { return AppDeviceControl::get(key); }
+
+bool AppVm::vmConfigSet(const char* key, float value, uint32_t nowMs) {
+  if (configSet_ && nowMs - lastConfigSetMs_ < kVmDeviceConfigIntervalMs) return false;
+  if (!AppDeviceControl::set(this, key, value)) return false;
+  configSet_ = true;
+  lastConfigSetMs_ = nowMs;
+  return true;
+}
+
+void AppVm::vmStream(bool on) { AppDeviceControl::setStream(this, on); }
+
+bool AppVm::vmI2cRead(uint8_t addr, uint8_t reg, uint8_t* out, uint8_t n) {
+  return AppIo::i2cRead(addr, reg, out, n);
+}
+
+bool AppVm::vmI2cWrite(uint8_t addr, const uint8_t* bytes, uint8_t n) {
+  return AppIo::i2cWrite(addr, bytes, n);
+}
+
+bool AppVm::vmUartOpen(uint32_t baud) { return AppIo::uartOpen(this, baud); }
+void AppVm::vmUartClose() { AppIo::uartClose(this); }
+int32_t AppVm::vmUartWrite(const uint8_t* bytes, uint8_t n) { return AppIo::uartWrite(this, bytes, n); }
+int32_t AppVm::vmUartAvailable() { return AppIo::uartAvailable(this); }
+int32_t AppVm::vmUartRead() { return AppIo::uartRead(this); }
 
 // --- outputs, pulled ----------------------------------------------------------------
 
@@ -707,6 +871,14 @@ String AppVm::statusJson(bool withOutputs) const {
   json += String(layout.arena);
   json += ",\"loop_free\":";
   json += verified_.loopFree ? "true" : "false";
+  if (messagesDropped_ != 0) {
+    json += ",\"messages_dropped\":";
+    json += String(messagesDropped_);
+  }
+  if (store_.isOpen()) {
+    json += ",\"store_bytes\":";
+    json += String(store_.usedBytes());
+  }
   json += ",\"suspensions\":";
   json += String(suspensions_);
   json += ",\"frames_skipped\":";

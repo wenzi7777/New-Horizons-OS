@@ -110,7 +110,7 @@ bool AppRegistry::readPackage(const String& path, String& json, String& sha, uin
 }
 
 bool AppRegistry::install(const String& path, const String& expectedSha256, bool replace,
-                          String& installedId, String& error) {
+                          uint32_t granted, String& installedId, String& error) {
   String json;
   String sha;
   uint32_t size = 0;
@@ -137,6 +137,12 @@ bool AppRegistry::install(const String& path, const String& expectedSha256, bool
   // disagrees with it would leave an entry nothing can remove.
   if (AppPackage::packagePath(String(manifest.id)) != path) {
     error = String("id_path_mismatch:") + manifest.id;
+    return false;
+  }
+
+  // The operator's consent, checked here and not trusted to the Desktop: a
+  // dangerous capability the install did not grant is refused.
+  if (!AppPackage::checkGrant(manifest.capabilities, granted, error)) {
     return false;
   }
 
@@ -182,6 +188,7 @@ bool AppRegistry::install(const String& path, const String& expectedSha256, bool
   entry.sizeBytes = size;
   entry.estimatedUs = estimatedUs;
   entry.loadFailed = false;
+  entry.granted = granted & manifest.capabilities & kAppDangerousCapabilities;
   if (existing < 0) {
     entry.slot = -1;
   }
@@ -218,6 +225,8 @@ bool AppRegistry::uninstall(const String& id, bool keepFile, String& error) {
   // keeps it.
   if (storage_ != nullptr) {
     AppVm::clearPersisted(*storage_, entry.manifest.id);
+    // Its store goes with it: values and every file in appdata/<id>/.
+    AppStore::erase(*storage_, entry.manifest.id);
   }
   Entry previous = entry;
   entry = Entry();
@@ -242,6 +251,11 @@ bool AppRegistry::bind(Entry& entry, int8_t slot, const String& json, String& er
   AppVm* app = slots_[slot];
   if (app == nullptr) {
     error = "slot_unavailable";
+    return false;
+  }
+  // Again at every bind: an index rebuilt from the files alone has lost the
+  // grants, and such a package must be installed (and consented to) again.
+  if (!AppPackage::checkGrant(entry.manifest.capabilities, entry.granted, error)) {
     return false;
   }
   if (!app->loadFromJson(json, AppPackage::packagePath(String(entry.manifest.id)), cellCount_,
@@ -470,6 +484,8 @@ bool AppRegistry::saveIndex() {
     json += appPackageKindName(entry.manifest.kind);
     json += "\",\"capabilities\":";
     json += String(entry.manifest.capabilities);
+    json += ",\"granted\":";
+    json += String(entry.granted);
     json += ",\"budget_us\":";
     json += String(entry.manifest.declaredBudgetUs);
     json += ",\"size\":";
@@ -532,7 +548,10 @@ bool AppRegistry::loadIndex() {
     entry.manifest.kind = appPackageKindFromName(jsonExtractString(object, "kind", "flow"));
     long number = 0;
     if (jsonExtractInt(object, "capabilities", number)) {
-      entry.manifest.capabilities = static_cast<uint16_t>(number);
+      entry.manifest.capabilities = static_cast<uint32_t>(number);
+    }
+    if (jsonExtractInt(object, "granted", number)) {
+      entry.granted = static_cast<uint32_t>(number);
     }
     if (jsonExtractInt(object, "budget_us", number)) {
       entry.manifest.declaredBudgetUs = static_cast<uint32_t>(number);
@@ -647,6 +666,8 @@ String AppRegistry::statusJson() const {
     json += appPackageKindName(entry.manifest.kind);
     json += "\",\"capabilities\":";
     json += String(entry.manifest.capabilities);
+    json += ",\"granted\":";
+    json += String(entry.granted);
     json += ",\"size\":";
     json += String(entry.sizeBytes);
     json += ",\"estimated_us\":";

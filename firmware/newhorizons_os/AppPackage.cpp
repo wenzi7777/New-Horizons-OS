@@ -58,11 +58,61 @@ bool AppPackage::osVersionSatisfies(const char* minOs) {
   return compareVersionCores(kFirmwareVersion, minOs) >= 0;
 }
 
-uint16_t AppPackage::capabilityFromName(const String& name) {
+uint32_t AppPackage::capabilityFromName(const String& name) {
   for (const AppCapabilityName& entry : kAppCapabilityNames) {
     if (name == entry.name) return entry.bit;
   }
   return 0;
+}
+
+bool AppPackage::capabilityMask(const String& array, uint32_t& mask, String& error) {
+  mask = 0;
+  int cursor = 0;
+  while (cursor < static_cast<int>(array.length())) {
+    const int open = array.indexOf('"', cursor);
+    if (open < 0) break;
+    const int close = array.indexOf('"', open + 1);
+    if (close < 0) break;
+    const String name = array.substring(open + 1, close);
+    const uint32_t bit = capabilityFromName(name);
+    if (bit == 0) {
+      error = String("unknown_capability:") + name;
+      return false;
+    }
+    mask |= bit;
+    cursor = close + 1;
+  }
+  return true;
+}
+
+const char* AppPackage::capabilityName(uint32_t bit) {
+  for (const AppCapabilityName& entry : kAppCapabilityNames) {
+    if (entry.bit == bit) return entry.name;
+  }
+  return "unknown";
+}
+
+bool AppPackage::checkGrant(uint32_t declared, uint32_t granted, String& error) {
+  uint32_t unsupported = 0;
+#if !NHOS_BOARD_HAS_APP_I2C
+  unsupported |= kAppCapIoI2c;
+#endif
+#if !NHOS_BOARD_HAS_APP_UART
+  unsupported |= kAppCapIoUart;
+#endif
+  for (uint8_t bit = 0; bit < 32; ++bit) {
+    const uint32_t mask = 1UL << bit;
+    if ((declared & mask) == 0) continue;
+    if ((unsupported & mask) != 0) {
+      error = String("capability_unsupported:") + capabilityName(mask);
+      return false;
+    }
+    if ((kAppDangerousCapabilities & mask) != 0 && (granted & mask) == 0) {
+      error = String("capability_not_granted:") + capabilityName(mask);
+      return false;
+    }
+  }
+  return true;
 }
 
 bool AppPackage::parseManifest(const String& json, AppPackageManifest& out, String& error) {
@@ -134,21 +184,9 @@ bool AppPackage::parseManifest(const String& json, AppPackageManifest& out, Stri
   // user-authored file would be hostile to read and easy to get wrong.
   String capabilityArray;
   if (jsonExtractArray(manifest, "capabilities", capabilityArray)) {
-    int cursor = 0;
-    while (cursor < static_cast<int>(capabilityArray.length())) {
-      const int open = capabilityArray.indexOf('"', cursor);
-      if (open < 0) break;
-      const int close = capabilityArray.indexOf('"', open + 1);
-      if (close < 0) break;
-      const String name = capabilityArray.substring(open + 1, close);
-      const uint16_t bit = capabilityFromName(name);
-      if (bit == 0) {
-        error = String("unknown_capability:") + name;
-        return false;
-      }
-      out.capabilities |= bit;
-      cursor = close + 1;
-    }
+    uint32_t mask = 0;
+    if (!capabilityMask(capabilityArray, mask, error)) return false;
+    out.capabilities |= mask;
   }
   if (out.capabilities == kAppCapNone) {
     // A readout or panel runs nowhere on the device, so it is granted nothing.

@@ -32,7 +32,7 @@ Flags:
 | `app_load_flow` |  | Load a flow graph into slot 0; rejected at load time if it exceeds the budget. |
 | `app_unload_flow` |  | Unload the flow graph in slot 0. |
 | `app_list_packages` |  | Installed app packages and which slot each is bound to. |
-| `app_install` | maintenance | Install an uploaded .nha package into the registry. |
+| `app_install` | maintenance | Install an uploaded .nha package into the registry; `grant` lists the dangerous capabilities the operator consented to. |
 | `app_uninstall` | maintenance | Remove a package from the registry and delete its file. |
 | `app_activate` | maintenance | Bind an installed package to a flow slot. |
 | `app_deactivate` | maintenance | Unbind a package from its slot, leaving it installed. |

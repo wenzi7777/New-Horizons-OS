@@ -50,6 +50,14 @@
 #define NHOS_BOARD_HAS_CONFIGURABLE_BUTTON 1
 #define NHOS_BOARD_HAS_PHYSICAL_POWER_SWITCH 1
 #define NHOS_BOARD_EXT_LED_RMT 1
+// Apps may reach the exposed I2C bus (FPC2.16 SDA / FPC2.17 SCL, shared with
+// the board's own chips, which apps are denied: AppContract.h kVmI2cDenied)
+// and UART0 (FPC1.17 TX = GPIO43, FPC1.16 RX = GPIO44; free, the console
+// is native USB).
+#define NHOS_BOARD_HAS_APP_I2C  1
+#define NHOS_BOARD_HAS_APP_UART 1
+#define NHOS_BOARD_APP_UART_TX  43
+#define NHOS_BOARD_APP_UART_RX  44
 #define NHOS_BOARD_OTA_MANIFEST_BASE \
   "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v15f"
 
@@ -87,6 +95,14 @@
 #define NHOS_BOARD_HAS_DAC_VREF 1
 #define NHOS_BOARD_HAS_PCA9536 1
 #define NHOS_BOARD_HAS_BATID 1
+// Apps may reach the exposed I2C bus (FPC2.16 SDA / FPC2.17 SCL, shared with
+// the board's own chips, which apps are denied: AppContract.h kVmI2cDenied)
+// and UART0 (FPC1.17 TX = GPIO43, FPC1.16 RX = GPIO44; free, the console
+// is native USB).
+#define NHOS_BOARD_HAS_APP_I2C  1
+#define NHOS_BOARD_HAS_APP_UART 1
+#define NHOS_BOARD_APP_UART_TX  43
+#define NHOS_BOARD_APP_UART_RX  44
 #define NHOS_BOARD_OTA_MANIFEST_BASE \
   "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v20f"
 
@@ -200,6 +216,12 @@
 #endif
 #ifndef NHOS_BOARD_HAS_MAX17048
 #define NHOS_BOARD_HAS_MAX17048 0
+#endif
+#ifndef NHOS_BOARD_HAS_APP_I2C
+#define NHOS_BOARD_HAS_APP_I2C 0
+#endif
+#ifndef NHOS_BOARD_HAS_APP_UART
+#define NHOS_BOARD_HAS_APP_UART 0
 #endif
 #ifndef NHOS_BOARD_HAS_BMM350
 #define NHOS_BOARD_HAS_BMM350 0

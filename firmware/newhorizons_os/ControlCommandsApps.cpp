@@ -4,6 +4,7 @@
 // never checks maintenance mode itself: the table's kCmdNeedsMaintenance
 // flag is enforced once, in processCommand(), before it runs.
 #include "ControlServer.h"
+#include "AppPackage.h"
 #include "EspNowOtaReceiver.h"
 #include <esp_timer.h>
 #include <utility>
@@ -162,10 +163,20 @@ String ControlServer::cmdAppInstall(const CommandContext& ctx) {
   if (path.isEmpty()) {
     return error(cmd, "path_required");
   }
-  String installedId;
+  // The dangerous capabilities the operator consented to (storage,
+  // device_config, device_stream, io_i2c, io_uart); the registry refuses a
+  // package declaring one that is not here.
+  uint32_t granted = 0;
+  String grantArray;
   String installError;
+  if (jsonExtractArray(request, "grant", grantArray) &&
+      !AppPackage::capabilityMask(grantArray, granted, installError)) {
+    return error(cmd, installError);
+  }
+  String installedId;
   if (!appRegistry_->install(path, extractString(request, "sha256"),
-                             extractBool(request, "replace", false), installedId, installError)) {
+                             extractBool(request, "replace", false), granted, installedId,
+                             installError)) {
     return error(cmd, installError);
   }
   String data = "{\"id\":\"";

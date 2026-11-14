@@ -87,6 +87,10 @@ class AppManager : public AppHost {
   void emitEvent(const char* app, const char* event, const String& detail) override;
   void emitValue(const char* app, const char* event, float value) override;
   void logLine(const char* app, const String& line) override;
+  // app.publish: queued for every other running app (each keeps
+  // kVmMessageQueue; an app's on("message") handlers run on its next
+  // delivery, inside its own budget).
+  void publish(const char* app, uint32_t topic, float value) override;
 
   // The OLED row the display should draw, composed across slots: the
   // lowest-numbered running slot that drew `row` on its last frame wins, so

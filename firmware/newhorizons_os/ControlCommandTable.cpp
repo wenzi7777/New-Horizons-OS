@@ -42,7 +42,7 @@ const CommandSpec* ControlServer::commandTable(size_t& count) {
       {"app_list_packages", &ControlServer::cmdAppListPackages, 0,
        "Installed app packages and which slot each is bound to."},
       {"app_install", &ControlServer::cmdAppInstall, kCmdNeedsMaintenance,
-       "Install an uploaded .nha package into the registry."},
+       "Install an uploaded .nha package into the registry; `grant` lists the dangerous capabilities the operator consented to."},
       {"app_uninstall", &ControlServer::cmdAppUninstall, kCmdNeedsMaintenance,
        "Remove a package from the registry and delete its file."},
       {"app_activate", &ControlServer::cmdAppActivate, kCmdNeedsMaintenance,

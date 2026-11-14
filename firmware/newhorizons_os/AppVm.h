@@ -1,6 +1,7 @@
 #pragma once
 
 #include "App.h"
+#include "AppStore.h"
 #include "VmCore.h"
 
 namespace nhos {
@@ -65,9 +66,12 @@ class AppVm : public App, private VmHostSink {
   void setIdentity(const char* name, uint32_t budgetUs = kDefaultBudgetUs);
   // Applied when a package is bound; reverted by unload().
   void applyPackageManifest(const char* version, const char* summary,
-                            const char* packageId, uint16_t capabilities);
+                            const char* packageId, uint32_t capabilities);
 
-  void attach(Storage& storage) { storage_ = &storage; }
+  void attach(Storage& storage) {
+    storage_ = &storage;
+    store_.attach(&storage);
+  }
   // A raw package file (app_load_flow): no manifest of record, so it may use
   // whatever a slot allows, and it persists nothing.
   bool loadFromFile(const String& path, uint16_t cellCount, String& error);
@@ -75,7 +79,7 @@ class AppVm : public App, private VmHostSink {
   // what it was running. `declaredCaps` is the manifest's capability set: an
   // image that needs more is refused.
   bool loadFromJson(const String& json, const String& sourcePath, uint16_t cellCount,
-                    uint16_t declaredCaps, String& error);
+                    uint32_t declaredCaps, String& error);
   bool loaded() const { return machine_.bound(); }
   // A faulted image is idle too: not dispatched, no share of the budget,
   // until it is reloaded.
@@ -86,7 +90,13 @@ class AppVm : public App, private VmHostSink {
 
   const AppManifest& manifest() const override { return manifest_; }
   bool start() override;
+  // Runs on("stop") and gives back what the app took: its store is written
+  // out, device settings it changed are restored, the UART is closed.
+  void stop() override;
   void onEvent(const AppEvent& event) override;
+  // app.publish from another app: queued (kVmMessageQueue) for this image's
+  // on("message") handlers, run before its next handler.
+  void queueMessage(uint32_t topic, float value) override;
   void service(uint32_t nowMs) override;
   String statusJson(bool withOutputs) const override;
   bool displayLine(uint8_t row, AppDisplayLine& out) const override;
@@ -98,7 +108,7 @@ class AppVm : public App, private VmHostSink {
   // without touching any slot. The registry refuses a package with it at
   // install time.
   static bool dryRun(const String& json, uint16_t cellCount, uint32_t budgetUs,
-                     uint16_t declaredCaps, uint32_t& estimatedUs, String& error);
+                     uint32_t declaredCaps, uint32_t& estimatedUs, String& error);
   // Forgets a package's persisted values. The registry calls it on uninstall;
   // deactivating keeps them, so re-activating carries on counting.
   static void clearPersisted(Storage& storage, const char* packageId);
@@ -113,8 +123,29 @@ class AppVm : public App, private VmHostSink {
   void vmEmitValue(const char* event, float value) override;
   void vmLog(const char* text, float value) override;
   void vmLed(bool on, const uint8_t rgb[3], uint16_t stateSlot) override;
+  float vmStoreGet(const char* key) override;
+  void vmStoreSet(const char* key, float value) override;
+  bool vmStoreAppend(const char* file, uint32_t nowMs, const float values[4]) override;
+  void vmStoreClear(const char* file) override;
+  void vmPublish(const char* topic, float value) override;
+  float vmConfigGet(const char* key) override;
+  bool vmConfigSet(const char* key, float value, uint32_t nowMs) override;
+  void vmStream(bool on) override;
+  bool vmI2cRead(uint8_t addr, uint8_t reg, uint8_t* out, uint8_t n) override;
+  bool vmI2cWrite(uint8_t addr, const uint8_t* bytes, uint8_t n) override;
+  bool vmUartOpen(uint32_t baud) override;
+  void vmUartClose() override;
+  int32_t vmUartWrite(const uint8_t* bytes, uint8_t n) override;
+  int32_t vmUartAvailable() override;
+  int32_t vmUartRead() override;
 
+  // Runs `handler` (a VmEvent, or -1 to resume a suspended one). As the App
+  // Library's simulator does: on("start") first if it has not run, then
+  // waiting messages, each as its own run, then the handler itself.
   void deliver(const AppEvent& event, int8_t handler);
+  void setDeadline(const AppEvent& event);
+  // What a stop, fault or unload gives back.
+  void releaseResources();
   void raiseFault(uint8_t fault, const AppEvent& event);
   bool persists() const;
   void restorePersisted();
@@ -153,6 +184,25 @@ class AppVm : public App, private VmHostSink {
   // edges.
   uint8_t pendingPresses_ = 0;
   bool pressShown_ = false;
+  // v2.1.0: lifecycle, messages and what the app holds on the device.
+  bool started_ = false;  // on("start") has run
+  bool stopped_ = false;  // on("stop") has run
+  struct Message {
+    uint32_t topic;
+    float value;
+  };
+  Message inbox_[kVmMessageQueue] = {};
+  uint8_t inboxCount_ = 0;
+  Message nextMessage_ = {};
+  bool runMessage_ = false;  // the handler being run is a message's
+  Message message_ = {};
+  uint32_t messagesDropped_ = 0;
+  uint32_t deadlineUs_ = 0;
+  uint32_t lastConfigSetMs_ = 0;
+  bool configSet_ = false;
+  uint32_t lastFrameSeq_ = 0;
+  AppHost* lastHost_ = nullptr;  // AppManager, for on("stop") outside dispatch
+  AppStore store_;
   String sourcePath_;
   String graphName_;
 };

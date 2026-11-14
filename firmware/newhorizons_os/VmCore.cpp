@@ -232,7 +232,7 @@ bool decode(const uint8_t* code, uint16_t codeLen, uint16_t pc, Insn& out) {
 struct Checker {
   const uint8_t* img;
   const VmLayout& L;
-  uint16_t declared;
+  uint32_t declared;
   float k(uint16_t i) const { return rdf(img + L.constsAt + i * 4U); }
   uint8_t stringLen(uint16_t index) const {
     uint32_t s = L.stringsAt;
@@ -241,7 +241,7 @@ struct Checker {
   }
 
   // A NAT's operands, docs/vm.md §9 rule 4-5.
-  bool native(int32_t op, int32_t state, int32_t param, uint16_t& usedCaps, const char*& error) const {
+  bool native(int32_t op, int32_t state, int32_t param, uint32_t& usedCaps, const char*& error) const {
     if (op <= 0 || op >= kFlowOpCount || kVmNatives[op].params == 0xFF) { error = "unknown_native"; return false; }
     const FlowOp fop = static_cast<FlowOp>(op);
     const uint16_t cap = kFlowOps[op].capability;
@@ -341,7 +341,7 @@ struct Checker {
 
 }  // namespace
 
-bool vmVerify(const uint8_t* img, size_t length, uint16_t declaredCaps, uint16_t cellCount,
+bool vmVerify(const uint8_t* img, size_t length, uint32_t declaredCaps, uint16_t cellCount,
               VmVerified& out, const char*& error) {
   out = VmVerified();
   VmLayout& L = out.layout;
@@ -372,7 +372,7 @@ bool vmVerify(const uint8_t* img, size_t length, uint16_t declaredCaps, uint16_t
   bool ok = true;
   bool loopFree = true;
   uint64_t estimatedNs = 0;
-  uint16_t used = 0;
+  uint32_t used = 0;
   uint8_t ownMax[kVmMaxFunctions] = {0};
   // Call sites: callee and the depth at the call, per function, flattened.
   struct Site { uint8_t from; uint8_t callee; uint8_t depth; };
@@ -418,7 +418,7 @@ bool vmVerify(const uint8_t* img, size_t length, uint16_t declaredCaps, uint16_t
         case VmOp::Ret: if (insn.a != fn.rets) { error = "bad_return"; ok = false; } break;
         case VmOp::Sys: {
           if (insn.a >= kVmSyscallCount) { error = "unknown_syscall"; ok = false; break; }
-          const uint16_t cap = kVmSyscalls[insn.a].capability;
+          const uint32_t cap = kVmSyscalls[insn.a].capability;
           if (cap != 0 && (declaredCaps & cap) == 0) { error = "capability_not_declared"; ok = false; }
           used |= cap;
           break;
@@ -854,6 +854,174 @@ VM_HOT bool VmMachine::syscall(uint16_t id, float* args, float& result, const Vm
       result = 0.0f;
       return true;
     }
+    default:
+      return extendedSyscall(id, args, result, ctx, host);
+  }
+}
+
+uint32_t vmHash(const char* text) {
+  uint32_t h = 0x811c9dc5U;
+  for (const char* c = text; *c != '\0'; ++c) {
+    h ^= static_cast<uint8_t>(*c);
+    h *= 0x01000193U;
+  }
+  return h;
+}
+
+namespace {
+
+bool i2cAddressOk(float addr) {
+  if (!isInt(addr, 0x08, 0x77)) return false;
+  const uint8_t a = static_cast<uint8_t>(addr);
+  for (uint8_t i = 0; i < kVmI2cDeniedCount; ++i) {
+    if (kVmI2cDenied[i] == a) return false;
+  }
+  return true;
+}
+
+bool byteOk(float v) { return isInt(v, 0, 255); }
+
+}  // namespace
+
+bool VmMachine::span(const float* args, uint16_t& base, uint8_t& n) const {
+  const float b = args[0], count = args[1];
+  if (!isInt(b, 0, static_cast<float>(layout_.arena)) || !isInt(count, 0, kVmI2cMaxTransfer)) return false;
+  if (b + count > static_cast<float>(layout_.arena)) return false;
+  base = static_cast<uint16_t>(b);
+  n = static_cast<uint8_t>(count);
+  return true;
+}
+
+// The v2.1.0 calls: storage, messages, device control and I/O. The JavaScript
+// twin is VmMachine.extendedSyscall in vm.mjs; a malformed argument (a string
+// or a buffer outside the image) faults, while hardware that is absent or
+// refuses -- an I2C NACK, a system address, a closed UART -- answers -1 or 0.
+bool VmMachine::extendedSyscall(uint16_t id, float* args, float& result, const VmContext& ctx,
+                                VmHostSink& host) {
+  const auto str = [&](uint8_t at, const char*& out) {
+    if (!isInt(args[at], 0, static_cast<float>(layout_.stringCount) - 1)) return false;
+    out = string(static_cast<uint16_t>(args[at]));
+    return true;
+  };
+  float* f = arena();
+  const char* name = nullptr;
+  result = 0.0f;
+  switch (id) {
+    case 7:  // store_get
+      if (!str(0, name)) return false;
+      result = host.vmStoreGet(name);
+      return true;
+    case 8:  // store_set
+      if (!str(0, name)) return false;
+      host.vmStoreSet(name, args[1]);
+      return true;
+    case 9:  // store_append
+      if (!str(0, name)) return false;
+      result = host.vmStoreAppend(name, ctx.nowMs, args + 1) ? 1.0f : 0.0f;
+      return true;
+    case 10:  // store_clear
+      if (!str(0, name)) return false;
+      host.vmStoreClear(name);
+      return true;
+    case 11:  // app_publish
+      if (!str(0, name)) return false;
+      host.vmPublish(name, args[1]);
+      return true;
+    case 12:  // msg_value
+      result = ctx.hasMessage ? ctx.messageValue : 0.0f;
+      return true;
+    case 13:  // msg_is
+      if (!str(0, name)) return false;
+      result = ctx.hasMessage && ctx.messageTopic == vmHash(name) ? 1.0f : 0.0f;
+      return true;
+    case 14:  // device_config_get
+      if (!str(0, name)) return false;
+      result = host.vmConfigGet(name);
+      return true;
+    case 15:  // device_config_set
+      if (!str(0, name)) return false;
+      result = host.vmConfigSet(name, args[1], ctx.nowMs) ? 1.0f : 0.0f;
+      return true;
+    case 16:  // device_stream
+      host.vmStream(args[0] != 0.0f);
+      return true;
+    case 17:    // i2c_read8
+    case 18: {  // i2c_read16
+      result = -1.0f;
+      if (!i2cAddressOk(args[0]) || !byteOk(args[1])) return true;
+      uint8_t bytes[2] = {0, 0};
+      const uint8_t n = id == 18 ? 2 : 1;
+      if (!host.vmI2cRead(static_cast<uint8_t>(args[0]), static_cast<uint8_t>(args[1]), bytes, n)) return true;
+      result = id == 18 ? static_cast<float>((bytes[0] << 8) | bytes[1]) : static_cast<float>(bytes[0]);
+      return true;
+    }
+    case 19: {  // i2c_write8
+      result = -1.0f;
+      if (!i2cAddressOk(args[0]) || !byteOk(args[1]) || !byteOk(args[2])) return true;
+      const uint8_t bytes[2] = {static_cast<uint8_t>(args[1]), static_cast<uint8_t>(args[2])};
+      if (host.vmI2cWrite(static_cast<uint8_t>(args[0]), bytes, 2)) result = 0.0f;
+      return true;
+    }
+    case 20: {  // i2c_read(addr, reg, base, n)
+      uint16_t base;
+      uint8_t n;
+      if (!span(args + 2, base, n)) return false;
+      result = -1.0f;
+      if (!i2cAddressOk(args[0]) || !byteOk(args[1])) return true;
+      uint8_t bytes[kVmI2cMaxTransfer] = {0};
+      if (!host.vmI2cRead(static_cast<uint8_t>(args[0]), static_cast<uint8_t>(args[1]), bytes, n)) return true;
+      for (uint8_t i = 0; i < n; ++i) f[base + i] = static_cast<float>(bytes[i]);
+      result = static_cast<float>(n);
+      return true;
+    }
+    case 21: {  // i2c_write(addr, base, n)
+      uint16_t base;
+      uint8_t n;
+      if (!span(args + 1, base, n)) return false;
+      result = -1.0f;
+      if (!i2cAddressOk(args[0])) return true;
+      uint8_t bytes[kVmI2cMaxTransfer];
+      for (uint8_t i = 0; i < n; ++i) {
+        if (!byteOk(f[base + i])) return true;
+        bytes[i] = static_cast<uint8_t>(f[base + i]);
+      }
+      if (host.vmI2cWrite(static_cast<uint8_t>(args[0]), bytes, n)) result = static_cast<float>(n);
+      return true;
+    }
+    case 22: {  // uart_open
+      const float baud = args[0];
+      if (isInt(baud, static_cast<float>(kVmUartMinBaud), static_cast<float>(kVmUartMaxBaud))) {
+        result = host.vmUartOpen(static_cast<uint32_t>(baud)) ? 1.0f : 0.0f;
+      }
+      return true;
+    }
+    case 23:  // uart_close
+      host.vmUartClose();
+      return true;
+    case 24: {  // uart_write
+      if (!byteOk(args[0])) return true;
+      const uint8_t b = static_cast<uint8_t>(args[0]);
+      result = static_cast<float>(host.vmUartWrite(&b, 1));
+      return true;
+    }
+    case 25: {  // uart_write_buf(base, n)
+      uint16_t base;
+      uint8_t n;
+      if (!span(args, base, n)) return false;
+      uint8_t bytes[kVmI2cMaxTransfer];
+      for (uint8_t i = 0; i < n; ++i) {
+        if (!byteOk(f[base + i])) return true;
+        bytes[i] = static_cast<uint8_t>(f[base + i]);
+      }
+      result = static_cast<float>(host.vmUartWrite(bytes, n));
+      return true;
+    }
+    case 26:  // uart_available
+      result = static_cast<float>(host.vmUartAvailable());
+      return true;
+    case 27:  // uart_read
+      result = static_cast<float>(host.vmUartRead());
+      return true;
     default:
       return false;
   }
