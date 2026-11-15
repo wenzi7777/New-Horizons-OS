@@ -51,8 +51,10 @@ class GrantTests(unittest.TestCase):
         self.assertIn("AppPackage::checkGrant(manifest.capabilities, granted, error)", install)
         # Before the package is indexed or dry-run.
         self.assertLess(install.index("checkGrant"), install.index("AppVm::dryRun"))
-        bind = body(registry, "bool AppRegistry::bind(")
-        self.assertLess(bind.index("checkGrant"), bind.index("loadFromJson"))
+        load = body(registry, "bool AppRegistry::load(")
+        self.assertLess(load.index("checkGrant"), load.index("loadFromJson"))
+        # Every bind goes through load().
+        self.assertIn("if (!load(entry, app, json, error)) {", body(registry, "bool AppRegistry::bind("))
         # The grant survives a reboot with the index.
         self.assertIn('"granted"', body(registry, "bool AppRegistry::loadIndex("))
 
@@ -96,7 +98,7 @@ class IoTests(unittest.TestCase):
         release = body(vm, "void AppVm::releaseResources()")
         self.assertIn("AppIo::uartClose(this)", release)
         self.assertIn("AppDeviceControl::release(this)", release)
-        self.assertIn("store_.flush()", release)
+        self.assertIn("store_->flush()", release)
         self.assertIn("releaseResources();", body(vm, "void AppVm::stop()"))
         self.assertIn("releaseResources();", body(vm, "void AppVm::raiseFault("))
         self.assertIn("stop();", body(vm, "void AppVm::unload()"))
@@ -156,8 +158,8 @@ class StoreTests(unittest.TestCase):
 class MessageTests(unittest.TestCase):
     def test_publish_reaches_other_running_apps_only(self):
         publish = body(read("AppManager.cpp"), "void AppManager::publish(")
-        self.assertIn("AppState::Running", publish)
-        self.assertIn("strcmp(slot.app->manifest().name, app) == 0", publish)
+        self.assertIn("if (!active(target)) continue;", publish)
+        self.assertIn("strcmp(target->manifest().name, app) == 0", publish)
         self.assertIn("queueMessage(topic, value)", publish)
 
     def test_the_queue_is_bounded_and_counts_drops(self):

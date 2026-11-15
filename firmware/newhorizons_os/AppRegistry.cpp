@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "AppGovernor.h"
 #include "AppManager.h"
 #include "AppVm.h"
 #include "JsonUtils.h"
@@ -39,14 +40,12 @@ void copyField(char* dest, size_t size, const String& value) {
 
 }  // namespace
 
-void AppRegistry::begin(Storage& storage, AppManager& apps, AppVm* const slots[kMaxSlots],
-                        uint16_t cellCount) {
+void AppRegistry::begin(Storage& storage, AppManager& apps, uint16_t cellCount,
+                        const AppGovernor* governor) {
   storage_ = &storage;
   apps_ = &apps;
-  for (uint8_t i = 0; i < kMaxSlots; ++i) {
-    slots_[i] = slots[i];
-  }
   cellCount_ = cellCount;
+  governor_ = governor;
 }
 
 int8_t AppRegistry::indexOfId(const String& id) const {
@@ -58,21 +57,27 @@ int8_t AppRegistry::indexOfId(const String& id) const {
   return -1;
 }
 
-int8_t AppRegistry::freeSlot() const {
-  for (uint8_t i = 0; i < kMaxSlots; ++i) {
-    if (slotOwner_[i] < 0) {
-      return static_cast<int8_t>(i);
-    }
+uint16_t AppRegistry::activeCount() const {
+  uint16_t count = 0;
+  for (uint8_t i = 0; i < kMaxPackages; ++i) {
+    if (entries_[i].valid && entries_[i].app != nullptr) ++count;
   }
-  return -1;
+  return count;
+}
+
+uint16_t AppRegistry::nextOrder() const {
+  uint16_t next = 0;
+  for (uint8_t i = 0; i < kMaxPackages; ++i) {
+    const Entry& entry = entries_[i];
+    if (entry.valid && entry.app != nullptr && entry.order >= next) next = entry.order + 1;
+  }
+  return next;
 }
 
 uint32_t AppRegistry::totalEstimatedUs() const {
   uint32_t total = 0;
-  for (uint8_t i = 0; i < kMaxSlots; ++i) {
-    if (slotOwner_[i] >= 0) {
-      total += entries_[slotOwner_[i]].estimatedUs;
-    }
+  for (uint8_t i = 0; i < kMaxPackages; ++i) {
+    if (entries_[i].valid && entries_[i].app != nullptr) total += entries_[i].estimatedUs;
   }
   return total;
 }
@@ -156,12 +161,13 @@ bool AppRegistry::install(const String& path, const String& expectedSha256, bool
   // install time rather than discovered at activation. A readout has no graph
   // -- the device stores and reports it without interpreting it.
   uint32_t estimatedUs = 0;
+  uint32_t memoryBytes = 0;
   if (!appPackageIsView(manifest.kind)) {
     String graphError;
     if (!AppVm::dryRun(json, cellCount_,
                        manifest.declaredBudgetUs != 0 ? manifest.declaredBudgetUs
                                                       : AppVm::kDefaultBudgetUs,
-                       manifest.capabilities, estimatedUs, graphError)) {
+                       manifest.capabilities, estimatedUs, memoryBytes, graphError)) {
       // A package built before v2.0.0 is not broken, only old: say so plainly
       // so the Desktop/Studio can offer the rebuilt one.
       error = graphError == "needs_update" ? graphError : String("graph_invalid:") + graphError;
@@ -187,10 +193,13 @@ bool AppRegistry::install(const String& path, const String& expectedSha256, bool
   copyField(entry.manifest.sha256, sizeof(entry.manifest.sha256), sha);
   entry.sizeBytes = size;
   entry.estimatedUs = estimatedUs;
+  entry.memoryBytes = memoryBytes;
   entry.loadFailed = false;
   entry.granted = granted & manifest.capabilities & kAppDangerousCapabilities;
   if (existing < 0) {
-    entry.slot = -1;
+    entry.app = nullptr;
+    entry.active = false;
+    entry.order = 0;
   }
 
   if (!saveIndex()) {
@@ -198,11 +207,12 @@ bool AppRegistry::install(const String& path, const String& expectedSha256, bool
     error = "index_write_failed";
     return false;
   }
-  // A replaced package that was live is rebound so the running slot reflects
-  // what the index now says.
-  if (entry.slot >= 0) {
-    String bindError;
-    if (!bind(entry, entry.slot, json, bindError)) {
+  // A replaced package that was running is reloaded in place, so the running
+  // app reflects what the index now says. Transactional: if the new image
+  // cannot load, the old one keeps running and the entry says so.
+  if (entry.app != nullptr) {
+    String loadError;
+    if (!load(entry, entry.app, json, loadError)) {
       entry.loadFailed = true;
     }
   }
@@ -217,10 +227,7 @@ bool AppRegistry::uninstall(const String& id, bool keepFile, String& error) {
     return false;
   }
   Entry& entry = entries_[index];
-  if (entry.slot >= 0) {
-    unbind(entry.slot);
-    entry.slot = -1;
-  }
+  unbind(entry);
   // Uninstalling is the one way to start a persisted count over; deactivating
   // keeps it.
   if (storage_ != nullptr) {
@@ -247,13 +254,8 @@ bool AppRegistry::uninstall(const String& id, bool keepFile, String& error) {
   return true;
 }
 
-bool AppRegistry::bind(Entry& entry, int8_t slot, const String& json, String& error) {
-  AppVm* app = slots_[slot];
-  if (app == nullptr) {
-    error = "slot_unavailable";
-    return false;
-  }
-  // Again at every bind: an index rebuilt from the files alone has lost the
+bool AppRegistry::load(Entry& entry, AppVm* app, const String& json, String& error) {
+  // Again at every load: an index rebuilt from the files alone has lost the
   // grants, and such a package must be installed (and consented to) again.
   if (!AppPackage::checkGrant(entry.manifest.capabilities, entry.granted, error)) {
     return false;
@@ -265,23 +267,60 @@ bool AppRegistry::bind(Entry& entry, int8_t slot, const String& json, String& er
     return false;
   }
   entry.needsUpdate = false;
-  app->applyPackageManifest(entry.manifest.version, entry.manifest.summary, entry.manifest.id,
-                            entry.manifest.capabilities);
+  if (!app->applyPackageManifest(entry.manifest.version, entry.manifest.summary, entry.manifest.id,
+                                 entry.manifest.capabilities, entry.manifest.burst)) {
+    error = "app_pool_exhausted";
+    return false;
+  }
   entry.estimatedUs = app->estimatedUs();
-  slotOwner_[slot] = static_cast<int8_t>(&entry - entries_);
-  entry.slot = slot;
+  entry.memoryBytes = app->memoryBytes();
   return true;
 }
 
-void AppRegistry::unbind(int8_t slot) {
-  if (slot < 0 || slot >= kMaxSlots || slots_[slot] == nullptr) {
-    return;
+bool AppRegistry::bind(Entry& entry, uint16_t order, const String& json, String& error) {
+  if (storage_ == nullptr || apps_ == nullptr) {
+    error = "apps_unavailable";
+    return false;
   }
-  slots_[slot]->unload();
-  slotOwner_[slot] = -1;
+  AppVm* app = AppVm::create(*storage_);
+  if (app == nullptr) {
+    error = "app_pool_exhausted";
+    return false;
+  }
+  if (!load(entry, app, json, error)) {
+    AppVm::destroy(app);
+    return false;
+  }
+  // Time is the other resource. A loop-free app has a static cost, and the
+  // running ones together must fit what the governor can ever give them; an
+  // app with loops has no static cost and is held to its slice instead.
+  const uint32_t ceiling = governor_ != nullptr ? governor_->ceilingUs() : 0;
+  if (ceiling != 0 && entry.estimatedUs != 0 &&
+      totalEstimatedUs() + entry.estimatedUs > ceiling) {
+    error = String("app_budget_exhausted:") + String(totalEstimatedUs() + entry.estimatedUs) +
+            "us>" + String(ceiling) + "us";
+    AppVm::destroy(app);
+    return false;
+  }
+  entry.app = app;
+  entry.active = true;
+  entry.order = order;
+  apps_->add(app, order);
+  return true;
 }
 
-bool AppRegistry::activate(const String& id, int8_t slot, String& error) {
+void AppRegistry::unbind(Entry& entry) {
+  if (entry.app == nullptr) {
+    entry.active = false;
+    return;
+  }
+  if (apps_ != nullptr) apps_->remove(entry.app);
+  AppVm::destroy(entry.app);
+  entry.app = nullptr;
+  entry.active = false;
+}
+
+bool AppRegistry::activate(const String& id, String& error) {
   const int8_t index = indexOfId(id);
   if (index < 0) {
     error = String("unknown_package:") + id;
@@ -289,28 +328,13 @@ bool AppRegistry::activate(const String& id, int8_t slot, String& error) {
   }
   Entry& entry = entries_[index];
   if (appPackageIsView(entry.manifest.kind)) {
-    // Nothing to dispatch. Saying so is better than binding it to a slot that
-    // would then sit idle and mislead anyone reading the roster.
+    // Nothing to dispatch. Saying so is better than running an app that would
+    // then sit idle and mislead anyone reading the roster.
     error = String("not_activatable:") + appPackageKindName(entry.manifest.kind);
     return false;
   }
-  if (entry.slot >= 0) {
-    error = String("already_active:") + String(entry.slot);
-    return false;
-  }
-  if (slot < 0) {
-    slot = freeSlot();
-    if (slot < 0) {
-      error = "no_free_slot";
-      return false;
-    }
-  }
-  if (slot >= kMaxSlots) {
-    error = String("slot_out_of_range:") + String(slot);
-    return false;
-  }
-  if (slotOwner_[slot] >= 0) {
-    error = String("slot_occupied:") + entries_[slotOwner_[slot]].manifest.id;
+  if (entry.app != nullptr) {
+    error = "already_active";
     return false;
   }
 
@@ -320,41 +344,71 @@ bool AppRegistry::activate(const String& id, int8_t slot, String& error) {
   if (!readPackage(AppPackage::packagePath(id), json, sha, size, error)) {
     return false;
   }
-  if (!bind(entry, slot, json, error)) {
+  if (!bind(entry, nextOrder(), json, error)) {
     return false;
   }
   entry.loadFailed = false;
   if (!saveIndex()) {
-    unbind(slot);
-    entry.slot = -1;
+    unbind(entry);
     error = "index_write_failed";
     return false;
   }
   return true;
 }
 
-bool AppRegistry::deactivate(const String& id, int8_t slot, String& error) {
-  int8_t index = -1;
-  if (id.length() > 0) {
-    index = indexOfId(id);
-    if (index < 0) {
-      error = String("unknown_package:") + id;
-      return false;
-    }
-    slot = entries_[index].slot;
-  } else {
-    if (slot < 0 || slot >= kMaxSlots) {
-      error = String("slot_out_of_range:") + String(slot);
-      return false;
-    }
-    index = slotOwner_[slot];
-  }
-  if (index < 0 || slot < 0) {
-    error = String("slot_not_active:") + String(slot);
+bool AppRegistry::deactivate(const String& id, String& error) {
+  const int8_t index = indexOfId(id);
+  if (index < 0) {
+    error = String("unknown_package:") + id;
     return false;
   }
-  unbind(slot);
-  entries_[index].slot = -1;
+  Entry& entry = entries_[index];
+  if (entry.app == nullptr) {
+    error = "app_not_active";
+    return false;
+  }
+  unbind(entry);
+  if (!saveIndex()) {
+    error = "index_write_failed";
+    return false;
+  }
+  return true;
+}
+
+bool AppRegistry::reorder(const String& id, uint16_t to, String& error) {
+  const int8_t index = indexOfId(id);
+  if (index < 0) {
+    error = String("unknown_package:") + id;
+    return false;
+  }
+  if (entries_[index].app == nullptr) {
+    error = "app_not_active";
+    return false;
+  }
+  // The active entries in their current order, with `id` moved to `to`.
+  int8_t ordered[kMaxPackages];
+  uint8_t count = 0;
+  for (uint8_t i = 0; i < kMaxPackages; ++i) {
+    if (entries_[i].valid && entries_[i].app != nullptr && i != static_cast<uint8_t>(index)) {
+      uint8_t at = count;
+      while (at > 0 && entries_[ordered[at - 1]].order > entries_[i].order) {
+        ordered[at] = ordered[at - 1];
+        --at;
+      }
+      ordered[at] = static_cast<int8_t>(i);
+      ++count;
+    }
+  }
+  if (to > count) to = count;
+  for (uint8_t i = count; i > to; --i) ordered[i] = ordered[i - 1];
+  ordered[to] = index;
+  ++count;
+  for (uint8_t i = 0; i < count; ++i) {
+    Entry& entry = entries_[ordered[i]];
+    entry.order = i;
+    entry.app->run.order = i;
+  }
+  apps_->sortByOrder();
   if (!saveIndex()) {
     error = "index_write_failed";
     return false;
@@ -386,16 +440,12 @@ bool AppRegistry::reindex(uint16_t& recovered, uint16_t& dropped, String& error,
   recovered = 0;
   dropped = 0;
 
-  // Remember the bindings so a rebuild does not silently stop everything that
-  // was running.
-  char boundIds[kMaxSlots][AppPackageManifest::kIdLen] = {{0}};
-  for (uint8_t i = 0; i < kMaxSlots; ++i) {
-    if (slotOwner_[i] >= 0) {
-      strncpy(boundIds[i], entries_[slotOwner_[i]].manifest.id, AppPackageManifest::kIdLen - 1);
-    }
-  }
+  // The running apps carry on through a rebuild: each is handed to the new
+  // entry for its file, and only one whose file is gone is stopped.
+  Entry previous[kMaxPackages];
   for (uint8_t i = 0; i < kMaxPackages; ++i) {
     if (entries_[i].valid) ++dropped;
+    previous[i] = entries_[i];
     entries_[i] = Entry();
   }
 
@@ -425,18 +475,22 @@ bool AppRegistry::reindex(uint16_t& recovered, uint16_t& dropped, String& error,
     entry.manifest = manifest;
     copyField(entry.manifest.sha256, sizeof(entry.manifest.sha256), sha);
     entry.sizeBytes = size;
-    entry.slot = -1;
-    for (uint8_t slot = 0; slot < kMaxSlots; ++slot) {
-      if (boundIds[slot][0] != '\0' && strcmp(boundIds[slot], manifest.id) == 0) {
-        String bindError;
-        if (bind(entry, static_cast<int8_t>(slot), json, bindError)) {
-          break;
-        }
-        entry.loadFailed = true;
-      }
+    for (uint8_t i = 0; i < kMaxPackages; ++i) {
+      Entry& old = previous[i];
+      if (!old.valid || strcmp(old.manifest.id, manifest.id) != 0) continue;
+      entry.app = old.app;
+      entry.active = old.app != nullptr;
+      entry.order = old.order;
+      entry.estimatedUs = old.estimatedUs;
+      entry.memoryBytes = old.memoryBytes;
+      old.app = nullptr;
+      break;
     }
     ++next;
     ++recovered;
+  }
+  for (uint8_t i = 0; i < kMaxPackages; ++i) {
+    if (previous[i].app != nullptr) unbind(previous[i]);
   }
   if (dropped >= recovered) {
     dropped = static_cast<uint16_t>(dropped - recovered);
@@ -490,8 +544,16 @@ bool AppRegistry::saveIndex() {
     json += String(entry.manifest.declaredBudgetUs);
     json += ",\"size\":";
     json += String(entry.sizeBytes);
-    json += ",\"slot\":";
-    json += String(entry.slot);
+    json += ",\"burst\":";
+    json += entry.manifest.burst ? "true" : "false";
+    json += ",\"estimated_us\":";
+    json += String(entry.estimatedUs);
+    json += ",\"memory_bytes\":";
+    json += String(entry.memoryBytes);
+    json += ",\"active\":";
+    json += entry.active ? "true" : "false";
+    json += ",\"order\":";
+    json += String(entry.order);
     json += "}";
   }
   json += "]}";
@@ -559,9 +621,23 @@ bool AppRegistry::loadIndex() {
     if (jsonExtractInt(object, "size", number)) {
       entry.sizeBytes = static_cast<uint32_t>(number);
     }
-    entry.slot = -1;
-    if (jsonExtractInt(object, "slot", number) && number >= 0 && number < kMaxSlots) {
-      entry.slot = static_cast<int8_t>(number);
+    if (jsonExtractInt(object, "estimated_us", number) && number > 0) {
+      entry.estimatedUs = static_cast<uint32_t>(number);
+    }
+    if (jsonExtractInt(object, "memory_bytes", number) && number > 0) {
+      entry.memoryBytes = static_cast<uint32_t>(number);
+    }
+    bool flag = false;
+    if (jsonExtractBool(object, "burst", flag)) entry.manifest.burst = flag;
+    if (jsonExtractBool(object, "active", flag)) {
+      entry.active = flag;
+      if (jsonExtractInt(object, "order", number) && number >= 0) {
+        entry.order = static_cast<uint16_t>(number);
+      }
+    } else if (jsonExtractInt(object, "slot", number) && number >= 0) {
+      // An index from before v2.1.0: a slot, and the slot was the order.
+      entry.active = true;
+      entry.order = static_cast<uint16_t>(number);
     }
     ++next;
   }
@@ -593,21 +669,31 @@ void AppRegistry::restore() {
     return;
   }
 
+  // In order, so the first ones get the pool if not everything fits any more.
+  bool pending[kMaxPackages] = {false};
   for (uint8_t i = 0; i < kMaxPackages; ++i) {
     Entry& entry = entries_[i];
-    if (!entry.valid || entry.slot < 0) continue;
-    if (appPackageIsView(entry.manifest.kind)) {
-      entry.slot = -1;
-      continue;
+    pending[i] = entry.valid && entry.active && !appPackageIsView(entry.manifest.kind);
+    entry.active = false;
+  }
+  uint16_t nextOrder = 0;
+  for (;;) {
+    int8_t pick = -1;
+    for (uint8_t i = 0; i < kMaxPackages; ++i) {
+      if (pending[i] && (pick < 0 || entries_[i].order < entries_[pick].order)) {
+        pick = static_cast<int8_t>(i);
+      }
     }
-    const int8_t wanted = entry.slot;
-    entry.slot = -1;
+    if (pick < 0) break;
+    pending[pick] = false;
+    Entry& entry = entries_[pick];
     String json;
     String sha;
     uint32_t size = 0;
     String error;
+    // Renumbered 0..n-1 as they come up: an old index's slots may have gaps.
     if (!readPackage(AppPackage::packagePath(String(entry.manifest.id)), json, sha, size, error) ||
-        !bind(entry, wanted, json, error)) {
+        !bind(entry, nextOrder, json, error)) {
       // Left installed but inactive, with a reason logged. One bad graph must
       // not keep the device from booting.
       entry.loadFailed = true;
@@ -616,7 +702,9 @@ void AppRegistry::restore() {
                             String("app_restore_failed id=") + entry.manifest.id + " reason=" + error,
                             LogLevel::Warn);
       }
+      continue;
     }
+    ++nextOrder;
   }
 }
 
@@ -629,8 +717,19 @@ String AppRegistry::statusJson() const {
   json += String(count);
   json += ",\"capacity\":";
   json += String(kMaxPackages);
-  json += ",\"slots\":";
-  json += String(kMaxSlots);
+  json += ",\"active\":";
+  json += String(activeCount());
+  // The two resources an app is admitted against (v2.1.0).
+  json += ",\"pool_bytes\":";
+  json += String(AppVm::kPoolBytes);
+  json += ",\"pool_used\":";
+  json += String(AppVm::poolUsedBytes());
+  json += ",\"pool_free\":";
+  json += String(AppVm::poolFreeBytes());
+  json += ",\"control_bytes\":";
+  json += String(AppVm::controlBytes());
+  json += ",\"budget_us\":";
+  json += String(governor_ != nullptr ? governor_->ceilingUs() : 0);
   json += ",\"used_us\":";
   json += String(totalEstimatedUs());
   json += ",\"index_writes\":";
@@ -672,10 +771,18 @@ String AppRegistry::statusJson() const {
     json += String(entry.sizeBytes);
     json += ",\"estimated_us\":";
     json += String(entry.estimatedUs);
-    json += ",\"slot\":";
-    json += String(entry.slot);
+    json += ",\"memory_bytes\":";
+    json += String(entry.app != nullptr ? entry.app->memoryBytes() : entry.memoryBytes);
+    json += ",\"burst\":";
+    json += entry.manifest.burst ? "true" : "false";
+    json += ",\"active\":";
+    json += entry.app != nullptr ? "true" : "false";
+    if (entry.app != nullptr) {
+      json += ",\"order\":";
+      json += String(entry.order);
+    }
     json += ",\"state\":\"";
-    json += entry.needsUpdate ? "needs_update" : entry.loadFailed ? "load_failed" : (entry.slot >= 0 ? "active" : "installed");
+    json += entry.needsUpdate ? "needs_update" : entry.loadFailed ? "load_failed" : (entry.app != nullptr ? "active" : "installed");
     json += "\"}";
   }
   json += "]}";
@@ -683,7 +790,7 @@ String AppRegistry::statusJson() const {
 }
 
 String AppRegistry::packagesText() const {
-  String out = "ID               VERSION   SLOT  SIZE   EST_US  STATE\n";
+  String out = "ID               VERSION   ORDER  SIZE   EST_US   MEM  STATE\n";
   for (uint8_t i = 0; i < kMaxPackages; ++i) {
     const Entry& entry = entries_[i];
     if (!entry.valid) continue;
@@ -693,17 +800,20 @@ String AppRegistry::packagesText() const {
     String version(entry.manifest.version);
     while (version.length() < 10) version += ' ';
     out += version;
-    String slot(entry.slot);
-    while (slot.length() < 6) slot = " " + slot;
-    out += slot;
+    String order(entry.app != nullptr ? String(entry.order) : String("-"));
+    while (order.length() < 6) order = " " + order;
+    out += order;
     String size(entry.sizeBytes);
     while (size.length() < 7) size = " " + size;
     out += size;
     String estimated(entry.estimatedUs);
     while (estimated.length() < 9) estimated = " " + estimated;
     out += estimated;
+    String memory(entry.app != nullptr ? entry.app->memoryBytes() : entry.memoryBytes);
+    while (memory.length() < 6) memory = " " + memory;
+    out += memory;
     out += "  ";
-    out += entry.needsUpdate ? "needs_update" : entry.loadFailed ? "load_failed" : (entry.slot >= 0 ? "active" : "installed");
+    out += entry.needsUpdate ? "needs_update" : entry.loadFailed ? "load_failed" : (entry.app != nullptr ? "active" : "installed");
     out += '\n';
   }
   return out;

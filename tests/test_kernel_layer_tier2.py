@@ -434,12 +434,12 @@ class AppOutputArbitrationTests(unittest.TestCase):
         self.assertNotIn("setLedSink", sketch)
         self.assertNotIn("setLed(", read("App.h"))
 
-    def test_the_lowest_running_slot_holds_the_led(self):
+    def test_the_first_running_app_holds_the_led(self):
         impl = read("AppManager.cpp")
         body = impl[impl.index("bool AppManager::statusLed") : impl.index("bool AppManager::displayLine")]
-        self.assertIn("slot.state != AppState::Running || slot.app->idle()", body)
+        self.assertIn("!active(app)", body)
         self.assertIn("kAppCapDriveLed) == 0", body)
-        self.assertIn("if (ownerSlot < 0) {", body)
+        self.assertIn("if (winner == nullptr) {", body)
 
     def test_apps_only_replace_a_healthy_online_pattern(self):
         impl = read("LedController.cpp")
@@ -484,7 +484,10 @@ class AppOutputArbitrationTests(unittest.TestCase):
         # Rows are formatted by the same functions the panel uses.
         self.assertIn("formatOledTextLine(", view)
         self.assertIn("oledBarGeometry(", view)
-        self.assertIn("displayContenders(", view)
+        self.assertIn("appendDisplayContenders(", view)
+        # v2.1.0: apps by package id, with their load, in the same poll.
+        self.assertIn('{\\"app\\":\\"', view)
+        self.assertIn("apps_->loadJson()", view)
         self.assertIn("appOverlayShown()", view)
 
 
@@ -541,11 +544,13 @@ class GatewayAttachTests(unittest.TestCase):
 
 class AppFrameworkTests(unittest.TestCase):
     def test_apps_are_opt_in(self):
-        impl = read("AppManager.cpp")
-
-        install = impl[impl.index("bool AppManager::install") : impl.index("String AppManager::enabledKey")]
-        self.assertIn("slot.state = AppState::Installed;", install)
-        self.assertIn("enabledKey", install)
+        # Nothing runs until a package is activated: the run list is filled by
+        # the registry and nothing else.
+        sketch = read("newhorizons_os.ino")
+        self.assertNotIn("apps.add(", sketch)
+        registry = read("AppRegistry.cpp")
+        bind = registry[registry.index("bool AppRegistry::bind(") : registry.index("void AppRegistry::unbind(")]
+        self.assertIn("apps_->add(app, order);", bind)
 
     def test_budget_overruns_stop_the_app(self):
         impl = read("AppManager.cpp")
@@ -555,15 +560,15 @@ class AppFrameworkTests(unittest.TestCase):
         # Killed when it blew an allocation nobody moved; Suspended when the
         # governor had just cut it. See HardwareRegressionTests for why that
         # distinction is not cosmetic.
-        self.assertIn("slot.consecutiveOverruns >= kMaxConsecutiveOverruns", impl)
+        self.assertIn("run.consecutiveOverruns >= kMaxConsecutiveOverruns", impl)
         self.assertIn("AppState::Killed", impl)
 
     def test_a_killed_app_is_not_silently_re_enabled(self):
         impl = read("AppManager.cpp")
-
-        enable = impl[impl.index("bool AppManager::setEnabled") : impl.index("bool AppManager::revive")]
-        self.assertIn("if (slot.state == AppState::Killed) {", enable)
-        self.assertIn("return false;", enable)
+        # Only app_revive clears a kill; app_start takes a Stopped app only.
+        start = impl[impl.index("AppManager::OpResult AppManager::start") : impl.index("const char* AppManager::opResultCode")]
+        self.assertIn("if (app->run.state != AppState::Stopped) {", start)
+        self.assertIn("return OpResult::NotStopped;", start)
 
     def test_capabilities_are_enforced_by_the_host_not_the_app(self):
         impl = read("AppManager.cpp")
@@ -581,19 +586,19 @@ class AppFrameworkTests(unittest.TestCase):
 
         # Two separate lists could disagree; one bit cannot. An app that may
         # not read the matrix is simply never woken for a frame.
-        table = impl[impl.index("uint16_t subscriptionBit") : impl.index("}  // namespace")]
+        table = impl[impl.index("uint32_t subscriptionBit") : impl.index("}  // namespace")]
         self.assertIn("case AppEventKind::Frame: return kAppCapReadMatrix;", table)
         self.assertIn("case AppEventKind::Imu: return kAppCapReadImu;", table)
 
     def test_flow_graph_cost_is_checked_before_it_ever_runs(self):
         impl = read("AppVm.cpp")
-        load = impl[impl.index("bool AppVm::loadFromJson") : impl.index("bool AppVm::loadFromFile")]
+        load = impl[impl.index("bool AppVm::loadFromJson") : impl.index("void AppVm::unload")]
         # A rejected image must not disturb the one already running: it is
         # verified and costed on a transient copy, BEFORE anything reaches the
         # pool or the machine.
-        self.assertLess(load.index("decodeAndVerify("), load.index("AppVmPool::allocate"))
-        self.assertLess(load.index("withinBudget("), load.index("AppVmPool::allocate"))
-        self.assertLess(load.index("AppVmPool::allocate"), load.index("machine_.bind("))
+        self.assertLess(load.index("decodeAndVerify("), load.index("pool().allocateMovable"))
+        self.assertLess(load.index("withinBudget("), load.index("pool().allocateMovable"))
+        self.assertLess(load.index("pool().allocateMovable"), load.index("machine_.bind("))
         self.assertIn("over_budget:", impl)
 
     def test_images_are_verified_before_they_run(self):
@@ -653,12 +658,13 @@ class AppEventModelTests(unittest.TestCase):
         # The tick is emitted outside the lastFrameReady branch.
         self.assertGreater(task.index("AppEventKind::Tick"), task.index("lastFrameReady = false;"))
 
-    def test_slot_identity_is_set_before_install(self):
-        sketch = read("newhorizons_os.ino")
-        # install() indexes by manifest().name and persists app_en_<name>, so a
-        # slot renamed afterwards would be unreachable forever.
-        self.assertLess(sketch.index("setIdentity(kSlotNames[i])"),
-                        sketch.index("apps.install(slotPtrs[i])"))
+    def test_apps_are_named_by_package_id(self):
+        # v2.1.0: no slots to name. The package id is the app's name, so
+        # app_list, app_view and the events all say which app it was.
+        vm = read("AppVm.cpp")
+        self.assertIn("manifest_.name = packageId_;", vm)
+        self.assertNotIn("setIdentity", read("newhorizons_os.ino"))
+        self.assertNotIn("kSlotNames", read("newhorizons_os.ino"))
 
     def test_the_flow_engine_has_per_instance_identity(self):
         header = read("AppVm.h")
@@ -707,10 +713,10 @@ class AppBudgetTests(unittest.TestCase):
         impl = read("AppManager.cpp")
         # A suspension that needed an operator to clear it would mean one busy
         # moment takes an app away permanently.
-        self.assertIn("Suspended = 4", header)
+        self.assertIn("Suspended = 4", read("App.h"))
         budget = impl[impl.index("void AppManager::setTotalBudgetUs") : impl.index("void AppManager::reallocate")]
         self.assertIn("AppState::Suspended", budget)
-        self.assertIn('recordEvent(slots_[i].app->manifest().name, "resumed"', budget)
+        self.assertIn('recordEvent(app->manifest().name, "resumed"', budget)
 
     def test_a_resumption_does_not_flap(self):
         impl = read("AppGovernor.cpp")
@@ -720,8 +726,9 @@ class AppBudgetTests(unittest.TestCase):
 
     def test_allocation_is_divided_among_what_is_actually_running(self):
         impl = read("AppManager.cpp")
-        realloc = impl[impl.index("void AppManager::reallocate") : impl.index("void AppManager::warnOverBudget")]
-        self.assertIn("totalBudgetUs_ / running", realloc)
+        realloc = impl[impl.index("void AppManager::reallocate") : impl.index("void AppManager::settle")]
+        self.assertIn("AppShare::base(totalBudgetUs_, running)", realloc)
+        self.assertIn("return running == 0 ? 0 : totalUs / running;", read("AppShare.h"))
 
     def test_the_app_is_warned_before_it_is_stopped(self):
         impl = read("AppManager.cpp")
@@ -795,7 +802,7 @@ class HardwareRegressionTests(unittest.TestCase):
         impl = read("AppManager.cpp")
         setter = impl[impl.index("void AppManager::setTotalBudgetUs"):
                       impl.index("void AppManager::reallocate")]
-        self.assertIn("slots_[i].consecutiveOverruns = 0;", setter)
+        self.assertIn("app->run.consecutiveOverruns = 0;", setter)
 
     def test_an_unreachable_target_does_not_cost_the_apps_anything(self):
         impl = read("AppGovernor.cpp")
@@ -864,29 +871,36 @@ class IdleSlotTests(unittest.TestCase):
         self.assertIn("virtual bool idle() const { return false; }", read("App.h"))
         self.assertIn("bool idle() const override { return !loaded() || fault_ != 0; }", read("AppVm.h"))
 
-    def test_idle_slots_take_no_share(self):
+    def test_idle_apps_take_no_share(self):
         impl = read("AppManager.cpp")
-        count = impl[impl.index("uint8_t AppManager::runningCount"):impl.index("uint8_t AppManager::activeMask")]
-        self.assertIn("!slots_[i].app->idle()", count)
-        realloc = impl[impl.index("void AppManager::reallocate"):impl.index("void AppManager::warnOverBudget")]
-        self.assertIn("!slots_[i].app->idle() ? share : 0", realloc)
+        active = impl[impl.index("bool AppManager::active(") : impl.index("bool AppManager::add(")]
+        self.assertIn("app->run.state == AppState::Running && !app->idle()", active)
+        count = impl[impl.index("uint16_t AppManager::runningCount") : impl.index("bool AppManager::revive")]
+        self.assertIn("if (active(app)) ++running;", count)
+        realloc = impl[impl.index("void AppManager::reallocate"):impl.index("void AppManager::settle")]
+        self.assertIn("app->run.baseUs = on ? base : 0;", realloc)
 
-    def test_idle_slots_are_not_dispatched(self):
+    def test_idle_apps_are_not_dispatched(self):
         impl = read("AppManager.cpp")
         dispatch = impl[impl.index("void AppManager::dispatch"):]
-        self.assertIn("slot.state != AppState::Running || slot.app->idle()", dispatch)
+        self.assertIn("if (!active(app)) {", dispatch)
 
     def test_binding_or_removing_a_package_redivides_the_budget(self):
         impl = read("AppManager.cpp")
         dispatch = impl[impl.index("void AppManager::dispatch"):]
-        head = dispatch[:dispatch.index("for (uint8_t i = 0; i < count_; ++i)")]
-        self.assertIn("if (mask != activeMask_)", head)
+        head = dispatch[:dispatch.index("for (App* app = head_; app != nullptr; app = app->run.next)")]
+        self.assertIn("if (runningCount() != activeCount_)", head)
         self.assertIn("reallocate();", head)
+        # And adding or removing one re-divides at once.
+        for name in ("bool AppManager::add(", "void AppManager::remove("):
+            body = impl[impl.index(name):]
+            body = body[:body.index("\n}\n")]
+            self.assertIn("reallocate();", body)
 
     def test_idle_is_reported(self):
         impl = read("AppManager.cpp")
         self.assertIn('json += "\\",\\"idle\\":";', impl)
-        self.assertIn('"idle"', impl[impl.index('String out = "NAME'):])
+        self.assertIn('"faulted"', impl[impl.index('String out = "NAME'):])
 
 
 class FullStatusOnEveryTransportTests(unittest.TestCase):
@@ -1070,7 +1084,7 @@ class AppRegistryTests(unittest.TestCase):
 
     def test_a_package_cannot_widen_its_own_permissions(self):
         impl = read("AppVm.cpp")
-        apply = impl[impl.index("void AppVm::applyPackageManifest") : impl.index("bool AppVm::dryRun")]
+        apply = impl[impl.index("bool AppVm::applyPackageManifest") : impl.index("bool AppVm::dryRun")]
         self.assertIn("capabilities & kSlotAllowedCaps", apply)
         # ... and an image needing a capability its manifest does not declare
         # is refused by the verifier.
@@ -1092,21 +1106,25 @@ class TwentyFourNodeTests(unittest.TestCase):
         registry = read("AppRegistry.cpp")
         self.assertIn('entry.needsUpdate ? "needs_update"', registry)
 
-    def test_images_live_in_one_static_pool(self):
+    def test_apps_live_in_one_static_pool(self):
         impl = read("AppVm.cpp")
-        # Never the heap while running: one static pool, sized to what the four
-        # FlowApp slots held, shared first fit.
+        header = read("AppVm.h")
+        # Never the heap while running: one static pool holds every app whole
+        # (v2.1.0) -- its control block, its store, its image.
         self.assertIn("alignas(4) uint8_t g_pool[AppVm::kPoolBytes];", impl)
-        self.assertIn("static constexpr uint32_t kPoolBytes = 4096;", read("AppVm.h"))
+        self.assertIn("static constexpr uint32_t kPoolBytes = 8192;", header)
+        self.assertIn("new (block) AppVm();", impl)
+        self.assertIn("pool().allocateFixed(controlBytes())", impl)
+        self.assertIn("new (block) AppStore();", impl)
         self.assertIn('error = "app_pool_exhausted";', impl)
-        # The install-time dry run needs no slot.
+        # The install-time dry run needs no pool space.
         install = read("AppRegistry.cpp")
         self.assertIn("AppVm::dryRun(", install)
 
     def test_the_dry_run_checks_everything_loading_would(self):
         impl = read("AppVm.cpp")
         dry = impl[impl.index("bool AppVm::dryRun") : impl.index("bool AppVm::loadFromJson")]
-        load = impl[impl.index("bool AppVm::loadFromJson") : impl.index("bool AppVm::loadFromFile")]
+        load = impl[impl.index("bool AppVm::loadFromJson") : impl.index("void AppVm::unload")]
         for body in (dry, load):
             self.assertIn("decodeAndVerify(", body)
             self.assertIn("withinBudget(", body)
@@ -1188,12 +1206,12 @@ class FlowV16Tests(unittest.TestCase):
 
     def test_uninstall_clears_a_persisted_count_and_deactivate_keeps_it(self):
         registry = read("AppRegistry.cpp")
-        uninstall = registry[registry.index("bool AppRegistry::uninstall") : registry.index("bool AppRegistry::bind")]
+        uninstall = registry[registry.index("bool AppRegistry::uninstall") : registry.index("bool AppRegistry::load(")]
         self.assertIn("AppVm::clearPersisted(", uninstall)
         deactivate = registry[registry.index("bool AppRegistry::deactivate") : registry.index("bool AppRegistry::verify")]
         self.assertNotIn("clearPersisted", deactivate)
         impl = read("AppVm.cpp")
-        unload = impl[impl.index("void AppVm::unload") : impl.index("void AppVm::relocate")]
+        unload = impl[impl.index("void AppVm::unload") : impl.index("void AppVm::relocate(uint8_t")]
         self.assertLess(unload.index("savePersisted();"), unload.index("machine_.unbind();"))
 
     def test_a_restore_needs_the_same_package_and_version(self):

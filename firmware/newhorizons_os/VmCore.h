@@ -199,6 +199,13 @@ class VmMachine {
                   uint32_t (*clock)() = nullptr, uint32_t deadlineUs = 0);
 
   bool suspended() const { return suspended_; }
+  // Drops a handler run that was suspended part way: the app was stopped and
+  // must not resume it later. Values (the arena) are kept.
+  void abandon() {
+    suspended_ = false;
+    sp_ = 0;
+    callDepth_ = 0;
+  }
   uint8_t fault() const { return fault_; }
   bool runDegraded() const { return runDegraded_; }
   bool persistDirty() const { return persistDirty_; }

@@ -110,8 +110,8 @@ class AppControlTests(unittest.TestCase):
         for body in (stop, start):
             self.assertNotIn("putUInt", body)
             self.assertNotIn("storage_", body)
-        self.assertIn("slot.state = AppState::Stopped;", stop)
-        self.assertIn("if (slot.state != AppState::Stopped)", start)
+        self.assertIn("app->run.state = AppState::Stopped;", stop)
+        self.assertIn("if (app->run.state != AppState::Stopped)", start)
         # The governor resumes Suspended only; a stopped app stays stopped.
         budget = between(impl, "void AppManager::setTotalBudgetUs(", "void AppManager::reallocate()")
         self.assertNotIn("AppState::Stopped", budget)

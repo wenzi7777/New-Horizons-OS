@@ -33,11 +33,22 @@ String ControlServer::memoryJson() const {
 
 String ControlServer::appListJson(const String& outputsFor) const {
   String json = apps_ ? apps_->statusJson(outputsFor) : String("{}");
-  if (appGovernor_ != nullptr && json.endsWith("}")) {
+  if (json.endsWith("}")) {
     json.remove(json.length() - 1);
     json += json.endsWith("{") ? "" : ",";
-    json += "\"governor\":";
-    json += appGovernor_->statusJson();
+    // The pool every app lives in (v2.1.0): what is left is what one more app
+    // can have.
+    json += "\"pool\":{\"bytes\":";
+    json += String(AppVm::kPoolBytes);
+    json += ",\"used\":";
+    json += String(AppVm::poolUsedBytes());
+    json += ",\"free\":";
+    json += String(AppVm::poolFreeBytes());
+    json += "}";
+    if (appGovernor_ != nullptr) {
+      json += ",\"governor\":";
+      json += appGovernor_->statusJson();
+    }
     json += "}";
   }
   return json;

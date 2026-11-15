@@ -91,10 +91,8 @@ class ControlServer {
   void setPowerGovernor(PowerGovernor* governor) { governor_ = governor; }
   void setVrefManager(VrefManager* vref) { vref_ = vref; }
   void setRangeCompensator(RangeCompensator* range) { range_ = range; }
-  void setAppManager(AppManager* apps, AppVm* flow, AppRegistry* registry,
-                     AppGovernor* governor) {
+  void setAppManager(AppManager* apps, AppRegistry* registry, AppGovernor* governor) {
     apps_ = apps;
-    flow_ = flow;
     appRegistry_ = registry;
     appGovernor_ = governor;
   }
@@ -124,16 +122,14 @@ class ControlServer {
   String cmdTaskList(const CommandContext& ctx);
   String cmdAppList(const CommandContext& ctx);
   String cmdAppView(const CommandContext& ctx);
-  String cmdAppEnable(const CommandContext& ctx);
   String cmdAppRevive(const CommandContext& ctx);
   String cmdAppEvents(const CommandContext& ctx);
-  String cmdAppLoadFlow(const CommandContext& ctx);
-  String cmdAppUnloadFlow(const CommandContext& ctx);
   String cmdAppListPackages(const CommandContext& ctx);
   String cmdAppInstall(const CommandContext& ctx);
   String cmdAppUninstall(const CommandContext& ctx);
   String cmdAppActivate(const CommandContext& ctx);
   String cmdAppDeactivate(const CommandContext& ctx);
+  String cmdAppReorder(const CommandContext& ctx);
   String cmdAppVerify(const CommandContext& ctx);
   String cmdAppReindex(const CommandContext& ctx);
   String cmdConfigSchema(const CommandContext& ctx);
@@ -292,7 +288,6 @@ class ControlServer {
   ClockService* clock_ = nullptr;
   PowerGovernor* governor_ = nullptr;
   AppManager* apps_ = nullptr;
-  AppVm* flow_ = nullptr;
   AppRegistry* appRegistry_ = nullptr;
   AppGovernor* appGovernor_ = nullptr;
   // Holds the previous run-time counters, so CPU shares are per-interval.

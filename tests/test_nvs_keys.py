@@ -54,8 +54,10 @@ class NvsKeyLengthTests(unittest.TestCase):
         flow = (ROOT / "firmware" / "newhorizons_os" / "AppVm.cpp").read_text(encoding="utf-8")
         self.assertIn('String key = "pc_";', flow)
         self.assertIn("substring(0, 12)", flow)  # 3 + 12 = 15
+        # v2.1.0: no app_en_<slot> keys any more; whether an app runs is in
+        # apps/index.json.
         apps = (ROOT / "firmware" / "newhorizons_os" / "AppManager.cpp").read_text(encoding="utf-8")
-        self.assertIn('String("app_en_") + String(name)', apps)  # slot names are flow..flow3
+        self.assertNotIn("app_en_", apps)
 
 
 if __name__ == "__main__":

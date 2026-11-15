@@ -255,3 +255,12 @@ echo "packet fixtures: up to date"
   -o "$BUILD_DIR/test_setup_portal_logic"
 
 "$BUILD_DIR/test_setup_portal_logic"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_app_resources.cpp" \
+  "$FIRMWARE_DIR/AppPool.cpp" \
+  "$FIRMWARE_DIR/AppLoad.cpp" \
+  "$FIRMWARE_DIR/AppShare.cpp" \
+  -o "$BUILD_DIR/test_app_resources"
+
+"$BUILD_DIR/test_app_resources"

@@ -9,19 +9,21 @@ namespace nhos {
 class Storage;
 class AppManager;
 class AppVm;
+class AppGovernor;
 
-// The on-device package registry: apps/index.json plus the binding of packages
-// to the fixed flow slots.
+// The on-device package registry: apps/index.json, and which packages are
+// activated -- running, each in its own AppVm placed in the app pool.
 //
-// Deliberately a second layer rather than a change to AppManager. AppManager's
-// install list is compiled in and only ever grows -- it holds host objects that
-// exist for the life of the firmware. A package, by contrast, is content: it
-// arrives, binds to a host, and can be removed. Conflating the two would mean
-// pretending slots can be destroyed, which they cannot.
+// v2.1.0: no slots. Activating a package creates its app in the pool and
+// adds it to AppManager's run list; deactivating removes and frees it. How
+// many run is whatever the pool and the time budget admit (`activate`
+// refuses with app_pool_exhausted / app_budget_exhausted), and an app's
+// position in `order` decides whose output wins where they compete.
 class AppRegistry {
  public:
-  static constexpr uint8_t kMaxPackages = 8;
-  static constexpr uint8_t kMaxSlots = 4;
+  // Installed packages, active or not. Resident RAM (an Entry each, ~300 B),
+  // not a limit on how many run; the flash holds the packages themselves.
+  static constexpr uint8_t kMaxPackages = 16;
   // 8192 since v1.19.0: the sysmon panel alone is ~5.4 KB. Read transiently
   // (file buffer + one String), never held, so the cost is a short-lived
   // ~16 KB on install/activate, not resident RAM. Must match the SDK's limit.
@@ -33,9 +35,16 @@ class AppRegistry {
   struct Entry {
     bool valid = false;
     AppPackageManifest manifest;
-    int8_t slot = -1;  // -1 = installed but not activated
+    // The running app while activated, nullptr otherwise.
+    AppVm* app = nullptr;
+    // Activated (persisted: re-activated at boot), and where in the run order.
+    bool active = false;
+    uint16_t order = 0;
     uint32_t sizeBytes = 0;
     uint32_t estimatedUs = 0;
+    // What the app takes of the pool when active (AppVm::memoryFor); known
+    // from install on, so the UI can say whether it would fit.
+    uint32_t memoryBytes = 0;
     bool loadFailed = false;
     // Built before the app VM (v2.0.0): no image to run. Kept in the index so
     // the Desktop/Studio can offer the rebuilt package in its place.
@@ -45,18 +54,23 @@ class AppRegistry {
     uint32_t granted = 0;
   };
 
-  void begin(Storage& storage, AppManager& apps, AppVm* const slots[kMaxSlots],
-             uint16_t cellCount);
-  // Reads apps/index.json, then re-activates every entry with slot >= 0. A
-  // package that fails to reload is kept in the index with slot = -1 and a
-  // reason logged: a bad graph must not stop the device booting.
+  void begin(Storage& storage, AppManager& apps, uint16_t cellCount,
+             const AppGovernor* governor = nullptr);
+  // Reads apps/index.json, then re-activates every active entry in order. An
+  // index from before v2.1.0 names a slot instead: slot >= 0 reads as
+  // active, in slot order. A package that fails to reload is kept, inactive,
+  // with a reason logged: a bad graph must not stop the device booting.
   void restore();
 
   bool install(const String& path, const String& expectedSha256, bool replace,
                uint32_t granted, String& installedId, String& error);
   bool uninstall(const String& id, bool keepFile, String& error);
-  bool activate(const String& id, int8_t slot, String& error);
-  bool deactivate(const String& id, int8_t slot, String& error);
+  // Creates the app in the pool, runs it, and appends it to the run order.
+  bool activate(const String& id, String& error);
+  bool deactivate(const String& id, String& error);
+  // Moves an active app to position `to` of the run order (0 = first, whose
+  // output wins). Clamped to the end.
+  bool reorder(const String& id, uint16_t to, String& error);
   // Rebuilds the index from the .nha files actually present: the recovery path
   // for a torn write, and the reason a lost index is survivable at all.
   // `persistWhenEmpty` is false on the boot path: a rebuild that finds
@@ -69,7 +83,9 @@ class AppRegistry {
   String statusJson() const;
   String packagesText() const;
   int8_t indexOfId(const String& id) const;
-  int8_t freeSlot() const;
+  uint16_t activeCount() const;
+  // The loop-free active apps' static estimates, summed. Apps with loops have
+  // none and are held to their time slice instead.
   uint32_t totalEstimatedUs() const;
 
  private:
@@ -78,13 +94,18 @@ class AppRegistry {
   // rename and therefore NOT atomic. loadIndex() handles the torn case.
   bool saveIndex();
   bool readPackage(const String& path, String& json, String& sha, uint32_t& size, String& error);
-  bool bind(Entry& entry, int8_t slot, const String& json, String& error);
-  void unbind(int8_t slot);
+  // Loads `json` into `app`: grant check, image, manifest. On failure the
+  // app keeps what it had.
+  bool load(Entry& entry, AppVm* app, const String& json, String& error);
+  // Creates and starts the app for `entry` at `order`; on failure nothing of
+  // it is left in the pool.
+  bool bind(Entry& entry, uint16_t order, const String& json, String& error);
+  void unbind(Entry& entry);
+  uint16_t nextOrder() const;
 
   Storage* storage_ = nullptr;
   AppManager* apps_ = nullptr;
-  AppVm* slots_[kMaxSlots] = {nullptr, nullptr, nullptr, nullptr};
-  int8_t slotOwner_[kMaxSlots] = {-1, -1, -1, -1};
+  const AppGovernor* governor_ = nullptr;
   Entry entries_[kMaxPackages];
   uint16_t cellCount_ = 0;
   uint32_t indexWrites_ = 0;

@@ -179,6 +179,10 @@ bool AppPackage::parseManifest(const String& json, AppPackageManifest& out, Stri
   if (jsonExtractInt(manifest, "budget_us", budget) && budget > 0) {
     out.declaredBudgetUs = static_cast<uint32_t>(budget);
   }
+  bool burst = false;
+  if (jsonExtractBool(manifest, "burst", burst)) {
+    out.burst = burst;
+  }
 
   // Capabilities arrive as a list of names. A bare integer bitmask in a
   // user-authored file would be hostile to read and easy to get wrong.

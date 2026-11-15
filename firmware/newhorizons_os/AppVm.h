@@ -1,6 +1,7 @@
 #pragma once
 
 #include "App.h"
+#include "AppPool.h"
 #include "AppStore.h"
 #include "VmCore.h"
 
@@ -25,11 +26,13 @@ class Storage;
 //    not killed, and resumed by the next delivery -- the frames it missed are
 //    counted and reported as `frames_skipped`, never silently dropped.
 //
-// Memory is one static pool shared by every slot (kPoolBytes): an image is
-// copied in at bind time with its
-// arena and stack, first fit, compacted when fragmented. Nothing is allocated
-// while running, and an image that does not fit is refused at activation as
-// `app_pool_exhausted` rather than taken from the heap.
+// Memory is one static pool (AppPoolCore, kPoolBytes) that holds the whole
+// app, v2.1.0: this object itself (create(), a fixed block), its store when it
+// has the `storage` capability (another fixed block), and its image with arena
+// and stack (a movable block, compacted when fragmented). How many apps run is
+// whatever fits: there are no slots. Nothing is allocated while running, and
+// an app that does not fit is refused at activation as `app_pool_exhausted`
+// rather than taken from the heap.
 class AppVm : public App, private VmHostSink {
  public:
   // The App Library's limits; the contract test reads them from here.
@@ -45,37 +48,37 @@ class AppVm : public App, private VmHostSink {
   // Persisted counters are written at most this often, from service(), so a
   // reboot loses at most this much counting and the flash sees few writes.
   static constexpr uint32_t kPersistIntervalMs = 30000;
-  // Shared by every slot. 4 KB: the four library apps measured on a 14x14
-  // board took 2.3 KB together (the largest 636 B). What the static FlowApp
-  // slots used to hold went mostly to IRAM instead: the interpreter's hot
-  // path runs from there, since from flash it lost most of its time to
-  // cache misses (bench/app-vm, variant D).
-  static constexpr uint32_t kPoolBytes = 4096;
-  // Share of the slot's allocation a handler may run for before it is
+  // Everything every app holds. 8 KB, about what the four static AppVm
+  // slots (928 B each) and their 4 KB image pool took together before
+  // v2.1.0. A control block is ~570 B (a store ~450 B more), so the four
+  // library apps measured on a 14x14 board take ~4.6 KB together: twice
+  // that many light apps fit, or a few large ones.
+  static constexpr uint32_t kPoolBytes = 8192;
+  // Block-table rows: each app holds up to three blocks (control, store,
+  // image), and one more while its image is being replaced.
+  static constexpr uint16_t kPoolBlocks = 40;
+  // Share of the app's allocation a handler may run for before it is
   // suspended. Below 100% so the clock check's granularity (kVmFuelCheck
   // instructions) does not turn a suspension into an overrun.
   static constexpr uint8_t kSlicePercent = 75;
 
-  AppVm();
   // The manifest points into this object's own buffers.
   AppVm(const AppVm&) = delete;
   AppVm& operator=(const AppVm&) = delete;
 
-  // Must be called BEFORE AppManager::install(): install() indexes by name and
-  // persists app_en_<name>, so the name has to be final by then.
-  void setIdentity(const char* name, uint32_t budgetUs = kDefaultBudgetUs);
-  // Applied when a package is bound; reverted by unload().
-  void applyPackageManifest(const char* version, const char* summary,
-                            const char* packageId, uint32_t capabilities);
+  // Places a new, empty app in the pool. nullptr when its control block does
+  // not fit. Only the registry calls these, on the loop task.
+  static AppVm* create(Storage& storage);
+  // Unloads (on("stop") runs, what it held is given back) and frees every
+  // block it had. Take it out of AppManager first.
+  static void destroy(AppVm* app);
 
-  void attach(Storage& storage) {
-    storage_ = &storage;
-    store_.attach(&storage);
-  }
-  // A raw package file (app_load_flow): no manifest of record, so it may use
-  // whatever a slot allows, and it persists nothing.
-  bool loadFromFile(const String& path, uint16_t cellCount, String& error);
-  // Decodes, verifies and binds a package's image. On failure the slot keeps
+  // Applied when a package is bound: the package id becomes the app's name.
+  // False only when the app needs a store and the pool has no room for it.
+  bool applyPackageManifest(const char* version, const char* summary,
+                            const char* packageId, uint32_t capabilities, bool burst);
+
+  // Decodes, verifies and binds a package's image. On failure the app keeps
   // what it was running. `declaredCaps` is the manifest's capability set: an
   // image that needs more is refused.
   bool loadFromJson(const String& json, const String& sourcePath, uint16_t cellCount,
@@ -105,17 +108,28 @@ class AppVm : public App, private VmHostSink {
 
   // Everything binding would check -- the image is present and well formed,
   // passes the verifier, needs no undeclared capability, fits the budget --
-  // without touching any slot. The registry refuses a package with it at
-  // install time.
+  // without touching the pool. The registry refuses a package with it at
+  // install time. `memoryBytes` is what the app would take of the pool.
   static bool dryRun(const String& json, uint16_t cellCount, uint32_t budgetUs,
-                     uint32_t declaredCaps, uint32_t& estimatedUs, String& error);
+                     uint32_t declaredCaps, uint32_t& estimatedUs, uint32_t& memoryBytes,
+                     String& error);
+  // What an app with an image of `imageBytes` (arena and stack included)
+  // and these capabilities takes of the pool, all blocks together.
+  static uint32_t memoryFor(uint32_t imageBytes, uint32_t capabilities);
+  static constexpr uint32_t controlBytes() { return (sizeof(AppVm) + 3U) & ~3U; }
+  static constexpr uint32_t storeBytes() { return (sizeof(AppStore) + 3U) & ~3U; }
   // Forgets a package's persisted values. The registry calls it on uninstall;
   // deactivating keeps them, so re-activating carries on counting.
   static void clearPersisted(Storage& storage, const char* packageId);
 
-  // Pool accounting, for /proc/apps.
+  // Pool accounting, for app_list and /proc/apps. Compaction makes all free
+  // space one run, so the free bytes are what one more app can have.
   static uint32_t poolUsedBytes();
-  static uint32_t poolLargestFree();
+  static uint32_t poolFreeBytes();
+
+  // App
+  uint32_t pressureCount() const override { return suspensions_ + framesSkippedTotal_; }
+  uint32_t memoryBytes() const override;
 
  private:
   // VmHostSink: what a running handler asks of the host.
@@ -146,21 +160,24 @@ class AppVm : public App, private VmHostSink {
   void setDeadline(const AppEvent& event);
   // What a stop, fault or unload gives back.
   void releaseResources();
+  void releaseStore();
   void raiseFault(uint8_t fault, const AppEvent& event);
   bool persists() const;
   void restorePersisted();
   void savePersisted();
   void relocate(uint8_t* memory);
-  friend struct AppVmPool;
+  static void relocateThunk(void* owner, uint8_t* to);
+  static AppPoolCore& pool();
+  AppVm();
+  ~AppVm() override = default;
 
   AppManifest manifest_;
-  char nameBuf_[12] = {0};
   char versionBuf_[12] = {0};
   char summaryBuf_[64] = {0};
   char packageId_[16] = {0};
 
   Storage* storage_ = nullptr;
-  uint8_t* memory_ = nullptr;  // this slot's block of the pool
+  uint8_t* memory_ = nullptr;  // the image's block of the pool
   VmMachine machine_;
   VmVerified verified_;
   uint32_t estimatedUs_ = 0;
@@ -202,7 +219,7 @@ class AppVm : public App, private VmHostSink {
   bool configSet_ = false;
   uint32_t lastFrameSeq_ = 0;
   AppHost* lastHost_ = nullptr;  // AppManager, for on("stop") outside dispatch
-  AppStore store_;
+  AppStore* store_ = nullptr;  // in the pool, only with the `storage` capability
   String sourcePath_;
   String graphName_;
 };

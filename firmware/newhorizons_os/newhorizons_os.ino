@@ -75,8 +75,8 @@ nhos::ServiceManager services;
 nhos::AppManager apps;
 nhos::AppGovernor appGovernor;
 nhos::AppRegistry appRegistry;
-nhos::AppVm flowApps[nhos::AppRegistry::kMaxSlots];
-nhos::AppVm& flowApp = flowApps[0];  // slot 0, the target of app_load_flow
+// The apps themselves live in the app pool (AppVm::kPoolBytes), created by
+// the registry as packages are activated: no slots, v2.1.0.
 // The last scanned frame, kept at file scope so the apps task can read it
 // after scan_stream has returned. Single-threaded, so this is a handover, not
 // sharing -- and it is the same buffer the scanner filled, not a copy.
@@ -657,10 +657,9 @@ void updateLedState() {
   extIn.calibrating = calibration.sessionActive();
   apps.extLedFrame(extIn.app);
   {
-    // Re-stated every pass, so a slot that stops lets go on the next one.
+    // Re-stated every pass, so an app that stops lets go on the next one.
     uint8_t rgb[3] = {0, 0, 0};
-    int8_t owner = -1;
-    const bool held = apps.statusLed(rgb, owner);
+    const bool held = apps.statusLed(rgb);
     leds.setAppOverlay(held, nhos::LedColor{rgb[0], rgb[1], rgb[2]});
   }
   const bool transportAttached =
@@ -1261,7 +1260,7 @@ void setup() {
   control.setVrefManager(&vref);
   control.setRangeCompensator(&range);
   procFs.setPowerGovernor(&powerGovernor);
-  control.setAppManager(&apps, &flowApp, &appRegistry, &appGovernor);
+  control.setAppManager(&apps, &appRegistry, &appGovernor);
   procFs.setAppManager(&apps);
   procFs.setAppRegistry(&appRegistry);
   procFs.setClock(&deviceClock);
@@ -1309,33 +1308,9 @@ void setup() {
   {
     const uint16_t cellCount =
         scanner.health().pointCount != 0 ? scanner.health().pointCount : nhos::kMaxSensors;
-    static const char* kSlotNames[nhos::AppRegistry::kMaxSlots] = {"flow", "flow1", "flow2",
-                                                                   "flow3"};
-    nhos::AppVm* slotPtrs[nhos::AppRegistry::kMaxSlots];
-    for (uint8_t i = 0; i < nhos::AppRegistry::kMaxSlots; ++i) {
-      flowApps[i].attach(storage);
-      // MUST precede install(): install() indexes by name and persists
-      // app_en_<name>, so a slot renamed afterwards would be unreachable.
-      flowApps[i].setIdentity(kSlotNames[i]);
-      slotPtrs[i] = &flowApps[i];
-    }
-    for (uint8_t i = 0; i < nhos::AppRegistry::kMaxSlots; ++i) {
-      apps.install(slotPtrs[i]);
-    }
-    appRegistry.begin(storage, apps, slotPtrs, cellCount);
+    appRegistry.begin(storage, apps, cellCount, &appGovernor);
     appRegistry.restore();
     logBoot(String("boot_stage=packages_ready ") + appRegistry.statusJson());
-
-    // A standalone graph is optional: a device with no packages and no
-    // /files/apps/flow.json simply runs with empty slots.
-    if (!flowApp.loaded()) {
-      String flowError;
-      if (flowApp.loadFromFile("apps/flow.json", cellCount, flowError)) {
-        logBoot(String("flow_graph_loaded ") + flowApp.statusJson(false));
-      } else if (flowError != "file_not_found") {
-        logBoot(String("flow_graph_rejected reason=") + flowError);
-      }
-    }
   }
   logBoot(String("boot_stage=apps_ready ") + apps.statusJson());
   registerServices();

@@ -28,7 +28,9 @@ struct AppPackageManifest {
   char sha256[kSha256Len] = {0};
   uint32_t capabilities = kAppCapNone;
   uint8_t kind = 0;             // 0 = flow graph
-  uint32_t declaredBudgetUs = 0;  // 0 -> use the slot's allocation
+  uint32_t declaredBudgetUs = 0;  // 0 -> use the app's allocation
+  // v2.1.0: may borrow other apps' unused time when there is some (AppShare).
+  bool burst = false;
 };
 
 // Package "kind" discriminator, so a kind this firmware does not understand is

@@ -1,6 +1,7 @@
 #include "AppManager.h"
 
 #include "AppEventWire.h"
+#include "AppShare.h"
 
 #include "JsonUtils.h"
 #include "Storage.h"
@@ -11,7 +12,7 @@ namespace {
 
 // Which capability bit subscribes an app to a given event kind. Budget events
 // reach any app that asked for them; Custom reaches nobody automatically.
-uint16_t subscriptionBit(AppEventKind kind) {
+uint32_t subscriptionBit(AppEventKind kind) {
   switch (kind) {
     case AppEventKind::Frame: return kAppCapReadMatrix;
     case AppEventKind::Imu: return kAppCapReadImu;
@@ -25,152 +26,134 @@ uint16_t subscriptionBit(AppEventKind kind) {
   }
 }
 
+void padLeft(String& out, const String& value, unsigned width) {
+  for (unsigned i = value.length(); i < width; ++i) out += ' ';
+  out += value;
+}
+
+void padRight(String& out, const String& value, unsigned width) {
+  out += value;
+  for (unsigned i = value.length(); i < width; ++i) out += ' ';
+}
+
 }  // namespace
 
-bool AppManager::install(App* app) {
-  if (count_ >= kMaxApps || app == nullptr || app->manifest().name == nullptr) {
+// Running AND with something to run. An app counted here while it had nothing
+// to run would take a share of the budget it cannot use.
+bool AppManager::active(const App* app) {
+  return app->run.state == AppState::Running && !app->idle();
+}
+
+bool AppManager::add(App* app, uint16_t order) {
+  if (app == nullptr || app->manifest().name == nullptr || app->manifest().name[0] == '\0') {
     return false;
   }
-  if (indexOf(String(app->manifest().name)) >= 0) {
-    return false;
+  for (App* it = head_; it != nullptr; it = it->run.next) {
+    if (it == app || strcmp(it->manifest().name, app->manifest().name) == 0) return false;
   }
-  Slot& slot = slots_[count_++];
-  slot.app = app;
-  slot.state = AppState::Installed;
-  if (storage_ != nullptr &&
-      storage_->getUInt(enabledKey(app->manifest().name).c_str(), 0) != 0) {
-    slot.state = app->start() ? AppState::Running : AppState::Faulted;
+  app->run = AppRun();
+  app->run.order = order;
+  // Activated is running. While the governor has every app suspended, this one
+  // joins them and comes back with them.
+  if (throttled_ && totalBudgetUs_ == 0) {
+    app->run.state = AppState::Suspended;
+  } else {
+    app->run.state = app->start() ? AppState::Running : AppState::Faulted;
   }
+  App** link = &head_;
+  while (*link != nullptr && (*link)->run.order <= order) link = &(*link)->run.next;
+  app->run.next = *link;
+  *link = app;
+  ++count_;
   reallocate();
-  return slot.state != AppState::Faulted;
+  return app->run.state != AppState::Faulted;
 }
 
-String AppManager::enabledKey(const char* name) {
-  // NVS keys cap at 15 chars, so the prefix stays short.
-  return String("app_en_") + String(name);
-}
-
-int8_t AppManager::indexOf(const String& name) const {
-  for (uint8_t i = 0; i < count_; ++i) {
-    if (name == slots_[i].app->manifest().name) {
-      return static_cast<int8_t>(i);
-    }
+void AppManager::remove(App* app) {
+  for (App** link = &head_; *link != nullptr; link = &(*link)->run.next) {
+    if (*link != app) continue;
+    *link = app->run.next;
+    app->run.next = nullptr;
+    --count_;
+    reallocate();
+    return;
   }
-  return -1;
 }
 
-int8_t AppManager::indexOfApp(const char* name) const {
-  if (name == nullptr) {
-    return -1;
+void AppManager::sortByOrder() {
+  App* pending = head_;
+  head_ = nullptr;
+  while (pending != nullptr) {
+    App* app = pending;
+    pending = pending->run.next;
+    App** link = &head_;
+    while (*link != nullptr && (*link)->run.order <= app->run.order) link = &(*link)->run.next;
+    app->run.next = *link;
+    *link = app;
   }
-  for (uint8_t i = 0; i < count_; ++i) {
-    if (strcmp(name, slots_[i].app->manifest().name) == 0) {
-      return static_cast<int8_t>(i);
-    }
-  }
-  return -1;
 }
 
-// Running AND with something to run. An empty slot counted here took an equal
-// share of the budget: one real app beside three empty slots got a quarter.
-uint8_t AppManager::runningCount() const {
-  uint8_t running = 0;
-  for (uint8_t i = 0; i < count_; ++i) {
-    if (slots_[i].state == AppState::Running && !slots_[i].app->idle()) {
-      ++running;
-    }
+App* AppManager::find(const String& name) const {
+  for (App* app = head_; app != nullptr; app = app->run.next) {
+    if (name == app->manifest().name) return app;
+  }
+  return nullptr;
+}
+
+uint16_t AppManager::runningCount() const {
+  uint16_t running = 0;
+  for (const App* app = head_; app != nullptr; app = app->run.next) {
+    if (active(app)) ++running;
   }
   return running;
 }
 
-uint8_t AppManager::activeMask() const {
-  uint8_t mask = 0;
-  for (uint8_t i = 0; i < count_ && i < 8; ++i) {
-    if (slots_[i].state == AppState::Running && !slots_[i].app->idle()) {
-      mask |= static_cast<uint8_t>(1u << i);
-    }
-  }
-  return mask;
-}
-
-bool AppManager::setEnabled(const String& name, bool enabled) {
-  const int8_t index = indexOf(name);
-  if (index < 0) {
-    return false;
-  }
-  Slot& slot = slots_[index];
-  if (storage_ != nullptr) {
-    // Persisted, so an operator's choice survives a reboot the way a service
-    // enable would.
-    storage_->putUInt(enabledKey(slot.app->manifest().name).c_str(), enabled ? 1 : 0);
-  }
-  if (!enabled) {
-    if (slot.state == AppState::Running) {
-      slot.app->stop();
-    }
-    slot.state = AppState::Installed;
-    reallocate();
-    return true;
-  }
-  // A killed app is not silently re-enabled: that verdict is cleared only by
-  // revive(), so an operator has to acknowledge it.
-  if (slot.state == AppState::Killed) {
-    return false;
-  }
-  slot.state = slot.app->start() ? AppState::Running : AppState::Faulted;
-  reallocate();
-  return slot.state == AppState::Running;
-}
-
 bool AppManager::revive(const String& name) {
-  const int8_t index = indexOf(name);
-  if (index < 0) {
+  App* app = find(name);
+  if (app == nullptr) {
     return false;
   }
-  Slot& slot = slots_[index];
-  slot.consecutiveOverruns = 0;
-  slot.state = slot.app->start() ? AppState::Running : AppState::Faulted;
+  app->run.consecutiveOverruns = 0;
+  app->run.state = app->start() ? AppState::Running : AppState::Faulted;
   reallocate();
-  return slot.state == AppState::Running;
+  return app->run.state == AppState::Running;
 }
 
 AppManager::OpResult AppManager::stop(const String& name) {
-  const int8_t index = indexOf(name);
-  if (index < 0) {
+  App* app = find(name);
+  if (app == nullptr) {
     return OpResult::UnknownApp;
   }
-  Slot& slot = slots_[index];
-  if (slot.state != AppState::Running && slot.state != AppState::Suspended) {
+  if (app->run.state != AppState::Running && app->run.state != AppState::Suspended) {
     return OpResult::NotRunning;
   }
-  if (slot.state == AppState::Running) {
-    slot.app->stop();
+  if (app->run.state == AppState::Running) {
+    app->stop();
   }
-  slot.state = AppState::Stopped;
-  recordEvent(slot.app->manifest().name, "stopped", "operator", false, 0);
+  app->run.state = AppState::Stopped;
+  recordEvent(app->manifest().name, "stopped", "operator", false, 0);
   reallocate();
   return OpResult::Ok;
 }
 
 AppManager::OpResult AppManager::start(const String& name) {
-  const int8_t index = indexOf(name);
-  if (index < 0) {
+  App* app = find(name);
+  if (app == nullptr) {
     return OpResult::UnknownApp;
   }
-  Slot& slot = slots_[index];
-  if (slot.state != AppState::Stopped) {
+  if (app->run.state != AppState::Stopped) {
     return OpResult::NotStopped;
   }
-  slot.consecutiveOverruns = 0;
-  if (totalBudgetUs_ == 0) {
+  app->run.consecutiveOverruns = 0;
+  if (throttled_ && totalBudgetUs_ == 0) {
     // The governor has every app suspended right now; join them, and come
     // back with them when the scan recovers.
-    slot.state = AppState::Suspended;
+    app->run.state = AppState::Suspended;
     return OpResult::Ok;
   }
-  slot.state = slot.app->start() ? AppState::Running : AppState::Faulted;
+  app->run.state = app->start() ? AppState::Running : AppState::Faulted;
   reallocate();
-  return slot.state == AppState::Running ? OpResult::Ok : OpResult::StartFailed;
+  return app->run.state == AppState::Running ? OpResult::Ok : OpResult::StartFailed;
 }
 
 const char* AppManager::opResultCode(OpResult result) {
@@ -193,52 +176,117 @@ void AppManager::setTotalBudgetUs(uint32_t totalUs, bool throttled) {
   // The yardstick moved, so the tally of consecutive overruns against the old
   // one means nothing. Without this an app is killed for the first few frames
   // after a cut it had no part in.
-  for (uint8_t i = 0; i < count_; ++i) {
-    slots_[i].consecutiveOverruns = 0;
+  for (App* app = head_; app != nullptr; app = app->run.next) {
+    app->run.consecutiveOverruns = 0;
   }
   if (totalUs == 0) {
     // The scanner needs everything. Suspend rather than kill: this is not the
     // apps' fault and they must come back by themselves.
-    for (uint8_t i = 0; i < count_; ++i) {
-      if (slots_[i].state == AppState::Running) {
-        slots_[i].app->stop();
-        slots_[i].state = AppState::Suspended;
-        recordEvent(slots_[i].app->manifest().name, "suspended", "scan_pressure", false, 0);
+    for (App* app = head_; app != nullptr; app = app->run.next) {
+      if (app->run.state == AppState::Running) {
+        app->stop();
+        app->run.state = AppState::Suspended;
+        recordEvent(app->manifest().name, "suspended", "scan_pressure", false, 0);
       }
     }
     reallocate();
     return;
   }
-  for (uint8_t i = 0; i < count_; ++i) {
-    if (slots_[i].state == AppState::Suspended) {
-      slots_[i].state = slots_[i].app->start() ? AppState::Running : AppState::Faulted;
-      if (slots_[i].state == AppState::Running) {
-        recordEvent(slots_[i].app->manifest().name, "resumed", "scan_recovered", false, 0);
+  for (App* app = head_; app != nullptr; app = app->run.next) {
+    if (app->run.state == AppState::Suspended) {
+      app->run.state = app->start() ? AppState::Running : AppState::Faulted;
+      if (app->run.state == AppState::Running) {
+        recordEvent(app->manifest().name, "resumed", "scan_recovered", false, 0);
       }
     }
   }
   reallocate();
 }
 
+// The guaranteed shares only: every loan is dropped, and the next settle
+// lends again from these.
 void AppManager::reallocate() {
-  const uint8_t running = runningCount();
-  const uint32_t share = running > 0 ? totalBudgetUs_ / running : 0;
-  for (uint8_t i = 0; i < count_; ++i) {
-    slots_[i].allocatedUs =
-        slots_[i].state == AppState::Running && !slots_[i].app->idle() ? share : 0;
+  const uint16_t running = runningCount();
+  activeCount_ = running;
+  const uint32_t base = AppShare::base(totalBudgetUs_, running);
+  for (App* app = head_; app != nullptr; app = app->run.next) {
+    const bool on = active(app);
+    app->run.baseUs = on ? base : 0;
+    app->run.allocatedUs = on ? base : 0;
+    app->run.borrowedUs = 0;
+    app->run.lentUs = 0;
   }
 }
 
-void AppManager::warnOverBudget(Slot& slot, uint32_t elapsedUs, uint32_t nowMs) {
-  const AppManifest& manifest = slot.app->manifest();
+// Once a second: who used how much, and who lends spare time to whom. Every
+// app's window is read here before AppLoad::settle() clears it.
+void AppManager::settle(uint32_t nowMs) {
+  const uint32_t nowUs = micros();
+  const uint32_t wallUs = lastSettleUs_ != 0 ? nowUs - lastSettleUs_ : kSettleMs * 1000U;
+  lastSettleUs_ = nowUs;
+  lastSettleMs_ = nowMs;
+
+  const uint16_t running = runningCount();
+  const uint32_t base = AppShare::base(totalBudgetUs_, running);
+  const uint32_t cap = AppShare::cap(totalBudgetUs_, running);
+  uint32_t pool = 0;
+  uint16_t borrowers = 0;
+  for (App* app = head_; app != nullptr; app = app->run.next) {
+    AppRun& run = app->run;
+    const uint32_t pressure = app->pressureCount();
+    const uint32_t pressureEvents = pressure - run.lastPressure;
+    run.lastPressure = pressure;
+    const uint32_t average = run.windowDeliveries != 0 ? run.load.windowUsedUs / run.windowDeliveries : 0;
+    run.windowPressured = pressureEvents != 0;
+    run.load.settle(wallUs, pressureEvents);
+    run.windowDeliveries = 0;
+
+    // Lending is decided here too, from the same window. lentUs holds what the
+    // app could lend, and borrowedUs marks a borrower, until the second pass.
+    run.lentUs = 0;
+    run.borrowedUs = 0;
+    if (!active(app) || base == 0) continue;
+    const bool hungry = AppShare::hungry(average, run.allocatedUs, run.windowPressured);
+    if (app->manifest().burst && hungry) {
+      run.borrowedUs = 1;
+      ++borrowers;
+    } else {
+      run.lentUs = AppShare::lendable(base, average, hungry);
+      pool += run.lentUs;
+    }
+  }
+
+  const uint32_t loan = AppShare::loan(pool, borrowers, base, cap);
+  const uint32_t borrowed = loan * borrowers;
+  for (App* app = head_; app != nullptr; app = app->run.next) {
+    AppRun& run = app->run;
+    if (!active(app) || base == 0) {
+      run.lentUs = 0;
+      run.borrowedUs = 0;
+      continue;
+    }
+    run.baseUs = base;
+    if (run.borrowedUs != 0) {
+      run.borrowedUs = loan;
+      run.lentUs = 0;
+    } else {
+      run.lentUs = AppShare::lent(run.lentUs, borrowed, pool);
+    }
+    run.allocatedUs = base - run.lentUs + run.borrowedUs;
+  }
+}
+
+void AppManager::warnOverBudget(App& app, uint32_t elapsedUs, uint32_t nowMs) {
+  const AppManifest& manifest = app.manifest();
+  AppRun& run = app.run;
   const uint8_t graceLeft = static_cast<uint8_t>(
-      kMaxConsecutiveOverruns > slot.consecutiveOverruns
-          ? kMaxConsecutiveOverruns - slot.consecutiveOverruns
+      kMaxConsecutiveOverruns > run.consecutiveOverruns
+          ? kMaxConsecutiveOverruns - run.consecutiveOverruns
           : 0);
-  const uint32_t allocated = slot.allocatedUs != 0 ? slot.allocatedUs : manifest.frameBudgetUs;
+  const uint32_t allocated = run.allocatedUs != 0 ? run.allocatedUs : manifest.frameBudgetUs;
 
   // The operator hears about it either way -- they have levers the app does
-  // not (disable something else, edit the graph, raise the ceiling).
+  // not (stop something else, change the app, raise the ceiling).
   recordEvent(manifest.name, "over_budget",
               String("us=") + String(elapsedUs) + " of " + String(allocated) +
                   " grace=" + String(graceLeft),
@@ -254,18 +302,18 @@ void AppManager::warnOverBudget(Slot& slot, uint32_t elapsedUs, uint32_t nowMs) 
     warning.host = this;
     warning.load = allocated > 0 ? static_cast<float>(elapsedUs) / allocated : 0.0f;
     warning.graceLeft = graceLeft;
-    slot.app->onEvent(warning);
+    app.onEvent(warning);
   }
 }
 
 void AppManager::service(uint32_t nowMs) {
-  // Every installed app, running or not: a slot that was just stopped may
-  // still have state to write out, and that write is exactly what service()
-  // is for.
-  for (uint8_t i = 0; i < count_; ++i) {
-    if (slots_[i].app != nullptr) {
-      slots_[i].app->service(nowMs);
-    }
+  // Every listed app, running or not: one that was just stopped may still
+  // have state to write out, and that write is exactly what service() is for.
+  for (App* app = head_; app != nullptr; app = app->run.next) {
+    app->service(nowMs);
+  }
+  if (lastSettleMs_ == 0 || nowMs - lastSettleMs_ >= kSettleMs) {
+    settle(nowMs);
   }
 }
 
@@ -274,22 +322,21 @@ void AppManager::dispatch(const AppEvent& event) {
   if (event.kind == AppEventKind::Frame) {
     frameSeq_ = event.frameSeq;
   }
-  // Binding and removing packages happens in the registry, which does not
-  // tell us; noticing it here keeps the split right without wiring every path.
-  const uint8_t mask = activeMask();
-  if (mask != activeMask_) {
-    activeMask_ = mask;
+  // An app faulting, or the registry adding or removing one, changes how many
+  // share the budget; noticing it here keeps the split right without wiring
+  // every path.
+  if (runningCount() != activeCount_) {
     reallocate();
   }
-  const uint16_t required = subscriptionBit(event.kind);
+  const uint32_t required = subscriptionBit(event.kind);
   uint32_t totalUs = 0;
 
-  for (uint8_t i = 0; i < count_; ++i) {
-    Slot& slot = slots_[i];
-    if (slot.state != AppState::Running || slot.app->idle()) {
+  for (App* app = head_; app != nullptr; app = app->run.next) {
+    AppRun& run = app->run;
+    if (!active(app)) {
       continue;
     }
-    const AppManifest& manifest = slot.app->manifest();
+    const AppManifest& manifest = app->manifest();
     // Subscription and permission are the same bit, so an app that may not
     // read the matrix is simply never woken for a frame.
     if (required == 0 || (manifest.capabilities & required) == 0) {
@@ -315,17 +362,18 @@ void AppManager::dispatch(const AppEvent& event) {
       delivered.linked = false;
     }
     delivered.host = this;
-    delivered.sliceUs = slot.allocatedUs != 0 ? slot.allocatedUs : manifest.frameBudgetUs;
+    const uint32_t slice = run.allocatedUs != 0 ? run.allocatedUs : manifest.frameBudgetUs;
+    delivered.sliceUs = slice;
 
     const uint32_t startedUs = micros();
-    slot.app->onEvent(delivered);
+    app->onEvent(delivered);
     const uint32_t elapsedUs = micros() - startedUs;
     totalUs += elapsedUs;
 
-    ++slot.invocations;
-    slot.lastUs = elapsedUs;
-    if (elapsedUs > slot.maxUs) {
-      slot.maxUs = elapsedUs;
+    ++run.invocations;
+    run.lastUs = elapsedUs;
+    if (elapsedUs > run.maxUs) {
+      run.maxUs = elapsedUs;
     }
 
     // Budget events are the runtime talking to the app about its own cost;
@@ -333,35 +381,40 @@ void AppManager::dispatch(const AppEvent& event) {
     if (event.kind == AppEventKind::Budget) {
       continue;
     }
+    run.load.charge(elapsedUs, slice);
+    ++run.windowDeliveries;
 
-    const uint32_t allocated = slot.allocatedUs != 0 ? slot.allocatedUs : manifest.frameBudgetUs;
-    if (allocated != 0 && elapsedUs > allocated) {
-      ++slot.overruns;
-      ++slot.consecutiveOverruns;
-      warnOverBudget(slot, elapsedUs, event.nowMs);
-      if (slot.consecutiveOverruns >= kMaxConsecutiveOverruns) {
+    // Judged against the guaranteed share, not a lender's reduced slice: an
+    // app that lent time and needs it back is not at fault for the second it
+    // takes to get it.
+    const uint32_t allowed = run.baseUs > slice ? run.baseUs : slice;
+    if (allowed != 0 && elapsedUs > allowed) {
+      ++run.overruns;
+      ++run.consecutiveOverruns;
+      warnOverBudget(*app, elapsedUs, event.nowMs);
+      if (run.consecutiveOverruns >= kMaxConsecutiveOverruns) {
         // Not preemption -- the frame it just cost is already gone. But it
         // bounds the damage to a handful of frames instead of every frame
         // for the rest of the session.
-        slot.app->stop();
+        app->stop();
         // Whose fault was it? Under throttling the app is being judged against
         // an allocation the governor just cut, so this is the system's doing
         // and must clear itself. Killing would make a transient scan overload
         // permanently disable an app until someone noticed and revived it.
-        slot.state = throttled_ ? AppState::Suspended : AppState::Killed;
+        run.state = throttled_ ? AppState::Suspended : AppState::Killed;
         recordEvent(manifest.name, throttled_ ? "suspended" : "killed",
                     String("last_us=") + String(elapsedUs), false, 0);
         if (storage_ != nullptr) {
           storage_->logTagged("apps",
                               String(throttled_ ? "app_suspended name=" : "app_killed name=") +
                                   manifest.name + " last_us=" + String(elapsedUs) +
-                                  " budget_us=" + String(allocated),
+                                  " budget_us=" + String(allowed),
                               LogLevel::Warn);
         }
         reallocate();
       }
     } else {
-      slot.consecutiveOverruns = 0;
+      run.consecutiveOverruns = 0;
     }
   }
 
@@ -375,7 +428,7 @@ void AppManager::recordEvent(const char* app, const char* event, const String& d
                              bool hasValue, float value) {
   EventRecord& record = events_[eventWrite_];
   if (record.valid) {
-    // The ring wrapped before anyone read this slot. Counted, because a lost
+    // The ring wrapped before anyone read this record. Counted, because a lost
     // event and an event that never happened must not look the same.
     ++eventsDropped_;
   }
@@ -395,115 +448,111 @@ void AppManager::recordEvent(const char* app, const char* event, const String& d
 }
 
 void AppManager::emitEvent(const char* app, const char* event, const String& detail) {
-  const int8_t index = indexOfApp(app);
-  if (index >= 0) {
-    if ((slots_[index].app->manifest().capabilities & kAppCapEmitEvent) == 0) {
+  App* source = app != nullptr ? find(String(app)) : nullptr;
+  if (source != nullptr) {
+    if ((source->manifest().capabilities & kAppCapEmitEvent) == 0) {
       return;
     }
-    ++slots_[index].events;
+    ++source->run.events;
   }
   recordEvent(app, event, detail, false, 0);
 }
 
 void AppManager::emitValue(const char* app, const char* event, float value) {
-  const int8_t index = indexOfApp(app);
-  if (index >= 0) {
-    if ((slots_[index].app->manifest().capabilities & kAppCapEmitEvent) == 0) {
+  App* source = app != nullptr ? find(String(app)) : nullptr;
+  if (source != nullptr) {
+    if ((source->manifest().capabilities & kAppCapEmitEvent) == 0) {
       return;
     }
-    ++slots_[index].events;
+    ++source->run.events;
   }
   recordEvent(app, event, String(value, 3), true, value);
 }
 
+namespace {
+
+void appendName(String& out, bool& first, const App* app) {
+  out += first ? "[\"" : ",\"";
+  first = false;
+  out += jsonEscape(String(app->manifest().name));
+  out += "\"";
+}
+
+}  // namespace
+
 // Pulled, not pushed. Until v1.7.0 the led op wrote the pixel directly and the
 // LED task painted the system pattern back over it within 10ms, so an app's
 // colour was all but invisible, and two apps raced with the later one winning.
-// Composing here gives the LED the same lowest-slot rule as the OLED and the
-// strip, and a slot that stops holds nothing because it is no longer running.
-bool AppManager::statusLed(uint8_t rgb[3], int8_t& ownerSlot, uint8_t* requesters) const {
-  ownerSlot = -1;
-  if (requesters != nullptr) {
-    *requesters = 0;
-  }
-  for (uint8_t i = 0; i < count_; ++i) {
-    const Slot& slot = slots_[i];
-    if (slot.state != AppState::Running || slot.app->idle() ||
-        (slot.app->manifest().capabilities & kAppCapDriveLed) == 0) {
+// Composing here gives the LED the same first-in-order rule as the OLED and
+// the strip, and an app that stops holds nothing because it is not running.
+bool AppManager::statusLed(uint8_t rgb[3], const App** owner, String* others) const {
+  const App* winner = nullptr;
+  bool first = true;
+  for (const App* app = head_; app != nullptr; app = app->run.next) {
+    if (!active(app) || (app->manifest().capabilities & kAppCapDriveLed) == 0) {
       continue;
     }
     uint8_t held[3];
-    if (!slot.app->statusLed(held)) {
+    if (!app->statusLed(held)) {
       continue;
     }
-    if (requesters != nullptr) {
-      *requesters |= static_cast<uint8_t>(1U << i);
-    }
-    if (ownerSlot < 0) {
-      ownerSlot = static_cast<int8_t>(i);
+    if (winner == nullptr) {
+      winner = app;
       rgb[0] = held[0];
       rgb[1] = held[1];
       rgb[2] = held[2];
-      if (requesters == nullptr) {
-        break;
-      }
-    }
-  }
-  return ownerSlot >= 0;
-}
-
-bool AppManager::displayLine(uint8_t row, AppDisplayLine& out, int8_t* ownerSlot) const {
-  for (uint8_t i = 0; i < count_; ++i) {
-    const Slot& slot = slots_[i];
-    if (slot.state != AppState::Running || slot.app->idle() ||
-        (slot.app->manifest().capabilities & kAppCapDisplay) == 0) {
+      if (others == nullptr) break;
       continue;
     }
-    if (slot.app->displayLine(row, out)) {
-      if (ownerSlot != nullptr) {
-        *ownerSlot = static_cast<int8_t>(i);
-      }
+    appendName(*others, first, app);
+  }
+  if (others != nullptr && !first) *others += "]";
+  if (owner != nullptr) *owner = winner;
+  return winner != nullptr;
+}
+
+bool AppManager::displayLine(uint8_t row, AppDisplayLine& out, const App** owner) const {
+  for (const App* app = head_; app != nullptr; app = app->run.next) {
+    if (!active(app) || (app->manifest().capabilities & kAppCapDisplay) == 0) {
+      continue;
+    }
+    if (app->displayLine(row, out)) {
+      if (owner != nullptr) *owner = app;
       return true;
     }
   }
   return false;
 }
 
-uint8_t AppManager::displayContenders(uint8_t row) const {
-  uint8_t mask = 0;
-  for (uint8_t i = 0; i < count_; ++i) {
-    const Slot& slot = slots_[i];
-    if (slot.state != AppState::Running || slot.app->idle() ||
-        (slot.app->manifest().capabilities & kAppCapDisplay) == 0) {
+bool AppManager::appendDisplayContenders(String& out, uint8_t row, const App* winner) const {
+  bool first = true;
+  for (const App* app = head_; app != nullptr; app = app->run.next) {
+    if (app == winner || !active(app) || (app->manifest().capabilities & kAppCapDisplay) == 0) {
       continue;
     }
     AppDisplayLine line;
-    if (slot.app->displayLine(row, line)) {
-      mask |= static_cast<uint8_t>(1U << i);
-    }
+    if (app->displayLine(row, line)) appendName(out, first, app);
   }
-  return mask;
+  if (!first) out += "]";
+  return !first;
 }
 
 void AppManager::extLedFrame(AppExtLedFrame& out) const {
   out = AppExtLedFrame();
-  for (uint8_t i = 0; i < count_; ++i) {
-    const Slot& slot = slots_[i];
-    if (slot.state != AppState::Running || slot.app->idle() ||
-        (slot.app->manifest().capabilities & kAppCapExtLed) == 0) {
+  for (const App* app = head_; app != nullptr; app = app->run.next) {
+    if (!active(app) || (app->manifest().capabilities & kAppCapExtLed) == 0) {
       continue;
     }
     out.active = true;
-    slot.app->extLedFrame(out);
+    app->extLedFrame(out);
   }
 }
 
 void AppManager::publish(const char* app, uint32_t topic, float value) {
-  for (uint8_t i = 0; i < count_; ++i) {
-    Slot& slot = slots_[i];
-    if (slot.state != AppState::Running || slot.app->idle()) continue;
-    if (app != nullptr && strcmp(slot.app->manifest().name, app) == 0) continue;
-    slot.app->queueMessage(topic, value);
+  for (App* target = head_; target != nullptr; target = target->run.next) {
+    if (!active(target)) continue;
+    if (app != nullptr && strcmp(target->manifest().name, app) == 0) continue;
+    target->queueMessage(topic, value);
   }
 }
 
@@ -526,11 +575,38 @@ const char* AppManager::stateName(AppState state) {
   }
 }
 
+namespace {
+
+void appendLoad(String& json, const AppRun& run) {
+  json += ",\"load\":";
+  json += String(run.load.load);
+  json += ",\"level\":\"";
+  json += AppLoad::levelName(run.load.level);
+  json += "\",\"cpu1\":";
+  json += String(run.load.cpu1);
+  json += ",\"cpu10\":";
+  json += String(run.load.cpu10);
+  json += ",\"cpu60\":";
+  json += String(run.load.cpu60);
+  json += ",\"budget10\":";
+  json += String(run.load.budget10);
+  json += ",\"base_us\":";
+  json += String(run.baseUs);
+  json += ",\"borrowed_us\":";
+  json += String(run.borrowedUs);
+  json += ",\"lent_us\":";
+  json += String(run.lentUs);
+}
+
+}  // namespace
+
 String AppManager::statusJson(const String& outputsFor) const {
   String json = "{\"dispatches\":";
   json += String(dispatches_);
   json += ",\"count\":";
   json += String(count_);
+  json += ",\"running\":";
+  json += String(runningCount());
   json += ",\"budget_us\":";
   json += String(totalBudgetUs_);
   json += ",\"last_total_us\":";
@@ -542,42 +618,80 @@ String AppManager::statusJson(const String& outputsFor) const {
   json += ",\"events_dropped\":";
   json += String(eventsDropped_);
   json += ",\"apps\":[";
-  for (uint8_t i = 0; i < count_; ++i) {
-    const Slot& slot = slots_[i];
-    const AppManifest& manifest = slot.app->manifest();
-    if (i != 0) {
-      json += ",";
-    }
+  bool first = true;
+  for (const App* app = head_; app != nullptr; app = app->run.next) {
+    const AppRun& run = app->run;
+    const AppManifest& manifest = app->manifest();
+    if (!first) json += ",";
+    first = false;
     json += "{\"name\":\"";
     json += jsonEscape(String(manifest.name));
     json += "\",\"version\":\"";
     json += jsonEscape(String(manifest.version));
-    json += "\",\"state\":\"";
-    json += stateName(slot.state);
+    json += "\",\"order\":";
+    json += String(run.order);
+    json += ",\"state\":\"";
+    json += stateName(run.state);
     json += "\",\"idle\":";
-    json += slot.app->idle() ? "true" : "false";
+    json += app->idle() ? "true" : "false";
+    json += ",\"burst\":";
+    json += manifest.burst ? "true" : "false";
     json += ",\"capabilities\":";
     json += String(manifest.capabilities);
     json += ",\"budget_us\":";
-    // An idle slot holds no share; showing the manifest default would claim
+    // An idle app holds no share; showing the manifest default would claim
     // budget it does not have.
-    json += String(slot.app->idle() ? 0
-                   : slot.allocatedUs != 0 ? slot.allocatedUs : manifest.frameBudgetUs);
+    json += String(app->idle() ? 0 : run.allocatedUs != 0 ? run.allocatedUs : manifest.frameBudgetUs);
+    appendLoad(json, run);
+    json += ",\"memory_bytes\":";
+    json += String(app->memoryBytes());
     json += ",\"invocations\":";
-    json += String(slot.invocations);
+    json += String(run.invocations);
     json += ",\"last_us\":";
-    json += String(slot.lastUs);
+    json += String(run.lastUs);
     json += ",\"max_us\":";
-    json += String(slot.maxUs);
+    json += String(run.maxUs);
     json += ",\"overruns\":";
-    json += String(slot.overruns);
+    json += String(run.overruns);
     json += ",\"events\":";
-    json += String(slot.events);
+    json += String(run.events);
     json += ",\"state_detail\":";
-    json += slot.app->statusJson(outputsFor.length() > 0 && outputsFor == manifest.name);
+    json += app->statusJson(outputsFor.length() > 0 && outputsFor == manifest.name);
     json += "}";
   }
   json += "]}";
+  return json;
+}
+
+String AppManager::loadJson() const {
+  uint32_t cpu = 0;
+  String apps = "[";
+  bool first = true;
+  for (const App* app = head_; app != nullptr; app = app->run.next) {
+    const AppRun& run = app->run;
+    cpu += run.load.cpu10;
+    if (!first) apps += ",";
+    first = false;
+    apps += "{\"name\":\"";
+    apps += jsonEscape(String(app->manifest().name));
+    apps += "\",\"state\":\"";
+    apps += app->idle() && run.state == AppState::Running ? "faulted" : stateName(run.state);
+    apps += "\"";
+    appendLoad(apps, run);
+    apps += ",\"memory_bytes\":";
+    apps += String(app->memoryBytes());
+    apps += "}";
+  }
+  apps += "]";
+  String json = "{\"budget_us\":";
+  json += String(totalBudgetUs_);
+  json += ",\"throttled\":";
+  json += throttled_ ? "true" : "false";
+  json += ",\"cpu10\":";
+  json += String(cpu > 1000 ? 1000 : cpu);
+  json += ",\"apps\":";
+  json += apps;
+  json += "}";
   return json;
 }
 
@@ -661,42 +775,20 @@ String AppManager::eventsJson(uint32_t sinceSeq, uint8_t limit) const {
 }
 
 String AppManager::appsText() const {
-  String out = "NAME              STATE      BUDGET_US  LAST_US   MAX_US  OVERRUNS\n";
-  for (uint8_t i = 0; i < count_; ++i) {
-    const Slot& slot = slots_[i];
-    String name(slot.app->manifest().name);
-    while (name.length() < 17) {
-      name += ' ';
-    }
-    out += name;
-    String state(slot.state == AppState::Running && slot.app->idle() ? "idle"
-                                                                     : stateName(slot.state));
-    while (state.length() < 11) {
-      state += ' ';
-    }
-    out += state;
-    String budget(slot.app->idle() ? 0
-                  : slot.allocatedUs != 0 ? slot.allocatedUs
-                                          : slot.app->manifest().frameBudgetUs);
-    while (budget.length() < 10) {
-      budget = " " + budget;
-    }
-    out += budget;
-    String last(slot.lastUs);
-    while (last.length() < 9) {
-      last = " " + last;
-    }
-    out += last;
-    String maxUs(slot.maxUs);
-    while (maxUs.length() < 9) {
-      maxUs = " " + maxUs;
-    }
-    out += maxUs;
-    String overruns(slot.overruns);
-    while (overruns.length() < 10) {
-      overruns = " " + overruns;
-    }
-    out += overruns;
+  String out = "NAME             STATE       BUDGET_US  LAST_US   MAX_US  OVERRUNS  CPU%  LOAD\n";
+  for (const App* app = head_; app != nullptr; app = app->run.next) {
+    const AppRun& run = app->run;
+    padRight(out, String(app->manifest().name), 17);
+    padRight(out, String(run.state == AppState::Running && app->idle() ? "faulted" : stateName(run.state)),
+             11);
+    padLeft(out, String(app->idle() ? 0 : run.allocatedUs != 0 ? run.allocatedUs
+                                                                 : app->manifest().frameBudgetUs),
+            10);
+    padLeft(out, String(run.lastUs), 9);
+    padLeft(out, String(run.maxUs), 9);
+    padLeft(out, String(run.overruns), 10);
+    padLeft(out, String(run.load.cpu10 / 10.0f, 1), 6);
+    padLeft(out, String(run.load.load), 6);
     out += '\n';
   }
   out += "\nTOTAL budget_us=";

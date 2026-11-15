@@ -592,30 +592,17 @@ void appendRgb(String& out, const uint8_t rgb[3]) {
   out += "]";
 }
 
-// Slot names for the bits of `mask`, leaving out `except`.
-void appendSlotList(String& out, const AppManager& apps, uint8_t mask, int8_t except) {
-  out += "[";
-  bool first = true;
-  for (uint8_t i = 0; i < apps.slotCount(); ++i) {
-    if ((mask & (1U << i)) == 0 || static_cast<int8_t>(i) == except) {
-      continue;
-    }
-    if (!first) out += ",";
-    first = false;
-    out += "\"";
-    out += jsonEscape(apps.slotName(i));
-    out += "\"";
-  }
-  out += "]";
-}
+const char* appName(const App* app) { return app != nullptr ? app->manifest().name : ""; }
 
 }  // namespace
 
 // What the apps' outputs look like right now, after every composition rule:
 // the OLED rows as the app page draws them (whichever page the panel is on,
 // and on boards with no panel at all), the status LED as the pixel shows it,
-// and the strip. Read-only and sized for an ESP-NOW reply (~1KB at most), so
-// the Desktop can poll it to mirror the device.
+// and the strip. Apps are named by package id (v2.1.0; before, by slot), and
+// `load` carries each one's load and memory, so the Desktop's one poll shows
+// both. Read-only and sized for an ESP-NOW reply (~1-2KB), so the Desktop can
+// poll it to mirror the device.
 String ControlServer::appViewJson() const {
   String out = "{\"oled\":{\"hw\":";
   out += NHOS_BOARD_HAS_OLED ? "true" : "false";
@@ -627,13 +614,13 @@ String ControlServer::appViewJson() const {
   for (uint8_t row = 0; row < kOledRows; ++row) {
     if (row) out += ",";
     AppDisplayLine line;
-    int8_t owner = -1;
+    const App* owner = nullptr;
     if (!apps_->displayLine(row, line, &owner)) {
       out += "null";
       continue;
     }
-    out += "{\"slot\":\"";
-    out += jsonEscape(apps_->slotName(static_cast<uint8_t>(owner)));
+    out += "{\"app\":\"";
+    out += jsonEscape(String(appName(owner)));
     out += "\",\"kind\":\"";
     if (line.kind == AppDisplayKind::Bar) {
       const OledBarGeometry bar = oledBarGeometry(static_cast<uint8_t>(strlen(line.label)),
@@ -655,10 +642,10 @@ String ControlServer::appViewJson() const {
       out += jsonEscape(text);
       out += "\"";
     }
-    const uint8_t contenders = apps_->displayContenders(row);
-    if ((contenders & ~(1U << owner)) != 0) {
+    String contenders;
+    if (apps_->appendDisplayContenders(contenders, row, owner)) {
       out += ",\"contended\":";
-      appendSlotList(out, *apps_, contenders, owner);
+      out += contenders;
     }
     out += "}";
   }
@@ -673,23 +660,23 @@ String ControlServer::appViewJson() const {
     out += "\",";
   }
   uint8_t appRgb[3] = {0, 0, 0};
-  int8_t ledOwner = -1;
-  uint8_t requesters = 0;
-  const bool held = apps_->statusLed(appRgb, ledOwner, &requesters);
+  const App* ledOwner = nullptr;
+  String requesters;
+  const bool held = apps_->statusLed(appRgb, &ledOwner, &requesters);
   const bool shownApp = held && leds_ && leds_->appOverlayShown();
   out += "\"owner\":\"";
-  out += shownApp ? jsonEscape(apps_->slotName(static_cast<uint8_t>(ledOwner))) : String("system");
+  out += shownApp ? jsonEscape(String(appName(ledOwner))) : String("system");
   out += "\"";
   if (held) {
-    out += ",\"app_request\":{\"slot\":\"";
-    out += jsonEscape(apps_->slotName(static_cast<uint8_t>(ledOwner)));
+    out += ",\"app_request\":{\"app\":\"";
+    out += jsonEscape(String(appName(ledOwner)));
     out += "\",\"rgb\":";
     appendRgb(out, appRgb);
     out += ",\"suppressed\":";
     out += shownApp ? "false" : "true";
-    if ((requesters & ~(1U << ledOwner)) != 0) {
+    if (requesters.length() > 0) {
       out += ",\"contended\":";
-      appendSlotList(out, *apps_, requesters, ledOwner);
+      out += requesters;
     }
     out += "}";
   }
@@ -712,7 +699,9 @@ String ControlServer::appViewJson() const {
     out += "]";
   }
 #endif
-  out += "}}";
+  out += "},\"load\":";
+  out += apps_->loadJson();
+  out += "}";
   return out;
 }
 

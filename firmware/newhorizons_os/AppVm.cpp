@@ -4,7 +4,6 @@
 
 #include <memory>
 #include <new>
-#include <vector>
 
 #include "AppDeviceControl.h"
 #include "AppIo.h"
@@ -14,89 +13,54 @@
 
 namespace nhos {
 
-// --- the shared pool -------------------------------------------------------------
+// --- the pool --------------------------------------------------------------------
 
 namespace {
 
-constexpr uint8_t kMaxBlocks = 8;  // a slot holds two blocks only while replacing its image
-
-struct Block {
-  AppVm* owner;
-  uint32_t at;
-  uint32_t len;
-};
+static_assert(AppVm::kPoolBytes <= 65535, "AppPoolCore blocks are 16-bit");
 
 alignas(4) uint8_t g_pool[AppVm::kPoolBytes];
-Block g_blocks[kMaxBlocks];
-uint8_t g_blockCount = 0;  // kept sorted by `at`
-
-uint32_t align4(uint32_t n) { return (n + 3U) & ~3U; }
+AppPoolCore::Block g_blocks[AppVm::kPoolBlocks];
 
 }  // namespace
 
-// Friend of AppVm, so compaction can move a slot's image and tell it where.
-struct AppVmPool {
-  static uint8_t* allocate(AppVm* owner, uint32_t len) {
-    len = align4(len);
-    if (len == 0 || len > AppVm::kPoolBytes || g_blockCount >= kMaxBlocks) return nullptr;
-    // First fit between the blocks.
-    uint32_t cursor = 0;
-    uint8_t insertAt = g_blockCount;
-    bool found = false;
-    for (uint8_t i = 0; i <= g_blockCount; ++i) {
-      const uint32_t end = i < g_blockCount ? g_blocks[i].at : AppVm::kPoolBytes;
-      if (end - cursor >= len) {
-        insertAt = i;
-        found = true;
-        break;
-      }
-      if (i < g_blockCount) cursor = g_blocks[i].at + g_blocks[i].len;
-    }
-    if (!found) {
-      // Fragmented: compact. Only ever called between deliveries (bind
-      // happens in a command handler on the loop task), so no handler is
-      // mid-run on the bytes being moved -- and a suspended one keeps only
-      // offsets, which moving does not change.
-      uint32_t used = 0;
-      for (uint8_t i = 0; i < g_blockCount; ++i) used += g_blocks[i].len;
-      if (AppVm::kPoolBytes - used < len) return nullptr;
-      cursor = 0;
-      for (uint8_t i = 0; i < g_blockCount; ++i) {
-        Block& block = g_blocks[i];
-        if (block.at != cursor) {
-          memmove(g_pool + cursor, g_pool + block.at, block.len);
-          block.at = cursor;
-          block.owner->relocate(g_pool + cursor);
-        }
-        cursor += block.len;
-      }
-      insertAt = g_blockCount;
-    }
-    for (uint8_t i = g_blockCount; i > insertAt; --i) g_blocks[i] = g_blocks[i - 1];
-    g_blocks[insertAt] = {owner, cursor, len};
-    ++g_blockCount;
-    return g_pool + cursor;
-  }
+void AppVm::relocateThunk(void* owner, uint8_t* to) { static_cast<AppVm*>(owner)->relocate(to); }
 
-  static void release(const uint8_t* memory) {
-    for (uint8_t i = 0; i < g_blockCount; ++i) {
-      if (g_pool + g_blocks[i].at != memory) continue;
-      for (uint8_t j = i; j + 1 < g_blockCount; ++j) g_blocks[j] = g_blocks[j + 1];
-      --g_blockCount;
-      return;
-    }
-  }
-};
-
-uint32_t AppVm::poolUsedBytes() {
-  uint32_t used = 0;
-  for (uint8_t i = 0; i < g_blockCount; ++i) used += g_blocks[i].len;
-  return used;
+AppPoolCore& AppVm::pool() {
+  static AppPoolCore core(g_pool, kPoolBytes, g_blocks, kPoolBlocks, &AppVm::relocateThunk);
+  return core;
 }
 
-uint32_t AppVm::poolLargestFree() {
-  // Compaction makes all free space one block, so that is what can be had.
-  return kPoolBytes - poolUsedBytes();
+uint32_t AppVm::poolUsedBytes() { return pool().usedBytes(); }
+
+uint32_t AppVm::poolFreeBytes() { return pool().freeBytes(); }
+
+uint32_t AppVm::memoryFor(uint32_t imageBytes, uint32_t capabilities) {
+  uint32_t bytes = controlBytes() + AppPoolCore::align4(imageBytes);
+  if ((capabilities & kAppCapStorage) != 0) bytes += storeBytes();
+  return bytes;
+}
+
+uint32_t AppVm::memoryBytes() const {
+  uint32_t bytes = controlBytes();
+  if (loaded()) bytes += AppPoolCore::align4(verified_.layout.poolBytes());
+  if (store_ != nullptr) bytes += storeBytes();
+  return bytes;
+}
+
+AppVm* AppVm::create(Storage& storage) {
+  void* block = pool().allocateFixed(controlBytes());
+  if (block == nullptr) return nullptr;
+  AppVm* app = new (block) AppVm();
+  app->storage_ = &storage;
+  return app;
+}
+
+void AppVm::destroy(AppVm* app) {
+  if (app == nullptr) return;
+  app->unload();
+  app->~AppVm();
+  pool().release(app);
 }
 
 // --- loading -----------------------------------------------------------------------
@@ -205,24 +169,17 @@ uint32_t clockUs() { return micros(); }
 }  // namespace
 
 AppVm::AppVm() {
-  manifest_.name = nameBuf_;
+  // The package id is the app's name everywhere: app_list, app_view, events.
+  manifest_.name = packageId_;
   manifest_.version = versionBuf_;
   manifest_.summary = summaryBuf_;
   manifest_.capabilities = kAppCapReadMatrix | kAppCapEmitEvent;
   manifest_.frameBudgetUs = kDefaultBudgetUs;
-  strncpy(nameBuf_, "flow", sizeof(nameBuf_) - 1);
   strncpy(versionBuf_, "1.0.0", sizeof(versionBuf_) - 1);
-  strncpy(summaryBuf_, "Runs an app image loaded from a package.", sizeof(summaryBuf_) - 1);
 }
 
-void AppVm::setIdentity(const char* name, uint32_t budgetUs) {
-  strncpy(nameBuf_, name != nullptr ? name : "flow", sizeof(nameBuf_) - 1);
-  nameBuf_[sizeof(nameBuf_) - 1] = '\0';
-  manifest_.frameBudgetUs = budgetUs;
-}
-
-void AppVm::applyPackageManifest(const char* version, const char* summary,
-                                 const char* packageId, uint32_t capabilities) {
+bool AppVm::applyPackageManifest(const char* version, const char* summary,
+                                 const char* packageId, uint32_t capabilities, bool burst) {
   if (version != nullptr) {
     strncpy(versionBuf_, version, sizeof(versionBuf_) - 1);
     versionBuf_[sizeof(versionBuf_) - 1] = '\0';
@@ -235,21 +192,39 @@ void AppVm::applyPackageManifest(const char* version, const char* summary,
     strncpy(packageId_, packageId, sizeof(packageId_) - 1);
     packageId_[sizeof(packageId_) - 1] = '\0';
   }
-  // Never widened: a package cannot grant itself a permission the host slot
+  // Never widened: a package cannot grant itself a permission the runtime
   // does not already allow.
   manifest_.capabilities = capabilities & kSlotAllowedCaps;
+  manifest_.burst = burst;
   // The package id and capabilities arrive after the image is bound, and
   // both are needed to find -- and be allowed -- the saved values.
   restorePersisted();
-  if ((manifest_.capabilities & kAppCapStorage) != 0 && packageId_[0] != '\0') {
-    store_.open(packageId_);
-  } else {
-    store_.close();
+  const bool wantsStore = (manifest_.capabilities & kAppCapStorage) != 0 && packageId_[0] != '\0';
+  if (!wantsStore) {
+    releaseStore();
+    return true;
   }
+  if (store_ == nullptr) {
+    void* block = pool().allocateFixed(storeBytes());
+    if (block == nullptr) return false;
+    store_ = new (block) AppStore();
+    store_->attach(storage_);
+  }
+  store_->open(packageId_);
+  return true;
+}
+
+void AppVm::releaseStore() {
+  if (store_ == nullptr) return;
+  store_->close();
+  store_->~AppStore();
+  pool().release(store_);
+  store_ = nullptr;
 }
 
 bool AppVm::dryRun(const String& json, uint16_t cellCount, uint32_t budgetUs,
-                   uint32_t declaredCaps, uint32_t& estimatedUs, String& error) {
+                   uint32_t declaredCaps, uint32_t& estimatedUs, uint32_t& memoryBytes,
+                   String& error) {
   std::unique_ptr<uint8_t[]> image;
   size_t length = 0;
   VmVerified verified;
@@ -257,8 +232,10 @@ bool AppVm::dryRun(const String& json, uint16_t cellCount, uint32_t budgetUs,
     return false;
   }
   if (!withinBudget(verified, budgetUs, error)) return false;
-  // Pool fit is decided at activation, against what else is running.
-  if (verified.layout.poolBytes() > kPoolBytes) {
+  // Pool fit is decided at activation, against what else is running; here
+  // only whether it could ever fit.
+  memoryBytes = memoryFor(verified.layout.poolBytes(), declaredCaps);
+  if (memoryBytes > kPoolBytes) {
     error = "app_pool_exhausted";
     return false;
   }
@@ -278,13 +255,13 @@ bool AppVm::loadFromJson(const String& json, const String& sourcePath, uint16_t 
   if (!withinBudget(verified, manifest_.frameBudgetUs, error)) return false;
 
   // Transactional: the new block is taken while the old image still runs, so
-  // a refusal leaves the slot as it was. Only when the pool cannot hold both
+  // a refusal leaves the app as it was. Only when the pool cannot hold both
   // is the old one given up first.
   const uint32_t need = verified.layout.poolBytes();
-  uint8_t* block = AppVmPool::allocate(this, need);
+  uint8_t* block = pool().allocateMovable(this, need);
   if (block == nullptr && memory_ != nullptr) {
     unload();
-    block = AppVmPool::allocate(this, need);
+    block = pool().allocateMovable(this, need);
   }
   if (block == nullptr) {
     error = "app_pool_exhausted";
@@ -312,50 +289,15 @@ bool AppVm::loadFromJson(const String& json, const String& sourcePath, uint16_t 
   return true;
 }
 
-bool AppVm::loadFromFile(const String& path, uint16_t cellCount, String& error) {
-  if (storage_ == nullptr) {
-    error = "storage_unavailable";
-    return false;
-  }
-  std::vector<uint8_t> bytes;
-  const size_t size = storage_->fileSize("user", path);
-  if (size == 0) {
-    error = "file_not_found";
-    return false;
-  }
-  if (size > kMaxPackageBytes) {
-    error = "file_too_large";
-    return false;
-  }
-  if (!storage_->readFile("user", path, bytes, 0, size)) {
-    error = "file_read_failed";
-    return false;
-  }
-  String json;
-  json.reserve(bytes.size() + 1);
-  for (uint8_t byte : bytes) {
-    json += static_cast<char>(byte);
-  }
-  if (!loadFromJson(json, path, cellCount, kSlotAllowedCaps, error)) {
-    return false;
-  }
-  // A raw package belongs to no install, so it has nowhere to persist to --
-  // and must not write its counters under the key of whatever package this
-  // slot held before.
-  packageId_[0] = '\0';
-  machine_.clearPersistDirty();
-  return true;
-}
-
 void AppVm::unload() {
   // Removed is stopped: on("stop") runs and the device gets back what the app
   // changed, before the image goes.
   if (loaded()) stop();
-  store_.close();
+  releaseStore();
   // Written out before the image goes: deactivating keeps a count, so
   // re-activating the package carries on counting.
   savePersisted();
-  if (memory_ != nullptr) AppVmPool::release(memory_);
+  if (memory_ != nullptr) pool().release(memory_);
   memory_ = nullptr;
   machine_.unbind();
   verified_ = VmVerified();
@@ -392,6 +334,15 @@ bool AppVm::start() {
 }
 
 void AppVm::stop() {
+  // A handler still in progress is dropped, not left to resume: it would come
+  // back after the pause and be judged starved for time it spent stopped.
+  if (machine_.suspended()) {
+    machine_.abandon();
+    handler_ = -1;
+    runMessage_ = false;
+    suspendedSinceMs_ = 0;
+    framesSkipped_ = 0;
+  }
   if (loaded() && !stopped_ && fault_ == 0 && !machine_.suspended() &&
       machine_.hasEntry(VmEvent::Stop)) {
     AppEvent event;
@@ -408,7 +359,7 @@ void AppVm::stop() {
 }
 
 void AppVm::releaseResources() {
-  store_.flush();
+  if (store_ != nullptr) store_->flush();
   AppDeviceControl::release(this);
   AppIo::uartClose(this);
 }
@@ -509,7 +460,7 @@ void AppVm::clearPersisted(Storage& storage, const char* packageId) {
 }
 
 void AppVm::service(uint32_t nowMs) {
-  store_.service(nowMs);
+  if (store_ != nullptr) store_->service(nowMs);
   // At most every kPersistIntervalMs, and only when a count moved: a flash
   // write is milliseconds, so it happens here, untimed, never in a handler.
   if (!machine_.persistDirty() || nowMs - lastPersistMs_ < kPersistIntervalMs) {
@@ -736,13 +687,16 @@ void AppVm::vmLed(bool on, const uint8_t rgb[3], uint16_t stateSlot) {
 // The capability behind each was checked by the verifier against the
 // manifest, and the manifest's dangerous ones against the operator's grant.
 
-float AppVm::vmStoreGet(const char* key) { return store_.get(key); }
+float AppVm::vmStoreGet(const char* key) { return store_ != nullptr ? store_->get(key) : 0.0f; }
 
-void AppVm::vmStoreSet(const char* key, float value) { store_.set(key, value); }
+void AppVm::vmStoreSet(const char* key, float value) {
+  if (store_ != nullptr) store_->set(key, value);
+}
 
 bool AppVm::vmStoreAppend(const char* file, uint32_t nowMs, const float values[4]) {
   bool reportFull = false;
-  const bool written = store_.append(file, nowMs, values, reportFull);
+  if (store_ == nullptr) return false;
+  const bool written = store_->append(file, nowMs, values, reportFull);
   if (reportFull && host_ != nullptr) {
     host_->emitEvent(manifest_.name, "store_full", file);
     if (storage_ != nullptr) {
@@ -752,7 +706,9 @@ bool AppVm::vmStoreAppend(const char* file, uint32_t nowMs, const float values[4
   return written;
 }
 
-void AppVm::vmStoreClear(const char* file) { store_.clear(file); }
+void AppVm::vmStoreClear(const char* file) {
+  if (store_ != nullptr) store_->clear(file);
+}
 
 void AppVm::vmPublish(const char* topic, float value) {
   if (host_ != nullptr) host_->publish(manifest_.name, vmHash(topic), value);
@@ -875,9 +831,9 @@ String AppVm::statusJson(bool withOutputs) const {
     json += ",\"messages_dropped\":";
     json += String(messagesDropped_);
   }
-  if (store_.isOpen()) {
+  if (store_ != nullptr && store_->isOpen()) {
     json += ",\"store_bytes\":";
-    json += String(store_.usedBytes());
+    json += String(store_->usedBytes());
   }
   json += ",\"suspensions\":";
   json += String(suspensions_);

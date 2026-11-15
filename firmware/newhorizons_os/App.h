@@ -5,6 +5,7 @@
 #include "AppContract.h"
 #include "AppDisplay.h"
 #include "AppExtLed.h"
+#include "AppLoad.h"
 #include "MatrixScanner.h"
 
 namespace nhos {
@@ -47,6 +48,54 @@ struct AppManifest {
   // is actually running, so this shrinks as more apps are enabled.
   uint32_t frameBudgetUs = 500;
   const char* summary = "";
+  // v2.1.0: may borrow time other apps leave unused (AppShare). Never
+  // guaranteed, and never past AppShare's cap.
+  bool burst = false;
+};
+
+enum class AppState : uint8_t {
+  Installed = 0,  // present but not running
+  Running = 1,
+  Killed = 2,     // repeatedly exceeded its own allocation -- the app's fault
+  Faulted = 3,    // start() refused
+  // Stopped because the system needed the capacity, NOT because the app did
+  // anything wrong. Distinct from Killed because it must come back on its own:
+  // a suspension that needed an operator to clear it would mean one busy
+  // moment takes an app away permanently, with nothing saying why.
+  Suspended = 4,
+  // Stopped by an operator (app_stop) for this boot only: nothing is
+  // persisted, so a reboot brings the app back; unlike Suspended it does not
+  // come back by itself.
+  Stopped = 5,
+};
+
+class App;
+
+// What AppManager keeps about one app while it is in the run list. Part of
+// the app object rather than a table in AppManager (v2.1.0): the apps live in
+// the AppPool, and how many there are is whatever fits there.
+struct AppRun {
+  App* next = nullptr;  // the run list, in `order`
+  uint16_t order = 0;   // lower first: wins the OLED rows, the LED and the strip
+  AppState state = AppState::Installed;
+  uint32_t invocations = 0;
+  uint32_t lastUs = 0;
+  uint32_t maxUs = 0;
+  uint32_t overruns = 0;
+  uint8_t consecutiveOverruns = 0;
+  uint32_t events = 0;
+  // The slice a delivery is given: the guaranteed base, minus what is lent,
+  // plus what is borrowed (AppShare). 0 while not running.
+  uint32_t allocatedUs = 0;
+  uint32_t baseUs = 0;
+  uint32_t borrowedUs = 0;
+  uint32_t lentUs = 0;
+  // Deliveries in the current load window, and the app's own pressure
+  // counter (suspensions + skipped frames) as of the last settle.
+  uint32_t windowDeliveries = 0;
+  uint32_t lastPressure = 0;
+  bool windowPressured = false;
+  AppLoad load;
 };
 
 // Why an app is being called. The scanned frame is one source among several --
@@ -122,6 +171,8 @@ struct AppEvent {
 class App {
  public:
   virtual ~App() = default;
+  // AppManager's bookkeeping for this app; nobody else writes it.
+  AppRun run;
   virtual const AppManifest& manifest() const = 0;
   virtual bool start() { return true; }
   virtual void stop() {}
@@ -134,15 +185,14 @@ class App {
   virtual void service(uint32_t nowMs) { (void)nowMs; }
   // Optional app-specific state for /proc/apps and app_list; must be cheap.
   // `withOutputs` asks for per-node values too, which app_list includes only
-  // for the one slot a caller names: for every slot at once they would not fit
+  // for the one app a caller names: for every app at once they would not fit
   // an ESP-NOW reply.
   virtual String statusJson(bool withOutputs) const {
     (void)withOutputs;
     return "{}";
   }
-  // True while an enabled app has nothing to run -- a flow slot with no graph
-  // bound. It is not dispatched and takes no share of the budget, but keeps
-  // its enabled state so binding a package later starts it straight away.
+  // True while an app has nothing to run (an image that faulted). It is not
+  // dispatched and takes no share of the budget.
   virtual bool idle() const { return false; }
   // What this app last put on OLED row `row`, if anything. Pulled by the
   // display at its own rate rather than pushed per frame, so drawing costs the
@@ -153,7 +203,7 @@ class App {
     return false;
   }
   // Adds what this app put on the external LED strip on its last frame to
-  // `out`, leaving the meter and every pixel an earlier slot already set.
+  // `out`, leaving the meter and every pixel an earlier app already set.
   // Pulled by the LED service, like displayLine.
   virtual void extLedFrame(AppExtLedFrame& out) const { (void)out; }
   // The status LED colour this app is holding, if any. Pulled, like
@@ -164,6 +214,11 @@ class App {
     (void)rgb;
     return false;
   }
+  // Times this app ran out of its slice or missed a frame because of it, ever.
+  // AppManager turns the change per second into the load's pressure.
+  virtual uint32_t pressureCount() const { return 0; }
+  // Bytes of the AppPool this app holds (control block, store, image).
+  virtual uint32_t memoryBytes() const { return 0; }
 };
 
 }  // namespace nhos

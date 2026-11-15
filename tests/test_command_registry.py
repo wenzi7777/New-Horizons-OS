@@ -37,6 +37,12 @@ V1_19_ADDED = [
 # v2.0.F: the Vref DAC, the calibration switch and the I2C probe.
 V2_0_ADDED = ["set_vref", "calibration_switch", "i2c_scan", "set_range", "rfb_measure", "vref_sweep", "matrix_sample"]
 
+# v2.1.0: no slots. Activated is running, so the per-slot enable switch went
+# into app_activate/app_deactivate, and the slot-0 debug loader went with the
+# slots; app_reorder sets whose output wins.
+V2_1_REMOVED = ["app_enable", "app_disable", "app_load_flow", "app_unload_flow"]
+V2_1_ADDED = ["app_reorder"]
+
 # v1.14.0 gated these inside their bodies (two idioms); exit_maintenance joins
 # them on purpose -- it was a silent no-op in normal mode.
 MAINTENANCE = {
@@ -54,10 +60,12 @@ class CommandTableTests(unittest.TestCase):
         names = command_names()
         self.assertEqual(len(names), len(set(names)), "duplicate rows")
         self.assertEqual([n for n in names if n != "commands" and n not in V1_19_ADDED
-                          and n not in V2_0_ADDED],
-                         V1_14_COMMANDS)
-        for name in V1_19_ADDED + V2_0_ADDED:
+                          and n not in V2_0_ADDED and n not in V2_1_ADDED],
+                         [n for n in V1_14_COMMANDS if n not in V2_1_REMOVED])
+        for name in V1_19_ADDED + V2_0_ADDED + V2_1_ADDED:
             self.assertIn(name, names)
+        for name in V2_1_REMOVED:
+            self.assertNotIn(name, names)
         self.assertIn("commands", names)
 
     def test_flags(self):
@@ -79,7 +87,7 @@ class CommandTableTests(unittest.TestCase):
     def test_aliases_share_a_handler(self):
         handlers = {row["name"]: row["handler"] for row in command_rows()}
         self.assertEqual(handlers["status"], handlers["query"])
-        self.assertEqual(handlers["app_enable"], handlers["app_disable"])
+        self.assertEqual(handlers["app_stop"], handlers["app_start"])
 
     def test_maintenance_is_enforced_once_by_the_dispatcher(self):
         source = control_source()

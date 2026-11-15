@@ -28,7 +28,7 @@ String ControlServer::cmdAppList(const CommandContext& ctx) {
   if (!apps_) {
     return error(cmd, "app_manager_unavailable");
   }
-  // {"command":"app_list","outputs":"flow1"} adds that slot's per-node values.
+  // {"command":"app_list","outputs":"<app id>"} adds that app's per-node values.
   return ok(cmd, "app_list", appListJson(extractString(request, "outputs")));
 }
 
@@ -39,26 +39,6 @@ String ControlServer::cmdAppView(const CommandContext& ctx) {
     return error(cmd, "app_manager_unavailable");
   }
   return ok(cmd, "app_view", appViewJson());
-}
-
-// app_enable, app_disable
-String ControlServer::cmdAppEnable(const CommandContext& ctx) {
-  const String& cmd = ctx.cmd;
-  const String& request = ctx.request;
-  if (!apps_) {
-    return error(cmd, "app_manager_unavailable");
-  }
-  const String name = extractString(request, "name");
-  if (name.isEmpty()) {
-    return error(cmd, "name_required");
-  }
-  const bool enable = cmd == "app_enable";
-  if (!apps_->setEnabled(name, enable)) {
-    // setEnabled() refuses to silently un-kill an app that blew its budget;
-    // app_revive is the deliberate acknowledgement.
-    return error(cmd, "app_state_change_rejected");
-  }
-  return ok(cmd, enable ? "app_enabled" : "app_disabled", apps_->statusJson());
 }
 
 // app_stop, app_start -- runtime only, nothing persisted.
@@ -108,36 +88,6 @@ String ControlServer::cmdAppEvents(const CommandContext& ctx) {
   const int limit = extractInt(request, "limit", 0);
   return ok(cmd, "app_events", apps_->eventsJson(static_cast<uint32_t>(since < 0 ? 0 : since),
                                                  static_cast<uint8_t>(limit < 0 ? 0 : limit)));
-}
-
-// app_load_flow
-String ControlServer::cmdAppLoadFlow(const CommandContext& ctx) {
-  const String& cmd = ctx.cmd;
-  const String& request = ctx.request;
-  if (!flow_ || !scanner_) {
-    return error(cmd, "flow_engine_unavailable");
-  }
-  String path = extractString(request, "path");
-  if (path.isEmpty()) {
-    path = "apps/flow.json";
-  }
-  String loadError;
-  // Cell count drives the load-time cost estimate, so the same graph is
-  // judged against the board it will actually run on.
-  if (!flow_->loadFromFile(path, scanner_->health().pointCount, loadError)) {
-    return error(cmd, String("flow_load_failed:") + loadError);
-  }
-  return ok(cmd, "flow_graph_loaded", flow_->statusJson(false));
-}
-
-// app_unload_flow
-String ControlServer::cmdAppUnloadFlow(const CommandContext& ctx) {
-  const String& cmd = ctx.cmd;
-  if (!flow_) {
-    return error(cmd, "flow_engine_unavailable");
-  }
-  flow_->unload();
-  return ok(cmd, "flow_graph_unloaded", flow_->statusJson(false));
 }
 
 // app_list_packages
@@ -216,9 +166,9 @@ String ControlServer::cmdAppActivate(const CommandContext& ctx) {
   if (id.isEmpty()) {
     return error(cmd, "id_required");
   }
-  const int slot = extractInt(request, "slot", -1);
+  // A `slot` from an older client is ignored: there are none since v2.1.0.
   String activateError;
-  if (!appRegistry_->activate(id, static_cast<int8_t>(slot), activateError)) {
+  if (!appRegistry_->activate(id, activateError)) {
     return error(cmd, activateError);
   }
   return ok(cmd, "app_activated", appRegistry_->statusJson());
@@ -232,15 +182,34 @@ String ControlServer::cmdAppDeactivate(const CommandContext& ctx) {
     return error(cmd, "app_registry_unavailable");
   }
   const String id = extractString(request, "id");
-  const int slot = extractInt(request, "slot", -1);
-  if (id.isEmpty() && slot < 0) {
-    return error(cmd, "id_or_slot_required");
+  if (id.isEmpty()) {
+    return error(cmd, "id_required");
   }
   String deactivateError;
-  if (!appRegistry_->deactivate(id, static_cast<int8_t>(slot), deactivateError)) {
+  if (!appRegistry_->deactivate(id, deactivateError)) {
     return error(cmd, deactivateError);
   }
   return ok(cmd, "app_deactivated", appRegistry_->statusJson());
+}
+
+// app_reorder -- no maintenance needed: nothing is loaded or freed, only
+// whose output wins where apps compete.
+String ControlServer::cmdAppReorder(const CommandContext& ctx) {
+  const String& cmd = ctx.cmd;
+  const String& request = ctx.request;
+  if (!appRegistry_) {
+    return error(cmd, "app_registry_unavailable");
+  }
+  const String id = extractString(request, "id");
+  if (id.isEmpty()) {
+    return error(cmd, "id_required");
+  }
+  const int to = extractInt(request, "to", 0);
+  String reorderError;
+  if (!appRegistry_->reorder(id, static_cast<uint16_t>(to < 0 ? 0 : to), reorderError)) {
+    return error(cmd, reorderError);
+  }
+  return ok(cmd, "app_reordered", appRegistry_->statusJson());
 }
 
 // app_verify

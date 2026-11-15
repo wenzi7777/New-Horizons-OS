@@ -213,8 +213,17 @@ the Desktop renders from polled commands), a `manifest` (id, version, `min_os`,
 - **`min_os`** is compared on the version core, so a beta can install an app
   that needs its release.
 - Packages are installed with `file_write_*` + `app_install` (with `sha256`),
-  activated per slot with `app_activate`, and observed with `app_list`,
-  `app_view` and `app_events`.
+  run with `app_activate` (and at every boot until `app_deactivate`), and
+  observed with `app_list`, `app_view` and `app_events`.
+- **Resources (v2.1.0).** There are no slots: every app lives whole in one
+  8 KB app pool (control block, store, image), and an app is admitted while
+  the pool has room (`app_pool_exhausted`) and the loop-free apps' estimated
+  cost fits the governor's ceiling (`app_budget_exhausted`). Apps are named by
+  package id everywhere; `app_reorder` sets whose output wins where they
+  compete. Each running app reports its load (`load` 0–100, `level`, `cpu1` /
+  `cpu10` / `cpu60` permille) in `app_view` and `app_list`; an app that
+  declares `burst` may borrow time other apps leave unused, up to half the
+  total, never guaranteed.
 
 ## 6. /proc
 

@@ -9,9 +9,9 @@ namespace nhos {
 class Storage;
 
 // An app's own storage (the `storage` capability, v2.1.0): store.get/set and
-// store.append/clear. One per flow slot, all of it fixed-size members -- the
-// four slots together hold kMaxSlots * kVmStoreBufferBytes of row buffer and
-// nothing is allocated while an app runs.
+// store.append/clear. Placed in the app pool, and only for an app with the
+// `storage` capability (v2.1.0); all of it fixed-size members, so nothing is
+// allocated while an app runs.
 //
 //  * Values: up to kVmStoreMaxKeys numbers, keyed by the FNV-1a hash of their
 //    name, kept in one NVS blob ("as_<id>") and written from service() at

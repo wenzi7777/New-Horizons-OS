@@ -191,7 +191,7 @@ String ControlServer::cmdCapabilities(const CommandContext& ctx) {
   data += ",\"apps\":";
   data += apps_ != nullptr ? "true" : "false";
   data += ",\"flow_engine\":";
-  data += flow_ != nullptr ? "true" : "false";
+  data += appRegistry_ != nullptr ? "true" : "false";
   data += ",\"app_registry\":";
   data += appRegistry_ != nullptr ? "true" : "false";
   data += ",\"app_view\":";

@@ -2,7 +2,7 @@
 
 # Device commands
 
-106 commands, in dispatch-table order. A device reports the same table at run time
+103 commands, in dispatch-table order. A device reports the same table at run time
 with the `commands` command (firmware v1.15.0+). See PROTOCOL.md for the request and
 reply envelope.
 
@@ -22,20 +22,17 @@ Flags:
 | `memory_status` | status snapshot | Heap totals and fragmentation. |
 | `task_list` |  | List the scheduler's task table with per-task timing and CPU share. |
 | `app_list` |  | List installed on-device apps with state, time budget and measured cost. |
-| `app_view` | quiet | What each app slot shows on the OLED, status LED and external strip. |
-| `app_enable` |  | Enable an installed app slot. (same handler as `app_disable`) |
-| `app_disable` |  | Disable an app slot without uninstalling its package. (same handler as `app_enable`) |
+| `app_view` | quiet | What each running app shows on the OLED, status LED and external strip, with its load. |
 | `app_revive` |  | Clear a budget-overrun kill and restart the app. |
-| `app_stop` |  | Stop a running app for this boot only (nothing persisted; app_disable is the persistent switch). (same handler as `app_start`) |
+| `app_stop` |  | Pause a running app for this boot only (nothing persisted; app_deactivate is the persistent switch). (same handler as `app_start`) |
 | `app_start` |  | Start an app that app_stop stopped. (same handler as `app_stop`) |
 | `app_events` | quiet | Events emitted by apps since a sequence number, with a dropped count. |
-| `app_load_flow` |  | Load a flow graph into slot 0; rejected at load time if it exceeds the budget. |
-| `app_unload_flow` |  | Unload the flow graph in slot 0. |
-| `app_list_packages` |  | Installed app packages and which slot each is bound to. |
+| `app_list_packages` |  | Installed app packages, which are active, and the app pool and time budget they share. |
 | `app_install` | maintenance | Install an uploaded .nha package into the registry; `grant` lists the dangerous capabilities the operator consented to. |
 | `app_uninstall` | maintenance | Remove a package from the registry and delete its file. |
-| `app_activate` | maintenance | Bind an installed package to a flow slot. |
-| `app_deactivate` | maintenance | Unbind a package from its slot, leaving it installed. |
+| `app_activate` | maintenance | Run an installed package (and at every boot), if the app pool and time budget have room. |
+| `app_deactivate` | maintenance | Stop a package and free what it held, leaving it installed. |
+| `app_reorder` |  | Move an active app to position `to` of the run order (0 = first; its output wins). |
 | `app_verify` |  | Re-hash an installed package and compare it with the index. |
 | `app_reindex` | maintenance | Rebuild the package index from the .nha files present. |
 | `config_schema` |  | Describe every configuration knob: path, type, range, and owning command. |
