@@ -106,7 +106,7 @@ void ControlServer::service() {
   Serial.print(F(" request_id="));
   Serial.println(requestId);
   const uint32_t startedMs = millis();
-  String response = processCommand(request);
+  String response = processCommand(request, client.remoteIP());
   const uint32_t durationMs = millis() - startedMs;
   const bool responseOk = response.indexOf("\"ok\":true") >= 0;
   String message = extractString(response, "message");
@@ -285,7 +285,9 @@ void ControlServer::executeUdpCommand(WiFiUDP& udp, const PendingUdpCommand& com
   Serial.print(F(" request_id="));
   Serial.println(requestId);
   const uint32_t startedMs = millis();
-  String response = processCommand(command.payload);
+  IPAddress senderIp;
+  senderIp.fromString(command.sender);
+  String response = processCommand(command.payload, senderIp);
   const uint32_t durationMs = millis() - startedMs;
   const bool responseOk = response.indexOf("\"ok\":true") >= 0;
   const String message = extractString(response, "message");
@@ -482,7 +484,7 @@ void ControlServer::servicePendingApplyUpdate() {
   ESP.restart();
 }
 
-String ControlServer::processCommand(const String& request) {
+String ControlServer::processCommand(const String& request, const IPAddress& sender) {
   const String cmd = commandName(request);
   if (cmd.isEmpty()) {
     return error("", "missing_command");
@@ -496,7 +498,7 @@ String ControlServer::processCommand(const String& request) {
   if ((spec->flags & kCmdNeedsMaintenance) != 0 && !maintenanceMode()) {
     return error(cmd, "maintenance_required");
   }
-  const CommandContext ctx{cmd, request};
+  const CommandContext ctx{cmd, request, sender};
   return (this->*(spec->handler))(ctx);
 }
 

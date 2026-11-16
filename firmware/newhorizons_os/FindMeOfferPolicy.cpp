@@ -2,6 +2,25 @@
 
 namespace nhos {
 
+FindMeRoundPlan FindMeOfferPolicy::startRound(bool attached, bool transferring) {
+  onRoundStart(attached);
+  FindMeRoundPlan plan;
+  if (!namesCurrentGateway(attached, transferring)) {
+    plan.kind = FindMeRoundKind::Search;
+    plan.nextInMs = searchIntervalMs_;
+    return plan;
+  }
+  ++renewalsSinceBeacon_;
+  if (renewalsSinceBeacon_ >= beaconEveryN_) {
+    renewalsSinceBeacon_ = 0;
+    plan.kind = FindMeRoundKind::Beacon;
+  } else {
+    plan.kind = FindMeRoundKind::Renew;
+  }
+  plan.nextInMs = leaseIntervalMs_;
+  return plan;
+}
+
 void FindMeOfferPolicy::onRoundStart(bool attached) {
   if (!attached) {
     missedRounds_ = 0;
@@ -27,6 +46,7 @@ bool FindMeOfferPolicy::shouldAccept(bool attached, bool transferring, bool same
 void FindMeOfferPolicy::reset() {
   missedRounds_ = 0;
   answeredThisRound_ = false;
+  renewalsSinceBeacon_ = 0;
 }
 
 }  // namespace nhos

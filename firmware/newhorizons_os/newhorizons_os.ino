@@ -743,7 +743,8 @@ void updateLedState() {
     activeSignal = nhos::LedSignal::WifiSetup;
   } else if (!wifi.isConnected()) {
     activeSignal = nhos::LedSignal::WifiConnecting;
-  } else if (!findme.hasGateway()) {
+  } else if (!findme.hasGateway() || findme.relayLost()) {
+    // Lost relay: still streaming to the old host, but searching again.
     activeSignal = nhos::LedSignal::FindMePending;
   } else if (bootMode.mode() == nhos::RunMode::SafeMaintenance) {
     activeSignal = nhos::LedSignal::SafeMode;

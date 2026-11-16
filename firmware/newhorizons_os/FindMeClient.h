@@ -17,9 +17,18 @@ class FindMeClient {
   void service();
   void setModeName(const String& mode);
   void discoverNow();
-  void switchGateway(const String& preferredGatewayId, const String& claimId, uint32_t ttlMs);
+  // fromIp: where the command came from (the relay asking for the device).
+  // While the transfer runs, discovers also go there unicast, so it works on
+  // networks that drop broadcast.
+  void switchGateway(const String& preferredGatewayId, const String& claimId, uint32_t ttlMs,
+                     const IPAddress& fromIp = IPAddress());
 
+  // Attached in this boot: the stream has a host. Stays true after the relay
+  // is lost (the stream keeps going to the old host until a new offer is
+  // taken); relayLost() tells that case apart.
   bool hasGateway() const;
+  // Attached, but the relay stopped renewing the lease: searching again.
+  bool relayLost() const;
   // Bumped every time the stream moves to a different Gateway (never for the
   // same one re-offering), so a caller can tell a fresh attachment -- whose
   // first sends may fail while the new host's address resolves -- from a
@@ -50,6 +59,10 @@ class FindMeClient {
 
   bool ensureUdp();
   void sendDiscover();
+  // Schedules a round now without dropping the attachment (discoverNow()
+  // drops it).
+  void searchNow();
+  bool namesCurrentGateway() const;
   bool sendDiscoverTo(const IPAddress& host, const String& payload);
   IPAddress directedBroadcast() const;
   void readOffers();
@@ -82,6 +95,8 @@ class FindMeClient {
   String claimId_;
   String preferredGatewayId_;
   uint32_t transferDeadlineMs_ = 0;
+  // Source of the findme_switch_gateway command (0 = none).
+  IPAddress transferSourceIp_;
   String lastError_;
   uint16_t streamPort_ = kUdpStreamPort;
   int priority_ = 0;
@@ -94,13 +109,20 @@ class FindMeClient {
   Offer candidate_;
   IPAddress candidateHost_;
   FindMeOfferRank candidateRank_;
-  // Sticks an attached device to its Gateway (see FindMeOfferPolicy.h).
-  FindMeOfferPolicy offerPolicy_;
+  // The lease and which offers an attached device takes (FindMeOfferPolicy.h).
+  FindMeOfferPolicy offerPolicy_{kFindMeSearchIntervalMs, kFindMeLeaseIntervalMs,
+                                 kFindMeBeaconEveryN};
   uint32_t attachGeneration_ = 0;
   uint32_t lastSuccessMs_ = 0;
   uint32_t lastHeartbeatMs_ = 0;
   uint32_t cooldownUntilMs_ = 0;
-  uint32_t lastProbeResponseMs_ = 0;
+  // findme_probe answers, throttled per source address (5 s each).
+  struct ProbeSlot {
+    uint32_t ip = 0;
+    uint32_t lastMs = 0;
+  };
+  static constexpr uint8_t kProbeSlots = 4;
+  ProbeSlot probeSlots_[kProbeSlots];
   String heartbeatLastError_;
 };
 

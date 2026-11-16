@@ -38,18 +38,42 @@ Ports (`wire.json` → `ports`):
 
 ### FindMe: choosing a relay, and who owns a device
 
-Every 3 s the device broadcasts `findme_discover`; relays (NH Studio, NH Pocket,
-NH Studio headless) and the Desktop server answer with `findme_offer`. Offer
-`version` 2 adds `served_devices` (the relay's load) and, when the relay held its
-answer back on purpose, `held_ms`. The device ignores offers below version 2:
-the retired Python NH Gateway sent 1.
+The device sends `findme_discover`; relays (NH Studio, NH Pocket, NH Studio
+headless) and the Desktop server answer with `findme_offer`. Offer `version` 2
+adds `served_devices` (the relay's load) and, when the relay held its answer
+back on purpose, `held_ms`. The device ignores offers below version 2: the
+retired Python NH Gateway sent 1.
 
-- **Attached** (its relay answered within the last 3 rounds): the device stays.
-  Only its own relay refreshing, or a transfer it was asked to make
-  (`findme_switch_gateway` + matching `claim_id`), is taken.
-- **Choosing** (not attached, or its relay missed 3 rounds, ~9 s): every offer of
-  the 600 ms read window is collected and the best is taken
-  (`FindMeOfferSelect.h`), in this order:
+Attachment is a **lease** the device renews (`FindMeOfferPolicy.h`):
+
+- **Searching** (not attached in this boot, its relay lost, or a transfer
+  running): every 3 s a discover goes to `255.255.255.255`, the subnet's
+  directed broadcast, and unicast to the last known relay host. It does not
+  carry `current_gateway_id`, so every relay may offer. During a transfer it
+  also goes unicast to the address the `findme_switch_gateway` command came
+  from (for networks that drop broadcast).
+- **Attached** (renewing): every 5 s a discover goes **unicast** to the relay
+  it streams to, carrying `current_gateway_id` and `current_priority`; the
+  relay answers with an offer, which renews the lease (the next renewal is
+  5 s after that answer). Every 3rd renewal is also broadcast — a **beacon**,
+  still naming the current relay — so a relay that owns the device hears where
+  it is. Relays other than the named one stay silent. `findme.state` stays
+  `"attached"` while renewing.
+- **Lost**: 3 renewals in a row without an answer (decided when the 4th would
+  be due, 15–20 s after the relay stopped answering; relays mark a silent
+  device stale after 16 s). The device goes back to searching
+  (`findme.state` `"discovering"`, status LED back to FindMe pending) but keeps
+  streaming to the old host until it takes a new offer. If the old relay
+  answers meanwhile, it simply stays.
+
+Offers while attached: only its own relay renewing, or a transfer it was asked
+to make (`findme_switch_gateway` + matching `claim_id`), is taken; a higher
+priority from another relay never takes the device on its own. A transfer
+keeps the current attachment (and stream) until the asked-for relay offers; if
+it times out (`ttl_ms`, default 30 s) the device resumes the lease with the
+relay it had. When choosing (searching after a relay was lost, or not
+attached), every offer of the 600 ms read window is collected and the best is
+taken (`FindMeOfferSelect.h`), in this order:
   1. `priority`, highest first. A relay's base is 100; the device's **owner** —
      the relay that adopted it, or took it over last — offers at 200 or more; a
      live claim adds 10000.
@@ -58,13 +82,22 @@ the retired Python NH Gateway sent 1.
      within 30 ms count as equal…
   4. …then fewer `served_devices`.
 
-While attached (and not transferring), `findme_discover` and the probe answer
-carry `current_gateway_id` and `current_priority` (the priority it attached
-at). A relay that owns the device and sees it attached elsewhere:
-`current_priority` ≥ 200 means another relay took it over — the owner yields
-(keeps it listed as taken over, offers only as a fallback); below 200 means a
-relay only picked it up while the owner was away — the owner takes it back.
-Without `current_priority` (older firmware) a relay treats it as a takeover.
+`findme_probe` (a relay asking devices to announce themselves) is answered with
+a unicast discover to the asker, at most once per 5 s per asking address (up to
+4 addresses tracked); it does not change the attachment.
+
+Renewals, beacons and probe answers (while attached, its relay not lost, and
+not transferring) carry `current_gateway_id` and `current_priority` (the
+priority it attached at). A relay that owns the device and sees it attached
+elsewhere: `current_priority` ≥ 200 means another relay took it over — the
+owner yields (keeps it listed as taken over, offers only as a fallback); below
+200 means a relay only picked it up while the owner was away — the owner takes
+it back (with `findme_switch_gateway`). Without `current_priority` (older
+firmware) a relay treats it as a takeover.
+
+Firmware before the lease stopped sending discovers once attached, so it never
+noticed a relay that went away; message formats and priorities are unchanged,
+so old and new firmware and relays work together.
 
 ## 2. Control commands
 

@@ -5,7 +5,6 @@
 
 namespace nhos {
 namespace {
-constexpr uint32_t kDiscoverIntervalMs = 3000;
 constexpr uint32_t kOfferReadWindowMs = 600;
 
 String bytesToString(const uint8_t* data, size_t len) {
@@ -61,14 +60,18 @@ void FindMeClient::service() {
     preferredGatewayId_ = "";
     claimId_ = "";
     transferDeadlineMs_ = 0;
+    transferSourceIp_ = IPAddress();
     lastError_ = "findme_transfer_timeout";
-    discoverNow();
+    // Still attached to the relay it was leaving: back to renewing that lease
+    // (lost after 3 unanswered renewals, as always).
+    offerPolicy_.restartLease();
+    searchNow();
   }
   readOffers();
   if (now < cooldownUntilMs_) {
     return;
   }
-  if (nextDiscoverMs_ && now >= nextDiscoverMs_) {
+  if (nextDiscoverMs_ && static_cast<int32_t>(now - nextDiscoverMs_) >= 0) {
     sendDiscover();
   }
 }
@@ -85,7 +88,12 @@ void FindMeClient::discoverNow() {
   state_ = "discovering";
 }
 
-void FindMeClient::switchGateway(const String& preferredGatewayId, const String& claimId, uint32_t ttlMs) {
+void FindMeClient::searchNow() {
+  nextDiscoverMs_ = 1;
+}
+
+void FindMeClient::switchGateway(const String& preferredGatewayId, const String& claimId, uint32_t ttlMs,
+                                 const IPAddress& fromIp) {
   const uint32_t effectiveTtlMs = ttlMs ? ttlMs : 30000;
   const bool alreadyAttached = hasGateway() &&
                                gatewayId_ == preferredGatewayId &&
@@ -98,6 +106,11 @@ void FindMeClient::switchGateway(const String& preferredGatewayId, const String&
                             claimId_ == claimId;
   preferredGatewayId_ = preferredGatewayId;
   claimId_ = claimId;
+  if (static_cast<uint32_t>(fromIp) != 0) {
+    transferSourceIp_ = fromIp;
+  } else if (!sameTransfer) {
+    transferSourceIp_ = IPAddress();
+  }
   if (!sameTransfer) {
     transferDeadlineMs_ = millis() + effectiveTtlMs;
     if (transferDeadlineMs_ == 0) {
@@ -105,11 +118,22 @@ void FindMeClient::switchGateway(const String& preferredGatewayId, const String&
     }
   }
   cooldownUntilMs_ = 0;
-  discoverNow();
+  // The attachment is kept: the stream goes on to the current relay until the
+  // one asked for offers (or the transfer times out and the lease resumes).
+  state_ = "discovering";
+  searchNow();
 }
 
 bool FindMeClient::hasGateway() const {
   return attachedThisBoot_ && !streamHost_.isEmpty() && streamPort_ > 0;
+}
+
+bool FindMeClient::relayLost() const {
+  return hasGateway() && offerPolicy_.currentGatewayLost();
+}
+
+bool FindMeClient::namesCurrentGateway() const {
+  return !gatewayId_.isEmpty() && offerPolicy_.namesCurrentGateway(hasGateway(), transferActive());
 }
 
 const String& FindMeClient::streamHost() const {
@@ -174,32 +198,58 @@ bool FindMeClient::ensureUdp() {
 }
 
 void FindMeClient::sendDiscover() {
-  // While attached (and not leaving it), name the relay and the priority it
-  // was taken at: the owner of a device then knows whether another relay took
-  // it over (owner priority) or only picked it up while the owner was away.
-  // Not while that relay is lost or a transfer runs: other relays must offer.
-  const bool named = hasGateway() && !transferActive() && !offerPolicy_.currentGatewayLost();
-  String payload = encodeDiscoverJson(named);
+  // FindMeOfferPolicy.h: searching (not attached, relay lost, or a transfer
+  // running) broadcasts without naming a relay, so every relay may offer.
+  // Attached, the lease is renewed unicast with the relay, naming it and the
+  // priority it was taken at (its owner then knows whether another relay took
+  // it over or only picked it up while the owner was away); every Nth renewal
+  // is also broadcast as a beacon, so the owner hears it on any relay.
+  const bool attached = hasGateway();
+  const bool transferring = transferActive();
+  const FindMeRoundPlan plan = offerPolicy_.startRound(attached, transferring);
+  const bool searching = plan.kind == FindMeRoundKind::Search;
+  hasCandidate_ = false;
+  if (searching && attached && !transferring &&
+      offerPolicy_.missedRounds() == kFindMeStickyMissedRounds) {
+    Serial.print(F("findme_relay_lost gateway="));
+    Serial.println(gatewayId_);
+  }
+  const String payload = encodeDiscoverJson(!searching);
   if (payload.isEmpty()) {
     lastError_ = "findme_encode_failed";
-    nextDiscoverMs_ = millis() + kDiscoverIntervalMs;
+    nextDiscoverMs_ = millis() + plan.nextInMs;
     return;
   }
-  bool sent = sendDiscoverTo(IPAddress(255, 255, 255, 255), payload);
-  sent = sendDiscoverTo(directedBroadcast(), payload) || sent;
+  bool sent = false;
+  if (plan.kind != FindMeRoundKind::Renew) {
+    sent = sendDiscoverTo(IPAddress(255, 255, 255, 255), payload) || sent;
+    sent = sendDiscoverTo(directedBroadcast(), payload) || sent;
+  }
   IPAddress knownGateway;
-  if (knownGateway.fromString(streamHost_)) {
+  const bool haveKnown = knownGateway.fromString(streamHost_);
+  if (haveKnown) {
     sent = sendDiscoverTo(knownGateway, payload) || sent;
+  }
+  // The relay that asked for the transfer, in case broadcast does not reach
+  // it (some networks drop it).
+  const uint32_t source = static_cast<uint32_t>(transferSourceIp_);
+  if (searching && transferring && source != 0 &&
+      (!haveKnown || source != static_cast<uint32_t>(knownGateway))) {
+    sent = sendDiscoverTo(transferSourceIp_, payload) || sent;
   }
   if (!sent) {
     lastError_ = "findme_discover_send_failed";
   }
   lastDiscoverMs_ = millis();
-  offerPolicy_.onRoundStart(hasGateway());
-  hasCandidate_ = false;
-  nextDiscoverMs_ = lastDiscoverMs_ + kDiscoverIntervalMs;
-  state_ = "discovering";
-  Serial.println(F("findme_discover_sent"));
+  nextDiscoverMs_ = lastDiscoverMs_ + plan.nextInMs;
+  if (nextDiscoverMs_ == 0) {
+    nextDiscoverMs_ = 1;
+  }
+  if (searching) {
+    // While attached the state stays "attached": relays read it in status.
+    state_ = "discovering";
+    Serial.println(F("findme_discover_sent"));
+  }
 }
 
 bool FindMeClient::sendDiscoverTo(const IPAddress& host, const String& payload) {
@@ -224,12 +274,37 @@ IPAddress FindMeClient::directedBroadcast() const {
 }
 
 void FindMeClient::respondToProbe(const IPAddress& host) {
+  // Throttled per asking address: one relay probing often must not keep
+  // another (or the Desktop) from hearing the device.
   const uint32_t now = millis();
-  if (now - lastProbeResponseMs_ < 5000) {
-    return;
+  const uint32_t ip = static_cast<uint32_t>(host);
+  ProbeSlot* slot = nullptr;
+  for (uint8_t i = 0; i < kProbeSlots; ++i) {
+    if (probeSlots_[i].ip == ip && ip != 0) {
+      slot = &probeSlots_[i];
+      break;
+    }
   }
-  lastProbeResponseMs_ = now;
-  const String payload = encodeDiscoverJson(attachedThisBoot_ && !gatewayId_.isEmpty());
+  if (slot) {
+    if (now - slot->lastMs < 5000) {
+      return;
+    }
+  } else {
+    // An empty slot, else the one answered longest ago.
+    slot = &probeSlots_[0];
+    for (uint8_t i = 0; i < kProbeSlots; ++i) {
+      if (probeSlots_[i].ip == 0) {
+        slot = &probeSlots_[i];
+        break;
+      }
+      if (now - probeSlots_[i].lastMs > now - slot->lastMs) {
+        slot = &probeSlots_[i];
+      }
+    }
+    slot->ip = ip;
+  }
+  slot->lastMs = now;
+  const String payload = encodeDiscoverJson(namesCurrentGateway());
   if (payload.isEmpty()) {
     return;
   }
@@ -273,7 +348,9 @@ void FindMeClient::readOffers() {
     }
     if (!offer.accept) {
       lastError_ = offer.reason.isEmpty() ? "findme_offer_rejected" : offer.reason;
-      state_ = "rejected";
+      if (!hasGateway()) {
+        state_ = "rejected";
+      }
       continue;
     }
     if (transferring && offer.claimId != claimId_) {
@@ -339,10 +416,15 @@ void FindMeClient::acceptOffer(const Offer& offer, const IPAddress& host) {
   state_ = "attached";
   lastError_ = "";
   lastSuccessMs_ = millis();
-  nextDiscoverMs_ = 0;
+  // The lease: renewed with this relay one interval from now.
+  nextDiscoverMs_ = lastSuccessMs_ + offerPolicy_.leaseIntervalMs();
+  if (nextDiscoverMs_ == 0) {
+    nextDiscoverMs_ = 1;
+  }
   cooldownUntilMs_ = 0;
   preferredGatewayId_ = "";
   transferDeadlineMs_ = 0;
+  transferSourceIp_ = IPAddress();
   if (storage_) {
     storage_->putString("findme_host", streamHost_);
     storage_->putUInt("findme_udp_port", streamPort_);

@@ -512,15 +512,39 @@ class GatewayAttachTests(unittest.TestCase):
         self.assertIn("findMeOfferBetter(rank, candidateRank_)", read_offers)
         self.assertIn("offer.version < kFindMeMinOfferVersion", read_offers)
         self.assertIn("(millis() - lastDiscoverMs_) <= kOfferReadWindowMs", read_offers)
-        discover = findme[findme.index("lastDiscoverMs_ = millis();") :][:160]
-        self.assertIn("offerPolicy_.onRoundStart(hasGateway());", discover)
-        self.assertIn("hasCandidate_ = false;", discover)
+        # Each round (search or lease renewal) starts the policy's round and
+        # drops the previous round's candidate.
+        send = findme[findme.index("void FindMeClient::sendDiscover") : findme.index("bool FindMeClient::sendDiscoverTo")]
+        self.assertIn("offerPolicy_.startRound(attached, transferring);", send)
+        self.assertIn("hasCandidate_ = false;", send)
 
     def test_discover_names_the_current_relay_and_its_priority(self):
         findme = read("FindMeClient.cpp")
         send = findme[findme.index("void FindMeClient::sendDiscover") : findme.index("bool FindMeClient::sendDiscoverTo")]
-        # Not while the relay is lost or a transfer runs: others must offer then.
-        self.assertIn("hasGateway() && !transferActive() && !offerPolicy_.currentGatewayLost()", send)
+        # Lease renewals and beacons name it; searching (relay lost, transfer,
+        # not attached) does not: others must offer then
+        # (FindMeOfferPolicy::startRound, test_findme_offer_policy.cpp).
+        self.assertIn("encodeDiscoverJson(!searching)", send)
+        # A renewal is unicast only; search rounds and beacons also broadcast.
+        self.assertIn("if (plan.kind != FindMeRoundKind::Renew) {", send)
+        # While attached the state stays "attached" (relays read it).
+        self.assertIn("if (searching) {", send)
+
+    def test_attachment_is_a_lease(self):
+        # Before, acceptOffer cleared the schedule: an attached device never
+        # sent another discover and never noticed its relay was gone.
+        findme = read("FindMeClient.cpp")
+        accept = findme[findme.index("void FindMeClient::acceptOffer") : findme.index("bool FindMeClient::transferActive")]
+        self.assertIn("nextDiscoverMs_ = lastSuccessMs_ + offerPolicy_.leaseIntervalMs();", accept)
+        self.assertNotIn("nextDiscoverMs_ = 0;", accept)
+        config = read("Config.h")
+        self.assertIn("kFindMeLeaseIntervalMs = 5000", config)
+        self.assertIn("kFindMeBeaconEveryN = 3", config)
+        # The switch command's sender gets the transfer discovers unicast.
+        system = read("ControlCommandsSystem.cpp")
+        self.assertIn("ctx.sender);", system)
+        # Probe answers are throttled per asking address.
+        self.assertIn("ProbeSlot probeSlots_[kProbeSlots];", read("FindMeClient.h"))
         encode = findme[findme.index("String FindMeClient::encodeDiscoverJson") :]
         self.assertIn('\\"current_priority\\":', encode)
 

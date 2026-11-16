@@ -240,7 +240,7 @@ class ControlServer {
   // one); true when one ran this tick.
   bool serviceDeferredUdpCommand(WiFiUDP& udp);
   bool heavyCommandMayRun(uint32_t deferredSinceUs) const;
-  String processCommand(const String& request);
+  String processCommand(const String& request, const IPAddress& sender = IPAddress());
   String ok(const String& command, const String& message, const String& data = "{}") const;
   String error(const String& command, const String& message) const;
   // An error that still carries data (e.g. warnings about a failed restore).

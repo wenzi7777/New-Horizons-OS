@@ -20,6 +20,8 @@ class ControlServer;
 struct CommandContext {
   const String& cmd;      // the name it was invoked as (status vs query)
   const String& request;  // the full request JSON
+  // Who sent it (UDP/TCP); 0.0.0.0 when unknown (ESP-NOW, synthesized).
+  IPAddress sender;
 };
 
 enum CommandFlag : uint16_t {

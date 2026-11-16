@@ -273,7 +273,8 @@ String ControlServer::cmdFindmeSwitchGateway(const CommandContext& ctx) {
     findme_->switchGateway(
         extractString(request, "preferred_gateway_id"),
         extractString(request, "claim_id"),
-        static_cast<uint32_t>(extractInt(request, "ttl_ms", 30000)));
+        static_cast<uint32_t>(extractInt(request, "ttl_ms", 30000)),
+        ctx.sender);
     return ok(cmd, "findme_switch_started", findme_->statusJson());
   }
   return error(cmd, "findme_unavailable");

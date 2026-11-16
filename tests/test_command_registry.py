@@ -91,7 +91,7 @@ class CommandTableTests(unittest.TestCase):
 
     def test_maintenance_is_enforced_once_by_the_dispatcher(self):
         source = control_source()
-        dispatch = source[source.index("String ControlServer::processCommand(const String& request) {"):]
+        dispatch = source[source.index("String ControlServer::processCommand(const String& request, const IPAddress& sender) {"):]
         dispatch = dispatch[:dispatch.index("\n}\n")]
         self.assertIn("(spec->flags & kCmdNeedsMaintenance) != 0 && !maintenanceMode()", dispatch)
         self.assertIn('return error(cmd, "unknown_command");', dispatch)

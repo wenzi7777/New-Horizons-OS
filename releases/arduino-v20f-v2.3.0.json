@@ -1,0 +1,12 @@
+{
+  "changelog_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v2.3.0/releases/notes/v2.3.0.md",
+  "firmware": {
+    "sha256": "1aafe6a6952efd3579a5e5663af3bb9f38a9ff6a77e36d3365366808ae2c1ee9",
+    "size": 1715184,
+    "url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/v2.3.0/releases/artifacts/newhorizons-os-v20f-v2.3.0.bin"
+  },
+  "latest": "v2.3.0",
+  "model": "VD-CTL/R v2.0.F 2026.10",
+  "product": "NHOS Arduino",
+  "protocol": "NHO/Arduino/1"
+}

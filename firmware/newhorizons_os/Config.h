@@ -6,7 +6,7 @@
 #include "PacketWire.h"
 
 #ifndef NHOS_FIRMWARE_VERSION
-#define NHOS_FIRMWARE_VERSION "v2.2.0"
+#define NHOS_FIRMWARE_VERSION "v2.3.0"
 #endif
 
 namespace nhos {
@@ -39,6 +39,13 @@ static constexpr size_t kMaxPacketBytes =
 static_assert(kMaxPacketBytes <= kEspNowDataFrameBudget,
               "v5 packet must stay within the ESP-NOW data-frame budget");
 static constexpr uint32_t kHeartbeatIntervalMs = 5000;
+// FindMe lease (FindMeOfferPolicy.h): an attached device renews with its relay
+// (unicast) this often; every kFindMeBeaconEveryN-th renewal is also broadcast.
+// 3 unanswered renewals and the relay is lost (relays mark a silent device
+// stale after control_stale_sec = 16 s).
+static constexpr uint32_t kFindMeSearchIntervalMs = 3000;
+static constexpr uint32_t kFindMeLeaseIntervalMs = 5000;
+static constexpr uint8_t kFindMeBeaconEveryN = 3;
 // Clock service (ClockService.h). The NTP interval is far below ESP-IDF's
 // 3 h default: a ±20 ppm crystal drifts ~200 ms in 3 h but ~12 ms in 10 min.
 static constexpr char kDefaultNtpServer[] = "pool.ntp.org";
