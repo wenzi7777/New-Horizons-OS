@@ -51,10 +51,10 @@ class AirtimeArbiterTests(unittest.TestCase):
         sketch = read("newhorizons_os.ino")
 
         gate = sketch[sketch.index("bool streamingGateOk()") : sketch.index("void scanAndStreamIfDue()")]
-        self.assertIn("airtime.canClaim(nhos::AirtimeClass::SensorStream)", gate)
+        self.assertIn("airtime->canClaim(nhos::AirtimeClass::SensorStream)", gate)
         # The two hand-written exclusions it replaced must be gone.
-        self.assertNotIn("espNowOtaReceiver.isRelaying()", gate)
-        self.assertNotIn("espNowPairing.hasPendingCommandWork()", gate)
+        self.assertNotIn("espNowOtaReceiver->isRelaying()", gate)
+        self.assertNotIn("espNowPairing->hasPendingCommandWork()", gate)
 
     def test_claimants_are_polled_so_a_claim_cannot_leak(self):
         impl = read("AirtimeArbiter.cpp")
@@ -156,7 +156,7 @@ class LoggingTests(unittest.TestCase):
         abort = receiver[receiver.index("void EspNowOtaReceiver::abortRelay") :]
         abort = abort[: abort.index("\n}\n")]
         self.assertIn("logFailure(reason, LogLevel::Error);", abort)
-        self.assertIn("espNowOtaReceiver.setStorage(&storage);", read("newhorizons_os.ino"))
+        self.assertIn("espNowOtaReceiver->setStorage(&storage);", read("newhorizons_os.ino"))
 
     def test_file_list_paths_can_be_read_back(self):
         # SPIFFS is flat: File::name() reports "x.nha" for /files/apps/x.nha,

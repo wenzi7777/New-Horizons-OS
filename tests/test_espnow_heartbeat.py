@@ -22,7 +22,7 @@ class EspNowHeartbeatTests(unittest.TestCase):
     def test_espnow_sends_only_while_paired_and_not_scanning(self):
         body = heartbeat_body()
         self.assertIn("if (espNowMode) {", body)
-        self.assertIn("if (!espNowTransport.ready() || scanner.active()) {", body)
+        self.assertIn("if (!espNowTransport->ready() || scanner.active()) {", body)
         self.assertIn("} else if (!wifi.isConnected() || !findme.hasGateway()) {", body)
 
     def test_heartbeat_task_is_registered_in_espnow_mode(self):

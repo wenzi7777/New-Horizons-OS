@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <new>
 #include <Wire.h>
 #include <esp_now.h>
 
@@ -111,15 +112,45 @@ nhos::ClockService deviceClock;
 // inbound command packets from serviceUdpCommand() while outbound stream
 // still appears healthy (Gateway last_seen updates, commands time out).
 nhos::UdpStreamTransport udpTransport;
-nhos::EspNowStreamTransport espNowTransport;
-nhos::EspNowPairing espNowPairing;
-nhos::EspNowOtaReceiver espNowOtaReceiver;
-nhos::AirtimeArbiter airtime;
+// ESP-NOW ("New Horizons Direct") state, ~44 KB in all (EspNowPairing's
+// reassembly / reply buffers alone are ~34 KB). Only a device that boots in
+// ESP-NOW mode uses any of it, and the transport is fixed for a whole boot
+// (set_transport takes effect on the next one), so these are created in that
+// boot branch (allocateEspNowRuntime()) instead of being static: a WiFi/UDP
+// device keeps the memory as heap. Null whenever espNowMode is false; every
+// use below is either behind espNowMode or reached only from a callback /
+// task that is registered after they exist.
+nhos::EspNowStreamTransport* espNowTransport = nullptr;
+nhos::EspNowPairing* espNowPairing = nullptr;
+nhos::EspNowOtaReceiver* espNowOtaReceiver = nullptr;
+nhos::AirtimeArbiter* airtime = nullptr;
 nhos::StreamTransport* activeTransport = nullptr;
 bool espNowMode = false;
 
+// Creates the ESP-NOW objects above, once, at boot. On failure nothing is
+// kept and the caller boots the device in WiFi mode instead, so a device that
+// cannot get the memory still comes up reachable.
+bool allocateEspNowRuntime() {
+  espNowPairing = new (std::nothrow) nhos::EspNowPairing();
+  espNowTransport = new (std::nothrow) nhos::EspNowStreamTransport();
+  espNowOtaReceiver = new (std::nothrow) nhos::EspNowOtaReceiver();
+  airtime = new (std::nothrow) nhos::AirtimeArbiter();
+  if (espNowPairing && espNowTransport && espNowOtaReceiver && airtime) {
+    return true;
+  }
+  delete espNowPairing;
+  delete espNowTransport;
+  delete espNowOtaReceiver;
+  delete airtime;
+  espNowPairing = nullptr;
+  espNowTransport = nullptr;
+  espNowOtaReceiver = nullptr;
+  airtime = nullptr;
+  return false;
+}
+
 void onEspNowRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
-  espNowPairing.handleEspNowRecv(info->src_addr, data, static_cast<size_t>(len));
+  espNowPairing->handleEspNowRecv(info->src_addr, data, static_cast<size_t>(len));
 }
 
 // Called from inside onEspNowRecv(), so t4 is stamped on arrival.
@@ -136,14 +167,14 @@ void onEspNowTimeResponse(const uint8_t* data, size_t len, int64_t t4MonoUs, voi
 // control-response fragment loss (see EspNowPairing.cpp's serviceCommand())
 // is happening here vs. somewhere else.
 void onEspNowSent(const esp_now_send_info_t* /*info*/, esp_now_send_status_t status) {
-  espNowPairing.handleSendStatus(status == ESP_NOW_SEND_SUCCESS);
+  espNowPairing->handleSendStatus(status == ESP_NOW_SEND_SUCCESS);
 }
 
 // Airtime claimant predicates. Both read state the owning module already
 // derives, so the arbiter can poll instead of relying on paired
 // acquire/release calls that could leak a claim on an error path.
-bool otaRelayNeedsAirtime(void*) { return espNowOtaReceiver.isRelaying(); }
-bool commandResponseNeedsAirtime(void*) { return espNowPairing.hasPendingCommandWork(); }
+bool otaRelayNeedsAirtime(void*) { return espNowOtaReceiver->isRelaying(); }
+bool commandResponseNeedsAirtime(void*) { return espNowPairing->hasPendingCommandWork(); }
 
 uint8_t packetBuffer[
     nhos::kMaxPacketBytes
@@ -393,7 +424,7 @@ bool streamingGateOk() {
   // MatrixScanner's ring buffer just drops the oldest queued frames while
   // paused (sensor data is lossy by design already) and resumes normally --
   // no special draining/resume logic needed here.
-  if (espNowMode && !airtime.canClaim(nhos::AirtimeClass::SensorStream)) {
+  if (espNowMode && !airtime->canClaim(nhos::AirtimeClass::SensorStream)) {
     return false;
   }
   return espNowMode || wifi.isConnected();
@@ -570,7 +601,7 @@ void sendQueuedPacketIfAny() {
 // displace a sensor frame.
 void sendHeartbeatIfDue() {
   if (espNowMode) {
-    if (!espNowTransport.ready() || scanner.active()) {
+    if (!espNowTransport->ready() || scanner.active()) {
       return;
     }
   } else if (!wifi.isConnected() || !findme.hasGateway()) {
@@ -617,12 +648,12 @@ void taskImu() { imu.service(micros()); }
 void taskMagnetometer() { magnetometer.service(millis()); }
 
 void taskEspNow() {
-  espNowPairing.service();
-  espNowOtaReceiver.service();
+  espNowPairing->service();
+  espNowOtaReceiver->service();
   // Before the stream transport, so a higher-priority paced burst keeps
   // making progress rather than queueing behind sensor frames.
-  airtime.service();
-  espNowTransport.service();
+  airtime->service();
+  espNowTransport->service();
 }
 
 void taskWifi() { wifi.service(); }
@@ -667,7 +698,7 @@ void updateLedState() {
     leds.setAppOverlay(held, nhos::LedColor{rgb[0], rgb[1], rgb[2]});
   }
   const bool transportAttached =
-      espNowMode ? espNowPairing.hasHub() : findme.hasGateway();
+      espNowMode ? espNowPairing->hasHub() : findme.hasGateway();
   // A fresh attachment gets a short grace period for UDP failures: the first
   // frames to a new host can fail while its address resolves (4 frames at
   // 60fps was seen), which is not the stream misbehaving. Overruns are the
@@ -738,7 +769,7 @@ void updateLedState() {
     // regardless of charge state; see EspNowConnecting's own comment in
     // LedController.h for why this is a distinct signal from
     // WifiConnecting rather than reusing it.
-    activeSignal = espNowPairing.hasHub() ? nhos::LedSignal::Online : nhos::LedSignal::EspNowConnecting;
+    activeSignal = espNowPairing->hasHub() ? nhos::LedSignal::Online : nhos::LedSignal::EspNowConnecting;
   } else if (wifi.setupActive()) {
     activeSignal = nhos::LedSignal::WifiSetup;
   } else if (!wifi.isConnected()) {
@@ -1194,6 +1225,14 @@ void setup() {
     espNowMode = false;
     logBoot("boot_action_button_setup_requested_from_espnow falling_back_to_wifi_portal");
   }
+  // Before WiFi.mode(): the heap is still in one piece, and EspNowPairing
+  // needs ~34 KB of it contiguous.
+  // On failure the device boots in WiFi mode: saved WiFi if it has one, the
+  // setup portal otherwise -- reachable either way.
+  if (espNowMode && !allocateEspNowRuntime()) {
+    espNowMode = false;
+    logBoot("espnow_alloc_failed falling_back_to_wifi", nhos::LogLevel::Error);
+  }
   if (espNowMode) {
     // ESP-NOW doesn't join a WiFi AP at all -- just needs the radio
     // driver initialized (see EspNowPairing.h for why the channel itself
@@ -1202,24 +1241,24 @@ void setup() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     logBoot("boot_stage=wifi_skipped transport=espnow");
-    if (!espNowPairing.begin(storage, deviceConfig, control, uid)) {
+    if (!espNowPairing->begin(storage, deviceConfig, control, uid)) {
       logBoot("espnow_pairing_begin_failed", nhos::LogLevel::Error);
     }
-    espNowPairing.setArbiter(&airtime);
-    espNowPairing.setOtaReceiver(&espNowOtaReceiver);
-    espNowPairing.setTimeResponseHandler(&onEspNowTimeResponse, nullptr);
-    espNowPairing.setLifetimeStats(&lifetime);
+    espNowPairing->setArbiter(airtime);
+    espNowPairing->setOtaReceiver(espNowOtaReceiver);
+    espNowPairing->setTimeResponseHandler(&onEspNowTimeResponse, nullptr);
+    espNowPairing->setLifetimeStats(&lifetime);
     deviceClock.setEspNowMode(true);
-    deviceClock.attachHub(&espNowPairing, &airtime);
-    espNowOtaReceiver.setArbiter(&airtime);
-    espNowOtaReceiver.setStorage(&storage);
-    espNowTransport.setArbiter(&airtime);
-    airtime.registerClaimant(nhos::AirtimeClass::OtaRelay, &otaRelayNeedsAirtime, nullptr);
-    airtime.registerClaimant(nhos::AirtimeClass::CommandResponse, &commandResponseNeedsAirtime, nullptr);
+    deviceClock.attachHub(espNowPairing, airtime);
+    espNowOtaReceiver->setArbiter(airtime);
+    espNowOtaReceiver->setStorage(&storage);
+    espNowTransport->setArbiter(airtime);
+    airtime->registerClaimant(nhos::AirtimeClass::OtaRelay, &otaRelayNeedsAirtime, nullptr);
+    airtime->registerClaimant(nhos::AirtimeClass::CommandResponse, &commandResponseNeedsAirtime, nullptr);
     esp_now_register_recv_cb(onEspNowRecv);
     esp_now_register_send_cb(onEspNowSent);
-    espNowTransport.attach(espNowPairing);
-    activeTransport = &espNowTransport;
+    espNowTransport->attach(*espNowPairing);
+    activeTransport = espNowTransport;
     logBoot("boot_stage=espnow_pairing_ready");
   } else {
     wifiConnected = wifi.begin(storage, deviceConfig,
@@ -1254,11 +1293,12 @@ void setup() {
   control.setScheduler(&scheduler);
   procFs.attach(scheduler, faults, scanner, bootMode, powerState, wifi, findme, deviceConfig);
   control.setProcFs(&procFs);
-  control.setArbiter(&airtime);
+  // Null on a WiFi/UDP device: the airtime arbiter only schedules ESP-NOW.
+  control.setArbiter(airtime);
   // Heavy UDP commands wait for the gap after a scan only while scans will
   // actually happen (HeavyCommandPacing, ReplyPacing.h).
   control.setScanGate(&streamingGateOk);
-  procFs.setArbiter(&airtime);
+  procFs.setArbiter(airtime);
   control.setServiceManager(&services);
   procFs.setServiceManager(&services);
   procFs.setStorage(&storage);
@@ -1276,7 +1316,7 @@ void setup() {
     // Route check_update/apply_update through the Hub-relayed OTA path --
     // a Direct-mode device has no WiFi, so OtaManager's HTTP fetch can
     // only fail. See ControlServer::setEspNowOtaReceiver().
-    control.setEspNowOtaReceiver(&espNowOtaReceiver);
+    control.setEspNowOtaReceiver(espNowOtaReceiver);
   }
   logBoot(String("boot_stage=control_ready port=") + String(nhos::kControlPort));
 
