@@ -25,18 +25,19 @@ void testRfbFromCalibration() {
   assert(rfbFromCalibration(990.0f, 0.0f) == 0.0f);
 }
 
-void testVirtualize() {
-  // Same Vref and Rfb: the identity.
-  assert(near(virtualizeMv(1200.0f, 330.0f, 20000.0f, 330.0f, 20000.0f), 1200.0f, 0.01f));
-  // Rs = 10k at Vref 330, Rfb 5k: Vout = 330 * 1.5 = 495. As the 20k board
-  // (Vref 330) would read it: 330 * (1 + 20k/10k) = 990.
-  assert(near(virtualizeMv(495.0f, 330.0f, 5000.0f, 330.0f, 20000.0f), 990.0f, 0.5f));
-  // Halving Vref with the same Rfb: Rs = 10k, Rfb 20k, Vref 165 -> 495; to 330/20k -> 990.
-  assert(near(virtualizeMv(495.0f, 165.0f, 20000.0f, 330.0f, 20000.0f), 990.0f, 0.5f));
-  // No signal maps to the reference baseline; unknown Rfb passes through.
-  assert(near(virtualizeMv(330.0f, 330.0f, 5000.0f, 330.0f, 20000.0f), 330.0f, 0.01f));
-  assert(near(virtualizeMv(300.0f, 330.0f, 5000.0f, 330.0f, 20000.0f), 330.0f, 0.01f));
-  assert(near(virtualizeMv(777.0f, 330.0f, 0.0f, 330.0f, 20000.0f), 777.0f, 0.01f));
+void testConductance() {
+  // Rs = 10k at Vref 330, Rfb 20k: Vout = 330 * 3 = 990 -> 100 uS.
+  assert(near(conductanceUs(990.0f, 330.0f, 20000.0f), 100.0f, 0.01f));
+  // The same cell at another Vref and Rfb is the same conductance.
+  assert(near(conductanceUs(165.0f * (1.0f + 5000.0f / 10000.0f), 165.0f, 5000.0f), 100.0f, 0.01f));
+  assert(near(conductanceUs(700.0f * (1.0f + 47000.0f / 10000.0f), 700.0f, 47000.0f), 100.0f, 0.02f));
+  // Rs = 1M: 1 uS.
+  assert(near(conductanceUs(330.0f * (1.0f + 20000.0f / 1.0e6f), 330.0f, 20000.0f), 1.0f, 0.001f));
+  // No signal, below baseline, unknown Rfb, no Vref: 0.
+  assert(conductanceUs(330.0f, 330.0f, 20000.0f) == 0.0f);
+  assert(conductanceUs(300.0f, 330.0f, 20000.0f) == 0.0f);
+  assert(conductanceUs(990.0f, 330.0f, 0.0f) == 0.0f);
+  assert(conductanceUs(990.0f, 0.0f, 20000.0f) == 0.0f);
 }
 
 void testLeak() {
@@ -96,8 +97,8 @@ void testFit() {
 
 void testOffsets() {
   // A row whose idle reading sits 9 mV above Vref: that is where "no signal" is.
-  assert(near(virtualizeMv(339.0f, 330.0f, 20000.0f, 330.0f, 20000.0f, 9.0f), 330.0f, 0.01f));
-  assert(near(virtualizeMv(339.0f + 660.0f, 330.0f, 20000.0f, 330.0f, 20000.0f, 9.0f), 990.0f, 0.5f));
+  assert(conductanceUs(339.0f, 330.0f, 20000.0f, 9.0f) == 0.0f);
+  assert(near(conductanceUs(339.0f + 660.0f, 330.0f, 20000.0f, 9.0f), 100.0f, 0.01f));
   assert(leakMv(339.0f, 330.0f, 20000.0f, kLeakResistorOhm, 9.0f) == 0.0f);
 }
 
@@ -107,16 +108,53 @@ void testSaturation() {
   assert(isSaturatedMv(4983.0f));
 }
 
+AutoRangeInput autoIn(float vref, size_t sat, uint32_t quiet, float peak, uint32_t window) {
+  AutoRangeInput in;
+  in.currentVrefMv = vref;
+  in.saturatedRows = sat;
+  in.quietMs = quiet;
+  in.windowPeakMv = peak;
+  in.windowMs = window;
+  in.floorMv = 100.0f;
+  in.ceilingMv = 700.0f;
+  return in;
+}
+
 void testAutoRange() {
   // A clipped row lowers Vref by 20 %, never below the floor.
-  assert(near(autoRangeNextVrefMv(330.0f, 3, 0, 330.0f, 100.0f), 264.0f, 0.01f));
-  assert(near(autoRangeNextVrefMv(110.0f, 1, 0, 330.0f, 100.0f), 100.0f, 0.01f));
-  assert(near(autoRangeNextVrefMv(100.0f, 1, 0, 330.0f, 100.0f), 100.0f, 0.01f));
-  // It waits 20 s of quiet before creeping back, and never passes the safe value.
-  assert(near(autoRangeNextVrefMv(264.0f, 0, 19999, 330.0f, 100.0f), 264.0f, 0.01f));
-  assert(near(autoRangeNextVrefMv(264.0f, 0, 20000, 330.0f, 100.0f), 290.4f, 0.1f));
-  assert(near(autoRangeNextVrefMv(320.0f, 0, 60000, 330.0f, 100.0f), 330.0f, 0.01f));
-  assert(near(autoRangeNextVrefMv(330.0f, 0, 60000, 330.0f, 100.0f), 330.0f, 0.01f));
+  assert(near(autoRangeNextVrefMv(autoIn(330.0f, 3, 0, 3100.0f, 9000)), 264.0f, 0.01f));
+  assert(near(autoRangeNextVrefMv(autoIn(110.0f, 1, 0, 3100.0f, 9000)), 100.0f, 0.01f));
+  assert(near(autoRangeNextVrefMv(autoIn(100.0f, 1, 0, 3100.0f, 9000)), 100.0f, 0.01f));
+  // Nothing pressed (peak = baseline): it climbs, at most x1.25 a step, to the ceiling.
+  assert(near(autoRangeNextVrefMv(autoIn(330.0f, 0, 9000, 340.0f, 9000)), 412.5f, 0.01f));
+  assert(near(autoRangeNextVrefMv(autoIn(600.0f, 0, 9000, 610.0f, 9000)), 700.0f, 0.01f));
+  assert(near(autoRangeNextVrefMv(autoIn(700.0f, 0, 9000, 710.0f, 9000)), 700.0f, 0.01f));
+  // The predicted Vref puts the peak at the target: 330 * 2000 / 1800 = 366.7.
+  assert(near(autoRangeNextVrefMv(autoIn(330.0f, 0, 9000, 1800.0f, 9000)), 366.67f, 0.05f));
+  // Between the target and the rail: held (hysteresis), never lowered without a clip.
+  assert(near(autoRangeNextVrefMv(autoIn(330.0f, 0, 9000, 1990.0f, 9000)), 330.0f, 0.01f));
+  assert(near(autoRangeNextVrefMv(autoIn(330.0f, 0, 9000, 2900.0f, 9000)), 330.0f, 0.01f));
+  // It waits until both the quiet time and the window at this Vref are long enough.
+  assert(near(autoRangeNextVrefMv(autoIn(330.0f, 0, kAutoRangeRaiseHoldMs - 1, 340.0f, 9000)), 330.0f, 0.01f));
+  assert(near(autoRangeNextVrefMv(autoIn(330.0f, 0, 9000, 340.0f, kAutoRangeRaiseHoldMs - 1)), 330.0f, 0.01f));
+  assert(near(autoRangeNextVrefMv(autoIn(330.0f, 0, 9000, 0.0f, 9000)), 330.0f, 0.01f));  // no peak yet
+  // A lowered limit pulls it down to the ceiling.
+  assert(near(autoRangeNextVrefMv(autoIn(740.0f, 0, 0, 900.0f, 0)), 700.0f, 0.01f));
+  // The ceiling: the operator's limit, but never the strap risk.
+  assert(near(autoRangeCeilingMv(700.0f, 100.0f), 700.0f, 0.01f));
+  assert(near(autoRangeCeilingMv(2000.0f, 100.0f), kAutoRangeMaxVrefMv, 0.01f));
+  assert(autoRangeCeilingMv(2000.0f, 100.0f) < static_cast<float>(kVrefStrapRiskMv));
+  assert(near(autoRangeCeilingMv(50.0f, 100.0f), 100.0f, 0.01f));
+}
+
+void testRangeTlv() {
+  uint8_t buf[16] = {0};
+  assert(encodeRangeTlv(true, true, 412, 0x00002005u, buf, sizeof(buf)) == 10);
+  const uint8_t want[10] = {kPacketExtRange, 8, kRangeUnitUs, kRangeFlagAuto, 0x9C, 0x01, 0x05, 0x20, 0x00, 0x00};
+  for (int i = 0; i < 10; ++i) assert(buf[i] == want[i]);
+  assert(encodeRangeTlv(false, false, 330, 0, buf, sizeof(buf)) == 10);
+  assert(buf[2] == kRangeUnitMv && buf[3] == 0 && buf[4] == 0x4A && buf[5] == 0x01);
+  assert(encodeRangeTlv(false, false, 330, 0, buf, 9) == 0);
 }
 
 }  // namespace
@@ -178,12 +216,13 @@ void testRfbFitTop() {
 
 int main() {
   testRfbFromCalibration();
-  testVirtualize();
+  testConductance();
   testLeak();
   testFit();
   testOffsets();
   testSaturation();
   testAutoRange();
+  testRangeTlv();
   testReadingMean();
   testAutoRangeStaleFrames();
   testRfbFitTop();

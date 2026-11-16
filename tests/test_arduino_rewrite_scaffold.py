@@ -316,7 +316,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIsNotNone(refresh_match)
         refresh_body = refresh_match.group("body")
         self.assertIn("savedTareComplete_", refresh_body)
-        self.assertIn("fitAll(tare_, levels_, fits_);", refresh_body)
+        self.assertIn("fitAll(tare_, levels_, unit_, fits_);", refresh_body)
         self.assertIn("runtimeReady_", refresh_body)
 
     def test_profiles_from_before_the_fitted_model_are_discarded(self):
@@ -451,7 +451,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         )
 
         capture_cell_match = re.search(
-            r"bool MatrixScanner::captureCellBlockMedian\(uint16_t sensorIndex, uint32_t durationMs, float& outValue\) \{(?P<body>.*?)\n\}",
+            r"bool MatrixScanner::captureCellBlockMedian\(uint16_t sensorIndex, uint32_t durationMs, float& outValue,\s*bool markSaturated\) \{(?P<body>.*?)\n\}",
             scanner_impl,
             re.S,
         )
@@ -459,7 +459,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("applyFilter(", capture_cell_match.group("body"))
 
         capture_all_match = re.search(
-            r"bool MatrixScanner::captureAllBlockMedians\(float\* outValues, size_t count, uint32_t durationMs\) \{(?P<body>.*?)\n\}",
+            r"bool MatrixScanner::captureAllBlockMedians\(float\* outValues, size_t count, uint32_t durationMs,\s*bool markSaturated\) \{(?P<body>.*?)\n\}",
             scanner_impl,
             re.S,
         )
@@ -1366,7 +1366,7 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertNotIn("std::vector<float> totals(totalPoints, 0);", impl)
         self.assertNotIn("std::vector<float> sample(totalPoints, 0);", impl)
         self.assertIn("captureTotalsScratch_[i] = 0;", impl)
-        self.assertIn("sampleRawFrame(captureSampleScratch_, totalPoints)", impl)
+        self.assertIn("sampleRawFrame(captureSampleScratch_, totalPoints, markSaturated)", impl)
 
     def test_stream_buffer_config_and_control_surface_exist(self):
         config_h = read_firmware("DeviceConfig.h")

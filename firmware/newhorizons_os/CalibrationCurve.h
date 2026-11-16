@@ -23,6 +23,22 @@
 namespace nhos {
 namespace calibration_curve {
 
+// The unit a profile (tare and levels) was captured in. A profile only applies
+// while the device outputs that unit; in conductance the readout is identity.
+enum class Unit : unsigned char {
+  Mv = 0,  // ADC mV (every board; the default)
+  Us = 1,  // conductance, microsiemens (v2.0.F range modes)
+};
+const char* unitName(Unit unit);
+
+// A conductance capture has no ADC clip voltage to compare against: a sample
+// read while its row's ADC was saturated is stored as kSaturatedCaptureUs, and
+// a capture at or above kConductanceClipUs (no textile sensor comes near 1 S)
+// is a saturated point. One saturated sample lifts its block mean past it, so
+// a capture is saturated when most of its blocks saw any saturation.
+constexpr float kSaturatedCaptureUs = 1.0e9f;
+constexpr float kConductanceClipUs = 1.0e6f;
+
 enum class OutputMode : unsigned char {
   Raw = 0,         // streamed as measured
   Tared = 1,       // max(0, raw - tare): zeroed, still in mV
@@ -80,6 +96,7 @@ enum class PointStatus : unsigned char {
   BelowMinLevel = 2,  // 'b'  under FitSettings::minLevel (turn-on threshold)
   Saturated = 3,      // 's'  at or above the ADC's clip voltage
   NoResponse = 4,     // 'n'  not above the sensor's own baseline
+  NoRfb = 5,          // 'r'  conductance profile, no Rfb on the sensor's row (reads 0)
 };
 char pointStatusCode(PointStatus status);
 

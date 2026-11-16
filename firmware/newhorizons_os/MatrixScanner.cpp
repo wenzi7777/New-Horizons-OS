@@ -79,8 +79,11 @@ void MatrixScanner::loadAdcCalibration() {
 #endif
 }
 
-float MatrixScanner::readCompensatedMv(size_t rowIndex, size_t colIndex, uint16_t cellIndex) {
+float MatrixScanner::readCompensatedMv(size_t rowIndex, size_t colIndex, uint16_t cellIndex, float* adcMv) {
   const float raw = readCellMv(rowIndex, cellIndex);
+  if (adcMv != nullptr) {
+    *adcMv = raw;
+  }
   if (!range_) {
     return raw;
   }
@@ -326,6 +329,11 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
   float peakValue = 0.0f;
   uint16_t activeCells = 0;
 
+  // Conductance (v2.0.F range modes): the raw_adc block carries the ADC
+  // reading itself, before the compensator, so a recording can be recomputed
+  // if an Rfb was measured wrong. The calibration applies in either unit; one
+  // captured in the other unit leaves the value as it is (Calibration::apply).
+  const bool conductance = range_ != nullptr && range_->conductance();
   if (range_) {
     range_->beginFrame();
   }
@@ -334,12 +342,13 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
     digitalWrite(cols_[c], LOW);
     delayMicroseconds(settleUs_);
     for (size_t r = 0; r < rowCount_; ++r) {
-      float value = readCompensatedMv(r, c, colMajorIdx);
+      float adcMv = 0.0f;
+      float value = readCompensatedMv(r, c, colMajorIdx, &adcMv);
       value = applyFilter(value, colMajorIdx);
       const uint16_t rowMajorIdx = static_cast<uint16_t>(r * colCount_ + c);
-      // Capture the pre-calibration reading (filtered millivolts) before it is
-      // overwritten by the calibration curve, so it can optionally be streamed.
-      frame.rawValues[rowMajorIdx] = value;
+      // In mV: the pre-calibration reading (filtered millivolts), captured
+      // before the calibration curve overwrites it, so it can be streamed.
+      frame.rawValues[rowMajorIdx] = conductance ? adcMv : value;
       if (calibration_) {
         float calibratedValue = value;
         calibration_->apply(value, colMajorIdx, calibratedValue);
@@ -391,7 +400,8 @@ size_t MatrixScanner::scanIntoPacketPayload(uint8_t* out, size_t capacity, Matri
 // Both captures report the median of ~0.5 s block means (see
 // calibration_curve::kCaptureBlockMs): a valve pulse or a twitch shifts one
 // block, not the result.
-bool MatrixScanner::captureCellBlockMedian(uint16_t sensorIndex, uint32_t durationMs, float& outValue) {
+bool MatrixScanner::captureCellBlockMedian(uint16_t sensorIndex, uint32_t durationMs, float& outValue,
+                                           bool markSaturated) {
   if (!hasLayout() || sensorIndex >= rowCount_ * colCount_) {
     return false;
   }
@@ -404,7 +414,7 @@ bool MatrixScanner::captureCellBlockMedian(uint16_t sensorIndex, uint32_t durati
     uint32_t samples = 0;
     do {
       float value = 0;
-      if (!sampleRawCell(sensorIndex, value)) {
+      if (!sampleRawCell(sensorIndex, value, markSaturated)) {
         return false;
       }
       total += value;
@@ -419,7 +429,8 @@ bool MatrixScanner::captureCellBlockMedian(uint16_t sensorIndex, uint32_t durati
   return true;
 }
 
-bool MatrixScanner::captureAllBlockMedians(float* outValues, size_t count, uint32_t durationMs) {
+bool MatrixScanner::captureAllBlockMedians(float* outValues, size_t count, uint32_t durationMs,
+                                           bool markSaturated) {
   const size_t totalPoints = rowCount_ * colCount_;
   if (!hasLayout() || !outValues || totalPoints == 0 || count < totalPoints) {
     return false;
@@ -439,7 +450,7 @@ bool MatrixScanner::captureAllBlockMedians(float* outValues, size_t count, uint3
     const uint32_t startedMs = millis();
     uint32_t samples = 0;
     do {
-      if (!sampleRawFrame(captureSampleScratch_, totalPoints)) {
+      if (!sampleRawFrame(captureSampleScratch_, totalPoints, markSaturated)) {
         return false;
       }
       for (size_t i = 0; i < totalPoints; ++i) {
@@ -537,7 +548,17 @@ void MatrixScanner::recordUdpSend(bool ok, uint32_t durationUs) {
   }
 }
 
-bool MatrixScanner::sampleRawFrame(float* outValues, size_t count) {
+float MatrixScanner::readCaptureSample(size_t rowIndex, size_t colIndex, uint16_t cellIndex, bool markSaturated) {
+  float adcMv = 0.0f;
+  const float value = readCompensatedMv(rowIndex, colIndex, cellIndex, &adcMv);
+  if (markSaturated && range_ != nullptr && range_->conductance() && range_->rfbOhm(rowIndex) > 0.0f &&
+      isSaturatedMv(adcMv)) {
+    return calibration_curve::kSaturatedCaptureUs;
+  }
+  return value;
+}
+
+bool MatrixScanner::sampleRawFrame(float* outValues, size_t count, bool markSaturated) {
   const size_t totalPoints = rowCount_ * colCount_;
   if (!outValues || count < totalPoints || totalPoints == 0) {
     return false;
@@ -547,7 +568,7 @@ bool MatrixScanner::sampleRawFrame(float* outValues, size_t count) {
     digitalWrite(cols_[c], LOW);
     delayMicroseconds(settleUs_);
     for (size_t r = 0; r < rowCount_; ++r) {
-      outValues[index] = readCompensatedMv(r, c, static_cast<uint16_t>(index));
+      outValues[index] = readCaptureSample(r, c, static_cast<uint16_t>(index), markSaturated);
       ++index;
     }
     digitalWrite(cols_[c], HIGH);
@@ -556,7 +577,7 @@ bool MatrixScanner::sampleRawFrame(float* outValues, size_t count) {
   return true;
 }
 
-bool MatrixScanner::sampleRawCell(uint16_t sensorIndex, float& outValue) {
+bool MatrixScanner::sampleRawCell(uint16_t sensorIndex, float& outValue, bool markSaturated) {
   if (rowCount_ == 0) {
     return false;
   }
@@ -567,7 +588,7 @@ bool MatrixScanner::sampleRawCell(uint16_t sensorIndex, float& outValue) {
   }
   digitalWrite(cols_[colIndex], LOW);
   delayMicroseconds(settleUs_);
-  outValue = readCompensatedMv(rowIndex, colIndex, sensorIndex);
+  outValue = readCaptureSample(rowIndex, colIndex, sensorIndex, markSaturated);
   digitalWrite(cols_[colIndex], HIGH);
   setAllColsInactive();
   return true;

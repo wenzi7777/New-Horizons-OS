@@ -18,6 +18,10 @@ const char* outputModeName(OutputMode mode) {
   }
 }
 
+const char* unitName(Unit unit) {
+  return unit == Unit::Us ? "uS" : "mV";
+}
+
 OutputMode resolveOutputMode(bool calibrationEnabled, bool calibrationReady, bool tareEnabled, bool tareComplete) {
   if (calibrationEnabled && calibrationReady) {
     return OutputMode::Calibrated;
@@ -157,6 +161,7 @@ char pointStatusCode(PointStatus status) {
     case PointStatus::BelowMinLevel: return 'b';
     case PointStatus::Saturated: return 's';
     case PointStatus::NoResponse: return 'n';
+    case PointStatus::NoRfb: return 'r';
     case PointStatus::NotCaptured:
     default: return '-';
   }

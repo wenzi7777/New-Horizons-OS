@@ -224,6 +224,7 @@ done
   "$SCRIPT_DIR/gen_packet_fixtures.cpp" \
   "$CORE_DIR/PacketV5Codec.cpp" \
   "$CORE_DIR/AppEventWire.cpp" \
+  "$FIRMWARE_DIR/RangeMath.cpp" \
   -o "$BUILD_DIR/gen_packet_fixtures"
 
 "$BUILD_DIR/gen_packet_fixtures" > "$BUILD_DIR/packets.json"

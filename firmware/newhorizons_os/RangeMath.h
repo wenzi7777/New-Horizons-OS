@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "PacketWireConstants.h"
+
 namespace nhos {
 
 // v2.0.F front end, per row: the op-amp's + input sits at Vref, a pressed
@@ -28,16 +30,13 @@ static constexpr float kSaturationMv = 3000.0f;
 // Rfb too large for this Vref (Vout saturates), or bad inputs.
 float rfbFromCalibration(float calOnMv, float vrefMv);
 
-// Re-expresses a reading taken at (vrefMv, rfbOhm) as the reading the same
-// cell would give at (refVrefMv, refRfbOhm): the part above Vref scales by
-// (refVref * refRfb) / (vref * rfb). Readings at or below Vref are no signal
-// and map to refVrefMv. Returns the input unchanged if rfbOhm is unknown.
-//
-// offsetMv is the row's ADC offset: with nothing pressed the row reads
-// vref + offsetMv (the ESP32 ADC is a few to ten mV off at this end of the range,
-// and the sign differs between ADC1 and ADC2), so that is where "no signal" is.
-float virtualizeMv(float voutMv, float vrefMv, float rfbOhm, float refVrefMv, float refRfbOhm,
-                   float offsetMv = 0.0f);
+// Conductance of a row's pressed cell, in microsiemens:
+//   Vout - (Vref + offset) = Vref * Rfb / Rs   ->   G = 1/Rs = signal / (Vref * Rfb)
+// Vref and Rfb both cancel out of what the cell is, so the answer does not move
+// when auto range changes Vref. offsetMv is the row's ADC offset (with nothing
+// pressed the row reads vref + offsetMv). Readings at or below that are no
+// signal (0); a row with no measured Rfb has no conductance either (0).
+float conductanceUs(float voutMv, float vrefMv, float rfbOhm, float offsetMv = 0.0f);
 
 // How much the idle column 13 adds to a row's Vout while another column is
 // scanned: its sensor Rs13 in series with the 100k pull-down.
@@ -60,13 +59,39 @@ float rfbFromPoints(const float* vrefMv, const float* offMv, const float* onMv, 
 
 inline bool isSaturatedMv(float voutMv) { return voutMv >= kSaturationMv; }
 
-// Auto range: one step of the Vref chooser. It only ever lowers Vref below the
-// safe value (more headroom) and returns to it; it never goes above it.
-//   saturatedRows: rows that clipped in the last window
-//   quietMs:       how long no row has clipped
-// Returns the Vref to use next.
-float autoRangeNextVrefMv(float currentVrefMv, size_t saturatedRows, uint32_t quietMs,
-                          float safeVrefMv, float minVrefMv);
+// Auto range: one step of the Vref chooser (v2.0.F, conductance output).
+// It moves both ways:
+//   - a measured row clipped in the last frame: Vref x 0.8, down to the floor;
+//   - nothing clipped for kAutoRangeRaiseHoldMs, and the window has run as long
+//     at this Vref: raise it toward where the window's peak would sit at
+//     kAutoRangeTargetPeakMv (Vout scales with Vref), at most x1.25 a step and
+//     never above the ceiling. Peaks between the target and the rail are left
+//     alone (hysteresis), so it does not hunt at the edge of saturation.
+//   - above the ceiling (the operator lowered the limit): back to the ceiling.
+// Only rows with a measured Rfb count, for the peak and the saturation alike:
+// a row without Rfb has no feedback and sits at the rail.
+static constexpr float kAutoRangeLowerFactor = 0.8f;
+static constexpr float kAutoRangeMaxRaiseFactor = 1.25f;
+static constexpr float kAutoRangeMinRaiseFactor = 1.03f;
+static constexpr float kAutoRangeTargetPeakMv = 2000.0f;
+static constexpr uint32_t kAutoRangeRaiseHoldMs = 5000;
+// Auto range's own ceiling, whatever limit the operator set: kept below the
+// GPIO45 strap risk (about 0.8 V), the same top rfb_measure fits up to.
+static constexpr float kAutoRangeMaxVrefMv = 750.0f;
+
+struct AutoRangeInput {
+  float currentVrefMv = 0.0f;
+  size_t saturatedRows = 0;  // measured rows that clipped in the last frame
+  uint32_t quietMs = 0;      // since a measured row last clipped
+  float windowPeakMv = 0.0f; // highest measured-row reading since Vref last moved
+  uint32_t windowMs = 0;     // how long that window has run
+  float floorMv = 0.0f;
+  float ceilingMv = 0.0f;
+};
+float autoRangeNextVrefMv(const AutoRangeInput& in);
+
+// min(operator limit, kAutoRangeMaxVrefMv), and never below the floor.
+float autoRangeCeilingMv(float limitMv, float floorMv);
 
 // Auto range acts on the last frame's saturation mask only while frames keep
 // coming: once the scan has stopped (or stalled) for this long the mask is
@@ -100,6 +125,12 @@ struct ReadingMean {
     return true;
   }
 };
+
+// The range TLV (wire.json packet.range, PROTOCOL.md 3.1): type, length, then
+// unit u8, flags u8, vref_mv u16, saturated_rows u32, little-endian. Returns
+// the bytes written (2 + kRangeTlvLen), or 0 when it does not fit.
+size_t encodeRangeTlv(bool conductance, bool autoRange, uint16_t vrefMv, uint32_t saturatedRows,
+                      uint8_t* out, size_t capacity);
 
 // rfb_measure: the highest Vref of the fit. Where the largest Rfb stays off the
 // rail (about 2.6 V out), but never above the operator's limit nor at or above

@@ -515,8 +515,12 @@ void scanAndStreamIfDue() {
   // App events ride the stream (spec/PROTOCOL.md 3.1). They were raised on an
   // earlier frame -- apps run after that frame's packet went out -- and carry
   // its frame_seq, which the receiver maps to that frame's time.
+  // The range TLV (v2.0.F) goes first, so every packet says its unit and Vref;
+  // the app events share what is left of the budget.
   static uint8_t eventExtensions[nhos::kPacketExtensionBudget];
-  const size_t eventBytes = apps.takeStreamEvents(eventExtensions, sizeof(eventExtensions));
+  const size_t rangeBytes = range.encodeFrameTlv(eventExtensions, sizeof(eventExtensions));
+  const size_t eventBytes =
+      rangeBytes + apps.takeStreamEvents(eventExtensions + rangeBytes, sizeof(eventExtensions) - rangeBytes);
 
   // Stamped with when the frame was scanned, not when this packet is built.
   const bool epochValid = deviceClock.hasSynced();
@@ -1137,6 +1141,8 @@ void setup() {
   scanner.setCalibration(&calibration);
 #if NHOS_BOARD_HAS_DAC_VREF
   scanner.setRangeCompensator(&range);
+  // Which unit the device outputs, so a profile applies only in its own.
+  calibration.setRangeCompensator(&range);
 #endif
   logBoot(String("boot_stage=scanner_ready shape=") + scanner.matrixShapeJson());
   if (bootMode.mode() == nhos::RunMode::Normal && scanner.hasLayout()) {

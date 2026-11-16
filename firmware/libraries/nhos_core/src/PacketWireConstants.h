@@ -38,9 +38,16 @@ constexpr size_t kEspNowDataFrameBudget = 3840;
 
 // Extension TLV types (spec/PROTOCOL.md 3.1).
 constexpr uint8_t kPacketExtAppEvent = 0x01;
+constexpr uint8_t kPacketExtRange = 0x02;
 constexpr uint8_t kAppEventFlagValue = 0x01;
 constexpr size_t kAppEventMaxApp = 15;
 constexpr size_t kAppEventMaxEvent = 23;
 constexpr size_t kAppEventMaxDetail = 47;
+
+// The range TLV (spec/PROTOCOL.md 3.1).
+constexpr size_t kRangeTlvLen = 8;
+constexpr uint8_t kRangeUnitMv = 0;
+constexpr uint8_t kRangeUnitUs = 1;
+constexpr uint8_t kRangeFlagAuto = 0x01;
 
 }  // namespace nhos

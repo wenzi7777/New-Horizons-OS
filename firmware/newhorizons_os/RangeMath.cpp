@@ -16,16 +16,16 @@ float rfbFromCalibration(float calOnMv, float vrefMv) {
   return kCalResistorOhm * (calOnMv / vrefMv - 1.0f);
 }
 
-float virtualizeMv(float voutMv, float vrefMv, float rfbOhm, float refVrefMv, float refRfbOhm,
-                   float offsetMv) {
-  if (!(rfbOhm > 0.0f) || !(vrefMv > 0.0f) || !(refRfbOhm > 0.0f) || !(refVrefMv > 0.0f)) {
-    return voutMv;
+float conductanceUs(float voutMv, float vrefMv, float rfbOhm, float offsetMv) {
+  if (!(rfbOhm > 0.0f) || !(vrefMv > 0.0f)) {
+    return 0.0f;
   }
   const float signal = voutMv - (vrefMv + offsetMv);
-  if (signal <= 0.0f) {
-    return refVrefMv;
+  if (!(signal > 0.0f)) {
+    return 0.0f;
   }
-  return refVrefMv + signal * (refVrefMv * refRfbOhm) / (vrefMv * rfbOhm);
+  // mV / (mV * ohm) = siemens; x 1e6 for microsiemens.
+  return signal / (vrefMv * rfbOhm) * 1.0e6f;
 }
 
 float leakMv(float v13Mv, float vrefMv, float rfbOhm, float leakOhm, float offsetMv) {
@@ -91,18 +91,31 @@ float rfbFromPoints(const float* vrefMv, const float* offMv, const float* onMv, 
   return kCalResistorOhm * (ratio - 1.0f);
 }
 
-float autoRangeNextVrefMv(float currentVrefMv, size_t saturatedRows, uint32_t quietMs,
-                          float safeVrefMv, float minVrefMv) {
-  if (saturatedRows > 0) {
-    float next = currentVrefMv * 0.8f;
-    return next < minVrefMv ? minVrefMv : next;
+float autoRangeNextVrefMv(const AutoRangeInput& in) {
+  const float current = in.currentVrefMv;
+  if (in.saturatedRows > 0) {
+    const float next = current * kAutoRangeLowerFactor;
+    return next < in.floorMv ? in.floorMv : next;
   }
-  // Quiet for 20 s: walk back toward the safe value.
-  if (quietMs >= 20000 && currentVrefMv < safeVrefMv) {
-    float next = currentVrefMv * 1.1f;
-    return next > safeVrefMv ? safeVrefMv : next;
+  if (current > in.ceilingMv) {
+    return in.ceilingMv;
   }
-  return currentVrefMv;
+  if (in.quietMs < kAutoRangeRaiseHoldMs || in.windowMs < kAutoRangeRaiseHoldMs ||
+      !(in.windowPeakMv > 0.0f) || !(current > 0.0f)) {
+    return current;
+  }
+  float next = current * (kAutoRangeTargetPeakMv / in.windowPeakMv);
+  if (!(next >= current * kAutoRangeMinRaiseFactor)) {
+    return current;  // already near (or past) the target: hold
+  }
+  const float maxStep = current * kAutoRangeMaxRaiseFactor;
+  next = next > maxStep ? maxStep : next;
+  return next > in.ceilingMv ? in.ceilingMv : next;
+}
+
+float autoRangeCeilingMv(float limitMv, float floorMv) {
+  float ceiling = limitMv < kAutoRangeMaxVrefMv ? limitMv : kAutoRangeMaxVrefMv;
+  return ceiling < floorMv ? floorMv : ceiling;
 }
 
 float rfbFitTopMv(float biggestRfbOhm, float limitMv, float strapCeilingMv) {
@@ -110,6 +123,24 @@ float rfbFitTopMv(float biggestRfbOhm, float limitMv, float strapCeilingMv) {
   top = top > limitMv ? limitMv : top;
   top = top > strapCeilingMv ? strapCeilingMv : top;
   return top < 0.0f ? 0.0f : top;
+}
+
+size_t encodeRangeTlv(bool conductance, bool autoRange, uint16_t vrefMv, uint32_t saturatedRows,
+                      uint8_t* out, size_t capacity) {
+  const size_t total = kPacketExtensionTlvHeaderLen + kRangeTlvLen;
+  if (out == nullptr || capacity < total) {
+    return 0;
+  }
+  out[0] = kPacketExtRange;
+  out[1] = static_cast<uint8_t>(kRangeTlvLen);
+  out[2] = conductance ? kRangeUnitUs : kRangeUnitMv;
+  out[3] = autoRange ? kRangeFlagAuto : 0;
+  out[4] = static_cast<uint8_t>(vrefMv & 0xFFU);
+  out[5] = static_cast<uint8_t>(vrefMv >> 8);
+  for (int i = 0; i < 4; ++i) {
+    out[6 + i] = static_cast<uint8_t>((saturatedRows >> (8 * i)) & 0xFFU);
+  }
+  return total;
 }
 
 }  // namespace nhos

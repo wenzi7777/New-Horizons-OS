@@ -73,7 +73,7 @@ Flags:
 | `set_battery_profile` |  | Set the manual battery profile (capacity, max charge current). |
 | `set_vref` |  | Set the Vref DAC (mV, register only) and its operator ceiling (v2.0.F). |
 | `calibration_switch` |  | Switch the calibration network on or off (v2.0.F; opens again on reboot). |
-| `set_range` |  | Choose raw, virtual-Rfb or auto range, the reference Rfb, and GPIO45 leak compensation (v2.0.F). |
+| `set_range` |  | Choose ADC mV, conductance (uS) or auto range (conductance), and GPIO45 leak compensation (v2.0.F). |
 | `rfb_measure` |  | Measure each row's Rfb through the calibration network and keep it (v2.0.F). |
 | `matrix_sample` | heavy | The median of each cell over duration_ms, as the stream would carry it (range applied) or raw (v2.0.F). |
 | `vref_sweep` | heavy | Step Vref and record each step's Rfb and raw matrix, for checking whether a material is a pure resistance (v2.0.F). |
@@ -86,7 +86,7 @@ Flags:
 | `calibration_status` |  | Query manual calibration status, coverage, and metadata. |
 | `calibration_enable` |  | Enable the saved manual calibration profile. |
 | `calibration_disable` |  | Disable the saved manual calibration profile. |
-| `calibration_session_begin` | maintenance | Start a draft calibration session. |
+| `calibration_session_begin` | maintenance | Start a draft calibration session, captured in the unit the device outputs (mV, or uS in conductance). |
 | `calibration_session_abort` | maintenance | Abort the current draft calibration session. |
 | `calibration_session_commit` | maintenance | Commit the current draft calibration session. |
 | `calibration_clear_profile` | maintenance | Delete the saved calibration profile and all stored levels. |

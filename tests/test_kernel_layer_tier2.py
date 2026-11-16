@@ -305,8 +305,8 @@ class CalibrationFitReportingTests(unittest.TestCase):
 
         # Draft: what the workbench marks red from. Saved: counts only, to
         # keep every status reply small.
-        self.assertIn("fitSummaryJson(draftFits, draftTare_, draftLevels_, true)", impl)
-        self.assertIn("fitSummaryJson(fits_, tare_, levels_, false)", impl)
+        self.assertIn("fitSummaryJson(draftFits, draftTare_, draftLevels_, draftUnit_, true)", impl)
+        self.assertIn("fitSummaryJson(fits_, tare_, levels_, unit_, false)", impl)
 
 
 class PowerGovernorTests(unittest.TestCase):

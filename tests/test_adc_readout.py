@@ -23,12 +23,14 @@ class AdcReadoutTests(unittest.TestCase):
     def test_every_read_path_uses_read_cell_mv(self):
         for signature in ("size_t MatrixScanner::scanIntoPacketPayload(",
                           "bool MatrixScanner::sampleRawFrame(",
-                          "bool MatrixScanner::sampleRawCell("):
+                          "bool MatrixScanner::sampleRawCell(",
+                          "float MatrixScanner::readCaptureSample("):
             with self.subTest(signature=signature):
                 body = self.body(signature)
                 # v2.0.F: the paths read through the range compensator, which
                 # wraps readCellMv() and nothing else.
-                self.assertIn("readCompensatedMv(", body)
+                # (the capture samples through readCaptureSample(), which does.)
+                self.assertTrue("readCompensatedMv(" in body or "readCaptureSample(" in body)
                 self.assertNotIn("analogRead", body)
         wrapper = self.body("float MatrixScanner::readCompensatedMv(")
         self.assertIn("readCellMv(", wrapper)

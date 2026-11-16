@@ -164,6 +164,7 @@ not know, by its length.
 | Type | Name | Since |
 |---|---|---|
 | `0x01` | `app_event` | firmware v1.16.0 |
+| `0x02` | `range` | firmware v2.2.0 (TIA-CTL v2.0.F) |
 
 **`app_event`** — one app event (`app_events`), little-endian:
 
@@ -185,6 +186,23 @@ A lost packet loses its events from the stream only: the device's ring (32
 entries) still holds them, and a receiver that sees a gap in `seq` fills it
 with `{"command":"app_events","since_seq":N}`. `app_events` replies carry
 `"streaming":true` from v1.16.0, so a receiver knows it need not poll.
+
+**`range`** — how this frame's levels were read (TIA-CTL v2.0.F only, on every
+packet, before any `app_event`), little-endian, 8 bytes:
+
+| Field | Size | |
+|---|---|---|
+| unit | u8 | `0` ADC mV, `1` conductance in µS |
+| flags | u8 | bit 0: auto range chose the Vref |
+| vref_mv | u16 | the Vref this frame was scanned at |
+| saturated_rows | u32 | bit n: row n (with a measured Rfb) clipped in this frame |
+
+In µS the matrix levels are each cell's conductance,
+`G = (Vout − Vref − offset) / (Vref · Rfb)`, independent of Vref and Rfb; a row
+with no measured Rfb reads 0, and a clipped cell's value is only a lower bound.
+The `raw_adc` block, when present, then holds the ADC reading itself (mV, before
+any compensation or filter) instead of the filtered pre-calibration level.
+A packet without this TLV is in ADC mV (every other board, and older firmware).
 
 ## 4. Time
 

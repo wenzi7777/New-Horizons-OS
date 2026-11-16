@@ -18,6 +18,7 @@
         "imu": null,
         "mag": null,
         "app_events": [],
+        "range": null,
         "battery": null
       }
     },
@@ -36,6 +37,7 @@
         "imu": null,
         "mag": null,
         "app_events": [],
+        "range": null,
         "battery": null
       }
     },
@@ -54,6 +56,7 @@
         "imu": [0.5, -0.25, 9.75, 0.125, -0.0625, 1.5, 36.5],
         "mag": null,
         "app_events": [],
+        "range": null,
         "battery": null
       }
     },
@@ -72,6 +75,7 @@
         "imu": [0, 0, 1, 0, 0, 0, 25],
         "mag": [7, 8, -9.5],
         "app_events": [],
+        "range": null,
         "battery": {"status": 1, "fault": 2, "vbat_mv": 4175, "soc_centi_percent": 7350}
       }
     },
@@ -90,6 +94,7 @@
         "imu": null,
         "mag": null,
         "app_events": [],
+        "range": null,
         "battery": null
       }
     },
@@ -108,6 +113,7 @@
         "imu": [0.25, 0.5, 0.75, 1, 1.25, 1.5, 30],
         "mag": [-1.5, 2.25, 40],
         "app_events": [],
+        "range": null,
         "battery": {"status": 0, "fault": 0, "vbat_mv": 3700, "soc_centi_percent": 10000}
       }
     },
@@ -126,7 +132,46 @@
         "imu": [0, 0, 1, 0, 0, 0, 25],
         "mag": null,
         "app_events": [{"seq": 3, "frame_seq": 2689, "ms": 54802, "app": "flow1", "event": "slouch", "detail": "rise", "value": null}, {"seq": 4, "frame_seq": 2689, "ms": 54803, "app": "balance", "event": "lean", "detail": "0.75", "value": 0.75}],
+        "range": null,
         "battery": {"status": 0, "fault": 0, "vbat_mv": 3900, "soc_centi_percent": 8000}
+      }
+    },
+    {
+      "name": "range_conductance",
+      "hex": "5aa505383cdc7545ccd02c03000070c4e93ea10100003e0000000000000048410000c8420000c9430050974400104245020801019c0104000000011a090000002b03000048ee00000005666c6f773105707265737300",
+      "expect": {
+        "flags": 56,
+        "device_uid": "3CDC7545CCD0",
+        "sequence": 812,
+        "epoch_valid": true,
+        "epoch_ms": 1792056870000,
+        "point_count": 3,
+        "matrix": [0, 12.5, 100],
+        "raw": [402, 1210.5, 3105],
+        "imu": null,
+        "mag": null,
+        "app_events": [{"seq": 9, "frame_seq": 811, "ms": 61000, "app": "flow1", "event": "press", "detail": "", "value": null}],
+        "range": {"unit": "uS", "auto": true, "vref_mv": 412, "saturated_rows": 4},
+        "battery": null
+      }
+    },
+    {
+      "name": "range_mv",
+      "hex": "5aa505303cdc7545ccd02d03000098c4e93ea101000012000000c94300509744020800004a0100000000",
+      "expect": {
+        "flags": 48,
+        "device_uid": "3CDC7545CCD0",
+        "sequence": 813,
+        "epoch_valid": true,
+        "epoch_ms": 1792056870040,
+        "point_count": 2,
+        "matrix": [402, 1210.5],
+        "raw": null,
+        "imu": null,
+        "mag": null,
+        "app_events": [],
+        "range": {"unit": "mV", "auto": false, "vref_mv": 330, "saturated_rows": 0},
+        "battery": null
       }
     }
   ]

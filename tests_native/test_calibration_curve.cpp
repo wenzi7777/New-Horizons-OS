@@ -185,7 +185,44 @@ void testClampedOutputHoldsAtTheTopOfTheCalibratedRange() {
   assert(near(cc::evaluateClamped(model, 300.0f, NAN, NAN), cc::evaluateModel(model, 300.0f), 1e-5));
 }
 
+void testConductanceProfileClassifiesSaturationAndFitsInMicrosiemens() {
+  const cc::Readout identity;
+  assert(std::string(cc::unitName(cc::Unit::Mv)) == "mV");
+  assert(std::string(cc::unitName(cc::Unit::Us)) == "uS");
+  // A sample read at the rail is stored as the saturated marker; relative to
+  // any real tare it is far past the conductance clip.
+  const float tareUs = 2.5f;
+  assert(cc::classifyPoint(40.0f, 3.0f, tareUs, cc::kSaturatedCaptureUs - tareUs, cc::kConductanceClipUs, identity,
+                           nullptr) == cc::PointStatus::Saturated);
+  // One saturated sample in a 30-sample block lifts the block mean past the
+  // clip; the capture is saturated only when most blocks did.
+  const float oneSaturatedBlock = (29.0f * 30.0f + cc::kSaturatedCaptureUs) / 30.0f;
+  assert(oneSaturatedBlock >= cc::kConductanceClipUs);
+  float blocks[5] = {30.0f, oneSaturatedBlock, 30.5f, 29.5f, 30.2f};
+  const float median = cc::medianInPlace(blocks, 5);
+  assert(median < 31.0f);
+  assert(cc::classifyPoint(40.0f, 3.0f, tareUs, median - tareUs, cc::kConductanceClipUs, identity, nullptr) ==
+         cc::PointStatus::Used);
+  // In µS the readout is identity: x is the tare-relative conductance, and
+  // the paper's model fits it directly.
+  const float g[4] = {10.0f, 25.0f, 49.0f, 81.0f};
+  const float p[4] = {1.0f + 2.0f * std::sqrt(g[0]) + 0.1f * g[0], 1.0f + 2.0f * std::sqrt(g[1]) + 0.1f * g[1],
+                      1.0f + 2.0f * std::sqrt(g[2]) + 0.1f * g[2], 1.0f + 2.0f * std::sqrt(g[3]) + 0.1f * g[3]};
+  float xs[4];
+  for (int i = 0; i < 4; ++i) {
+    assert(cc::classifyPoint(p[i], 0.0f, tareUs, g[i], cc::kConductanceClipUs, identity, &xs[i]) ==
+           cc::PointStatus::Used);
+    assert(near(xs[i], g[i], 1e-5));
+  }
+  cc::FitModel model;
+  assert(cc::fitModel(xs, p, 4, model));
+  assert(near(model.a, 1.0f, 1e-3));
+  assert(near(model.b, 2.0f, 1e-3));
+  assert(near(model.c, 0.1f, 1e-3));
+}
+
 int main() {
+  testConductanceProfileClassifiesSaturationAndFitsInMicrosiemens();
   testPointClassificationMatchesTheFitSelection();
   testClampedOutputHoldsAtTheTopOfTheCalibratedRange();
   testFitMatchesNumpyPolyfitOnPaperData();

@@ -14,6 +14,7 @@
 #include "AppEventWire.h"
 #include "PacketV5Codec.h"
 #include "PacketWire.h"
+#include "RangeMath.h"
 
 namespace {
 
@@ -31,6 +32,14 @@ struct Case {
   bool hasBattery;
   nhos::PacketBatteryBlock battery;
   std::vector<nhos::AppEventFields> events;  // app_event extension TLVs
+  // The range TLV (TIA-CTL v2.0.F), first among the extensions when present.
+  struct Range {
+    bool present = false;
+    bool conductance = false;
+    bool autoRange = false;
+    uint16_t vrefMv = 0;
+    uint32_t saturatedRows = 0;
+  } range = {};
 };
 
 std::string jsonString(const char* text) {
@@ -77,6 +86,14 @@ int main() {
        {}, {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 25.0f}, {}, true, {0, 0, 3900, 8000},
        {{3, 2689, 54802, false, 0.0f, "flow1", "slouch", "rise"},
         {4, 2689, 54803, true, 0.75f, "balance", "lean", "0.75"}}},
+      // v2.0.F in auto range: conductance in µS, the raw block holds ADC mV,
+      // and the range TLV precedes an app event.
+      {"range_conductance", 812, 1792056870000ULL, true, {0.0f, 12.5f, 100.0f},
+       {402.0f, 1210.5f, 3105.0f}, {}, {}, false, {},
+       {{9, 811, 61000, false, 0.0f, "flow1", "press", ""}},
+       {true, true, true, 412, 0x00000004u}},
+      {"range_mv", 813, 1792056870040ULL, true, {402.0f, 1210.5f},
+       {}, {}, {}, false, {}, {}, {true, false, false, 330, 0}},
   };
 
   std::printf("{\n  \"description\": \"NHO/Arduino/1 v5 stream packets from the firmware encoder "
@@ -99,6 +116,14 @@ int main() {
     input.battery = k.hasBattery ? &k.battery : nullptr;
     uint8_t extensions[nhos::kPacketExtensionBudget];
     size_t extensionBytes = 0;
+    if (k.range.present) {
+      extensionBytes = nhos::encodeRangeTlv(k.range.conductance, k.range.autoRange, k.range.vrefMv,
+                                            k.range.saturatedRows, extensions, sizeof(extensions));
+      if (extensionBytes == 0) {
+        std::fprintf(stderr, "encodeRangeTlv failed for %s\n", k.name);
+        return 1;
+      }
+    }
     for (const nhos::AppEventFields& event : k.events) {
       const size_t written = nhos::encodeAppEventTlv(event, extensions + extensionBytes,
                                                      sizeof(extensions) - extensionBytes);
@@ -149,6 +174,14 @@ int main() {
                   event.hasValue ? value : "null");
     }
     std::printf("],\n");
+    if (k.range.present) {
+      std::printf("        \"range\": {\"unit\": \"%s\", \"auto\": %s, \"vref_mv\": %u, "
+                  "\"saturated_rows\": %u},\n",
+                  k.range.conductance ? "uS" : "mV", k.range.autoRange ? "true" : "false",
+                  static_cast<unsigned>(k.range.vrefMv), static_cast<unsigned>(k.range.saturatedRows));
+    } else {
+      std::printf("        \"range\": null,\n");
+    }
     if (k.hasBattery) {
       std::printf("        \"battery\": {\"status\": %u, \"fault\": %u, \"vbat_mv\": %u, "
                   "\"soc_centi_percent\": %u}\n",

@@ -824,11 +824,14 @@ String ControlServer::cmdCalibrationSwitch(const CommandContext& ctx) {
 #endif
 }
 
-// set_range (v2.0.F): how a row reading is presented. raw leaves it as read;
-// virtual re-expresses it as the reference Vref / Rfb would have read it, so
-// stored calibrations from a 20k board stay valid whatever Rfb is soldered and
-// whatever Vref is set; auto does the same and also lowers Vref when rows clip.
-// Both need the measured Rfb (rfb_measure).
+// set_range (v2.0.F): what a row reading is sent as.
+//   raw          ADC mV as read: the old boards' way, the calibration curves apply
+//   conductance  the cell's conductance in µS, G = (Vout - Vref - offset) / (Vref * Rfb);
+//                Vref and Rfb cancel out, so no reference board is involved
+//   auto         conductance, with auto range choosing Vref (both ways)
+// conductance and auto need the measured Rfb (rfb_measure); a row without one
+// reads 0. The mV calibration curves and tare are not applied to conductance.
+// "virtual" (mV re-expressed at 330 mV / 20k, before v2.2) is gone.
 String ControlServer::cmdSetRange(const CommandContext& ctx) {
   const String& cmd = ctx.cmd;
   const String& request = ctx.request;
@@ -839,9 +842,9 @@ String ControlServer::cmdSetRange(const CommandContext& ctx) {
   if (!range_ || !range_->enabled() || !vref_) {
     return error(cmd, "range_unavailable");
   }
-  // Auto may have left Vref lowered; leaving it (by mode or by clear_rfb)
-  // hands Vref back at the safe value at once, before any later check can
-  // return, and a failure to do so is reported.
+  // Auto may have left Vref anywhere in its range; leaving it (by mode or by
+  // clear_rfb) hands Vref back at the safe value at once, before any later
+  // check can return, and a failure to do so is reported.
   const char* restoreFailure = "";
   auto restoreSafeVref = [&]() {
     const char* failure = "";
@@ -850,6 +853,12 @@ String ControlServer::cmdSetRange(const CommandContext& ctx) {
     }
     range_->setVrefMv(static_cast<float>(vref_->vrefMv()));
   };
+  // The output unit cannot change under an open calibration session: its
+  // draft is being captured in the current one.
+  if (calibration_ && calibration_->sessionActive() &&
+      (extractBool(request, "clear_rfb", false) || !extractString(request, "mode").isEmpty())) {
+    return error(cmd, "calibration_session_active");
+  }
   if (extractBool(request, "clear_rfb", false)) {
     const bool wasAuto = range_->mode() == RangeMode::Auto;
     range_->clearRfb();
@@ -857,10 +866,6 @@ String ControlServer::cmdSetRange(const CommandContext& ctx) {
     if (wasAuto) {
       restoreSafeVref();
     }
-  }
-  const int refRfb = extractInt(request, "ref_rfb_ohm", -1);
-  if (refRfb >= 0 && !range_->setRefRfbOhm(static_cast<uint32_t>(refRfb))) {
-    return error(cmd, "range_ref_rfb_invalid");
   }
   if (request.indexOf("\"leak_comp\"") >= 0) {
     range_->setLeakCompensation(extractBool(request, "leak_comp", range_->leakCompensation()));
@@ -870,10 +875,12 @@ String ControlServer::cmdSetRange(const CommandContext& ctx) {
     RangeMode next;
     if (mode == "raw") {
       next = RangeMode::Raw;
-    } else if (mode == "virtual") {
-      next = RangeMode::Virtual;
+    } else if (mode == "conductance") {
+      next = RangeMode::Conductance;
     } else if (mode == "auto") {
       next = RangeMode::Auto;
+    } else if (mode == "virtual") {
+      return error(cmd, "range_mode_removed");
     } else {
       return error(cmd, "range_mode_invalid");
     }
@@ -881,9 +888,14 @@ String ControlServer::cmdSetRange(const CommandContext& ctx) {
       return error(cmd, "range_rfb_required");
     }
     const bool leavingAuto = range_->mode() == RangeMode::Auto && next != RangeMode::Auto;
+    const bool unitChanges = (range_->mode() == RangeMode::Raw) != (next == RangeMode::Raw);
     range_->setMode(next);
     if (leavingAuto) {
       restoreSafeVref();
+    }
+    if (unitChanges && scanner_) {
+      // The filter's history is in the old unit: start it again.
+      scanner_->restartFilter();
     }
   }
   range_->setVrefMv(static_cast<float>(vref_->vrefMv()));
@@ -1016,6 +1028,7 @@ String ControlServer::cmdRfbMeasure(const CommandContext& ctx) {
   static const float kFitFractions[kFitPoints] = {0.0f, 0.07f, 0.143f, 0.329f, 0.571f, 1.0f};
   float rfb[kRows] = {0};
   float offset[kRows] = {0};
+  RfbRowStatus rowStatus[kRows] = {};
   RfbPass pass[kFitPoints];
   float pointMv[kFitPoints] = {0};
   bool fitted_points = false;
@@ -1086,6 +1099,11 @@ String ControlServer::cmdRfbMeasure(const CommandContext& ctx) {
                ? "ok"
                : (isSaturatedMv(first.off[r]) ? "no_feedback" : (isSaturatedMv(first.on[r]) ? "saturated" : "open")));
     fitted += result > 0.0f ? 1 : 0;
+    rowStatus[r] = adcFailed ? RfbRowStatus::AdcFailed
+                             : (result > 0.0f ? RfbRowStatus::Ok
+                                              : (isSaturatedMv(first.off[r]) ? RfbRowStatus::NoFeedback
+                                                                             : (isSaturatedMv(first.on[r]) ? RfbRowStatus::Saturated
+                                                                                                           : RfbRowStatus::Open)));
     if (r) rowsJson += ",";
     rowsJson += "{\"row\":" + String(static_cast<unsigned>(r));
     rowsJson += ",\"off_mv\":" + String(first.off[r], 1);
@@ -1096,7 +1114,19 @@ String ControlServer::cmdRfbMeasure(const CommandContext& ctx) {
     rowsJson += ",\"status\":\"" + String(status) + "\"}";
   }
   rowsJson += "]";
-  range_->setRfbTable(rfb, offset, rows);
+  range_->setRfbTable(rfb, offset, rowStatus, rows);
+  if (range_->mode() != RangeMode::Raw && range_->rfbKnownRows() == 0) {
+    // Nothing measured any more: conductance has nothing to stand on.
+    const bool wasAuto = range_->mode() == RangeMode::Auto;
+    range_->setMode(RangeMode::Raw);
+    if (wasAuto) {
+      const char* failure = "";
+      if (!vref_->setVrefMv(kVrefSafeMv, failure)) {
+        warnings += String(warnings.isEmpty() ? "" : ",") + "\"vref_restore_failed\"";
+      }
+    }
+    scanner_->restartFilter();
+  }
   range_->setVrefMv(static_cast<float>(vref_->vrefMv()));
   String data = "{\"vref_mv\":" + String(firstVref) + ",\"fitted_rows\":" + String(static_cast<unsigned>(fitted));
   data += ",\"points_mv\":[";
@@ -1275,12 +1305,14 @@ String ControlServer::cmdMatrixSample(const CommandContext& ctx) {
   String data;
   data.reserve(64 + points * 7);
   data = "{\"rows\":" + String(static_cast<unsigned>(rows)) + ",\"cols\":" + String(static_cast<unsigned>(cols));
-  data += ",\"raw\":" + String(raw ? "true" : "false") + ",\"matrix\":[";
+  data += ",\"raw\":" + String(raw ? "true" : "false");
+  const bool conductance = !raw && range_ != nullptr && range_->conductance();
+  data += String(",\"unit\":\"") + (conductance ? "uS" : "mV") + "\",\"matrix\":[";
   // captureAllBlockMedians is column-major; the reply is row-major.
   for (size_t r = 0; r < rows; ++r) {
     for (size_t c = 0; c < cols; ++c) {
       if (r || c) data += ",";
-      data += String(matrix[c * rows + r], 1);
+      data += String(matrix[c * rows + r], conductance ? 3 : 1);
     }
   }
   data += "]}";

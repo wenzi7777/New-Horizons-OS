@@ -6,9 +6,12 @@
 #include <algorithm>
 #include <cmath>
 
+#include "RangeCompensator.h"
 #include "Storage.h"
 
 namespace nhos {
+
+using calibration_curve::Unit;
 
 namespace {
 
@@ -152,7 +155,23 @@ String Calibration::statusJson(bool modeActive) const {
   out += tareEnabled_ ? "true" : "false";
   out += ",\"output_mode\":\"";
   out += calibration_curve::outputModeName(outputMode());
-  out += "\",\"tare\":";
+  // The profile's unit and the device's: a profile in the other unit is kept
+  // but not applied (output_mode "raw") until they match again.
+  out += "\",\"unit\":\"";
+  out += calibration_curve::unitName(unit_);
+  out += "\",\"active_unit\":\"";
+  out += calibration_curve::unitName(activeUnit());
+  out += "\",\"unit_matches\":";
+  out += unitMatches() ? "true" : "false";
+  out += ",\"draft_unit\":";
+  if (sessionActive_) {
+    out += "\"";
+    out += calibration_curve::unitName(draftUnit_);
+    out += "\"";
+  } else {
+    out += "null";
+  }
+  out += ",\"tare\":";
   out += tareSummaryJson(tare_, "saved");
   out += ",\"draft_tare\":";
   out += tareSummaryJson(draftTare_, "draft");
@@ -161,14 +180,14 @@ String Calibration::statusJson(bool modeActive) const {
   out += ",\"draft_levels\":";
   out += levelsSummaryJson(draftLevels_, "draft");
   out += ",\"fit\":";
-  out += fitSummaryJson(fits_, tare_, levels_, false);
+  out += fitSummaryJson(fits_, tare_, levels_, unit_, false);
   out += ",\"draft_fit\":";
   if (sessionActive_) {
     // Fitted on demand: it is what Save would produce, so the workbench can
     // show which sensors still need levels before committing.
     FitSet draftFits;
-    fitAll(draftTare_, draftLevels_, draftFits);
-    out += fitSummaryJson(draftFits, draftTare_, draftLevels_, true);
+    fitAll(draftTare_, draftLevels_, draftUnit_, draftFits);
+    out += fitSummaryJson(draftFits, draftTare_, draftLevels_, draftUnit_, true);
   } else {
     out += "null";
   }
@@ -184,8 +203,17 @@ bool Calibration::sessionBegin() {
   if (sessionActive_) {
     return true;
   }
-  draftTare_ = tare_;
-  draftLevels_ = levels_;
+  // The draft is captured in the unit the device outputs now. A saved profile
+  // in the other unit cannot be extended: the draft starts empty, and saving
+  // it replaces that profile.
+  draftUnit_ = activeUnit();
+  if (draftUnit_ == unit_) {
+    draftTare_ = tare_;
+    draftLevels_ = levels_;
+  } else {
+    draftTare_.clear();
+    draftLevels_.clear();
+  }
   sessionActive_ = true;
   return true;
 }
@@ -202,9 +230,13 @@ bool Calibration::sessionCommit(bool autoEnable, String& outError) {
     return false;
   }
 
+  if (draftUnit_ != activeUnit()) {
+    outError = "calibration_unit_changed";
+    return false;
+  }
   if (autoEnable) {
     FitSet draftFits;
-    fitAll(draftTare_, draftLevels_, draftFits);
+    fitAll(draftTare_, draftLevels_, draftUnit_, draftFits);
     // Partial profiles are allowed (see refreshSavedStateCache()); only one
     // with nothing fitted at all is refused.
     if (!tareComplete(draftTare_) || draftFits.fitted == 0) {
@@ -215,6 +247,7 @@ bool Calibration::sessionCommit(bool autoEnable, String& outError) {
 
   tare_ = draftTare_;
   levels_ = draftLevels_;
+  unit_ = draftUnit_;
   draftTare_.clear();
   draftLevels_.clear();
   sessionActive_ = false;
@@ -254,6 +287,10 @@ bool Calibration::setEnabled(bool enabled, String& outError) {
     outError = "calibration_incomplete";
     return false;
   }
+  if (enabled && !unitMatches()) {
+    outError = "calibration_unit_mismatch";
+    return false;
+  }
   enabled_ = enabled;
   updatedAtMs_ = millis();
   if (!saveToStorage()) {
@@ -271,6 +308,7 @@ bool Calibration::clearProfile() {
   levels_.clear();
   draftLevels_.clear();
   sessionActive_ = false;
+  unit_ = activeUnit();
   createdAtMs_ = 0;
   updatedAtMs_ = millis();
   refreshSavedStateCache();
@@ -382,7 +420,9 @@ String Calibration::dumpFitJson() const {
   const size_t total = totalPointCount();
   String out = "{\"model\":\"a+b*sqrt(x)+c*x\",\"total_points\":";
   out += String(static_cast<unsigned int>(total));
-  out += ",\"settings\":";
+  out += ",\"unit\":\"";
+  out += calibration_curve::unitName(unit_);
+  out += "\",\"settings\":";
   out += fitSettingsJson();
   out += ",\"cells\":[";
   for (size_t sensorIndex = 0; sensorIndex < total; ++sensorIndex) {
@@ -391,7 +431,10 @@ String Calibration::dumpFitJson() const {
     }
     const calibration_curve::FitModel model =
         sensorIndex < fits_.models.size() ? fits_.models[sensorIndex] : calibration_curve::FitModel();
-    const FitResult result = sensorIndex < fits_.results.size() ? fits_.results[sensorIndex] : FitResult::NoTare;
+    FitResult result = sensorIndex < fits_.results.size() ? fits_.results[sensorIndex] : FitResult::NoTare;
+    if (result != FitResult::Fitted && sensorWithoutRfb(sensorIndex, unit_)) {
+      result = FitResult::NoRfb;
+    }
     out += "{\"sensor_index\":";
     out += String(static_cast<unsigned int>(sensorIndex));
     out += ",\"adc\":";
@@ -496,10 +539,11 @@ bool Calibration::draftTareCaptured(int sensorIndex) const {
 
 bool Calibration::applyTareDirect(const float* values, size_t count) {
   const size_t total = totalPointCount();
-  if (total == 0 || !values || count < total || sessionActive_) {
+  if (total == 0 || !values || count < total || sessionActive_ || tareUnitConflict()) {
     return false;
   }
   tare_.assign(values, values + total);
+  unit_ = activeUnit();
   tareEnabled_ = true;
   refreshSavedStateCache();
   if (!complete()) {
@@ -541,7 +585,30 @@ bool Calibration::setFitSettings(const FitSettings& settings) {
 }
 
 calibration_curve::OutputMode Calibration::outputMode() const {
+  if (!unitMatches()) {
+    return calibration_curve::OutputMode::Raw;
+  }
   return calibration_curve::resolveOutputMode(enabled_, runtimeReady_, tareEnabled_, savedTareComplete_);
+}
+
+Unit Calibration::activeUnit() const {
+  return range_ != nullptr && range_->conductance() ? Unit::Us : Unit::Mv;
+}
+
+calibration_curve::Readout Calibration::readoutFor(size_t adc, Unit unit) const {
+  // A conductance is already linear in the cell: x is the tare-relative µS.
+  return unit == Unit::Us ? calibration_curve::Readout() : fitSettings_.readout[adc];
+}
+
+float Calibration::clipFor(size_t adc, Unit unit) const {
+  return unit == Unit::Us ? calibration_curve::kConductanceClipUs : fitSettings_.clipMv[adc];
+}
+
+bool Calibration::sensorWithoutRfb(size_t sensorIndex, Unit unit) const {
+  if (unit != Unit::Us || range_ == nullptr || analogCount_ == 0) {
+    return false;
+  }
+  return !(range_->rfbOhm(sensorIndex % analogCount_) > 0.0f);
 }
 
 bool Calibration::apply(float rawMv, uint16_t sensorIndex, float& outValue) const {
@@ -559,7 +626,7 @@ bool Calibration::apply(float rawMv, uint16_t sensorIndex, float& outValue) cons
         return false;
       }
       const float x = calibration_curve::readoutX(calibration_curve::applyTare(rawMv, tareValue),
-                                                  fitSettings_.readout[adcIndexForSensor(sensorIndex)]);
+                                                  readoutFor(adcIndexForSensor(sensorIndex), unit_));
       // Held at the top of this sensor's calibrated range rather than
       // extrapolated; an unfitted sensor (partial profile) reads 0.
       const float maxX = sensorIndex < fits_.maxX.size() ? fits_.maxX[sensorIndex] : NAN;
@@ -618,7 +685,8 @@ bool Calibration::tareComplete(const std::vector<float>& tare) const {
   return total > 0 && capturedCount(tare) >= total;
 }
 
-void Calibration::fitAll(const std::vector<float>& tare, const std::vector<LevelData>& levels, FitSet& out) const {
+void Calibration::fitAll(const std::vector<float>& tare, const std::vector<LevelData>& levels, Unit unit,
+                         FitSet& out) const {
   const size_t total = totalPointCount();
   out.models.assign(total, calibration_curve::FitModel());
   out.results.assign(total, FitResult::NoTare);
@@ -646,7 +714,7 @@ void Calibration::fitAll(const std::vector<float>& tare, const std::vector<Level
       const float relative = sensorIndex < item.values.size() ? item.values[sensorIndex] : NAN;
       float x = NAN;
       if (calibration_curve::classifyPoint(keyLevel(item.key), fitSettings_.minLevel, tare[sensorIndex], relative,
-                                           fitSettings_.clipMv[adc], fitSettings_.readout[adc], &x) !=
+                                           clipFor(adc, unit), readoutFor(adc, unit), &x) !=
           calibration_curve::PointStatus::Used) {
         continue;
       }
@@ -679,7 +747,7 @@ size_t Calibration::adcIndexForSensor(size_t sensorIndex) const {
 
 void Calibration::refreshSavedStateCache() {
   savedTareComplete_ = tareComplete(tare_);
-  fitAll(tare_, levels_, fits_);
+  fitAll(tare_, levels_, unit_, fits_);
   // Usable once any sensor is fitted: a sensor that cannot be (a broken
   // trace, a dead cell) reads 0 and is listed in the fit summary, instead of
   // holding the whole profile hostage.
@@ -712,6 +780,8 @@ bool Calibration::loadFromStorage() {
   enabled_ = false;
   tareEnabled_ = false;
   sessionActive_ = false;
+  // A profile saved before units existed was captured in mV.
+  unit_ = Unit::Mv;
   savedTareComplete_ = false;
   runtimeReady_ = false;
   tare_.clear();
@@ -755,6 +825,8 @@ bool Calibration::loadFromStorage() {
         enabled_ = value == "1";
       } else if (key == "tare_enabled") {
         tareEnabled_ = value == "1";
+      } else if (key == "unit") {
+        unit_ = value == "uS" ? Unit::Us : Unit::Mv;
       } else if (key == "created_at_ms") {
         createdAtMs_ = static_cast<uint32_t>(value.toInt());
       } else if (key == "updated_at_ms") {
@@ -838,6 +910,8 @@ bool Calibration::saveToStorage() {
   meta += enabled_ ? "1" : "0";
   meta += "\ntare_enabled=";
   meta += tareEnabled_ ? "1" : "0";
+  meta += "\nunit=";
+  meta += calibration_curve::unitName(unit_);
   meta += "\ncreated_at_ms=";
   meta += String(createdAtMs_);
   meta += "\nupdated_at_ms=";
@@ -1049,15 +1123,19 @@ String Calibration::levelsSummaryJson(const std::vector<LevelData>& levels, cons
 }
 
 String Calibration::fitSummaryJson(const FitSet& fits, const std::vector<float>& tare,
-                                   const std::vector<LevelData>& levels, bool points) const {
+                                   const std::vector<LevelData>& levels, Unit unit, bool points) const {
   const size_t total = totalPointCount();
-  size_t counts[4] = {0, 0, 0, 0};
+  size_t counts[5] = {0, 0, 0, 0, 0};
   String failed = "[";
   size_t listed = 0;
   for (size_t i = 0; i < fits.results.size(); ++i) {
-    const FitResult result = fits.results[i];
+    FitResult result = fits.results[i];
+    if (result != FitResult::Fitted && sensorWithoutRfb(i, unit)) {
+      // No Rfb on its row: it reads 0 by design, which is not a failure.
+      result = FitResult::NoRfb;
+    }
     ++counts[static_cast<size_t>(result)];
-    if (result == FitResult::Fitted || listed >= kMaxListedFitFailures) {
+    if (result == FitResult::Fitted || result == FitResult::NoRfb || listed >= kMaxListedFitFailures) {
       continue;
     }
     if (listed++) {
@@ -1074,8 +1152,11 @@ String Calibration::fitSummaryJson(const FitSet& fits, const std::vector<float>&
   out += String(static_cast<unsigned int>(total));
   out += ",\"cells_fitted\":";
   out += String(static_cast<unsigned int>(fits.fitted));
+  out += ",\"cells_no_rfb\":";
+  out += String(static_cast<unsigned int>(counts[static_cast<size_t>(FitResult::NoRfb)]));
   out += ",\"complete\":";
-  out += total > 0 && fits.fitted == total ? "true" : "false";
+  const size_t applicable = total - counts[static_cast<size_t>(FitResult::NoRfb)];
+  out += applicable > 0 && fits.fitted == applicable ? "true" : "false";
   // Savable with some sensors unfitted (they read 0); see sessionCommit().
   out += ",\"partial_save\":true";
   out += ",\"failures\":{\"no_tare\":";
@@ -1100,11 +1181,16 @@ String Calibration::fitSummaryJson(const FitSet& fits, const std::vector<float>&
     for (size_t sensorIndex = 0; sensorIndex < total; ++sensorIndex) {
       const float sensorTare = sensorIndex < tare.size() ? tare[sensorIndex] : NAN;
       const size_t adc = adcIndexForSensor(sensorIndex);
+      const bool noRfb = sensorWithoutRfb(sensorIndex, unit);
       for (const LevelData& item : levels) {
+        if (noRfb) {
+          codes += calibration_curve::pointStatusCode(calibration_curve::PointStatus::NoRfb);
+          continue;
+        }
         const float relative = sensorIndex < item.values.size() ? item.values[sensorIndex] : NAN;
         codes += calibration_curve::pointStatusCode(calibration_curve::classifyPoint(
-            keyLevel(item.key), fitSettings_.minLevel, sensorTare, relative, fitSettings_.clipMv[adc],
-            fitSettings_.readout[adc], nullptr));
+            keyLevel(item.key), fitSettings_.minLevel, sensorTare, relative, clipFor(adc, unit),
+            readoutFor(adc, unit), nullptr));
       }
     }
     out += codes;
@@ -1234,6 +1320,8 @@ const char* Calibration::fitResultName(FitResult result) {
       return "too_few_points";
     case FitResult::Singular:
       return "singular";
+    case FitResult::NoRfb:
+      return "no_rfb";
     case FitResult::NoTare:
     default:
       return "no_tare";

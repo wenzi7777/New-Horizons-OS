@@ -9,6 +9,7 @@
 namespace nhos {
 
 class Storage;
+class RangeCompensator;
 
 // Pressure calibration: per-sensor least-squares fits of the paper's model
 // (see CalibrationCurve.h) over captured pressure levels.
@@ -32,9 +33,27 @@ class Calibration {
     float clipMv[2] = {3150.0f, 3100.0f};
   };
 
-  enum class FitResult : uint8_t { Fitted = 0, NoTare, TooFewPoints, Singular };
+  // NoRfb: a conductance profile's sensor on a row without a measured Rfb
+  // (it reads 0); not a failure. Only ever reported, never stored.
+  enum class FitResult : uint8_t { Fitted = 0, NoTare, TooFewPoints, Singular, NoRfb };
 
   void begin(Storage& storage);
+  // v2.0.F: what the device outputs (mV or µS) and which rows have an Rfb.
+  // Without it every profile is in mV.
+  void setRangeCompensator(const RangeCompensator* range) { range_ = range; }
+  // The unit the device outputs now; a profile in another unit is kept but
+  // not applied (output_mode reads "raw") until the unit matches again.
+  calibration_curve::Unit activeUnit() const;
+  calibration_curve::Unit unit() const { return unit_; }
+  // An empty profile (no tare, no levels) has no unit to disagree with.
+  bool unitMatches() const { return unit_ == activeUnit() || profileEmpty(); }
+  // False once the output unit changed under an open session: its draft
+  // captures are in the old unit.
+  bool draftUnitMatches() const { return !sessionActive_ || draftUnit_ == activeUnit(); }
+  // A stand-alone tare in the active unit would sit under levels captured in
+  // the other one: refused until the profile is cleared.
+  bool tareUnitConflict() const { return !unitMatches() && !levels_.empty(); }
+  bool profileEmpty() const { return levels_.empty() && capturedCount(tare_) == 0; }
   void setLayout(const uint8_t* analogPins, size_t analogCount, const uint8_t* selectPins, size_t selectCount);
 
   String statusJson(bool modeActive) const;
@@ -84,7 +103,8 @@ class Calibration {
     int32_t key = 0;
     // The pressure actually applied when the level was captured.
     float reference = 0;
-    // mV relative to the tare active at capture; NaN where not captured.
+    // Relative to the tare active at capture, in the profile's unit; NaN where
+    // not captured.
     std::vector<float> values;
   };
 
@@ -102,7 +122,14 @@ class Calibration {
   LevelData* mutableLevel(std::vector<LevelData>& levels, float level, bool createIfMissing);
   const LevelData* findLevel(const std::vector<LevelData>& levels, float level) const;
   bool tareComplete(const std::vector<float>& tare) const;
-  void fitAll(const std::vector<float>& tare, const std::vector<LevelData>& levels, FitSet& out) const;
+  void fitAll(const std::vector<float>& tare, const std::vector<LevelData>& levels, calibration_curve::Unit unit,
+              FitSet& out) const;
+  // The readout curve and clip a point is classified with: the board's in mV,
+  // identity and kConductanceClipUs in µS.
+  calibration_curve::Readout readoutFor(size_t adc, calibration_curve::Unit unit) const;
+  float clipFor(size_t adc, calibration_curve::Unit unit) const;
+  // A µS sensor on a row without Rfb: reported as no_rfb, not as a failure.
+  bool sensorWithoutRfb(size_t sensorIndex, calibration_curve::Unit unit) const;
   size_t adcIndexForSensor(size_t sensorIndex) const;
   void refreshSavedStateCache();
   void logEvaluationCost() const;
@@ -121,7 +148,7 @@ class Calibration {
   // `points` adds the per-sensor, per-level PointStatus string (draft only:
   // it is what the workbench marks levels and sensors red from).
   String fitSummaryJson(const FitSet& fits, const std::vector<float>& tare,
-                        const std::vector<LevelData>& levels, bool points) const;
+                        const std::vector<LevelData>& levels, calibration_curve::Unit unit, bool points) const;
   String fitSettingsJson() const;
   String metadataJson() const;
   String arrayJson(const uint8_t* values, size_t count) const;
@@ -136,6 +163,9 @@ class Calibration {
   static const char* fitResultName(FitResult result);
 
   Storage* storage_ = nullptr;
+  const RangeCompensator* range_ = nullptr;
+  calibration_curve::Unit unit_ = calibration_curve::Unit::Mv;
+  calibration_curve::Unit draftUnit_ = calibration_curve::Unit::Mv;
   bool enabled_ = false;
   bool tareEnabled_ = false;
   bool sessionActive_ = false;

@@ -19,7 +19,8 @@
     "espnow_data_frame_budget": 3840,
     "extension_types": {
       "_comment": "TLV types in a packet's extensions block (PROTOCOL.md 3.1). A receiver skips a type it does not know.",
-      "app_event": "0x01"
+      "app_event": "0x01",
+      "range": "0x02"
     },
     "app_event": {
       "_comment": "The app_event TLV: seq u32, frame_seq u32, uptime_ms u32, flags u8, [value f32 when flags & value], then app, event, detail as u8 length + bytes, at most these lengths (AppManager's EventRecord).",
@@ -27,6 +28,13 @@
       "max_app": 15,
       "max_event": 23,
       "max_detail": 47
+    },
+    "range": {
+      "_comment": "The range TLV (TIA-CTL v2.0.F, every packet): unit u8 (unit_* below), flags u8, vref_mv u16, saturated_rows u32 (bit n = row n, measured rows that clipped in this frame). The frame's own state, so a recording knows each frame's unit and Vref.",
+      "len": 8,
+      "unit_mv": 0,
+      "unit_us": 1,
+      "flag_auto": "0x01"
     },
     "flags": {
       "imu": "0x01",

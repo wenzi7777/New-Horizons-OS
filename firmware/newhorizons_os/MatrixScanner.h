@@ -99,8 +99,11 @@ class MatrixScanner {
   size_t scanIntoPacketPayload(uint8_t* out, size_t capacity, MatrixFrame& frame);
   bool streamBufferEnabled() const;
   // Calibration captures: the median of ~0.5 s block means over durationMs.
-  bool captureCellBlockMedian(uint16_t sensorIndex, uint32_t durationMs, float& outValue);
-  bool captureAllBlockMedians(float* outValues, size_t count, uint32_t durationMs);
+  // markSaturated (calibration only): in conductance, a sample whose measured
+  // row's ADC is saturated counts as calibration_curve::kSaturatedCaptureUs,
+  // so the fit can leave that point out as it does a clipped mV reading.
+  bool captureCellBlockMedian(uint16_t sensorIndex, uint32_t durationMs, float& outValue, bool markSaturated = false);
+  bool captureAllBlockMedians(float* outValues, size_t count, uint32_t durationMs, bool markSaturated = false);
   bool shouldSendFrame(const MatrixFrame& frame) const;
   bool enqueuePacket(const uint8_t* data, size_t len, uint32_t seq, uint32_t timestampMs, uint8_t flags);
   bool sendQueuedPacket(StreamTransport& transport);
@@ -118,6 +121,9 @@ class MatrixScanner {
   float lastPeak01() const { return lastPeak01_; }
   uint16_t lastActiveCells() const { return lastActiveCells_; }
 
+ // The filter's history, started again (set_range when the unit changes).
+  void restartFilter() { resetFilterState(); }
+
  private:
   RangeCompensator* range_ = nullptr;
   struct SensorFilterState {
@@ -132,9 +138,12 @@ class MatrixScanner {
   // ok (optional) is set false when the ADC read failed.
   float readCellMv(size_t rowIndex, uint16_t cellIndex, bool* ok = nullptr);
   // readCellMv() through the range compensator (when there is one).
-  float readCompensatedMv(size_t rowIndex, size_t colIndex, uint16_t cellIndex);
-  bool sampleRawFrame(float* outValues, size_t count);
-  bool sampleRawCell(uint16_t sensorIndex, float& outValue);
+  // adcMv, when given, receives the ADC reading before the compensator.
+  float readCompensatedMv(size_t rowIndex, size_t colIndex, uint16_t cellIndex, float* adcMv = nullptr);
+  bool sampleRawFrame(float* outValues, size_t count, bool markSaturated = false);
+  bool sampleRawCell(uint16_t sensorIndex, float& outValue, bool markSaturated = false);
+  // One capture sample: readCompensatedMv(), or kSaturatedCaptureUs as above.
+  float readCaptureSample(size_t rowIndex, size_t colIndex, uint16_t cellIndex, bool markSaturated);
   void resetFilterState();
   float applyFilter(float value, uint16_t sensorIndex);
   void configurePins();

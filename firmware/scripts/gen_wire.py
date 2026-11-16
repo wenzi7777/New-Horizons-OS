@@ -88,6 +88,12 @@ def packet_header(spec: dict) -> str:
         f"constexpr size_t kAppEventMaxEvent = {e['max_event']};",
         f"constexpr size_t kAppEventMaxDetail = {e['max_detail']};",
         "",
+        "// The range TLV (spec/PROTOCOL.md 3.1).",
+        f"constexpr size_t kRangeTlvLen = {p['range']['len']};",
+        f"constexpr uint8_t kRangeUnitMv = {p['range']['unit_mv']};",
+        f"constexpr uint8_t kRangeUnitUs = {p['range']['unit_us']};",
+        f"constexpr uint8_t kRangeFlagAuto = 0x{p['range']['flag_auto']:02X};",
+        "",
         "}  // namespace nhos",
         "",
     ]
@@ -165,6 +171,10 @@ def python_module(spec: dict) -> str:
         f"APP_EVENT_MAX_APP = {e['max_app']}",
         f"APP_EVENT_MAX_EVENT = {e['max_event']}",
         f"APP_EVENT_MAX_DETAIL = {e['max_detail']}",
+        f"RANGE_TLV_LEN = {p['range']['len']}",
+        f"RANGE_UNIT_MV = {p['range']['unit_mv']}",
+        f"RANGE_UNIT_US = {p['range']['unit_us']}",
+        f"RANGE_FLAG_AUTO = 0x{p['range']['flag_auto']:02X}",
     ]
     lines += [
         "",

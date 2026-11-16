@@ -4,6 +4,7 @@
 // never checks maintenance mode itself: the table's kCmdNeedsMaintenance
 // flag is enforced once, in processCommand(), before it runs.
 #include "ControlServer.h"
+#include "RangeCompensator.h"
 #include "EspNowOtaReceiver.h"
 #include <esp_timer.h>
 #include <utility>
@@ -189,10 +190,15 @@ String ControlServer::cmdCalibrationCaptureTare(const CommandContext& ctx) {
   if (!calibration_ || !scanner_) {
     return error(cmd, "calibration_unavailable");
   }
+  if (!calibration_->draftUnitMatches()) {
+    // The output unit changed under the session: its draft is in the other one.
+    return error(cmd, "calibration_unit_changed");
+  }
   const ScanHealth health = scanner_->health();
   std::vector<float> values(health.pointCount, 0);
   const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 3000));
-  if (!scanner_->captureAllBlockMedians(values.data(), values.size(), durationMs) || !calibration_->captureTare(values.data(), values.size())) {
+  if (!scanner_->captureAllBlockMedians(values.data(), values.size(), durationMs, true) ||
+      !calibration_->captureTare(values.data(), values.size())) {
     return error(cmd, "calibration_capture_failed");
   }
   String tareJson;
@@ -209,6 +215,10 @@ String ControlServer::cmdCalibrationTareCapture(const CommandContext& ctx) {
   if (!calibration_ || !scanner_) {
     return error(cmd, "calibration_unavailable");
   }
+  if (calibration_->tareUnitConflict()) {
+    // The saved levels are in the other unit; a tare in this one would not fit them.
+    return error(cmd, "calibration_unit_mismatch");
+  }
   if (calibration_->sessionActive()) {
     // Inside a session the baseline is the draft's (calibration_capture_tare);
     // writing the saved tare here would be undone by the commit.
@@ -219,7 +229,7 @@ String ControlServer::cmdCalibrationTareCapture(const CommandContext& ctx) {
   const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 1000));
   const bool pauseScan = !maintenanceMode() && scanner_->active();
   if (pauseScan) scanner_->stop();
-  const bool captured = scanner_->captureAllBlockMedians(values.data(), values.size(), durationMs);
+  const bool captured = scanner_->captureAllBlockMedians(values.data(), values.size(), durationMs, true);
   if (pauseScan) scanner_->start();
   if (!captured || !calibration_->applyTareDirect(values.data(), values.size())) {
     return error(cmd, "calibration_tare_capture_failed");
@@ -249,6 +259,10 @@ String ControlServer::cmdCalibrationCaptureCell(const CommandContext& ctx) {
   if (!calibration_ || !scanner_) {
     return error(cmd, "calibration_unavailable");
   }
+  if (!calibration_->draftUnitMatches()) {
+    // The output unit changed under the session: its draft is in the other one.
+    return error(cmd, "calibration_unit_changed");
+  }
   const uint16_t sensorIndex = static_cast<uint16_t>(extractInt(request, "sensor_index", -1));
   const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 3000));
   // `level` names the level (nominal); `reference` is the pressure actually
@@ -260,7 +274,7 @@ String ControlServer::cmdCalibrationCaptureCell(const CommandContext& ctx) {
     return error(cmd, "calibration_tare_required");
   }
   float value = 0;
-  if (!scanner_->captureCellBlockMedian(sensorIndex, durationMs, value) ||
+  if (!scanner_->captureCellBlockMedian(sensorIndex, durationMs, value, true) ||
       !calibration_->captureCell(sensorIndex, level, reference, value)) {
     return error(cmd, "calibration_capture_failed");
   }
@@ -276,6 +290,10 @@ String ControlServer::cmdCalibrationCaptureAll(const CommandContext& ctx) {
   if (!calibration_ || !scanner_) {
     return error(cmd, "calibration_unavailable");
   }
+  if (!calibration_->draftUnitMatches()) {
+    // The output unit changed under the session: its draft is in the other one.
+    return error(cmd, "calibration_unit_changed");
+  }
   const ScanHealth health = scanner_->health();
   std::vector<float> values(health.pointCount, 0);
   const uint32_t durationMs = static_cast<uint32_t>(extractInt(request, "duration_ms", 3000));
@@ -284,7 +302,7 @@ String ControlServer::cmdCalibrationCaptureAll(const CommandContext& ctx) {
   if (calibration_->sessionActive() && !calibration_->draftTareCaptured()) {
     return error(cmd, "calibration_tare_required");
   }
-  if (!scanner_->captureAllBlockMedians(values.data(), values.size(), durationMs) ||
+  if (!scanner_->captureAllBlockMedians(values.data(), values.size(), durationMs, true) ||
       !calibration_->captureAll(level, reference, values.data(), values.size())) {
     return error(cmd, "calibration_capture_failed");
   }
