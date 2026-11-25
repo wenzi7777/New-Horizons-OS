@@ -369,4 +369,55 @@ size_t jsonExtractUInt8Array(const String& source, const char* key, uint8_t* out
   return count;
 }
 
+size_t jsonExtractFloatArray(const String& source, const char* key, float* out, size_t maxCount) {
+  String array;
+  if (!jsonExtractArray(source, key, array) || array.length() < 2) {
+    return 0;
+  }
+  const String body = array.substring(1, array.length() - 1);
+  size_t count = 0;
+  int cursor = 0;
+  while (cursor <= static_cast<int>(body.length())) {
+    int end = body.indexOf(',', cursor);
+    if (end < 0) end = body.length();
+    String token = body.substring(cursor, end);
+    token.trim();
+    if (!token.length()) {
+      return 0;  // "[]", or an empty slot such as "[1,,2]"
+    }
+    if (count >= maxCount) {
+      return 0;
+    }
+    char* parsedEnd = nullptr;
+    const float value = strtof(token.c_str(), &parsedEnd);
+    if (!parsedEnd || *parsedEnd != '\0') {
+      return 0;
+    }
+    out[count++] = value;
+    cursor = end + 1;
+  }
+  return count;
+}
+
+bool jsonExtractUInt64(const String& source, const char* key, uint64_t& out) {
+  String value;
+  if (!extractScalarText(source, key, value) || !value.length()) {
+    return false;
+  }
+  uint64_t parsed = 0;
+  for (unsigned int i = 0; i < value.length(); ++i) {
+    const char c = value.charAt(i);
+    if (c < '0' || c > '9') {
+      return false;
+    }
+    const uint64_t next = parsed * 10 + static_cast<uint64_t>(c - '0');
+    if (next / 10 != parsed) {
+      return false;  // overflow
+    }
+    parsed = next;
+  }
+  out = parsed;
+  return true;
+}
+
 }  // namespace nhos

@@ -6,7 +6,7 @@
 #include "PacketWire.h"
 
 #ifndef NHOS_FIRMWARE_VERSION
-#define NHOS_FIRMWARE_VERSION "v2.3.1"
+#define NHOS_FIRMWARE_VERSION "v2.4.0"
 #endif
 
 namespace nhos {
@@ -60,6 +60,9 @@ static constexpr uint16_t kMinSyncIntervalS = 5;
 static constexpr uint16_t kMaxSyncIntervalS = 3600;
 
 static constexpr uint16_t kDefaultTargetFps = 60;
+// Magnetometer calibration reminder (days; 0 = never remind).
+static constexpr uint16_t kDefaultMagCalIntervalDays = 30;
+static constexpr uint16_t kMaxMagCalIntervalDays = 365;
 static constexpr uint16_t kMaxTargetFps = 120;
 static constexpr uint16_t kDefaultSettleUs = 20;
 static constexpr uint8_t kDefaultSendEveryNFrames = 1;

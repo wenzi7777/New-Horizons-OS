@@ -933,8 +933,41 @@ class ArduinoRewriteScaffoldTests(unittest.TestCase):
         self.assertIn("ImuManager& imu", control_header)
         self.assertIn("imu_ ? imu_->statusJson()", control)
         self.assertIn("void setServiceIntervalUs(uint32_t us)", imu_header)
-        self.assertIn("imu.setServiceIntervalUs(scanner.scanIntervalUs())", sketch)
-        self.assertIn("imu_->setServiceIntervalUs(scanner_->scanIntervalUs())", control)
+        # The scan rate reaches the IMU and magnetometer in one place.
+        rates = read_firmware("SensorRates.cpp")
+        self.assertIn("imu->setServiceIntervalUs(intervalUs)", rates)
+        self.assertIn("imu->setOdrForFps(fps)", rates)
+        self.assertIn("magnetometer->setRateForScan(fps, intervalUs)", rates)
+        self.assertEqual(sketch.count("nhos::applySensorRates(scanner, &imu, &magnetometer)"), 2)
+        self.assertIn("applySensorRates(*scanner_, imu_, magnetometer_)", control)
+        self.assertIn("applySensorRates(*scanner_, imu_, magnetometer_)",
+                      read_firmware("AppDeviceControl.cpp"))
+        self.assertNotIn("setServiceIntervalUs(scanner", sketch + control)
+
+    def test_magnetometer_is_off_by_default_switchable_and_calibrated(self):
+        device_header = read_firmware("DeviceConfig.h")
+        device_config = read_firmware("DeviceConfig.cpp")
+        manager = read_firmware("MagnetometerManager.cpp")
+        control = control_source()
+        sketch = read_firmware("newhorizons_os.ino")
+        table = read_firmware("ControlCommandTable.cpp")
+
+        self.assertIn("bool magEnabled = false;", device_header)
+        self.assertIn("data_.magEnabled = false;", device_config)
+        self.assertIn("MagCalibrationData magCal;", device_header)
+        self.assertIn('{"set_mag", &ControlServer::cmdSetMag', table)
+        self.assertIn('{"set_mag_calibration", &ControlServer::cmdSetMagCalibration', table)
+        self.assertIn("magcal::validate(cal)", control)
+        # Calibrated before it is cached: stream, sensor_sample and apps agree.
+        self.assertIn("magcal::apply(calibration_, raw, calibrated)", manager)
+        self.assertIn("sample_.store(calibrated)", manager)
+        # The persisted switch is read at boot, and the poll follows the scan.
+        self.assertIn("magnetometer.begin(deviceConfig.data().magEnabled, imu.initialized())", sketch)
+        self.assertIn("magnetometer.service(micros())", sketch)
+        self.assertNotIn("nowMs - lastPollMs_ < 50", manager)
+        # Off means the chip sleeps, not just that nobody reads it.
+        self.assertIn("bmm350_.setAwake(false)", manager)
+        self.assertIn("imuDriver.setMagAwake(false)", manager)
 
     def test_log_configuration_defaults_to_rolling_12k_and_has_extended_24k_mode(self):
         config = read_firmware("Config.h")

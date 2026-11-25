@@ -71,12 +71,13 @@ class ServiceControlTests(unittest.TestCase):
         self.assertIn("return OpResult::NotStoppable;", stop)
         self.assertIn("service.state = ServiceState::Stopped;", stop)
 
-    def test_only_scanner_and_imu_are_stoppable(self):
+    def test_only_scanner_imu_and_magnetometer_are_stoppable(self):
         sketch = read("newhorizons_os.ino")
         block = between(sketch, "void registerServices()", "void registerRuntimeTasks()")
         self.assertIn("&scannerStop", block)
         self.assertIn("&imuStop", block)
-        self.assertEqual(block.count("Stop);"), 2)
+        self.assertIn("&magnetometerStop", block)
+        self.assertEqual(block.count("Stop);"), 3)
 
     def test_supervision_leaves_a_stopped_service_alone(self):
         impl = read("ServiceManager.cpp")
@@ -90,6 +91,8 @@ class ServiceControlTests(unittest.TestCase):
         sketch = read("newhorizons_os.ino")
         resume = between(sketch, "void applyNormalRuntimeState()", "void servicePowerTransition()")
         self.assertIn('!services.isOperatorStopped("imu")', resume)
+        self.assertIn("syncMagnetometerNow()", resume)
+        self.assertIn('services.isOperatorStopped("magnetometer")', sketch)
         self.assertIn('!services.isOperatorStopped("scanner")', resume)
         self.assertIn('isOperatorStopped("scanner")', handler_body("exit_maintenance"))
         self.assertIn('isOperatorStopped("scanner")', handler_body("set_matrix_layout"))

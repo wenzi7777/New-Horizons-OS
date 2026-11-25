@@ -34,12 +34,35 @@ class ImuDriver : public BoschSensorClass {
   // readAcceleration()/readGyroscope().
   bool readAccelGyro(float acc[3], float gyr[3]);
 
+  // Output data rate of the accelerometer and gyroscope (25/50/100/200 Hz;
+  // see SensorRatePolicy). Kept across begin(): configure_sensor() applies
+  // it after the library's own setup, so a re-begun IMU keeps its rate.
+  // Written to the chip at once when it is already up. Returns false when
+  // the chip rejected it.
+  bool setImuOdrHz(uint16_t hz);
+  uint16_t imuOdrHz() const { return imuOdrHz_; }
+
+  // BMM150 (GCU boards, hosted by this driver): output data rate in normal
+  // mode, 10/15/20/25/30 Hz, and sleep/wake. Same persistence as above.
+  bool setMagOdrHz(uint16_t hz);
+  uint16_t magOdrHz() const { return magOdrHz_; }
+  bool setMagAwake(bool awake);
+  bool magHosted() const { return magDev_ != nullptr; }
+
  protected:
   using BoschSensorClass::configure_sensor;
   int8_t configure_sensor(struct bmi2_dev* dev) override;
+  int8_t configure_sensor(struct bmm150_dev* dev) override;
 
  private:
+  int8_t applyImuOdr();
+  int8_t applyMagOdr();
+
   struct bmi2_dev* dev_ = nullptr;
+  struct bmm150_dev* magDev_ = nullptr;
+  uint16_t imuOdrHz_ = 100;  // the library's own default
+  uint16_t magOdrHz_ = 10;   // the BMM150's reset default
+  bool magAwake_ = true;
 };
 
 // The one instance. Both ImuManager and MagnetometerManager use it: on boards

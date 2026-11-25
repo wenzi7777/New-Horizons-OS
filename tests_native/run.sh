@@ -265,3 +265,15 @@ echo "packet fixtures: up to date"
   -o "$BUILD_DIR/test_app_resources"
 
 "$BUILD_DIR/test_app_resources"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_sensor_rate_policy.cpp" \
+  -o "$BUILD_DIR/test_sensor_rate_policy"
+
+"$BUILD_DIR/test_sensor_rate_policy"
+
+"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$FIRMWARE_DIR" \
+  "$SCRIPT_DIR/test_mag_calibration.cpp" \
+  -o "$BUILD_DIR/test_mag_calibration"
+
+"$BUILD_DIR/test_mag_calibration"

@@ -32,6 +32,11 @@ const ConfigEntry kEntries[] = {
      nullptr, "Low-pass smoothing factor."},
     {"imu.enabled", ConfigType::Bool, "set_imu", "enabled", 0, 0, nullptr,
      "Sample the IMU and attach it to outgoing frames."},
+    {"mag.enabled", ConfigType::Bool, "set_mag", "enabled", 0, 0, nullptr,
+     "Sample the magnetometer and attach it to outgoing frames (off by default)."},
+    {"mag.cal_interval_days", ConfigType::Int, "set_mag", "cal_interval_days", 0,
+     kMaxMagCalIntervalDays, nullptr,
+     "Days after a magnetometer calibration before apps remind to redo it (0 = never)."},
     {"log.enabled", ConfigType::Bool, "set_log", "enabled", 0, 0, nullptr,
      "Write the device log to flash."},
     {"log.level", ConfigType::Enum, "set_log", "level", 0, 0, "error,warn,info,debug",
@@ -99,6 +104,8 @@ bool ConfigRegistry::readValue(const String& path, const DeviceConfig& config,
   if (path == "filter.median") { out = String(data.filter.median); return true; }
   if (path == "filter.alpha") { out = String(data.filter.alpha, 3); return true; }
   if (path == "imu.enabled") { out = boolText(data.imuEnabled); return true; }
+  if (path == "mag.enabled") { out = boolText(data.magEnabled); return true; }
+  if (path == "mag.cal_interval_days") { out = String(data.magCalIntervalDays); return true; }
   if (path == "log.enabled") { out = boolText(data.logging.enabled); return true; }
   if (path == "log.level") { out = data.logging.level; return true; }
   if (path == "log.mode") { out = data.logging.mode; return true; }

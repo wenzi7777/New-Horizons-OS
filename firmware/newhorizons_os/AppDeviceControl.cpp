@@ -6,13 +6,17 @@
 #include "ConfigRegistry.h"
 #include "DeviceConfig.h"
 #include "ImuManager.h"
+#include "MagnetometerManager.h"
 #include "MatrixScanner.h"
+#include "SensorRates.h"
 
 namespace nhos {
 
 DeviceConfig* AppDeviceControl::config_ = nullptr;
 MatrixScanner* AppDeviceControl::scanner_ = nullptr;
 ImuManager* AppDeviceControl::imu_ = nullptr;
+MagnetometerManager* AppDeviceControl::magnetometer_ = nullptr;
+void (*AppDeviceControl::syncMagnetometer_)() = nullptr;
 const void* AppDeviceControl::owner_[kVmDeviceConfigKeyCount] = {};
 float AppDeviceControl::value_[kVmDeviceConfigKeyCount] = {};
 const void* AppDeviceControl::pausedBy_ = nullptr;
@@ -30,10 +34,13 @@ Group groupOf(const char* key) {
 
 }  // namespace
 
-void AppDeviceControl::begin(DeviceConfig* config, MatrixScanner* scanner, ImuManager* imu) {
+void AppDeviceControl::begin(DeviceConfig* config, MatrixScanner* scanner, ImuManager* imu,
+                             MagnetometerManager* magnetometer, void (*syncMagnetometer)()) {
   config_ = config;
   scanner_ = scanner;
   imu_ = imu;
+  magnetometer_ = magnetometer;
+  syncMagnetometer_ = syncMagnetometer;
 }
 
 int8_t AppDeviceControl::indexOf(const char* key) {
@@ -112,7 +119,7 @@ void AppDeviceControl::apply() {
     const uint16_t every = static_cast<uint16_t>(get("scan.send_every_n_frames"));
     if (fps != scanner_->targetFps() || every != scanner_->sendEveryNFrames()) {
       scanner_->setTiming(fps, data.scanTiming.settleUs, every);
-      if (imu_ != nullptr) imu_->setServiceIntervalUs(scanner_->scanIntervalUs());
+      applySensorRates(*scanner_, imu_, magnetometer_);
     }
     FilterConfig filter = data.filter;
     filter.enabled = get("filter.enabled") != 0.0f;
@@ -122,7 +129,10 @@ void AppDeviceControl::apply() {
   }
   if (imu_ != nullptr) {
     const bool want = get("imu.enabled") != 0.0f;
-    if (want != imu_->enabled()) imu_->setEnabled(want);
+    if (want != imu_->enabled()) {
+      imu_->setEnabled(want);
+      if (syncMagnetometer_ != nullptr) syncMagnetometer_();
+    }
   }
 }
 

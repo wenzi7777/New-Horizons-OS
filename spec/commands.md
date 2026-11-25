@@ -2,7 +2,7 @@
 
 # Device commands
 
-103 commands, in dispatch-table order. A device reports the same table at run time
+105 commands, in dispatch-table order. A device reports the same table at run time
 with the `commands` command (firmware v1.15.0+). See PROTOCOL.md for the request and
 reply envelope.
 
@@ -81,6 +81,8 @@ Flags:
 | `battery_status` |  | The battery card's slice of status: charger, gauge and power state. |
 | `resync_battery_gauge` |  | Restart the fuel gauge's state-of-charge estimate. |
 | `set_imu` |  | Enable or disable the optional IMU service. |
+| `set_mag` |  | Enable or disable the magnetometer (off by default) and set the calibration reminder interval. |
+| `set_mag_calibration` |  | Store the magnetometer's hard/soft-iron calibration (offset, matrix), or clear it. |
 | `set_log` |  | Configure device rolling log level and capacity. |
 | `set_indicators` |  | Configure supported indicator hardware. Brightness expects decimal values such as 0.10, 0.35, 0.50, or 1.00. |
 | `calibration_status` |  | Query manual calibration status, coverage, and metadata. |

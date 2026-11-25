@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "Config.h"
+#include "MagCalibration.h"
 #include "Storage.h"
 #include "UpdateChannel.h"
 
@@ -115,6 +116,13 @@ struct DeviceConfigData {
   StreamBufferConfig streamBuffer;
   FilterConfig filter;
   bool imuEnabled = true;
+  // Magnetometer: off unless turned on (a device updated from a firmware
+  // without this key comes up off too). Turning it on from the Desktop /
+  // Studio / Pocket runs the calibration wizard first.
+  bool magEnabled = false;
+  // Days after a calibration before the apps remind to redo it; 0 = never.
+  uint16_t magCalIntervalDays = kDefaultMagCalIntervalDays;
+  MagCalibrationData magCal;
   bool streamRawAdc = false;
   LogConfig logging;
   OtaConfig ota;
@@ -140,6 +148,10 @@ class DeviceConfig {
   bool setStreamBuffer(bool enabled, const String& mode);
   bool setFilter(bool enabled, uint8_t median, float alpha);
   bool setImuEnabled(bool enabled);
+  bool setMagEnabled(bool enabled);
+  bool setMagCalIntervalDays(uint16_t days);
+  // Validated by the caller (magcal::validate).
+  void setMagCalibration(const MagCalibrationData& cal);
   bool setStreamRawAdc(bool enabled);
   bool setLogging(bool enabled, const String& level, const String& mode, size_t maxBytes);
   // `channel` must be a valid update channel. A `manifestUrl` equal to the

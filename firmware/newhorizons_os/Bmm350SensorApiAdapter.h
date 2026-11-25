@@ -16,6 +16,14 @@ class Bmm350SensorApiAdapter {
  public:
   bool begin();
   bool readCompensatedMicroTesla(float out[3]);
+  // Output data rate (25/50/100/200 Hz) and averaging (8/4/2 samples), see
+  // SensorRatePolicy. Remembered for the next begin(); written at once when
+  // the chip is up (then back to normal mode, as the SensorAPI requires).
+  bool setOdr(uint16_t hz, uint8_t averaging);
+  uint16_t odrHz() const { return odrHz_; }
+  uint8_t averaging() const { return averaging_; }
+  // Suspend (the chip's lowest-power state) or back to normal mode.
+  bool setAwake(bool awake);
   bool initialized() const { return initialized_; }
   bool normalMode() const { return normalMode_; }
   int8_t lastResult() const { return lastResult_; }
@@ -32,6 +40,8 @@ class Bmm350SensorApiAdapter {
   bmm350_dev device_{};
   bool initialized_ = false;
   bool normalMode_ = false;
+  uint16_t odrHz_ = 25;
+  uint8_t averaging_ = 8;
   int8_t lastResult_ = BMM350_E_COM_FAIL;
 };
 

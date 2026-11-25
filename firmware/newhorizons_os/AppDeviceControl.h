@@ -8,6 +8,7 @@ namespace nhos {
 
 class DeviceConfig;
 class ImuManager;
+class MagnetometerManager;
 class MatrixScanner;
 
 // What device.configGet/configSet and device.stream (device_config /
@@ -23,7 +24,10 @@ class MatrixScanner;
 // One instance for the device (static state), keyed by the AppVm asking.
 class AppDeviceControl {
  public:
-  static void begin(DeviceConfig* config, MatrixScanner* scanner, ImuManager* imu);
+  // syncMagnetometer: re-applies the magnetometer's on/off rule after an app
+  // turned the IMU on or off (on GCU boards the IMU hosts the BMM150).
+  static void begin(DeviceConfig* config, MatrixScanner* scanner, ImuManager* imu,
+                    MagnetometerManager* magnetometer, void (*syncMagnetometer)());
 
   static float get(const char* key);
   // False when the key is not offered or the value is out of range.
@@ -41,6 +45,8 @@ class AppDeviceControl {
   static DeviceConfig* config_;
   static MatrixScanner* scanner_;
   static ImuManager* imu_;
+  static MagnetometerManager* magnetometer_;
+  static void (*syncMagnetometer_)();
   static const void* owner_[kVmDeviceConfigKeyCount];
   static float value_[kVmDeviceConfigKeyCount];
   static const void* pausedBy_;

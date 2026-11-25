@@ -2,7 +2,7 @@
 
 # Device configuration
 
-21 keys, read with `config_get --path <key>` and written with
+23 keys, read with `config_get --path <key>` and written with
 `config_set --path <key> --value <v>` (or the listed command directly). `config_schema`
 returns this table, with a hash, at run time.
 
@@ -18,6 +18,8 @@ returns this table, with a hash, at run time.
 | `filter.median` | int | 1 – 5 | `set_filter median` | Median window size in samples. |
 | `filter.alpha` | float | 0.05 – 0.6 | `set_filter alpha` | Low-pass smoothing factor. |
 | `imu.enabled` | bool |  | `set_imu enabled` | Sample the IMU and attach it to outgoing frames. |
+| `mag.enabled` | bool |  | `set_mag enabled` | Sample the magnetometer and attach it to outgoing frames (off by default). |
+| `mag.cal_interval_days` | int | 0 – 365 | `set_mag cal_interval_days` | Days after a magnetometer calibration before apps remind to redo it (0 = never). |
 | `log.enabled` | bool |  | `set_log enabled` | Write the device log to flash. |
 | `log.level` | enum | `error`, `warn`, `info`, `debug` | `set_log level` | Global log verbosity. |
 | `log.mode` | enum | `standard`, `extended` | `set_log mode` | Log file size budget. |

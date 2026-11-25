@@ -42,6 +42,8 @@ V2_0_ADDED = ["set_vref", "calibration_switch", "i2c_scan", "set_range", "rfb_me
 # slots; app_reorder sets whose output wins.
 V2_1_REMOVED = ["app_enable", "app_disable", "app_load_flow", "app_unload_flow"]
 V2_1_ADDED = ["app_reorder"]
+# v2.4.0: the magnetometer switch (off by default) and its calibration.
+V2_4_ADDED = ["set_mag", "set_mag_calibration"]
 
 # v1.14.0 gated these inside their bodies (two idioms); exit_maintenance joins
 # them on purpose -- it was a silent no-op in normal mode.
@@ -60,9 +62,10 @@ class CommandTableTests(unittest.TestCase):
         names = command_names()
         self.assertEqual(len(names), len(set(names)), "duplicate rows")
         self.assertEqual([n for n in names if n != "commands" and n not in V1_19_ADDED
-                          and n not in V2_0_ADDED and n not in V2_1_ADDED],
+                          and n not in V2_0_ADDED and n not in V2_1_ADDED
+                          and n not in V2_4_ADDED],
                          [n for n in V1_14_COMMANDS if n not in V2_1_REMOVED])
-        for name in V1_19_ADDED + V2_0_ADDED + V2_1_ADDED:
+        for name in V1_19_ADDED + V2_0_ADDED + V2_1_ADDED + V2_4_ADDED:
             self.assertIn(name, names)
         for name in V2_1_REMOVED:
             self.assertNotIn(name, names)

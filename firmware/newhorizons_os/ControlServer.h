@@ -177,6 +177,9 @@ class ControlServer {
   String cmdMatrixSample(const CommandContext& ctx);
   String cmdResyncBatteryGauge(const CommandContext& ctx);
   String cmdSetImu(const CommandContext& ctx);
+  String cmdSetMag(const CommandContext& ctx);
+  String cmdSetMagCalibration(const CommandContext& ctx);
+  void syncMagnetometerFromConfig();
   String cmdSetLog(const CommandContext& ctx);
   String cmdSetIndicators(const CommandContext& ctx);
   String cmdCalibrationStatus(const CommandContext& ctx);

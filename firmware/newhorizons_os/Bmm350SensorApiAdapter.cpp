@@ -29,6 +29,20 @@ class WireBmm350Bus final : public Bmm350I2cBus {
     return length;
   }
 };
+
+enum bmm350_data_rates odrCode(uint16_t hz) {
+  if (hz >= 200) return BMM350_DATA_RATE_200HZ;
+  if (hz >= 100) return BMM350_DATA_RATE_100HZ;
+  if (hz >= 50) return BMM350_DATA_RATE_50HZ;
+  return BMM350_DATA_RATE_25HZ;
+}
+
+enum bmm350_performance_parameters averagingCode(uint8_t samples) {
+  if (samples >= 8) return BMM350_AVERAGING_8;
+  if (samples >= 4) return BMM350_AVERAGING_4;
+  if (samples >= 2) return BMM350_AVERAGING_2;
+  return BMM350_NO_AVERAGING;
+}
 }
 
 bool Bmm350SensorApiAdapter::begin() {
@@ -42,8 +56,8 @@ bool Bmm350SensorApiAdapter::begin() {
 
   lastResult_ = bmm350_init(&device_);  // Includes official OTP trim dump.
   if (lastResult_ != BMM350_OK) return false;
-  lastResult_ = bmm350_set_odr_performance(BMM350_DATA_RATE_25HZ,
-                                           BMM350_AVERAGING_8, &device_);
+  lastResult_ = bmm350_set_odr_performance(odrCode(odrHz_),
+                                           averagingCode(averaging_), &device_);
   if (lastResult_ != BMM350_OK) return false;
   lastResult_ = bmm350_enable_axes(BMM350_X_EN, BMM350_Y_EN, BMM350_Z_EN,
                                    &device_);
@@ -52,6 +66,28 @@ bool Bmm350SensorApiAdapter::begin() {
   if (lastResult_ != BMM350_OK) return false;
   initialized_ = true;
   normalMode_ = true;
+  return true;
+}
+
+bool Bmm350SensorApiAdapter::setOdr(uint16_t hz, uint8_t averaging) {
+  odrHz_ = hz;
+  averaging_ = averaging;
+  if (!initialized_) return true;  // applied by the next begin()
+  lastResult_ = bmm350_set_odr_performance(odrCode(odrHz_), averagingCode(averaging_),
+                                           &device_);
+  if (lastResult_ != BMM350_OK) return false;
+  if (!normalMode_) return true;  // suspended: applied on wake
+  lastResult_ = bmm350_set_powermode(BMM350_NORMAL_MODE, &device_);
+  return lastResult_ == BMM350_OK;
+}
+
+bool Bmm350SensorApiAdapter::setAwake(bool awake) {
+  if (!initialized_) return !awake;
+  if (awake == normalMode_) return true;
+  lastResult_ = bmm350_set_powermode(awake ? BMM350_NORMAL_MODE : BMM350_SUSPEND_MODE,
+                                     &device_);
+  if (lastResult_ != BMM350_OK) return false;
+  normalMode_ = awake;
   return true;
 }
 

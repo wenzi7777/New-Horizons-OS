@@ -4,6 +4,7 @@
 // never checks maintenance mode itself: the table's kCmdNeedsMaintenance
 // flag is enforced once, in processCommand(), before it runs.
 #include "ControlServer.h"
+#include "MagnetometerManager.h"
 #include "EspNowOtaReceiver.h"
 #include <esp_timer.h>
 #include <utility>
@@ -132,6 +133,19 @@ String ControlServer::cmdSensorSample(const CommandContext& ctx) {
       data += "\":";
       data += String(magSample[i], 3);
     }
+    // Before the hard/soft-iron calibration: what the chip reported.
+    float magRaw[3] = {0};
+    if (magnetometer_->copyLatestRawSample(magRaw)) {
+      static const char* const kMagRawKeys[] = {"mx_raw", "my_raw", "mz_raw"};
+      for (uint8_t i = 0; i < 3; ++i) {
+        data += ",\"";
+        data += kMagRawKeys[i];
+        data += "\":";
+        data += String(magRaw[i], 3);
+      }
+    }
+    data += ",\"calibrated\":";
+    data += magnetometer_->calibration().mode != MagCalibrationMode::None ? "true" : "false";
   }
   data += "},\"battery\":{";
   BatteryGaugeSample gauge;

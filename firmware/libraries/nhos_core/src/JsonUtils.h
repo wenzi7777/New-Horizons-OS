@@ -20,5 +20,11 @@ bool jsonExtractBool(const String& source, const char* key, bool& out);
 bool jsonExtractInt(const String& source, const char* key, long& out);
 bool jsonExtractFloat(const String& source, const char* key, float& out);
 size_t jsonExtractUInt8Array(const String& source, const char* key, uint8_t* out, size_t maxCount);
+// Every element must parse as a number; returns the element count, or 0 when
+// the key is missing, an element is not a number, or there are more than
+// maxCount elements (a truncated vector would be silently wrong).
+size_t jsonExtractFloatArray(const String& source, const char* key, float* out, size_t maxCount);
+// Non-negative integers up to 2^64-1 (epoch milliseconds do not fit a long).
+bool jsonExtractUInt64(const String& source, const char* key, uint64_t& out);
 
 }  // namespace nhos

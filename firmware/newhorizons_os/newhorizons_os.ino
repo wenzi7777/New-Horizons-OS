@@ -21,6 +21,7 @@
 #include "FindMeClient.h"
 #include "ImuManager.h"
 #include "MagnetometerManager.h"
+#include "SensorRates.h"
 #include "BatteryGaugeManager.h"
 #include "LedController.h"
 #include "LifetimeStats.h"
@@ -255,11 +256,19 @@ String chargeStateName() {
   }
 }
 
+// The magnetometer's on/off rule (set_mag's switch, no operator stop, and on
+// GCU boards an IMU that is up), applied after anything that changes it.
+void syncMagnetometerNow() {
+  nhos::syncMagnetometer(&magnetometer, deviceConfig.data().magEnabled,
+                         services.isOperatorStopped("magnetometer"), &imu);
+}
+
 void suspendRuntimeServicesForSoftOff() {
   if (!runtimeServicesSuspended) {
     scanner.stop();
     wifi.suspend();
     imu.setEnabled(false);
+    magnetometer.applyState(false, false);
     // Frequency is the governor's call now; it drops to the floor as soon as
     // runtimeActive goes false on the next tick.
     // Soft-off light-sleeps for kSoftOffBatterySleepUs == 5s, exactly the
@@ -296,6 +305,7 @@ void applyNormalRuntimeState() {
   // An operator stop (service_stop) outlives soft-off; only a reboot or an
   // explicit start clears it.
   imu.setEnabled(deviceConfig.data().imuEnabled && !services.isOperatorStopped("imu"));
+  syncMagnetometerNow();
   if (bootMode.mode() == nhos::RunMode::Normal && scanner.hasLayout() && !scanner.active() &&
       !services.isOperatorStopped("scanner")) {
     scanner.start();
@@ -645,7 +655,7 @@ void taskBatteryGauge() { batteryGauge.service(millis()); }
 void taskRange() { range.service(millis(), vref); }
 #endif
 void taskImu() { imu.service(micros()); }
-void taskMagnetometer() { magnetometer.service(millis()); }
+void taskMagnetometer() { magnetometer.service(micros()); }
 
 void taskEspNow() {
   espNowPairing->service();
@@ -871,23 +881,34 @@ bool imuHealthy(void*) {
 
 bool imuStart(void*) {
   imu.begin(deviceConfig.data().imuEnabled);
-  imu.setServiceIntervalUs(scanner.scanIntervalUs());
+  nhos::applySensorRates(scanner, &imu, &magnetometer);
+  // GCU: the IMU driver hosts the BMM150, so the magnetometer follows.
+  syncMagnetometerNow();
   return imuHealthy(nullptr);
 }
 
 // service_stop: powers the IMU down for this boot only. set_imu is the
 // persisted switch; this never touches deviceConfig.
-void imuStop(void*) { imu.setEnabled(false); }
+void imuStop(void*) {
+  imu.setEnabled(false);
+  syncMagnetometerNow();
+}
 
 #if NHOS_BOARD_HAS_MAG
-bool magnetometerHealthy(void*) { return magnetometer.initialized(); }
+// A deliberately disabled magnetometer (the default) is healthy, not broken.
+bool magnetometerHealthy(void*) {
+  return !deviceConfig.data().magEnabled || magnetometer.initialized();
+}
 
 bool magnetometerStart(void*) {
-  // Follows the IMU's actual init result, not a board flag -- BMM150 is
-  // hosted by the combined IMU driver.
-  magnetometer.begin(imu.initialized());
-  return magnetometer.initialized();
+  // An explicit start: the operator stop is already cleared. Follows the
+  // IMU's actual init result on GCU (the IMU driver hosts the BMM150).
+  magnetometer.applyState(deviceConfig.data().magEnabled, imu.initialized());
+  return magnetometerHealthy(nullptr);
 }
+
+// service_stop: this boot only; set_mag is the persisted switch.
+void magnetometerStop(void*) { magnetometer.applyState(false, false); }
 #endif
 
 #if NHOS_BOARD_HAS_MAX17048
@@ -952,8 +973,8 @@ void registerServices() {
                            &scannerStop);
   services.registerService("imu", imuHealthy(nullptr), &imuStart, &imuHealthy, nullptr, &imuStop);
 #if NHOS_BOARD_HAS_MAG
-  services.registerService("magnetometer", magnetometer.initialized(), &magnetometerStart,
-                           &magnetometerHealthy);
+  services.registerService("magnetometer", magnetometerHealthy(nullptr), &magnetometerStart,
+                           &magnetometerHealthy, nullptr, &magnetometerStop);
 #endif
 #if NHOS_BOARD_HAS_MAX17048
   services.registerService("battery_gauge", batteryGaugeHealthy(nullptr), &batteryGaugeStart,
@@ -1136,7 +1157,9 @@ void setup() {
   logBoot(String("boot_stage=battery_gauge_ready ") + batteryGauge.statusJson());
   imu.begin(deviceConfig.data().imuEnabled);
   logBoot(String("boot_stage=imu_ready ") + imu.statusJson());
-  magnetometer.begin(imu.initialized());
+  magnetometer.setCalibration(deviceConfig.data().magCal);
+  magnetometer.setCalibrationIntervalDays(deviceConfig.data().magCalIntervalDays);
+  magnetometer.begin(deviceConfig.data().magEnabled, imu.initialized());
   logBoot(String("boot_stage=magnetometer_ready ") + magnetometer.statusJson());
 
   if (!nhos::validatePinMap()) {
@@ -1158,7 +1181,7 @@ void setup() {
       deviceConfig.data().scanTiming.targetFps,
       deviceConfig.data().scanTiming.settleUs,
       deviceConfig.data().scanTiming.sendEveryNFrames);
-  imu.setServiceIntervalUs(scanner.scanIntervalUs());
+  nhos::applySensorRates(scanner, &imu, &magnetometer);
   scanner.setStreamBufferConfig(
       deviceConfig.data().streamBuffer.enabled,
       deviceConfig.data().streamBuffer.depthFrames);
@@ -1351,7 +1374,8 @@ void setup() {
   }
   apps.begin(&storage);
   appGovernor.begin(&apps);
-  nhos::AppDeviceControl::begin(&deviceConfig, &scanner, &imu);
+  nhos::AppDeviceControl::begin(&deviceConfig, &scanner, &imu, &magnetometer,
+                                &syncMagnetometerNow);
   {
     const uint16_t cellCount =
         scanner.health().pointCount != 0 ? scanner.health().pointCount : nhos::kMaxSensors;

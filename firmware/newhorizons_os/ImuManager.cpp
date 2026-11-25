@@ -5,6 +5,7 @@
 #include <Wire.h>
 
 #include "BoardConfig.h"
+#include "SensorRatePolicy.h"
 
 namespace nhos {
 
@@ -133,6 +134,16 @@ void ImuManager::service(uint32_t nowUs) {
   }
 }
 
+void ImuManager::setOdrForFps(uint16_t fps) {
+  const uint16_t hz = SensorRatePolicy::imuOdrHzForFps(fps);
+  if (hz == imuDriver.imuOdrHz()) return;
+  // Before begin() (or while disabled) this only records the rate;
+  // configure_sensor() applies it when the chip comes up.
+  if (!imuDriver.setImuOdrHz(hz) && initialized_) {
+    lastError_ = "bmi270_odr_write_failed";
+  }
+}
+
 bool ImuManager::copyLatestSample(float out[kImuSampleFloats]) const {
   if (!enabled_ || !initialized_ || !sampleValid_ || !out) {
     return false;
@@ -184,6 +195,8 @@ String ImuManager::statusJson() const {
   out += "]";
   out += ",\"sample_rate_hz\":";
   out += sampleRateHz;
+  out += ",\"odr_hz\":";
+  out += imuDriver.imuOdrHz();
   out += ",\"measured_rate_hz\":";
   out += measuredSampleRateHz_;
   out += ",\"cache_age_ms\":";

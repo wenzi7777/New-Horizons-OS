@@ -17,6 +17,9 @@ class ImuManager {
   bool enabled() const { return enabled_; }
   String statusJson() const;
   void setServiceIntervalUs(uint32_t us) { serviceIntervalUs_ = us; }
+  // Chip output data rate for this scan rate (SensorRatePolicy). Remembered
+  // by the driver, so it also holds after the IMU is re-begun.
+  void setOdrForFps(uint16_t fps);
   // Actual samples-per-second achieved over the last ~1s window, for
   // distinguishing "requested poll rate" from what the loop can really
   // deliver (see set_imu rate diagnostics).

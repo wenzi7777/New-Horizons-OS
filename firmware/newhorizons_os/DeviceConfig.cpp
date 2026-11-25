@@ -2,6 +2,7 @@
 
 #include "ActionButtonPolicy.h"
 #include "BoardPins.h"
+#include "MagCalibrationJson.h"
 
 namespace nhos {
 namespace {
@@ -304,6 +305,23 @@ bool DeviceConfig::setImuEnabled(bool enabled) {
   return true;
 }
 
+bool DeviceConfig::setMagEnabled(bool enabled) {
+  data_.magEnabled = enabled;
+  return true;
+}
+
+bool DeviceConfig::setMagCalIntervalDays(uint16_t days) {
+  if (days > kMaxMagCalIntervalDays) {
+    return false;
+  }
+  data_.magCalIntervalDays = days;
+  return true;
+}
+
+void DeviceConfig::setMagCalibration(const MagCalibrationData& cal) {
+  data_.magCal = cal;
+}
+
 bool DeviceConfig::setStreamRawAdc(bool enabled) {
   data_.streamRawAdc = enabled;
   return true;
@@ -601,6 +619,9 @@ void DeviceConfig::setDefaults() {
   data_.filter.median = kFilterDefaultMedian;
   data_.filter.alpha = kFilterDefaultAlpha;
   data_.imuEnabled = true;
+  data_.magEnabled = false;
+  data_.magCalIntervalDays = kDefaultMagCalIntervalDays;
+  data_.magCal = MagCalibrationData();
   data_.streamRawAdc = false;
   data_.logging.enabled = true;
   data_.logging.maxBytes = kDefaultLogMaxBytes;
@@ -688,6 +709,27 @@ bool DeviceConfig::applyJson(const String& json) {
   const String imu = objectForKey(json, "imu");
   if (!imu.isEmpty()) {
     data_.imuEnabled = extractBool(imu, "enabled", data_.imuEnabled);
+  }
+
+  const String mag = objectForKey(json, "mag");
+  if (!mag.isEmpty()) {
+    data_.magEnabled = extractBool(mag, "enabled", data_.magEnabled);
+    const int days = extractInt(mag, "cal_interval_days", data_.magCalIntervalDays);
+    if (days >= 0 && days <= kMaxMagCalIntervalDays) {
+      data_.magCalIntervalDays = static_cast<uint16_t>(days);
+    }
+    const String calJson = objectForKey(mag, "calibration");
+    if (!calJson.isEmpty()) {
+      MagCalibrationData cal;
+      String calError;
+      if (parseMagCalibrationJson(calJson, cal, calError) &&
+          magcal::validate(cal) == magcal::ValidateResult::Ok) {
+        data_.magCal = cal;
+      } else {
+        data_.magCal = MagCalibrationData();
+        lastError_ = "mag_calibration_invalid_dropped";
+      }
+    }
   }
 
   data_.streamRawAdc = extractBool(json, "stream_raw_adc", data_.streamRawAdc);
@@ -814,6 +856,12 @@ String DeviceConfig::toJson() const {
   out += filterJson();
   out += ",\"imu\":{\"enabled\":";
   out += data_.imuEnabled ? "true" : "false";
+  out += "},\"mag\":{\"enabled\":";
+  out += data_.magEnabled ? "true" : "false";
+  out += ",\"cal_interval_days\":";
+  out += String(static_cast<unsigned int>(data_.magCalIntervalDays));
+  out += ",\"calibration\":";
+  appendMagCalibrationJson(out, data_.magCal);
   out += "},\"stream_raw_adc\":";
   out += data_.streamRawAdc ? "true" : "false";
   out += ",\"logging\":";

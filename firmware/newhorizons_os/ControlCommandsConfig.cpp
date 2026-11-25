@@ -10,12 +10,17 @@
 #include <new>
 #include <utility>
 #include <vector>
+#include "BoardConfig.h"
 #include "Config.h"
 #include "BatteryStatusJsonMerge.h"
 #include "ActionButtonPolicy.h"
 #include "EspNowPairing.h"  // kEspNowPairingFailFlagKey, so this stays in sync with EspNowPairing.cpp's own check
 #include "EspNowTimeWire.h"
 #include "JsonUtils.h"
+#include "MagCalibration.h"
+#include "MagCalibrationJson.h"
+#include "MagnetometerManager.h"
+#include "SensorRates.h"
 #include "ReplyPacing.h"
 #include "UpdateChannel.h"
 #include "Watchdog.h"
@@ -285,7 +290,7 @@ String ControlServer::cmdSetScanTiming(const CommandContext& ctx) {
   if (!scanner_->setTiming(fps, settle, sendEvery)) {
     return error(cmd, "scan_timing_invalid");
   }
-  if (imu_) imu_->setServiceIntervalUs(scanner_->scanIntervalUs());
+  applySensorRates(*scanner_, imu_, magnetometer_);
   if (deviceConfig_) {
     deviceConfig_->setScanTiming(fps, settle, sendEvery);
     if (!deviceConfig_->save(*storage_)) {
@@ -561,12 +566,104 @@ String ControlServer::cmdSetImu(const CommandContext& ctx) {
   } else if (imu_) {
     imu_->setEnabled(enabled);
   }
+  // GCU: the IMU driver hosts the BMM150, so the magnetometer follows.
+  syncMagnetometerFromConfig();
   String data = "{\"imu\":";
   data += imu_ ? imu_->statusJson() : "{}";
   data += ",\"config\":";
   data += deviceConfig_ ? deviceConfig_->statusJson() : "{}";
   data += "}";
   return ok(cmd, "config_stored", data);
+}
+
+void ControlServer::syncMagnetometerFromConfig() {
+  if (!magnetometer_ || !deviceConfig_) return;
+  syncMagnetometer(magnetometer_, deviceConfig_->data().magEnabled,
+                   services_ && services_->isOperatorStopped("magnetometer"), imu_);
+}
+
+// set_mag
+String ControlServer::cmdSetMag(const CommandContext& ctx) {
+  const String& cmd = ctx.cmd;
+  const String& request = ctx.request;
+#if !NHOS_BOARD_HAS_MAG
+  (void)request;
+  return error(cmd, "magnetometer_not_supported");
+#else
+  bool enabled = false;
+  const bool hasEnabled = jsonExtractBool(request, "enabled", enabled);
+  long days = 0;
+  const bool hasDays = jsonExtractInt(request, "cal_interval_days", days);
+  if (!hasEnabled && !hasDays) {
+    return error(cmd, "set_mag_requires_enabled_or_cal_interval_days");
+  }
+  if (hasDays && (days < 0 || days > kMaxMagCalIntervalDays)) {
+    return error(cmd, "mag_cal_interval_days_invalid");
+  }
+  if (deviceConfig_) {
+    if (hasEnabled) deviceConfig_->setMagEnabled(enabled);
+    if (hasDays) deviceConfig_->setMagCalIntervalDays(static_cast<uint16_t>(days));
+    if (!deviceConfig_->save(*storage_)) {
+      return error(cmd, "config_write_failed");
+    }
+  }
+  if (magnetometer_ && hasDays) {
+    magnetometer_->setCalibrationIntervalDays(static_cast<uint16_t>(days));
+  }
+  if (hasEnabled) {
+    if (services_ && services_->isOperatorStopped("magnetometer")) {
+      // Persisting "on" is an explicit start; "off" leaves the stop alone.
+      if (enabled) services_->start("magnetometer");
+    } else {
+      syncMagnetometerFromConfig();
+    }
+  }
+  String data = "{\"magnetometer\":";
+  data += magnetometer_ ? magnetometer_->statusJson() : "{}";
+  data += ",\"config\":";
+  data += deviceConfig_ ? deviceConfig_->statusJson() : "{}";
+  data += "}";
+  return ok(cmd, "config_stored", data);
+#endif
+}
+
+// set_mag_calibration
+String ControlServer::cmdSetMagCalibration(const CommandContext& ctx) {
+  const String& cmd = ctx.cmd;
+  const String& request = ctx.request;
+#if !NHOS_BOARD_HAS_MAG
+  (void)request;
+  return error(cmd, "magnetometer_not_supported");
+#else
+  MagCalibrationData cal;
+  bool clear = false;
+  if (jsonExtractBool(request, "clear", clear) && clear) {
+    cal = MagCalibrationData();
+  } else {
+    String parseError;
+    if (!parseMagCalibrationJson(request, cal, parseError)) {
+      return error(cmd, parseError);
+    }
+    if (cal.mode == MagCalibrationMode::None) {
+      return error(cmd, "mag_calibration_mode_required");
+    }
+    const magcal::ValidateResult result = magcal::validate(cal);
+    if (result != magcal::ValidateResult::Ok) {
+      return error(cmd, magcal::validateResultName(result));
+    }
+  }
+  if (deviceConfig_) {
+    deviceConfig_->setMagCalibration(cal);
+    if (!deviceConfig_->save(*storage_)) {
+      return error(cmd, "config_write_failed");
+    }
+  }
+  if (magnetometer_) magnetometer_->setCalibration(cal);
+  String data = "{\"magnetometer\":";
+  data += magnetometer_ ? magnetometer_->statusJson() : "{}";
+  data += "}";
+  return ok(cmd, clear ? "mag_calibration_cleared" : "mag_calibration_stored", data);
+#endif
 }
 
 // set_log
